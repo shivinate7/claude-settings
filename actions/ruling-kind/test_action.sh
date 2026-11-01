@@ -16,6 +16,7 @@
 #    against the action's CLAUDE.md or the caller's, and fails in neither.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
+. "$here/../../lint/_test_git.sh"  # test-run signing opt-out
 TRACKED_ROOT="$(cd "$here/../.." && pwd)"
 # shellcheck source=../../testing/tracked_tree.sh
 . "$TRACKED_ROOT/testing/tracked_tree.sh"  # copies what git lists, so no fixture lists files

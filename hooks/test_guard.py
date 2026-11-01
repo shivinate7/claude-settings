@@ -58,6 +58,8 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
@@ -104,6 +106,9 @@ FAMILIES = {
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
+    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
+    "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
@@ -3291,16 +3296,18 @@ TAG_CWD = os.path.join(ROOT, "tagged")   # a scratch folder, not an agent worktr
 TAG_HOLDER = "import os, time; os.setsid(); time.sleep(300)"
 
 
-def tag_orphan(env_entries=(), argv_extra=()):
+def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     """A holder whose shell exits first, so init adopts it (PPID 1). `env_entries` are NAME=value
     strings for its environment, with the inherited tag removed first. `argv_extra` is appended to
-    its argv. Returns its pid, or None when it is not an orphan leading its own process group."""
+    its argv. `holder` replaces the holder's argv (a shell stub, which leads no group of its own,
+    so only PPID 1 is waited for). Returns its pid, or None when it is not an orphan leading its
+    own process group (an orphan, for a `holder`)."""
     env = {key: value for key, value in os.environ.items() if key != TAG}
     env.update(entry.split("=", 1) for entry in env_entries)
     os.makedirs(TAG_CWD, exist_ok=True)
     script = '"$@" </dev/null >/dev/null 2>&1 & echo $!'
     try:
-        answer = subprocess.run(["sh", "-c", script, "sh", sys.executable, "-c", TAG_HOLDER]
+        answer = subprocess.run(["sh", "-c", script, "sh"] + (holder or [sys.executable, "-c", TAG_HOLDER])
                                 + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
                                 text=True, timeout=20)
         pid = int(answer.stdout.strip())
@@ -3310,7 +3317,7 @@ def tag_orphan(env_entries=(), argv_extra=()):
                                         capture_output=True, text=True, timeout=5).stdout.split()
             if ppid != "1":
                 return None
-            if pgid == str(pid):
+            if holder or pgid == str(pid):
                 return pid
             time.sleep(0.05)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -3318,11 +3325,38 @@ def tag_orphan(env_entries=(), argv_extra=()):
     return None
 
 
+def stranded_job(job_env_words):
+    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+    child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
+    takes the stub's away. The stub's own environment is `env_entries` of tag_orphan."""
+    return ["sh", "-c", '"$@" & wait', "sh"] + list(job_env_words) + ["sleep", "300"]
+
+
+def stub_job(stub):
+    """The pid of the one child of `stub`, once the stub has forked it, or None."""
+    for _ in range(100):
+        try:
+            rows = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                                  timeout=10).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for row in rows:
+            fields = row.split()
+            if len(fields) == 2 and fields[1] == str(stub) and fields[0].isdigit():
+                ORPHAN_PIDS.append(int(fields[0]))
+                return int(fields[0])
+        time.sleep(0.05)
+    return None
+
+
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
-             **who):
-    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
-    is agent_id and agent_type, the payload fields that mark an agent call."""
-    pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
+             holder=None, job=False, **who):
+    """One kill of a PPID-1 holder, or with `job` of the child under a stranded stub (`holder` from
+    stranded_job). Returns the killed pid, or None when it was skipped. `who` is agent_id and
+    agent_type, the payload fields that mark an agent call."""
+    pid = tag_orphan(env_entries, argv_extra, holder) if ORPHAN_CASES else None
+    if pid is not None and job:
+        pid = stub_job(pid)
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
@@ -3363,6 +3397,19 @@ else:
     sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
+# A STRANDED JOB (roadmap step wait-for-pid-form). After a stall the stub shell is under init, and
+# the job is its child. On Linux the forked stub holds no tag, and the exec'd job holds it.
+# `kill` keeps the predicate the owner ruled on (decision a-kill-by-pid-needs-an-owned-pid: the
+# PPID-1 pid itself). A wider kill needs the owner, so each job below stays refused. The wait form,
+# bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
+tag_case("kill: a job under an untagged PPID-1 stub, the job holding this session's id, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+         carries="did not start")
+tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job untagged, stays refused",
+         "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=stranded_job(["env", "-u", TAG]),
+         job=True, carries="did not start")
+tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
+         holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -4733,6 +4780,35 @@ for _label, _trigger in (
         cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
     add("ci-wait: the remedy of %s names the CI-wake notice" % _label, "deny",
         "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
+
+# ------------------------------------------------------------------ wait-pid: the one wait on a pid
+#
+# Roadmap step wait-for-pid-form: after the stall watch trips, the session holds a stranded job's
+# pid and the guard refuses every way to wait on it. `bin/wait-pid PID [--timeout SECS]` is the one
+# allowed form (its own cases: lint/test_wait_pid.py). The guard allows the helper and keeps
+# refusing the loops, so each refusal case pins that it did not move. The three remedies below
+# point at the helper.
+WAIT_PID = "wait-pid"
+for _label, _command in (("a pid", "wait-pid 12345"), ("a pid and a timeout", "wait-pid 12345 --timeout 500")):
+    sh("wait-pid: %s is allowed in the foreground" % _label, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _label, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+sh("wait-pid: a kill -0 loop stays refused, and its remedy names the helper",
+   "while kill -0 12345; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
+sh("wait-pid: tail --pid with a follow stays refused", "tail --pid=12345 -f /dev/null", "deny",
+   "live-stream", cwd=NOGIT)
+sh("wait-pid: a pgrep loop stays refused", "while pgrep x; do sleep 5; done", "deny", "waiter",
+   cwd=NOGIT)
+# Each remedy is reached by its own trigger. The pattern remedy must not advise `kill -0`: a bare
+# kill -0 loop is a refused form, so that advice sends the reader into a second refusal.
+for _label, _trigger, _rule, _lacks in (
+        ("a followed stream", "tail -f app.log", "live-stream", ()),
+        ("a pause", "sleep 30", "waiter", ()),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter",
+         ("kill -0",)),
+):
+    add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
+        carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
@@ -7921,6 +7997,7 @@ ROLE_OTHER = "session_ROLEOTHER01"
 ROLE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_ROLEOWN01"}
 ROLE_DIR = os.path.join(ROOT, "rolerec")
 GET_SESSION = "mcp__claude-code-remote__get_session"
+SET_SESSION_TAGS = "mcp__claude-code-remote__set_session_tags"
 LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
 LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
@@ -7928,10 +8005,10 @@ COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 MERGE_SHIM = "~/.claude/bin/merge"
 
 
-def role_use(tool_id, name):
+def role_use(tool_id, name, tool_input=None):
     """An assistant line that calls the tool `name`."""
     return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": tool_id, "name": name, "input": {}}]}})
+        {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input or {}}]}})
 
 
 def role_result(tool_id, text):
@@ -7949,6 +8026,12 @@ def role_record(tags, session=ROLE_OWN, title="a lane session"):
 def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
     """One paired get_session call whose record carries `tags`."""
     return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+
+
+def role_tag_call(tool_id, session=ROLE_OWN):
+    """One paired set_session_tags call that adds a tag to `session`."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": ["cs-build:coordinator"]}),
+            role_result(tool_id, "ok")]
 
 
 def role_said(text):
@@ -7974,6 +8057,15 @@ ROLE_LINES = {
     "newest-wins": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS),
     "pending-newest": role_call("g1", RUNNER_TAGS) + [role_use("g2", GET_SESSION)],
     "foreign-newest": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+    # trust-card-in-build shapes: an own record with no cs-build tag, and foreign records beside or in place of it.
+    "untagged": role_call("g1", ["cs-repo:o/r"]),
+    "other-untagged": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER),
+    "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+    # A session reads its record untagged at start, then tags itself: the untagged read is stale from then on.
+    "untagged-then-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1"),
+    "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
+    "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
+    "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
 }
 
 
@@ -8082,6 +8174,75 @@ role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
+# =========================================================================== 5f. the trust card in a cs-build session
+#
+# Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
+# cs-build: tag may not call the two tools that open the owner's trust card, because the card blocks every
+# message into that session. These cases prove the refusal, and that it holds when the tags are missing.
+# The tags are read as merge-role-proof reads them (same transcript fixtures, same env id), and the read
+# fails closed: no own record is a refusal.
+TRUST_RULE = "trust-card-in-build"
+TRUST_TOOLS = {
+    "mcp__claude-code-remote__confirm_repository_trust": {"content_digest": "0" * 64},
+    "mcp__claude-code-remote__request_computer_folder": {
+        "environment_id": "env_X", "computer_name": "box", "folder": "repo"},
+}
+# The remedy steers to get_session. It never tells the session to call either tool.
+TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
+
+
+def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
+    """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
+    add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
+        carries=carries, transcript=transcript, env=env, **TRUST_TOOLS[tool])
+
+
+def trust_allow(name, tool, transcript):
+    """A call the guard lets through silently."""
+    add("trust-card-in-build: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=transcript,
+        env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
+
+
+for _trust_tool in TRUST_TOOLS:
+    _trust_word = _trust_tool.rsplit("__", 1)[1]
+    trust_refuse(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
+    trust_refuse(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
+    trust_allow(_trust_word + " in a session whose record has no cs-build tag allows", _trust_tool,
+                role_path("untagged"))
+    # No own record to read is a refusal, and the reason steers to get_session alone, then a retry.
+    for _trust_why, _trust_file in (
+        ("no get_session record", "no-record"),
+        ("a get_session result that is not JSON", "not-json"),
+        ("only a record of another session, with no tags", "other-untagged"),
+    ):
+        trust_refuse(_trust_word + " with " + _trust_why + " is refused", _trust_tool, role_path(_trust_file),
+                   carries=("get_session", "alone", ("retry", "Retry")))
+    # A transcript or env id the guard cannot use is a refusal too, never a crash that lets the call through.
+    # No remedy text is pinned: get_session cannot help when there is no transcript to read.
+    for _trust_why, _trust_file in (
+        ("a transcript_path that names no file", role_path("missing")),
+        ("a transcript_path that cannot be read", role_path("unreadable")),
+        ("a payload with no transcript_path", None),
+    ):
+        trust_refuse(_trust_word + " with " + _trust_why + " is refused", _trust_tool, _trust_file)
+    trust_refuse(_trust_word + " with no session id in the env is refused, whatever the record holds",
+               _trust_tool, role_path("untagged"), env=None)
+    # The own-id filter: a newer foreign cs-build:lane record is not this session's tag.
+    trust_allow(_trust_word + " beside a newer record of another session that is tagged allows", _trust_tool,
+                role_path("foreign-lane-newest"))
+    # A set_session_tags call after the newest own read makes that read stale: the tags may have changed.
+    trust_refuse(_trust_word + " after an untagged read and then a set_session_tags call is refused",
+               _trust_tool, role_path("untagged-then-tags"), carries=("get_session",))
+    trust_allow(_trust_word + " after a set_session_tags call and then a newer untagged read allows",
+                _trust_tool, role_path("tags-then-untagged"))
+    trust_refuse(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
+               _trust_tool, role_path("tags-then-coordinator"))
+    trust_refuse(_trust_word + " after an untagged read and then a newer lane read is refused",
+               _trust_tool, role_path("untagged-then-lane"))
+trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
+            role_path("lane"))
 
 
 # =========================================================================== 5d. cite by id
@@ -9077,6 +9238,54 @@ add("frozen: Write of X-live beside a clone with both markers and no install scr
 add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
     "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
+
+# --------------------------------------------------------------------------- frozen dup: a descriptor dup
+#
+# `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
+# `&1`, `&2` or `&-` as a path. From a cwd inside a frozen place, that read makes a plain `git fetch
+# 2>&1 | tail -1` a frozen write, and the guard refuses it with rule frozen-path. The ALLOW cases
+# are the false alarm. The DENY cases after them stay refused: a quoted `&1` is a real file, a dup
+# beside a real write still writes that file, and `&>` onto a frozen file is a write.
+# Run only this block: MUTATE_ONLY="frozen dup:" python3 hooks/test_guard.py (the name filter).
+DUP_HOOKS_CWD = slash(os.path.join(CFG, "hooks"))   # the config directory's hooks folder, as a cwd
+# ALLOW: a descriptor dup, from the live pin and from the config directory's hooks folder.
+sh("frozen dup: the REST branch delete from the live pin, a 2>&1 tail, is allowed",
+   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/shivinate7/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
+   "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the live pin's clone is allowed",
+   "cd /home/user/claude-settings && git fetch origin main 2>&1 | tail -1", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls >&2 from the live pin is allowed", "ls >&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 1>&2 from the live pin is allowed", "ls 1>&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&- from the live pin is allowed", "ls 2>&-", "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the config directory's hooks folder is allowed",
+   "git fetch 2>&1 | tail -1", "allow", cwd=DUP_HOOKS_CWD)
+# DENY: each one still writes a file, so each stays refused as frozen-path.
+sh("frozen dup: a quoted \"&1\" is a real file in the live pin and stays frozen",
+   'ls > "&1"', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a dup beside a real write to a frozen file stays frozen",
+   "ls 2>&1 > " + CFG_SETTINGS, "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: &> onto a frozen file stays frozen", "ls &> " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a relative redirect inside the live pin stays frozen", "echo x > f", "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a redirect onto a frozen file from a plain folder stays frozen",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A DUP WRITTEN BEFORE A PATH. `2>&1 PATH` is one redirect and one argument: the `2>` is joined to
+# `&1`, so the path after them is an argument, not the target of a `2>`. Each ALLOW reads the path
+# or closes a descriptor. Each DENY still writes the path, through cp or tee.
+sh("frozen dup: cat 2>&1 before a frozen settings file is allowed", "cat 2>&1 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: grep 2>&1 before a frozen hook is allowed", "grep x 2>&1 " + CFG_HOOK,
+   "allow", cwd=NOGIT)
+sh("frozen dup: echo >&2 before a frozen settings file is allowed", "echo x >&2 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: ls >&- before a frozen settings file is allowed", "ls >&- " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
+   "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
+   "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
@@ -10429,6 +10638,8 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
                       ("NotebookEdit", "notebook_path")):
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
+add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
+    file_path="src/test_app.py", carries=("merge conflict",), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
@@ -11583,24 +11794,29 @@ OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
 OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
 OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
 OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
+# The Departs from line a question carries (rule question-departs, its cases in that section). A port item
+# carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
+QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
 
 
-def with_stake(item):
-    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
-    lacks one. An item with no context, or no options, stays as it is."""
+def with_stake(item, departs=True):
+    """The item with OJ_FORM on the lines before its context, a Departs from line after them unless `departs`
+    is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
+    stays as it is."""
     if isinstance(item.get("context"), str):
-        item["context"] = OJ_FORM + "\n" + item["context"]
+        lines = [OJ_FORM] + ([QD_LINE] if departs else [])
+        item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
                            for o in item["options"]]
     return item
 
 
-def pq_item(**over):
+def pq_item(departs=False, **over):
     item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
     item.update(over)
-    return with_stake({k: v for k, v in item.items() if v is not None})
+    return with_stake({k: v for k, v in item.items() if v is not None}, departs=departs)
 
 
 def pq(name, expected, item, action="set", **extra):
@@ -11622,24 +11838,27 @@ pq("the Departs from line is read in any case, at a line start", "allow",
    pq_item(port=True, context=PQ_CTX + "\ndeparts from: a.ts:f \u2014 x", holds=None))
 pq("a Departs from phrase mid-line does not count", "deny",
    pq_item(port=True, context="This item departs from: a.ts:f", holds=None))
-pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False))
+pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False, departs=True))
 pq("a non-port item with holds is allowed", "allow",
-   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits."))
+   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits.", departs=True))
 pq("a database port question is not a port of an app", "allow",
-   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits."))
+   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits.",
+           departs=True))
 pq("switch ports in a rack are not a port of an app", "allow",
-   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits."))
+   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits.",
+           departs=True))
 pq("a taken port is not a port of an app", "allow",
-   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits."))
+   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits.", departs=True))
 pq("the incident's own wording is a known limit and is allowed", "allow",
    pq_item(title="Suspense cards when Card in Hand closes",
-           context="Duo version of the web screen.", holds="Card in Hand plan waits."))
-pq("an item with no kind is allowed", "allow", pq_item(kind=None))
+           context="Duo version of the web screen.", holds="Card in Hand plan waits.", departs=True))
+pq("an item with no kind is allowed", "allow", pq_item(kind=None, departs=True))
 pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
 pq("a dev server port is not a port of an app", "allow",
-   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None))
+   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None,
+           departs=True))
 pq("a port number is not a port of an app", "allow",
-   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits."))
+   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits.", departs=True))
 pq("redesign with no Departs from line is denied", "deny",
    pq_item(title="Redesign of the login screen", context="The login screen is new.", holds=None))
 pq("a task about a port with no Departs from line is denied", "deny",
@@ -11799,16 +12018,25 @@ up("a task with a list pick is not judged", "allow",
 up("a multi item whose list pick holds the widening key and a null is denied", "deny",
    up_item(multi=True, options=UP_THREE, pick=["a", None]))
 up("a multi item whose list pick holds a number and a widening key is denied", "deny",
-   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+   up_item(multi=True, options=[dict(UP_WIDE, key="a"), UP_MATCH, UP_THIRD], pick=[1, "a"]))
 # A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
-# the missing pick never reads as the key None.
+# the missing pick never reads as the key None. Rule option-letter-keys refuses a keyless option, so these
+# cases are refused by it. Each names option-letter-keys, not uniform-pick: a uniform-pick refusal here would
+# mean the missing pick read as a key, and the rule-name check in the runner fails that.
 UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
-up("a widening option with no key and an item with no pick is allowed", "allow",
-   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
-up("a widening option with no key and an item with a null pick is allowed", "allow",
-   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
-up("a widening option with no key and a multi item with no pick is allowed", "allow",
-   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+
+
+def up_keyless(name, item):
+    add("uniform pick: " + name, "deny", "option-letter-keys", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+        action="set", collection="items", doc_id="banchi-titles", data=item)
+
+
+up_keyless("a widening option with no key and an item with no pick is refused by option-letter-keys",
+           up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up_keyless("a widening option with no key and an item with a null pick is refused by option-letter-keys",
+           dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up_keyless("a widening option with no key and a multi item with no pick is refused by option-letter-keys",
+           up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
 add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
     "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
@@ -12001,6 +12229,9 @@ FAMILY = "command-in-item"
 
 CI_DOC = "c152-stale-branch-deletes"
 CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
+CI_TERMINAL = ["Open Terminal", "Paste the command below and run it"]
+# A task's `command` is {powershell, mac}, one string per shell (decision act-in-place).
+CMD_BOTH_SHELLS = {"powershell": "git push origin --delete old-a", "mac": "git push origin --delete old-a"}
 
 
 def ci_task(steps, **over):
@@ -12026,19 +12257,84 @@ ci("a copy-the-command-from-file step is denied", "deny",
 ci("a file opened and its command run in one step is denied", "deny",
    ci_task(["Open plans/c152-stale-branch-deletes.md and run its command"]))
 ci("a terminal step with the command on the item is allowed", "allow",
-   ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
+   ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": OJ_FORM + "\nThe plan file lists them.",
+    "context": OJ_FORM + "\n" + QD_LINE + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
 
 
 ci("a file step with the command set is denied", "deny",
-   ci_task(CI_STEPS, command="git push origin --delete old-a"))
+   ci_task(CI_STEPS, command=CMD_BOTH_SHELLS))
 ci("a run-the-command-in-file step with the command set is denied", "deny",
-   ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
+   ci_task(["Run the command in plans/c152.md"], command=CMD_BOTH_SHELLS))
+
+# The command is {powershell, mac}: a bash-only string is refused, and so is a dict missing a shell or
+# holding a blank string. The refusal names both shells.
+ci("a bash-only command string on a set is denied", "deny",
+   ci_task(CI_TERMINAL, command="git push origin --delete old-a"), carries=("powershell", "mac"))
+ci("an update that sets a bash-only command string is denied", "deny", {"command": "git push"}, action="update")
+ci("a command with no mac is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete old-a"}))
+ci("a command with no powershell is denied", "deny",
+   ci_task(CI_TERMINAL, command={"mac": "git push origin --delete old-a"}))
+ci("a command whose mac string is empty is denied", "deny",
+   ci_task(CI_TERMINAL, command=dict(CMD_BOTH_SHELLS, mac="")))
+ci("a command whose powershell string is blank is denied", "deny",
+   ci_task(CI_TERMINAL, command=dict(CMD_BOTH_SHELLS, powershell="   ")))
+
+# PowerShell 5.1 has none of these operators (item 78 failed on && and <<<). The same text under mac is allowed.
+PS_OPERATOR_LINES = [("&&", "cd repo && git push origin --delete old-a"),
+                     ("||", "git push origin --delete old-a || echo failed"),
+                     ("<<<", "cat <<< old-a"),
+                     ("<<", "cat <<EOF")]
+for op, line in PS_OPERATOR_LINES:
+    ci("a powershell line with %s is denied" % op, "deny",
+       ci_task(CI_TERMINAL, command={"powershell": line, "mac": CMD_BOTH_SHELLS["mac"]}))
+    ci("a mac line with %s and a clean powershell line is allowed" % op, "allow",
+       ci_task(CI_TERMINAL, command={"powershell": CMD_BOTH_SHELLS["powershell"], "mac": line}))
+
+# A shell line in a step's backtick span or fence is a command in the step. It belongs in the item's command field.
+ci("a step that runs a git line in backticks is denied", "deny", ci_task(["Run `git push origin --delete old-a`"]))
+ci("a step that runs a cd and && line in backticks is denied", "deny", ci_task(["Run `cd repo && npm test`"]))
+ci("a step that runs a PowerShell cmdlet in backticks is denied", "deny", ci_task(["Run `Get-ChildItem -Recurse`"]))
+ci("a step with a shell line in a fence is denied", "deny", ci_task(["Run this:\n```\ngit push origin --delete old-a\n```"]))
+ci("a step with a backticked file name and no command verb is allowed", "allow",
+   ci_task(["Check `README.md` reads well"]))
+ci("a step that mentions git in prose is allowed", "allow", ci_task(["Look at the git branch list on the page"]))
+ci("a step with a backticked word that is not a command is allowed", "allow", ci_task(["Pick `main`"]))
+ci("an update with no command key and plain steps is allowed", "allow",
+   {"steps": ["Read the summary on the page."]}, action="update")
+
+# A command on the item excuses the loose verb match, as on main (decision act-in-place).
+ci("a file step and a run-the-command step with a command on the item are allowed", "allow",
+   ci_task(["Open plans/c152.md", "Run the command"], command=CMD_BOTH_SHELLS))
+ci("a backticked file to read and a paste-in-PowerShell step with a command on the item are allowed", "allow",
+   ci_task(["Open `plans/x.md` to read the plan", "Paste the command in PowerShell and run it"],
+           command=CMD_BOTH_SHELLS))
+ci("a paste-from-the-box step and a result-file step with a command on the item are allowed", "allow",
+   ci_task(["Paste the command from the box below", "Check the result in `out.log`"], command=CMD_BOTH_SHELLS))
+ci("a backticked ./ doc path to open is allowed", "allow", ci_task(["Open `./docs/a.md`"]))
+ci("a backticked ./ source path with a line number to edit is allowed", "allow",
+   ci_task(["Edit `./hooks/guard.py` line 3"]))
+# A PowerShell string holds PowerShell only: a 2>/dev/null redirect or an export statement is bash.
+ci("a powershell line with a 2>/dev/null redirect is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete a 2>/dev/null",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+ci("a powershell line that starts with export is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "export A=1; git push origin --delete a",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+# A known program with an argument in backticks is a shell line. A known program alone is prose.
+BACKTICK_RUNS = ["Run `make test`", "Run `pytest -q`", "Run `docker compose up`", "Run `mkdir out`",
+                 "Run `gcloud auth login`", "Run `bq ls`", "Run `winget install Tool.Id`", "Run `./cleanup.sh`",
+                 "Run `./build --release`"]
+for step in BACKTICK_RUNS:
+    ci("a step with a backticked command and an argument is denied: " + step, "deny", ci_task([step]))
+BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "Read the `npm` section"]
+for step in BACKTICK_PROSE:
+    ci("a step with a known program alone in backticks is allowed: " + step, "allow", ci_task([step]))
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
@@ -12052,7 +12348,7 @@ FAMILY = "task-names-check"
 
 TN_CTX = "The cloud proxy refused the branch deletes (403)."
 TN_STEPS = ["Open Terminal", "Paste the command below and run it"]
-TN_COMMAND = "git push origin --delete old-a"
+TN_COMMAND = CMD_BOTH_SHELLS  # the {powershell, mac} command of the 14:47 ruling
 
 
 def tn_task(**over):
@@ -12082,7 +12378,7 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 # The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + QD_LINE + "\n" + TN_CTX))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -12140,9 +12436,10 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
-def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
-    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
+    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
+    empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
@@ -12356,9 +12653,124 @@ oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_G
 wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
          "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
 wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
-         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+         "deny", "port-question", oj_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=OJ_DOC)
 wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
          "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+
+
+# --------------------------------------------------------------------------- a question says how it departs from main
+FAMILY = "question-departs"
+#
+# Rule question-departs (decision owner-judge's ruling, Oct 30: a question to the owner that restates main is
+# not a question). A decision carries a line at a line start in `context`: `Departs from: <what on main> — <what
+# changes>`. Both sides are non-empty, and the change side is not a restatement of main. The check runs after
+# the form and the older rules, at the same ArtifactData call. A closed decision, a task, a note, an update that
+# carries no context, and another artifact's page are not judged. The line sits in `context` only.
+
+QD_DOC = "departs-item"
+QD_RESTATE = "Departs from: agent-model-cap — Opus above the row stays the existing ask"
+QD_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def qd_item(**over):
+    item = {"id": QD_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def qd(name, expected, item, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=item)
+    kw.update(extra)
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+qd("a decision with the form and no Departs from line is denied", "deny", qd_item(context=oj_ctx(departs=None)))
+qd("the refusal says to add the line", "deny", qd_item(context=oj_ctx(departs=None)), carries=("Departs from",))
+qd("an empty Departs from line is denied", "deny", qd_item(context=oj_ctx(departs="Departs from:")))
+qd("a line with no change side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp —")))
+qd("a line with no separator is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp")))
+qd("a line with no left side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: — the stamp check moves to the lint job")))
+qd("a line that restates main is denied", "deny", qd_item(context=oj_ctx(departs=QD_RESTATE)))
+qd("a line whose change side is none is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — none")))
+qd("a line whose change side is STAYS, in any case, is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — STAYS in the lint job")))
+qd("a Departs from phrase mid-line does not count", "deny",
+   qd_item(context=oj_ctx(departs="Why: Departs from: lint/stamp.py:run_stamp — the stamp moves")))
+qd("a line in why, not in context, is denied", "deny", qd_item(context=oj_ctx(departs=None), why=QD_LINE))
+qd("a line in an option, not in context, is denied", "deny",
+   qd_item(context=oj_ctx(departs=None), options=[dict(OJ_OPTIONS[0], how=QD_LINE), OJ_OPTIONS[1]]))
+qd("a valid line is allowed", "allow", qd_item())
+qd("a valid line with a hyphen separator is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp - the stamp moves to the lint job")))
+qd("a change side that holds the word nonetheless is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves")))
+qd("comment openers and an apostrophe in the change side are plain text", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — don't parse // or /* or # here")))
+
+qd("a closed decision with the chat answer and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=OJ_ANSWERED))
+qd("a closed decision with the form and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=oj_ctx(departs=None)))
+qd("a task with a Why yours line and no Departs from line is allowed", "allow",
+   {"id": QD_DOC, "kind": "task", "status": "open", "title": "Merge the batch", "steps": ["Open Terminal"],
+    "context": QD_WHY})
+qd("a note with the form and no Departs from line is allowed", "allow",
+   qd_item(kind="note", context=oj_ctx(departs=None)))
+qd("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+qd("an update that carries kind decision and no context is allowed", "allow",
+   {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+qd("an update that carries kind decision and a context with no Departs from line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=None)}, action="update")
+qd("an update that carries kind decision and a context with a restating line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=QD_RESTATE)}, action="update")
+qd("an update that carries kind decision and a context with the line is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx()}, action="update")
+qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
+   url="https://claude.ai/artifact/other")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
+    cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
+    data=qd_item(context=oj_ctx(departs=None)))
+
+# The older rules and the form keep their ids: this check runs after them.
+wp_write("question departs: a decision with no Goal and no line is refused as question-form", "deny",
+         "question-form", qd_item(context=oj_ctx(goal=None, departs=None)), doc_id=QD_DOC)
+wp_write("question departs: a port with no line is refused as port-question", "deny", "port-question",
+         qd_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=QD_DOC)
+wp_write("question departs: a widening pick with no line is refused as uniform-pick", "deny", "uniform-pick",
+         qd_item(context=oj_ctx(departs=None), options=[UP_WIDE, UP_MATCH], pick="a"), doc_id=QD_DOC)
+
+
+def qd_replace(name, expected, old, new, field="context"):
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=QD_DOC,
+        field=field, old_str=old, new_str=new)
+
+
+qd_replace("a str_replace that drops the Departs from line from context is denied", "deny", QD_LINE, "")
+qd_replace("a str_replace that drops the line and keeps the form is denied", "deny", oj_ctx(), oj_ctx(departs=None))
+qd_replace("a str_replace that swaps the line for another valid line is allowed", "allow", QD_LINE,
+           "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job")
+qd_replace("a str_replace that keeps the line and changes the prose is allowed", "allow", oj_ctx(),
+           oj_ctx(tail="The stamp check runs in the test job today."))
+qd_replace("a str_replace whose old_str holds no Departs from line is allowed", "allow", OJ_CTX,
+           "The stamp check runs in the test job today.")
+qd_replace("a str_replace on the title is not judged", "allow", QD_LINE, "", field="title")
+
+add("question departs: a batch with a decision that has no line is denied", "deny", "question-departs",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item(context=oj_ctx(departs=None))}])
+add("question departs: a batch of decisions that each carry a line is allowed", "allow", tool="ArtifactData",
+    cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item()},
+            {"op": "set", "collection": "items", "doc_id": "departs-second", "data": qd_item(id="departs-second")}])
 
 
 # --------------------------------------------------------------------------- an item field the page renders
@@ -12387,14 +12799,15 @@ IF_LAST = {"choice": "b", "note": "n", "at": "2026-10-29T19:05:00Z"}
 IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": True, "kind": "decision",
             "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
             "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
-            "lastAnswer": IF_LAST}
+            "command": CMD_BOTH_SHELLS, "lastAnswer": IF_LAST}
 IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
 os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
 
 def if_item(**over):
     """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
-    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None,
+                      "departs": True, **over})
 
 
 def if_page(slug, body):
@@ -13118,6 +13531,279 @@ def branch_base_unread_log_case():
     if "branch" not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
     return True, "one noted/subject-unread line for the unresolved base"
+
+
+# --------------------------------------------------------------------------- an option's key is its position's letter
+FAMILY = "option-letter-keys"
+#
+# Rule option-letter-keys (decision option-keys-are-letters), built against a named incident: waiting item 77,
+# Oct 30 15:09 CDT, and item 44 (key none), Oct 28 12:47 CDT. The page shows an option by its position, as a
+# letter (skills/waiting-page/page.html, letterOf), so an option keyed a showed as B and the owner's "A" was
+# misread. An option at index i takes the lowercase letter of the page's letter for i. The writer also refuses
+# a key that is missing or not a string, a key that repeats, and the key none, which the page reads as "none of
+# these". A task, a note and a closed item are not judged. An open item's text names no option by a
+# letter-and-digit key, as in "option e2".
+
+OL_DOC = "letter-keys"
+OL_CTX = "The stamp check runs in the lint job today. The test job could run it too."
+# The three options of the item's shape, with no key. ol_keyed gives them keys in position order.
+OL_BASE = [
+    {"label": "Keep the check in the lint job", "how": "Leave the workflow as it is.",
+     "gain": "No change to review.", "lose": "The lint job stays the slow one."},
+    {"label": "Move the check to the test job", "how": "Move the step to the test job.",
+     "gain": "The lint job gets faster.", "lose": "The test job runs longer."},
+    {"label": "Drop the check", "how": "Remove the step.", "gain": "Less runner time.", "lose": "No stamp check."},
+]
+ALPHA = [dict(OL_BASE[0], key=chr(97 + i), label="Path " + chr(97 + i)) for i in range(26)]
+
+
+def ol_keyed(*keys):
+    """The OL_BASE options, keyed `keys` in position order."""
+    return [dict(OL_BASE[i], key=k) for i, k in enumerate(keys)]
+
+
+def ol_opt(index, **over):
+    """The a, b, c options of ol_item, with the option at `index` changed by `over`."""
+    options = ol_keyed("a", "b", "c")
+    options[index] = dict(options[index], **over)
+    return options
+
+
+def ol_item(**over):
+    item = {"id": OL_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": OL_CTX, "options": ol_keyed("a", "b", "c"), "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return with_stake({k: v for k, v in item.items() if v is not None})
+
+
+def ol(name, expected, item, action="set", **extra):
+    wp_write("option letter keys: " + name, expected, "option-letter-keys", item, action=action,
+             doc_id=OL_DOC, **extra)
+
+
+def ol_write(data, op="set"):
+    return {"op": op, "collection": "items", "doc_id": OL_DOC, "data": data}
+
+
+# Keys by position: the page's letter for index i, lowercased.
+ol("options keyed a, b and c are allowed", "allow", ol_item())
+ol("keys a through z in position order are allowed", "allow", ol_item(options=ALPHA))
+ol("options keyed e2, a and c are denied", "deny", ol_item(options=ol_keyed("e2", "a", "c")))
+ol("options keyed a and c are denied", "deny", ol_item(options=ol_keyed("a", "c")))
+ol("options keyed a and a are denied", "deny", ol_item(options=ol_keyed("a", "a")))
+ol("item 44's shape, keyed a and none, is denied", "deny", ol_item(options=ol_keyed("a", "none")))
+ol("options keyed none, b and c are denied", "deny", ol_item(options=ol_keyed("none", "b", "c")))
+ol("options keyed A, b and c are denied, since the key is the lowercase letter", "deny",
+   ol_item(options=ol_keyed("A", "b", "c")))
+ol("keys b then a are denied", "deny", ol_item(options=ol_keyed("b", "a")))
+ol("a keyless option at index 0 is denied", "deny", ol_item(options=[OL_BASE[0], dict(OL_BASE[1], key="b")]))
+ol("a keyless option at index 1 is denied", "deny", ol_item(options=[dict(OL_BASE[0], key="a"), OL_BASE[1]]))
+ol("an option whose key is null is denied", "deny", ol_item(options=ol_opt(0, key=None)))
+ol("a multi item keyed a, b and c with a list pick is allowed", "allow", ol_item(multi=True, pick=["a", "c"]))
+ol("a multi item keyed e2, a and c with a list pick is denied", "deny",
+   ol_item(multi=True, options=ol_keyed("e2", "a", "c"), pick=["a", "c"]))
+
+# Item text: an option named by a letter-and-digit key, after option, options, pick or key.
+ol("a context that says option e2 is safer, keys a, b and c, is denied", "deny", ol_item(context="option e2 is safer"))
+ol("a context that says Option e2 with a capital is denied", "deny",
+   ol_item(context="Option e2 is safer for the stamp check."))
+ol("a backticked key, option `e2`, is denied", "deny", ol_item(context="Keep option `e2` as it is."))
+ol("a quoted key after pick is denied", "deny", ol_item(options=ol_opt(0, how='Pick "e2" to keep the check.')))
+ol("a title that names option e2 is denied", "deny", ol_item(title="Option e2 or option b?"))
+ol("a why that names key e2 is denied", "deny", ol_item(why="The key e2 keeps the lint job."))
+ol("an option gain that names option e2 is denied", "deny", ol_item(options=ol_opt(0, gain="Option e2 keeps the check.")))
+ol("a context that says the option to merge is allowed", "allow", ol_item(context="The option to merge is open."))
+ol("a context that says option A is allowed", "allow", ol_item(context="Option A is the safer pick."))
+ol("a context that says pick b is allowed", "allow", ol_item(context="Pick b for the lint job."))
+ol("a context that says option 2 is allowed", "allow", ol_item(context="Option 2 is the safer pick."))
+
+# The forms a session writes between the word and the key: a colon, a bracket, markdown emphasis.
+ol("a context that says Option: e2 is denied", "deny", ol_item(context="Option: e2 is the safer pick."))
+ol("a context that says Option (e2) is denied", "deny", ol_item(context="Option (e2) is the safer pick."))
+ol("a context that says Pick **e2** is denied", "deny", ol_item(context="Pick **e2** to keep the check."))
+ol("a context that says Option [e2] is denied", "deny", ol_item(context="Option [e2] is the safer pick."))
+ol("a why that says key: e2 is denied", "deny", ol_item(why="The key: e2 keeps the lint job."))
+
+# The page shows an option's letter in capitals, so Claude can write "Option E2" for key e2. That is the incident
+# form (waiting item 77), so a key takes either case after the word.
+ol("a context that says Option E2 with a capital key is denied", "deny",
+   ol_item(context="Option E2 is safer for the stamp check."))
+ol("a context that says Pick **E2** with a capital key is denied", "deny",
+   ol_item(context="Pick **E2** to keep the check."))
+
+# Ids this repo cites are not keys. D12 is a decision id and t18 is the owner's topic id for the uniform ruling.
+# A lowercase d-and-digit word after "key" has a key's shape, so it is refused like "key e2": the exempt ids are
+# D<digits> and t<digits>, not every letter that an id could start with. A1 is not exempt: folding case on the key
+# refuses A1 too, and that cost is accepted, so "Pick A1" is refused.
+ol("a context that says Option D12 is allowed", "allow", ol_item(context="Option D12 is the short-titles ruling."))
+ol("a context that says Option t18 is allowed", "allow", ol_item(context="Option t18 is the uniform ruling."))
+ol("a context that says Pick A1 is denied, since a key folds case", "deny", ol_item(context="Pick A1 on the sheet."))
+ol("a context that says key d4 is denied, since it has a key's shape", "deny", ol_item(context="The key d4 stays."))
+
+# A closed item records what was decided, so its old keys and its text are not judged, as in decision_form_hit.
+ol("a whole-item set of a closed item keyed e2, a and c is allowed", "allow",
+   ol_item(status="closed", options=ol_keyed("e2", "a", "c")))
+ol("a whole-item set of a closed item whose context says option e2 won is allowed", "allow",
+   ol_item(status="closed", context="Option e2 won."))
+
+# A str_replace carries no status, so it is judged on the text it adds: new_str, never old_str.
+ol("a str_replace that adds Option e2 wins. to context is denied", "deny", None, action="str_replace",
+   field="context", old_str="The test job could run it too.", new_str="Option e2 wins.")
+ol("a str_replace that adds Option b wins. to context is allowed", "allow", None, action="str_replace",
+   field="context", old_str="The test job could run it too.", new_str="Option b wins.")
+ol("a str_replace that takes option e2 out of context is allowed", "allow", None, action="str_replace",
+   field="context", old_str="Option e2 wins.", new_str="Option a wins.")
+
+# Kind: an item with no kind is a decision. A task and a note are not judged.
+ol("an item with no kind is judged as a decision and denied", "deny",
+   ol_item(kind=None, options=ol_keyed("e2", "a", "c")))
+ol("a task keyed e2, a and c is not judged", "allow",
+   ol_item(kind="task", options=ol_keyed("e2", "a", "c"), context=OL_CTX + "\n" + TN_WHY))
+ol("a note keyed e2, a and c is not judged", "allow", ol_item(kind="note", options=ol_keyed("e2", "a", "c")))
+
+# Updates: judged when they carry options; the kind defaults to decision.
+ol("an update that carries options keyed x and y is denied", "deny", {"options": ol_keyed("x", "y")},
+   action="update")
+ol("an update that carries options keyed a, b and c is allowed", "allow", {"options": ol_keyed("a", "b", "c")},
+   action="update")
+ol("an update that carries options keyed a and none is denied", "deny", {"options": ol_keyed("a", "none")},
+   action="update")
+ol("a set to another artifact is allowed", "allow", ol_item(options=ol_keyed("e2", "a", "c")),
+   url="https://claude.ai/artifact/other")
+add("option letter keys: a batch with one item keyed e2, a and c is denied", "deny", "option-letter-keys",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[ol_write(ol_item()), ol_write(ol_item(options=ol_keyed("e2", "a", "c")))])
+add("option letter keys: a batch of keyed items is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
+    url=PQ_URL, action="batch", writes=[ol_write(ol_item()), ol_write(ol_item(multi=True, pick=["a", "c"]))])
+
+# The page's letters and none. The guard's copy must match them: the page's letterOf maps index i to
+# String.fromCharCode(65 + i % 26), and NONE is "none". Each check reads one line, anchored at a line start,
+# so a copy in a comment never stands for the page's line.
+PAGE_HTML = os.path.join(REPO, "skills", "waiting-page", "page.html")
+PAGE_LETTER_CALL = re.compile(r"const i = \(it\.options \|\| \[\]\)\.findIndex\(\(o\) => o\.key === key\);")
+PAGE_LETTER_MAP = re.compile(r"String\.fromCharCode\(65 \+ i % 26\)")
+
+
+def page_letter_problem(text):
+    """'' when the page's letterOf maps index i to String.fromCharCode(65 + i % 26), else what differs."""
+    defs = [line for line in text.splitlines() if re.match(r"\s*const letterOf\s*=", line)]
+    if len(defs) != 1:
+        return "want one const letterOf line, found %d" % len(defs)
+    if not PAGE_LETTER_CALL.search(defs[0]):
+        return "letterOf does not read the index of the option it is given"
+    if not PAGE_LETTER_MAP.search(defs[0]):
+        return "letterOf does not map index i to String.fromCharCode(65 + i % 26)"
+    return ""
+
+
+def page_none_problem(text):
+    """'' when the page sets NONE to "none", else what differs."""
+    defs = [line for line in text.splitlines() if re.match(r"\s*const NONE\s*=", line)]
+    if len(defs) != 1 or not re.match(r'\s*const NONE = "none";\s*$', defs[0]):
+        return 'want one line const NONE = "none";'
+    return ""
+
+
+def page_letters_check():
+    with open(PAGE_HTML, encoding="utf-8") as handle:
+        text = handle.read()
+    problem = page_letter_problem(text) or page_none_problem(text)
+    return (not problem), (problem or "the page's letterOf and NONE are the letters the guard checks")
+
+
+LOG_CHECKS_EXTRA.append(("option letter keys: the page's letterOf and NONE are the letters the guard checks",
+                         page_letters_check))
+
+# Scanner cases for page_letter_problem: a comment copy, a lone quote in a comment, and a template literal copy.
+LETTER_RIGHT = ('const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); '
+                'return i < 0 ? "" : String.fromCharCode(65 + i % 26); };')
+LETTER_WRONG = LETTER_RIGHT.replace("65 + i", "66 + i")
+
+
+def page_text_check(text, want_problem):
+    """A checker that runs page_letter_problem on synthetic page text and wants a problem, or none."""
+    def check():
+        problem = page_letter_problem(text)
+        if bool(problem) != want_problem:
+            return False, "want %s, got %r" % ("a problem" if want_problem else "no problem", problem)
+        return True, "as wanted"
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("option letter keys: a comment copy of letterOf does not stand for the page's line",
+                         page_text_check("// " + LETTER_RIGHT + "\n" + LETTER_WRONG, True)))
+LOG_CHECKS_EXTRA.append(("option letter keys: a lone quote in a comment does not hide letterOf",
+                         page_text_check("// The owner's page keeps this line.\n" + LETTER_RIGHT, False)))
+LOG_CHECKS_EXTRA.append(("option letter keys: a template literal copy of letterOf fails the check as ambiguous",
+                         page_text_check("const doc = `\n" + LETTER_WRONG + "\n`;\n" + LETTER_RIGHT, True)))
+
+
+# --------------------------------------------------------------------------- a reworked item is not answered on the page
+FAMILY = "rework-off-page"
+#
+# Rule rework-off-page (decision rework-leaves-page), built against a named incident: waiting item 97, Oct 30
+# 15:40 CDT. Item 97 was being reworked while still open and answerable, so the owner could answer options that
+# were about to change. An item whose text (title, context, why, an option or a step) says "being reworked", in
+# any case, is refused unless the same write has status closed. A str_replace carries no status and its stored
+# item is unseen, so it is refused when its new_str adds the phrase.
+
+RW_DOC = "rework-stamp-check"
+RW_TEXT = "Options being reworked."
+
+
+def rw_item(**over):
+    merged = {"id": RW_DOC, "context": RW_TEXT}
+    merged.update(over)
+    return ol_item(**merged)
+
+
+def rw(name, expected, item, action="set", **extra):
+    wp_write("rework off page: " + name, expected, "rework-off-page", item, action=action, doc_id=RW_DOC, **extra)
+
+
+rw("an open decision with Options being reworked in its context is denied", "deny", rw_item())
+rw("the same decision with status closed is allowed", "allow", rw_item(status="closed"))
+rw("the phrase in capitals, BEING REWORKED, is denied", "deny", rw_item(context="Options BEING REWORKED."))
+rw("a context that says the options were reworked last week is allowed", "allow",
+   rw_item(context="The options were reworked last week."))
+rw("an update that carries only context with the phrase is denied", "deny", {"context": RW_TEXT}, action="update")
+rw("an update that carries status open and that context is denied", "deny", {"status": "open", "context": RW_TEXT},
+   action="update")
+rw("an update that carries status closed and that context is allowed", "allow",
+   {"status": "closed", "context": RW_TEXT}, action="update")
+rw("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+rw("an item set to another artifact is allowed", "allow", rw_item(), url="https://claude.ai/artifact/other")
+add("rework off page: a str_replace that adds the phrase to context is denied", "deny", "rework-off-page",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=RW_DOC,
+    field="context", old_str="Options are open.", new_str=RW_TEXT)
+rw("a str_replace that adds the phrase in capitals is denied", "deny", None, action="str_replace",
+   field="context", old_str="Options are open.", new_str="Options BEING REWORKED.")
+rw("a str_replace that takes the phrase out of context is allowed", "allow", None, action="str_replace",
+   field="context", old_str=RW_TEXT, new_str="Options are ready.")
+
+# Item text other than context: title, why and an option's own text. The same write with status closed is allowed.
+RW_QUIET = "The options are open."
+rw("a title that says Options being reworked is denied", "deny", rw_item(context=RW_QUIET, title=RW_TEXT))
+rw("a why that says Options being reworked is denied", "deny", rw_item(context=RW_QUIET, why=RW_TEXT))
+rw("an option's how that says being reworked is denied", "deny",
+   rw_item(context=RW_QUIET, options=ol_opt(0, how="This option is being reworked.")))
+rw("an update that carries only a title with the phrase is denied", "deny", {"title": RW_TEXT}, action="update")
+rw("a str_replace that adds the phrase to a title is denied", "deny", None, action="str_replace",
+   field="title", old_str="Which CI job runs the stamp check?", new_str=RW_TEXT)
+rw("a closed item whose title says Options being reworked is allowed", "allow",
+   rw_item(status="closed", context=RW_QUIET, title=RW_TEXT))
+
+# Other spellings of the same state. A bare past-tense re-worked or the noun rework is not the state.
+rw("the phrase with a hyphen, being re-worked, is denied", "deny", rw_item(context="Options being re-worked."))
+rw("the phrase under rework is denied", "deny", rw_item(context="Options under rework."))
+rw("a context that says the options were re-worked last week is allowed", "allow",
+   rw_item(context="The options were re-worked last week."))
+rw("a context that says the rework landed last week is allowed", "allow",
+   rw_item(context="The rework landed last week."))
+add("rework off page: a batch with an open reworked item is denied", "deny", "rework-off-page",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": RW_DOC, "data": rw_item()}])
 
 
 # --------------------------------------------------------------------------- the reason hygiene
