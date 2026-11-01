@@ -1,1 +1,1 @@
-repo=pbakaus/impeccable path=plugin/skills/impeccable tag=skill-v4.6.0 commit=d631a8827f99414d2b6daba4ef08b7f8701751d7
+repo=pbakaus/impeccable path=plugin/skills/impeccable tag=skill-v4.6.0 commit=8a0e198da34ebc5b936a9d5975fb7a3b1cf353b7
