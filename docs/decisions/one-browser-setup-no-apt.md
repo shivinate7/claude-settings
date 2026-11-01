@@ -8,7 +8,7 @@ Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite acti
 
 - Runs `npm ci` in `package-dir` (default `.`), unless `npm-ci` is `false`.
 - Reads the pinned `playwright-core` version from that folder. No pin there stops the job with one line.
-- Caches `~/.cache/ms-playwright`, keyed by the runner OS, that version and the browsers.
+- Caches `~/.cache/ms-playwright`, keyed by the runner OS, its release (`ubuntu-24.04`, read by `pin.sh`), that version and the browsers. A browser built for one OS release fails on another, as `libicudata.so.74` did on 26.04. There is no restore key, so a new OS release downloads fresh.
 - Runs `playwright install <browsers>` (default `chromium`) with no `--with-deps`. The runner image already has Chromium's libraries. A missing library fails the suite, never skips it.
 - Runs no apt for Chromium. WebKit and Firefox may opt in with the `system-deps` input, such as `system-deps: webkit`. Its default is empty, so the default path runs no apt.
 - With `system-deps` set, it runs `install-deps` for exactly those browsers, on Linux only. Chromium, any other name, or a blank value fails the job with one line. A blank value would install every browser's libraries.
