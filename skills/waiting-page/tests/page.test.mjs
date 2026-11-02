@@ -90,6 +90,12 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
+// The page's name, PAGE_NAME in skills/waiting-page/splice.py. Read from that file, never copied here (owner ruling, 2026-11-02 11:12 CST).
+function pageName() {
+  const m = /^PAGE_NAME = "([^"]*)"/m.exec(fs.readFileSync(path.join(HERE, "..", "splice.py"), "utf8"));
+  assert.ok(m, "splice.py has no PAGE_NAME line");
+  return m[1];
+}
 after(async () => { if (browser) await browser.close(); });
 
 async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
@@ -458,8 +464,9 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    // The title is "<repo> Queue" on Questions (shiv ruling, Oct 30 14:33 CDT).
-    assert.equal(await page.title(), "Agent Q Queue");
+    // The title is "<repo> <page name>" on Questions (owner ruling, 2026-11-02 11:12 CST).
+    assert.notEqual(await page.title(), "Agent Q Queue", "the title still names the old page name Queue");
+    assert.equal(await page.title(), "Agent Q " + pageName());
   });
 }
 
@@ -3583,30 +3590,40 @@ test("a note typed on an item survives a press of Status and back, because Statu
   assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
 });
 
-// The title is "<repo> Queue" on Questions and "<repo> Queue · Status" (a middle dot, a space each side) on Status
-// (shiv ruling, Oct 30 14:33 CDT).
-test("the document title names the repo and the open tab: <repo> Queue, then <repo> Queue · Status", async (t) => {
+// The title is "<repo> <page name>" on Questions and on Status, with no suffix on Status (owner ruling, 2026-11-02 11:12 CST).
+test("the document title names the repo and is the same on both tabs: <repo> <page name>", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
-  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+  const want = "Compass " + pageName();
+  assert.equal(await titleOf(page, want), want);
   await openStatus(page);
-  assert.equal(await titleOf(page, "Compass Queue · Status"), "Compass Queue · Status");
+  assert.equal(await titleOf(page, want), want, "the Status tab adds a suffix to the title");
   await page.click("#tabQ");
-  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+  assert.equal(await titleOf(page, want), want);
 });
 
-// With no identity name the title is the page name alone, "Queue" (shiv ruling, Oct 30 14:33 CDT).
-test("with no identity name the document title is Queue, then Queue · Status", async (t) => {
+// With no identity name the title is the page name alone, on both tabs (owner ruling, 2026-11-02 11:12 CST).
+test("with no identity name the document title is the page name alone, on both tabs", async (t) => {
   const page = await open(t); if (!page) return;
-  assert.equal(await titleOf(page, "Queue"), "Queue");
+  const want = pageName();
+  assert.equal(await titleOf(page, want), want);
   await openStatus(page);
-  assert.equal(await titleOf(page, "Queue · Status"), "Queue · Status");
+  assert.equal(await titleOf(page, want), want, "the Status tab adds a suffix to the title");
 });
 
-// The static <title> in page.html is the page name, "Queue"; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
-test("page.html's static title is Queue", () => {
+// setTitle cuts the repo name to 40 characters, so a longer name shows its first 40 (a full-size name, owner ruling, 2026-11-02 11:12 CST).
+test("a repo name over 40 characters is cut to 40 in the title", async (t) => {
+  const name = "Repo-" + "x".repeat(60);
+  const page = await open(t, { meta: { identity: { name } } }); if (!page) return;
+  const want = name.slice(0, 40) + " " + pageName();
+  assert.equal(await titleOf(page, want), want);
+});
+
+// The static <title> in page.html is the page name. setTitle adds the repo name at run time.
+test("page.html's static title is the page name, read from splice.py", () => {
   const staticTitle = html.match(/<title>([^<]*)<\/title>/);
   assert.ok(staticTitle, "page.html has no static <title>");
-  assert.equal(staticTitle[1], "Queue");
+  assert.notEqual(staticTitle[1], "Queue", "page.html's static title is still the old name Queue");
+  assert.equal(staticTitle[1], pageName());
 });
 
 // ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)

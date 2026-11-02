@@ -19,6 +19,7 @@ SPLICE_UNDER_TEST names the command to run (default: splice.py beside this file)
 cases run red against a checkout that lacks it. Temp files: the run folder of lint/_test_temp.py,
 whose sweep lint/test_find_copies.py proves (decision test-temp-standard).
 """
+import importlib.util
 import json
 import os
 import re
@@ -35,7 +36,39 @@ import _test_temp  # noqa: E402
 CMD = os.environ.get("SPLICE_UNDER_TEST") or os.path.join(HERE, "splice.py")
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     TEMPLATE = f.read()
+ROADMAP_PAGE = os.path.join(HERE, "..", "roadmap", "page", "index.html")
 RUN_FOLDER = None  # made in setUpModule
+
+
+def load_splice():
+    """splice.py as a module, loaded from CMD, so a name a test reads is the one the splice defines."""
+    spec = importlib.util.spec_from_file_location("splice_under_test", CMD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SPLICE = load_splice()
+
+
+def page_name(test):
+    """splice.PAGE_NAME. A test asserts the old name is gone before it asks for the new one."""
+    name = getattr(SPLICE, "PAGE_NAME", None)
+    test.assertIsNotNone(name, "splice.py has no PAGE_NAME")
+    return name
+
+
+def set_title_statement(text):
+    """The document.title expression of setTitle() in `text`, up to the line's `;`, or None."""
+    body = re.search(r"function setTitle\(\) \{(.*?)\n\}", text, re.S)
+    stmt = re.search(r"document\.title\s*=\s*(.*?);[ \t]*(?:\n|\Z)", body.group(1)) if body else None
+    return stmt.group(1) if stmt else None
+
+
+def js_literals(code):
+    """The double-quoted string literals of a JS expression, escapes kept as written."""
+    return re.findall(r'"((?:[^"\\]|\\.)*)"', code or "")
+
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 # designData: "<" is written as <, as the writer does. It holds comment openers in strings, a
@@ -166,6 +199,18 @@ CHANGED_LINE = "<p>The template changed this line.</p>"
 DECOY_SLOT = "<script>\nconst SLOT = '<script type=\"application/json\" id=\"designData\">{\"decoy\": 1}<\\/script>';\n</script>"
 
 
+# Owner ruling, 2026-11-02 11:12 CST: the page is named PAGE_NAME. A live title of an old form becomes the name
+# under its prefix. Each other live title is kept byte for byte. The rewrite holds each regex special as text.
+OLD_TITLES = [
+    ("Queue", ""), ("Queue · Status", ""), ("Roadmap", ""),
+    ("Compass Queue", "Compass "), ("Compass Queue · Status", "Compass "), ("Compass Roadmap", "Compass "),
+    ("Roadmap Queue", "Roadmap "), ("Queue Lab Roadmap", "Queue Lab "),
+    (r"Don't /* // # $1 \1 Compass Queue", r"Don't /* // # $1 \1 Compass "),
+    (r"\g<0> $& \\ Compass Roadmap", r"\g<0> $& \\ Compass "),
+]
+OTHER_TITLES = ["Compass Cockpit", "Compass Queues", "Requeue", "Compass Queue · Other", "Queue Status", ""]
+
+
 class Carry(Folder):
     """--carry LIVE: a republish of a changed template keeps the live page's two data blocks, the
     designData block and the roadmap block, byte for byte (build constraint 6: replace only the
@@ -196,44 +241,73 @@ class Carry(Folder):
         self.assertEqual(out, live_page(block=block, design=DESIGN, extra=DECOY_SLOT + "\n" + CHANGED_LINE))
         self.assertEqual(self.read("live.html"), live, "the live page changed")
 
-    def test_the_live_title_text_replaces_the_templates_and_a_title_in_a_script_does_not(self):
-        # shiv ruling, Oct 30 14:33 CDT: a republish keeps the live page's own title text. The title holds a lone quote,
-        # comment openers, `$1` and `\1`. The decoys are <title> strings in a script and a template literal: only the head's title moves.
-        live_title = "Don't /* // # $1 \\1 Compass Queue"
+    def title_of(self, page):
+        span = SPLICE.title_span(page)
+        self.assertIsNotNone(span, "the page has no title")
+        return page[span[0]:span[1]]
+
+    def test_the_live_title_is_renamed_and_a_title_in_a_script_does_not_move(self):
+        # Owner ruling, 2026-11-02 11:12 CST: the old title becomes the page name under its prefix. The old title holds a
+        # lone quote, comment openers, `$1` and `\1`, and the rewrite keeps them. The decoys are <title> strings in a
+        # script and a template literal: only the head's title moves.
+        live_title = r"Don't /* // # $1 \1 Compass Queue"
         decoys = ("<script>\nconst S = '<title>Queue</title>';\n</script>\n"
                   "<script>\nconst T = `\n<title>Queue</title>\n`;\n</script>")
-        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Queue", extra=decoys)
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Template Title", extra=decoys)
         live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=live_title, extra=decoys.replace("Queue", "Live decoy"))
         out = self.carried(template, live)
-        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=live_title, extra=decoys),
-                         "the live title and blocks, the template's own script text, and nothing else")
+        self.assertNotEqual(self.title_of(out), live_title, "the carry kept the old title")
+        name = page_name(self)
+        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=r"Don't /* // # $1 \1 Compass " + name, extra=decoys),
+                         "the renamed title and blocks, the template's own script text, and nothing else")
         self.assertEqual(self.read("live.html"), live, "the live page changed")
+
+    def test_each_old_title_becomes_the_page_name_under_its_prefix(self):
+        for old, prefix in OLD_TITLES:
+            with self.subTest(old=old):
+                out = self.carried(live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN),
+                                   live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=old))
+                self.assertNotEqual(self.title_of(out), old, "the carry kept the old title")
+                self.assertEqual(self.title_of(out), prefix + page_name(self), "the old title did not become the page name")
+
+    def test_any_other_live_title_is_kept_byte_for_byte(self):
+        for old in OTHER_TITLES:
+            with self.subTest(old=old):
+                out = self.carried(live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN),
+                                   live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=old))
+                self.assertEqual(self.title_of(out), old, "the carry changed a title it must keep")
+
+    def test_a_live_page_with_no_title_keeps_the_templates_title(self):
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Template Title")
+        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN).replace("<title>x: Questions</title>", "", 1)
+        self.assertIsNone(SPLICE.title_span(live), "the live page still has a title")
+        self.assertEqual(self.title_of(self.carried(template, live)), "Template Title")
 
     def test_a_host_title_ahead_of_the_page_title_is_not_carried(self):
         # The host's skeleton holds its own <title> before the page's. The page's own title is the one that moves.
         host = '<!doctype html>\n<html><head><meta charset="utf-8"><title>Host Title</title></head><body>\n'
         template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Queue")
-        live = host + live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue") + "</body></html>\n"
+        live = host + live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board") + "</body></html>\n"
         out = self.carried(template, live)
-        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue"),
+        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board"),
                          "the page's title, not the host's, and no host text")
         self.assertEqual(self.read("live.html"), live, "the live page changed")
 
     def test_a_title_in_an_svg_is_not_the_page_title(self):
         svg = "<svg><title>Icon label</title></svg>"
         template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Queue", extra=svg)
-        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue", extra=svg.replace("Icon label", "Live icon"))
+        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board", extra=svg.replace("Icon label", "Live icon"))
         out = self.carried(template, live)
-        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue", extra=svg))
+        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board", extra=svg))
 
     def test_a_script_string_with_comment_openers_and_a_title_does_not_move_the_title(self):
         # building-scanner-respects-strings: `/*`, `//` and `#` in a string, with a head tag, a body tag and an svg title in it.
         decoy = ("<script>\nconst D = '/* // # <title>Decoy</title> <body class=\"x\"> <svg><title>S</title></svg> */ //';\n"
                  "const E = `\n# <title>Decoy</title> // /*\n`;\n</script>")
         template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Queue", extra=decoy)
-        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue", extra=decoy.replace("Decoy", "Live decoy"))
+        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board", extra=decoy.replace("Decoy", "Live decoy"))
         out = self.carried(template, live)
-        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Queue", extra=decoy))
+        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title="Compass Board", extra=decoy))
 
     def test_a_second_carry_gives_the_same_page(self):
         template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, extra=CHANGED_LINE)
@@ -282,6 +356,48 @@ class Carry(Folder):
         for why, template, live, word in cases:
             with self.subTest(why):
                 self.refused(template, live, word, why)
+
+
+class PageName(unittest.TestCase):
+    """The page's name is splice.PAGE_NAME. page.html's static title, setTitle's literal and the roadmap
+    page's title say it too (owner ruling, 2026-11-02 11:12 CST)."""
+
+    def test_the_static_title_is_the_page_name_and_the_page_name_is_cockpit(self):
+        span = SPLICE.title_span(TEMPLATE)
+        self.assertIsNotNone(span, "page.html has no document title")
+        static = TEMPLATE[span[0]:span[1]]
+        self.assertNotEqual(static, "Queue", "page.html's static title is still the old name Queue")
+        name = page_name(self)
+        self.assertEqual(static, name, "page.html's static title is not PAGE_NAME")
+        self.assertEqual(name, "Cockpit", "PAGE_NAME is not the ruled name Cockpit")
+
+    def test_set_title_writes_the_page_name_and_no_status_suffix(self):
+        stmt = set_title_statement(TEMPLATE)
+        self.assertIsNotNone(stmt, "page.html has no setTitle() document.title statement")
+        literals = js_literals(stmt)
+        self.assertNotIn("Queue", literals, "setTitle still writes the old name Queue")
+        name = page_name(self)
+        self.assertIn(name, literals, "setTitle writes no PAGE_NAME literal")
+        self.assertEqual([s for s in literals if "Status" in s], [], "setTitle still adds a Status suffix")
+
+    def test_the_roadmap_page_title_is_claude_settings_then_the_page_name(self):
+        with open(ROADMAP_PAGE, encoding="utf-8") as f:
+            text = f.read()
+        span = SPLICE.title_span(text)
+        self.assertIsNotNone(span, "the roadmap page has no document title")
+        title = text[span[0]:span[1]]
+        self.assertNotEqual(title, "claude-settings Roadmap", "the roadmap page is still titled with the old name Roadmap")
+        self.assertEqual(title, "claude-settings " + page_name(self), "the roadmap page title is not the repo and PAGE_NAME")
+
+    def test_the_setTitle_reader_skips_comment_openers_in_strings_and_a_template_literal(self):
+        # building-scanner-respects-strings: the reader finds the statement and its literals past `/*`, `//`, `#`,
+        # a lone quote in a string, and a multi-line template literal.
+        code = ('function setTitle() {\n'
+                '  const T = `\n  // not a comment /* # \'\n  `;\n'
+                '  document.title = (name ? name + " " : "") + "A /* // # Don\'t $1 Cockpit";\n'
+                '}\n')
+        self.assertEqual(set_title_statement(code), '(name ? name + " " : "") + "A /* // # Don\'t $1 Cockpit"')
+        self.assertIn("A /* // # Don't $1 Cockpit", js_literals(set_title_statement(code)))
 
 
 if __name__ == "__main__":

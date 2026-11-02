@@ -14151,7 +14151,7 @@ def wp_write_pages():
     pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
              (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
              (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)),
-             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Queue")),
+             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Cockpit")),
              (WP_SPACED, wp_writer(template, roadmap=False, title=False, design_text="{ }")))
     for path, text in pages:
         wp_put(path, text)
@@ -14292,6 +14292,28 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live data writes the stamp", wp_stamp_case))
+
+
+def page_empty_reason_names_the_page_case():
+    """The remedy PAGE_EMPTY_REASON gives names the page "<repo> <page name>", the name in skills/waiting-page/splice.py
+    (owner ruling, 2026-11-02 11:12 CST). The old "<repo> Queue" is checked first, so a red run names the old text."""
+    guard = _load_guard_module()
+    reason = guard.PAGE_EMPTY_REASON
+    if "<repo> Queue" in reason:
+        return False, "PAGE_EMPTY_REASON still tells the writer to title the page \"<repo> Queue\""
+    with open(os.path.join(REPO, "skills", "waiting-page", "splice.py"), encoding="utf-8") as handle:
+        found = re.search(r'^PAGE_NAME = "([^"]*)"', handle.read(), re.M)
+    if not found:
+        return False, "skills/waiting-page/splice.py has no PAGE_NAME line"
+    want = "<repo> " + found.group(1)
+    if want not in reason:
+        return False, "PAGE_EMPTY_REASON does not name the page %r" % want
+    return True, "PAGE_EMPTY_REASON names the page %r" % want
+
+
+FIXTURELESS_CHECKS.add(page_empty_reason_names_the_page_case)  # loads the guard and reads one file, builds no fixture
+LOG_CHECKS_EXTRA.append(("page-stale: the empty-page remedy names the page <repo> and the page name",
+                         page_empty_reason_names_the_page_case))
 
 
 # --------------------------------------------------------------------------- a design picture is checked at write

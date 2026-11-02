@@ -64,6 +64,15 @@ with open(WRAPPER, encoding="utf-8", newline="") as f:
 VERDICT = re.compile(r"\b(current|behind|unknown)\b")
 
 
+def with_title(text, title):
+    """`text` with its document title's text replaced. A function replacement keeps the title's backslashes."""
+    return re.sub(r"<title>[^<]*</title>", lambda m: "<title>%s</title>" % title, text, count=1)
+
+
+# The setTitle line of main before the page was named Cockpit (owner ruling, 2026-11-02 11:12 CST). Its escape is JS text.
+OLD_TITLE_LINE = r'  document.title = (name ? name + " " : "") + "Queue" + (state.tab === "s" ? " \u00b7 Status" : "");'
+
+
 def set_body(text, body):
     """The text with its designData body replaced. A function replacement keeps the body's backslashes."""
     return BLOCK.sub(lambda m: m.group(1) + body + m.group(3), text, count=1)
@@ -149,9 +158,9 @@ class Stale(unittest.TestCase):
         self.assertIn("current: mocked", out)
 
     def test_a_page_that_differs_only_in_its_title_is_current_in_both_modes(self):
-        # shiv ruling, Oct 30 14:33 CDT: the <title> text is the live page's own, so a title alone never makes a page behind.
-        # The title holds a lone quote and comment openers; every other byte is page.html's.
-        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Queue</title>", PAGE, count=1)
+        # The verdict ignores the <title> text, so a title alone never makes a page behind. The title holds a lone
+        # quote and comment openers; every other byte is page.html's.
+        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", PAGE, count=1)
         self.assertNotEqual(titled, PAGE)
         with self.subTest("batch"):
             root = self.repo("titled", "KKK")
@@ -171,11 +180,30 @@ class Stale(unittest.TestCase):
         main = write_text(os.path.join(self.fetched, "main-with-svg.html"), PAGE.replace('<header class="hdr">', svg + '<header class="hdr">', 1))
         self.assertIn(svg, open(main, encoding="utf-8").read())
         edited_svg = write_text(os.path.join(self.fetched, "svg-edited.html"), open(main, encoding="utf-8").read().replace("Icon label", "Edited label"))
-        edited_title = write_text(os.path.join(self.fetched, "title-edited.html"), open(main, encoding="utf-8").read().replace("<title>Queue</title>", "<title>Compass Queue</title>", 1))
+        main_text = open(main, encoding="utf-8").read()
+        retitled = with_title(main_text, "Compass Cockpit")
+        self.assertNotEqual(retitled, main_text, "the edit changed no title")
+        edited_title = write_text(os.path.join(self.fetched, "title-edited.html"), retitled)
         r = self.page_run(edited_svg, "--main", main)
         self.assertEqual(self.verdict(r)[0], "behind", r.stdout + r.stderr)
         r = self.page_run(edited_title, "--main", main)
         self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+
+    def test_an_old_main_page_titled_with_the_old_name_reads_behind_the_new_template(self):
+        # Owner ruling, 2026-11-02 11:12 CST: the page is named Cockpit. A live page from before the rename still runs
+        # the old setTitle line, so it reads behind. The title text alone never makes a page behind; this line does.
+        self.assertIsNotNone(re.search(r"^  document\.title = [^\n]*", PAGE, re.M), "page.html has no setTitle document.title line")
+        old = re.sub(r"^  document\.title = [^\n]*", lambda m: OLD_TITLE_LINE, PAGE, count=1, flags=re.M)
+        old = with_title(old, "Compass Queue")
+        root = self.repo("old-main", "OLD")
+        self.fetch("OLD", old)
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("behind: old-main", out)
+        page = write_text(os.path.join(self.fetched, "old-main-single.html"), old)
+        r = self.page_run(page, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(self.verdict(r)[0], "behind", r.stdout + r.stderr)
 
     def live_with_both_blocks(self):
         live = with_both_blocks(PAGE)
