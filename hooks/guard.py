@@ -171,6 +171,15 @@ Other tools, in `judge` order:
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
+  lane-repo-tag        deny. A `create_session` call with a lane tag (as for lane-effort-pin) and no tag
+                       that names the calling checkout's GitHub `owner/name` as the roadmap reads a repo tag
+                       (`repo_tag_names`): exact `cs-repo:` prefix, no strip, owner/name without case.
+                       The repo is `git_reads.github_repo`, shared with the roadmap build: the "github"
+                       key of the layout extras file's "roadmap" object first, else the last two
+                       segments of the origin's path (a scheme-less local path too), `.git` stripped;
+                       the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
+                       passes. The deny reason names the tag to add.
+                       Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -1987,6 +1996,14 @@ LANE_EFFORT_REASON = (
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
     % LANE_EFFORT
 )
+# A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
+# when no repo reads.
+LANE_REPO_TAG_REASON = (
+    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
+)
+# A repo tag with no origin to compare to: the full form, one owner and one name.
+FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -2129,6 +2146,28 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
+def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
+    """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo, or
+    ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
+    key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
+    `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return "", None
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return "", None
+    repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
+    # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
+    for tag in tags:
+        if repo and repo_tag_names(tag, repo):
+            return "", None
+        if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
+            return "", None
+    return ", ".join(str(t) for t in tags), repo
+
+
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
@@ -2235,6 +2274,7 @@ ROLE_DEFAULT = "general-purpose"
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
@@ -4076,6 +4116,12 @@ def judge(payload) -> None:
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
+    lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if lane_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
