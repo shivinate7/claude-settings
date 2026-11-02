@@ -1929,11 +1929,11 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
 
 
-# reports-rewrite-stamp (report_guard.py, Stop, landed turns): a reply that says decision D was
-# rewritten for a ruling blocks when D's record was last committed before that ruling, on the default
-# branch AND on HEAD. Each case builds its own git repo. Every commit takes its date from
-# GIT_COMMITTER_DATE, so the check reads real history. The cases are red-first: the check is not built
-# yet, so the red cases fail and the green cases pass on the current code.
+# rewrite-cite-predates-ruling (the rewrite-stamp check in report_guard.py, Stop, landed turns): a reply
+# that says decision D was rewritten for a ruling blocks when D's record was last committed before that
+# ruling, on the default branch AND on HEAD. Each case builds its own git repo. Every commit takes its
+# date from GIT_COMMITTER_DATE, so the check reads real history. Each case states the result the check
+# must give; a case that fails names a gap in the check, not in the fixture.
 RULING = "2026-11-01 18:44 CST"
 RULING_SENTENCE = "RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling of %s (PR #1001)" % RULING
 D_LAST_COMMIT = "2026-10-28T22:30:00-05:00"  # late in the Central evening, so the UTC day is the next one
@@ -1992,8 +1992,20 @@ class DecisionRepo:
         self._git("switch", "-q", name)
 
 
+GIT_TRACE_LINE = "trace: built-in: git "
+
+
+def git_process_count(trace_path):
+    """How many git processes wrote to a GIT_TRACE file. Git writes one `built-in: git` line per process."""
+    try:
+        with open(trace_path, encoding="utf-8", errors="replace") as f:
+            return sum(1 for line in f if GIT_TRACE_LINE in line)
+    except FileNotFoundError:
+        return 0
+
+
 class RewriteStampTests(unittest.TestCase):
-    """reports-rewrite-stamp, in report_guard.py's Stop hook. The case numbers are the brief's."""
+    """rewrite-cite-predates-ruling, in report_guard.py's Stop hook. The case numbers are the brief's."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -2074,8 +2086,9 @@ class RewriteStampTests(unittest.TestCase):
                 self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
                                   "ci-job-caps", "2026-10-28", "18:44")
 
-    def test_under_or_by_R_without_a_stamp_blocks_when_R_is_later(self):
-        """Case 3, red. No stamp, so the ruling time is R's last main commit. R is committed after D."""
+    def test_under_or_by_R_without_a_stamp_passes(self):
+        """Case 3, flipped to green. With no stamp there is no ruling time. R's later commit is no fallback:
+        a typo fix on R would make the check cry wolf. R is committed after D, as before."""
         repo = self.repo()
         repo.commit(D_LAST_COMMIT, "ci-job-caps")
         repo.commit("2026-10-30T16:00:00Z", "test-strategy-reset")
@@ -2087,7 +2100,7 @@ class RewriteStampTests(unittest.TestCase):
         }
         for name, done in variants.items():
             with self.subTest(variant=name):
-                self.assertBlocks(self.run_stop(repo, done_reply(done)), "ci-job-caps", "2026-10-28", "2026-10-30")
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
 
     def test_r_and_d_in_one_commit_passes(self):
         """Case 3, green. D's last commit is R's own commit, so D does not predate the ruling."""
@@ -2159,6 +2172,83 @@ class RewriteStampTests(unittest.TestCase):
     def test_unlanded_turn_passes(self):
         """Case 5, green. The red fixture and the same reply, on a turn with no git write."""
         self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), landed=False))
+
+    def test_bare_id_without_a_decision_word_blocks(self):
+        """Red. The id is named bare, with no word "decision", and its record file exists."""
+        run = self.run_stop(self.red_repo(), done_reply(
+            "RECORDED: ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_only_the_stale_id_of_two_blocks(self):
+        """Red. Two ids share one ruling. test-strategy-reset is committed after the ruling, so only
+        ci-job-caps is stale, and the block may name only it."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        run = self.run_stop(repo, done_reply(
+            "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+            "of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+        self.assertNotIn("test-strategy-reset", run.stdout)
+
+    def test_not_rewritten_yet_or_will_be_passes(self):
+        """Green. The id is stale, but the sentence says it is not rewritten yet, was not rewritten, or
+        will be rewritten. None of these says a rewrite has happened."""
+        repo = self.red_repo()
+        replies = {
+            "is not rewritten yet": "OTHER: Decision ci-job-caps is not rewritten yet for the owner ruling of 2026-11-01 18:44 CST.",
+            "was not rewritten": "OTHER: Decision ci-job-caps was not rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+            "will be rewritten": "OTHER: Decision ci-job-caps will be rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_stamp_tied_to_the_ruling_wins_over_a_later_merge_stamp(self):
+        """Green. The sentence holds two stamps. The one tied to "ruling" is the ruling time. The merge
+        stamp is later than the record's commit, so reading it as the ruling time would block."""
+        repo = self.repo()
+        repo.commit("2026-11-02T08:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision ci-job-caps was rewritten in PR 1001 (merged 2026-11-02 09:00 CST) "
+            "for the owner ruling of 2026-11-01 18:44 CST")))
+
+    def test_reply_with_no_recorded_id_runs_no_git(self):
+        """Cost. A rewrite word with no id that has a record runs no git process."""
+        repo = self.red_repo()
+        replies = {
+            "no id": "RECORDED: rewrote a record in place for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown id": "RECORDED: rewrote decision `no-such-decision` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertEqual(git_process_count(trace), 0)
+
+    def test_matching_reply_runs_at_most_one_git_process_per_cited_id(self):
+        """Cost. A reply that cites ids with records runs at most one git process per cited id."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        replies = (
+            ("one id", 1, "RECORDED: decision ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"),
+            ("two ids", 2, "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+                           "of 2026-11-01 18:44 CST (PR #1001)"),
+        )
+        for name, cited, done in replies:
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertLessEqual(git_process_count(trace), cited)
+
+    def test_trace_counter_sees_each_git_process(self):
+        """The counter behind the cost cases. A zero count means the guard ran no git, not that the counter is
+        blind: one plain git process must count as one."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        subprocess.run(["git", "-C", repo.path, "rev-parse", "HEAD"], check=True, capture_output=True,
+                       env=dict(os.environ, GIT_TRACE=trace))
+        self.assertEqual(git_process_count(trace), 1)
 
 
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
