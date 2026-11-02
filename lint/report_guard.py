@@ -549,10 +549,11 @@ REWRITE_RE = re.compile(r"\b(?:rewrote|rewritten|rewrites|rewrite\s+of)\b", re.I
 # A negation or a modal just before the rewrite word: "not rewritten yet", "no rewrite of", "will be rewritten",
 # "should be rewritten", "needs a rewrite of". No rewrite has happened.
 REWRITE_UNDONE_RE = re.compile(
-    r"(?:\b(?:not|never|no|will|would|shall|should|must|can|may|could|needs?|yet)\b|n't\b|\bto\s+be\b|\bgoing\s+to\b)"
+    r"(?:(?<![\w-])(?:not|never|no|will|would|shall|should|must|can|may|could|needs?|yet)(?![\w-])|n't\b"
+    r"|\bto\s+be\b|\bgoing\s+to\b)"
     r"[\w\s'`-]{0,20}$", re.I)
 # A status word anywhere in the sentence: the rewrite waits in a queue.
-REWRITE_QUEUED_RE = re.compile(r"\b(?:pending|queued)\b", re.I)
+REWRITE_QUEUED_RE = re.compile(r"(?<![\w-])(?:pending|queued)(?![\w-])", re.I)  # a hyphen keeps an id like no-x whole
 REWRITE_CAP = 5  # most distinct records one reply may make this check read
 SLUG = r"`?[a-z0-9]+(?:-[a-z0-9]+)*`?"
 SLUG_RE = re.compile(r"(?<![\w-])[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
