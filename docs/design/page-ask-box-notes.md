@@ -34,8 +34,9 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 - Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key, as for `items/`.
 - The page writes `id`, `text` (the owner's words, line breaks kept, 4000 characters or fewer) and `at` (ISO).
-  It writes them once, at Send. A text over 4000 characters is never cut: Send ask writes nothing, the words stay in the box,
-  and the hint says the length and the limit. An Undo that brings the box over 4000 does the same.
+  It writes them once, at Send. A text over 4000 characters is never cut: the box has no `maxlength`, so a paste keeps
+  every character. Send ask is off and writes nothing, the words stay in the box, and the hint says the length and the
+  limit. An Undo that brings the box over 4000 does the same.
 - The writer and the owning session write only these fields:
   - `owner`: the session that has the ask. The writer sets itself, or the session it routes the ask to.
   - `read`: ISO time when `owner` read it.
@@ -65,11 +66,14 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   - When no comment can go: today's `NOT_TOLD` words.
 - Undo: 8 seconds (`UNDO_S`), read from the clock, as `undoLeft` does. Undo deletes `asks/<id>`
   and puts the text back in the box. A session waits 10 seconds after `at` before it reads, as for an answer.
-- The Undo shows at the box, in the hint row beside Send ask (ux-answer-at-press). It does not use
+  After an Undo the hint says "Undone. Your ask is back in the box." Copy ask does not show, because the store works.
+- The Undo shows at the box, in the hint row beside Send ask (ux-answer-at-press). Send ask keeps its own grid column,
+  flush with the box's right edge, so it does not move when Undo or Copy ask shows or goes. It does not use
   the `.sent` panel above the bar. That panel grows the fixed bar, and at 390 it would cover the box.
 - Send answers and Send ask never mix. The bar's count ("1 ready") never counts an ask. The bar does not change in `#s=sent`.
 - Send ask is off while the box is empty. The hint says so: "Send ask turns on once you type."
-  Ctrl+Enter sends on a fine pointer. The hint drops those words on a touch screen.
+  Ctrl+Enter sends on a fine pointer. The hint drops those words on a touch screen. With focus anywhere in the Ask
+  section, Ctrl+Enter sends the ask and never the answers.
 - The typed text is kept in `localStorage` `waiting.askDraft`, as `waiting.draft` keeps a note (ux-keep-what-was-made).
 - An ask cannot be changed after the Undo time. A follow-up is a new ask.
 - Departs from: page.html `openSent` and `renderSent` — the Undo for an ask shows at the box, with no stamp. The window, the clock read and the notices stay as today.
@@ -125,6 +129,7 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 - Loading: "Loading your asks…". The box works before the list loads (ux-unknown-is-not-empty).
 - Write failed: "Not saved (<code>). Your ask is still in the box: copy it and paste it in chat."
   A Copy ask button shows beside Send ask, as "Copy answers" does today. Send ask stays on, so the owner can try again.
+  A press on Copy ask puts its result in the hint ("Copied. Paste it in chat.", or "Select and copy the text in the box.").
 - Store not reachable (`state.db === false`): Send ask is off, and the hint says why. Copy ask shows.
   The list says "Your asks cannot be read in this view." It never says "nothing asked".
 - Gain: each state has its own words, and no typed text is lost. Lose: four more strings to keep true.
