@@ -20,5 +20,5 @@ docs do not say. Never guess an answer the docs should give you.
 You cannot spawn agents. If the question is too large for one agent, report PARTIAL with the
 parts you covered and the parts you propose.
 
-Report once. Start with the point. Write in Simplified Technical English. Report in under 25
+Report once. Start with the point. Write plainly (rule output-write-in-ste). Report in under 25
 lines unless the brief names another cap.
