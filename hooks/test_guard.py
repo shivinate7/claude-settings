@@ -13240,11 +13240,20 @@ for how in ("The session merges PR #374 after the owner clicks Approve.",
             "The session merges PR #374: press Merge.",
             "The session merges PR #374 - press Merge on GitHub.",
             "The session merges PR #374 (press Merge).",
-            "The session merges PR #374 after Shivam approves it on GitHub."):
+            "The session merges PR #374 after Shivam approves it on GitHub.",
+            "The session merges PR #374 so you hit Merge on GitHub.",
+            "The session merges PR #374 but you approve it on GitHub.",
+            "The session merges PR #374: you approve it on GitHub."):
     pl("a session clause that hides an owner press, %r, with no link, is refused" % how, "deny",
        pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
-pl("a session clause with no press, 'The session merges PR #374.', with no link, is allowed", "allow",
-   pl_item(options=[pl_opt("Merge PR #374", "The session merges PR #374."), PL_KEEP_OPT]))
+for how in ("The session merges PR #374.",
+            "The session merges PR #374 as the owner asked.",
+            "The session merges PR #374 once the owner's approval is in.",
+            "The session merges PR #374 as he asked.",
+            "The session merges PR #374 after Shivam's OK.",
+            "The session merges PR #374 so CI reruns."):
+    pl("a session clause with no press, %r, with no link, is allowed" % how, "allow",
+       pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command

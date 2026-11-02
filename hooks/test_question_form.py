@@ -490,9 +490,18 @@ HIDDEN_OWNER_PRESS = [
     "The session merges PR #374 - press Merge on GitHub.",
     "The session merges PR #374 (press Merge).",
     "The session merges PR #374 after Shivam approves it on GitHub.",
+    "The session merges PR #374 so you hit Merge on GitHub.",
+    "The session merges PR #374 but you approve it on GitHub.",
+    "The session merges PR #374: you approve it on GitHub.",
 ]
-# A session clause with no press in it, and a press the session makes after the pick: both pass.
-SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merges PR #374."]
+# A session clause with no press in it, and a press the session makes after the pick: both pass. An owner
+# word (the owner, he, Shivam) in a clause with no press verb asks the owner for nothing, so it passes too.
+SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merges PR #374.",
+                "The session merges PR #374 as the owner asked.",
+                "The session merges PR #374 once the owner's approval is in.",
+                "The session merges PR #374 as he asked.",
+                "The session merges PR #374 after Shivam's OK.",
+                "The session merges PR #374 so CI reruns."]
 
 
 def case_session_press_needs_no_link():
