@@ -369,6 +369,18 @@ class Mirror(Base):
         self.assertEqual(r.returncode, 2, shown(r))
         self.assertEqual(snapshot(out), before, "a fetch with no completeness marker wrote into the copy")
 
+    def test_a_fetch_with_no_completeness_markers_is_unknown_and_writes_nothing(self):
+        fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
+        for name in COLLECTIONS:
+            os.remove(os.path.join(fetched, name, MARKER))
+        out = self.out()
+        write_text(os.path.join(out, "items", "old.json"), "{}\n")
+        before = snapshot(out)
+        r = self.export(fetched, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "a fetch with no completeness marker at all wrote into the copy")
+
     def test_all_empty_collections_into_an_empty_copy_are_same(self):
         fetched = self.fetch()
         out = self.out()
