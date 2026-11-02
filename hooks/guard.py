@@ -313,8 +313,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
-            project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -1578,6 +1578,32 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
     return full if outside else None
 
 
+def builder_test_path(path: str, cwd: str) -> bool:
+    """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
+    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
+    disables tests is judged on content, so only the Edit tools read it."""
+    rel = repo_rel(path, cwd)
+    if rel is None:
+        return False
+    # From a call that runs in a repository, a path in no repository is no test of it, as for the test-author
+    # in role_write_hit. From a call in no repository nothing says which paths are outside, so the shape decides.
+    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
+    # read but not from the probe, and the target would then count as outside.
+    where = drive_form_cwd(cwd)
+    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
+            and repo_rel(path, where, outside=False) is None):
+        return False
+    return is_test_rel(rel)
+
+
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
+    """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
+    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
+            or interpreter_write_hit(raw, cwd, builder_test_path))
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -1599,15 +1625,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    # From a call that runs in a repository, a path in no repository is no test of it, as for the author
-    # above. From a call in no repository nothing says which paths are outside, so the shape decides.
-    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
-    # read but not from the probe, and the target would then count as outside.
-    where = drive_form_cwd(cwd)
-    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
-            and repo_rel(target, where, outside=False) is None):
-        return ""
-    if is_test_rel(rel):
+    if builder_test_path(target, cwd):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -3087,6 +3105,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         record(tool, "noted", "config-edit", matched)
 
+    # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
+    # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
+    # role is judged, the same gate as the Edit tools.
+    if role == BUILDER_ROLE:
+        matched = builder_shell_test_hit(raw, stripped, cwd)
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
@@ -3849,7 +3874,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw)))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
