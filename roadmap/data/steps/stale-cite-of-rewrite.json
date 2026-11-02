@@ -1,0 +1,9 @@
+{
+ "title": "A report cannot cite a record that its own rewriting decision has not reached",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21024,
+ "why": "A report cited decision ci-job-caps, last touched Oct 28, as if it held a later ruling (F119). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "A report that cites a record goes red if the record's last main commit predates the decision that rewrites it. Red first: replay F119. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

@@ -1,0 +1,9 @@
+{
+ "title": "Each triage report lists ready steps and stale draft PRs with no lane",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21022,
+ "why": "Ready steps and drafts sat unstarted with nobody naming them (P2). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "Each triage report lists every ready todo step and every draft PR older than 12 hours with no live lane. Red first: a fixture report missing one such step or PR is refused. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

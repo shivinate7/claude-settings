@@ -1,0 +1,9 @@
+{
+ "title": "Record what the repository-trust error means and the owner's plan for it",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21028,
+ "why": "Claude Code's docs say nothing about the repository-trust error that blocks PC sessions (F188/F190). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "A decision records \"docs silent\" on the error and what was measured. Any question for the owner about his plan goes through the question check first (past rulings, undoable picks) before it reaches the page. Not ready until that vetting is done. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

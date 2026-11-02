@@ -1,0 +1,9 @@
+{
+ "title": "Draft PR #979 gets its step",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21029,
+ "why": "Draft PR #979 had no step (F20). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "Track PR #979 here: name what it changes, its lint status (see runner-refuses-lint-red), and close this step when it merges or is dropped. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

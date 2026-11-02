@@ -1,0 +1,9 @@
+{
+ "title": "An answer the owner gives in chat lands on the page item",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21021,
+ "why": "The owner answered \"143 b\" in chat and the page kept item 143 open (F43/F46). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "Red first: replay the chat answer \"143 b\" with no page answer written; the check goes red until the item carries it. Related: chat-answers-reach-page (done, batch 42) did not cover this case. Items 137, 138 and 143 were closed by hand Nov 1 19:32 CST. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

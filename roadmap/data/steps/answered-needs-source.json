@@ -1,0 +1,9 @@
+{
+ "title": "A report line that says \"answered\" cites where",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21027,
+ "why": "Reports said \"answered\" with no source (F188). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "A report line that says answered with no cited source goes red. Red first: replay F188. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

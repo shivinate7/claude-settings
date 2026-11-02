@@ -1,0 +1,9 @@
+{
+ "title": "The batch runner refuses a lane whose lint is red at its head",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21025,
+ "why": "A lane joined a batch with red local lint (PR #979). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "The batch runner runs the lane's local lint at its head and refuses the lane if red. Red first: replay #979. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}

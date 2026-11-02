@@ -1,0 +1,9 @@
+{
+ "title": "An inbox item cannot close without a step, record or answer",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21026,
+ "why": "Inbox items closed with nothing tracking them (F88). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
+ "note": "An inbox item that closes with no step, record or answer goes red. Red first: replay F88. Related: inbox-roadmap-task-home (roadmap steps as task homes). Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-02T02:08:00Z"
+}
