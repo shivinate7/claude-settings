@@ -11016,6 +11016,19 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
+# A builder always works in a repo, so the DENY rows below run in LINTREPO, a checkout, not in NOGIT
+# (outside every repo). LINTREPO holds lint/test_x.py on disk, so a glob in lint/ expands to a test file.
+# The round-2 rows below share it.
+LINTREPO = os.path.join(ROOT, "lintrepo")  # a checkout holding a test file and a glob target
+
+
+def _build_lintrepo():
+    make_repo(LINTREPO, {"lint/test_x.py": "x = 1\n", "lint/app.py": "x = 1\n",
+                         "hooks/guard.py": "x = 1\n"})
+
+
+lazy_fixture([LINTREPO], _build_lintrepo)
+
 # ---- a builder's SHELL write (Bash, PowerShell). The early warning above judges an Edit or a Write by
 # its path. A shell write names its target inside the command text, so the same refusal must hold on
 # the shell path. Incident (Nov 1): a builder changed lint/test_rule_audit.py through a python heredoc
@@ -11055,7 +11068,7 @@ SHELL_TEST_WRITES = (
 )
 for _what, _command in SHELL_TEST_WRITES:
     sh("builder-test: Bash %s is refused" % _what, _command, "deny", rule=BT,
-       carries=("test-author", "Report"), **B)
+       carries=("test-author", "Report"), **dict(B, cwd=LINTREPO))
 POWERSHELL_TEST_WRITES = (
     ("Set-Content writes a test file", "Set-Content -Path lint/test_x.py -Value 'x'"),
     ("a pipeline into Out-File writes a test file", "'x' | Out-File -FilePath lint/test_x.py"),
@@ -11063,7 +11076,7 @@ POWERSHELL_TEST_WRITES = (
 )
 for _what, _command in POWERSHELL_TEST_WRITES:
     sh("builder-test: PowerShell %s is refused" % _what, _command, "deny", rule=BT,
-       tool="PowerShell", carries=("test-author", "Report"), **B)
+       tool="PowerShell", carries=("test-author", "Report"), **dict(B, cwd=LINTREPO))
 BUILDER_SHELL_READS = (
     ("cat of a test file", "cat lint/test_x.py"),
     ("grep of a test file", "grep -n foo hooks/test_guard.py"),
@@ -11100,18 +11113,7 @@ sh("builder-test: Bash python heredoc write to a test file is allowed in the mai
 # does not read. A path built by os.path.join, a string concatenation or an f-string is a value the
 # guard does not resolve. A long option, perl -pi and a glob write a test file the guard does not
 # name. The FALSE ALARM rows are reads, prints, comments and non-test writes that name a test path,
-# and a write into a test folder outside every repo. LINTREPO holds lint/test_x.py on disk, so a
-# glob in lint/ expands to a test file.
-LINTREPO = os.path.join(ROOT, "lintrepo")  # a checkout holding a test file and a glob target
-
-
-def _build_lintrepo():
-    make_repo(LINTREPO, {"lint/test_x.py": "x = 1\n", "lint/app.py": "x = 1\n",
-                         "hooks/guard.py": "x = 1\n"})
-
-
-lazy_fixture([LINTREPO], _build_lintrepo)
-
+# and a write into a test folder outside every repo. The rows run in LINTREPO (above).
 BASH_BODY_WRITE = "bash <<'EOF'\nsed -i 's/a/b/' lint/test_x.py\nEOF"
 GLOB_WRITE = "sed -i 's/old/new/g' lint/*.py"
 SHELL_SHAPE_WRITES = (
