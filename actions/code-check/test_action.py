@@ -3,7 +3,8 @@ Asserts: a tracked language with no row is red (by extension and by shebang), a 
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
 a listed module renamed off the list is red, a shrink against --main (current main) is red,
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
-standard's table is whole (every layer runs or has a one-line reason).
+standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
+lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
@@ -12,6 +13,8 @@ import json, os, shutil, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 RUNNER = os.path.join(HERE, "code_check.py")
 STANDARD = os.path.join(HERE, "standard.json")
 GOOD_PY = "def add(a: int, b: int) -> int:\n    return a + b\n"
@@ -53,7 +56,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
     Returns (exit, output)."""
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
             put(d, base_files)
@@ -308,6 +311,71 @@ class CodeCheck(unittest.TestCase):
         std = json.load(open(STANDARD, encoding="utf-8"))
         for name, row in std["languages"].items():
             self.assertNotIn("run", row["format"], name)
+
+
+NARRATED = "# fixed on 2026-10-28\n"
+NARRATED_FN = "def add(a: int, b: int) -> int:\n    # fixed on 2026-10-28\n    return a + b\n"
+WHY_FN = ("def add(a: int, b: int) -> int:\n"
+          "    # the cache key must hold the user id, so two users never share rows\n    return a + b\n")
+
+
+def one_line_with(out, *needles):
+    return any(all(n in row for n in needles) for row in out.splitlines())
+
+
+class CommentCheck(unittest.TestCase):
+    def assertSkipped(self, out):
+        rows = [r for r in out.splitlines() if "comment check: skipped" in r]
+        self.assertTrue(rows, out)
+        self.assertTrue(rows[0].split("comment check: skipped", 1)[1].strip(" ,:;-()"), "no reason: " + out)
+
+    def test_added_narrating_comment_is_red_and_names_the_line(self):
+        rc, out = check({"a.py": NARRATED_FN}, base_files={".code-check.json": config(["a.py"]), "a.py": GOOD_PY})
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "a.py:2", "2026-10-28"), out)
+
+    def test_added_why_comment_is_green(self):
+        rc, out = check({"a.py": WHY_FN}, base_files={".code-check.json": config(["a.py"]), "a.py": GOOD_PY})
+        self.assertEqual(rc, 0, out)
+
+    def test_narrating_comment_already_in_base_is_green(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": NARRATED + GOOD_PY}
+        rc, out = check({"a.py": NARRATED + GOOD_PY + "\n\nSCALE = 2\n"}, base_files=base)
+        self.assertEqual(rc, 0, out)
+
+    def test_narrating_comment_under_excluded_folders_is_green(self):
+        base = {".code-check.json": config([], ["vendor/", "third_party/"]), "a.py": GOOD_PY}
+        head = {"vendor/x.py": NARRATED + GOOD_PY, "third_party/y.py": NARRATED + GOOD_PY}
+        rc, out = check(head, base_files=base)
+        self.assertEqual(rc, 0, out)
+
+    def test_narrating_comment_outside_excluded_folders_is_red_and_only_it_is_named(self):
+        base = {".code-check.json": config([], ["vendor/", "third_party/"]), "a.py": GOOD_PY}
+        head = {"vendor/x.py": NARRATED + GOOD_PY, "third_party/y.py": NARRATED + GOOD_PY, "a.py": NARRATED_FN}
+        rc, out = check(head, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "a.py:2", "2026-10-28"), out)
+        self.assertNotIn("vendor/x.py", out)
+        self.assertNotIn("third_party/y.py", out)
+
+    def test_no_base_passed_skips_the_comment_check_with_a_reason(self):
+        rc, out = check({".code-check.json": config([]), "a.py": NARRATED + GOOD_PY}, send_base=False)
+        self.assertEqual(rc, 0, out)
+        self.assertSkipped(out)
+
+    def test_base_not_in_clone_is_unknown_not_red(self):
+        rc, out = check({".code-check.json": config([]), "a.py": NARRATED + GOOD_PY}, base="1" * 40)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "comment check", "unknown"), out)
+
+    def test_zero_sha_base_skips_the_comment_check(self):
+        rc, out = check({".code-check.json": config([]), "a.py": NARRATED + GOOD_PY}, base="0" * 40)
+        self.assertEqual(rc, 0, out)
+        self.assertSkipped(out)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":

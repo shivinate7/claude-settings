@@ -13,6 +13,7 @@ The cases pin this contract:
 - Line numbers follow `ast` and `tokenize`, which break lines on \\r\\n, \\r and \\n only. A U+2028, U+2029,
   \\x0b, \\x0c, \\x1c-\\x1e or \\x85 inside a string never shifts a reported line or hides an added one.
 - Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
+- `--exclude PREFIX` skips the files under that path prefix. Repeat it for each prefix.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -27,6 +28,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 MODULE = os.path.join(HERE, "check_comment_narration.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -67,7 +70,7 @@ def at(src, needle):
 class Case(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
-        self.tree = tempfile.mkdtemp(prefix="cnl_")
+        self.tree = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.tree, True)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, whatever they become
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_comment_narration.py"))
@@ -412,6 +415,29 @@ class Scanner(Case):
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "flagged.py", at(flagged, "round 2"))
         self.assertNoHit(out, "clean.py", 2)
+
+
+class Exclude(Case):
+    def test_exclude_prefix_drops_a_narrating_line_under_it_and_not_elsewhere(self):
+        self.base({"vendor/x.py": "def f():\n    return 1\n", "pkg/mod.py": "def g():\n    return 2\n"})
+        self.change({"vendor/x.py": "def f():\n    # fixed in round 2\n    return 1\n",
+                     "pkg/mod.py": "def g():\n    # fixed in round 2\n    return 2\n"})
+        rc, out = self.lint("--base", "origin/main", "--exclude", "vendor/")
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "vendor/x.py", 2)
+        self.assertHit(out, "pkg/mod.py", 2)
+        self.assertNotIn("Traceback", out)
+
+    def test_exclude_matches_a_path_prefix_not_a_substring(self):
+        self.base({"pkg/vendor/y.py": "def f():\n    return 1\n"})
+        self.change({"pkg/vendor/y.py": "def f():\n    # fixed in round 2\n    return 1\n"})
+        rc, out = self.lint("--base", "origin/main", "--exclude", "vendor/")
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "pkg/vendor/y.py", 2)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":
