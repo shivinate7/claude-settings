@@ -24,6 +24,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -32,6 +33,25 @@ OK = "a" * 32 + ".md"  # a slug of 32 characters passes
 LONG = "a" * 33 + ".md"  # a slug of 33 characters fails
 VERY_LONG = "a" * 44 + ".md"  # a slug of 44 characters fails, for the ./ path case
 DOCS = "docs/decisions"  # a folder the default run does not read
+FEEL_DEBT = "debts/scroll-jank.md"  # a feel-fix debt with no device check
+CHECKED_DEBT = "debts/tap-lag.md"  # a feel-fix debt with a device check
+PLAIN_DEBT = "debts/stale-link.md"  # a debt that is not a feel-fix
+# A lone quote in the text is one of the traps a line scanner must pass.
+FEEL_TEXT = "# Scroll jank\n\nDon't scroll the list while it loads.\n\n**Feel.** Motion is off on touch.\n"
+CHECKED_TEXT = ("# Tap lag\n\nTaps land late on the first screen.\n\n**Feel.** Touch timing is off.\n\n"
+                "**Device check.** simulator, 2026-11-01T11:44:00-06:00\n")
+PLAIN_TEXT = "# Stale link\n\nA plain debt.\n"
+
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 def flagged(out):
@@ -43,7 +63,7 @@ def flagged(out):
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
-        self.tree = tempfile.mkdtemp(prefix="rsl_")
+        self.tree = tempfile.mkdtemp(prefix="rsl_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
@@ -82,6 +102,10 @@ class RecordSlugsTests(unittest.TestCase):
     def commit_change(self):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "change")
+
+    def delete(self, *rels):
+        for rel in rels:
+            os.remove(os.path.join(self.tree, *rel.split("/")))
 
     # Positive controls first: a red case means nothing if the clean case fails.
 
@@ -155,6 +179,47 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()  # no file arguments: the diff against origin/main
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), ["debts/" + LONG])
+
+    def test_feel_debt_deleted_with_no_device_check_fails(self):
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_record_slugs: FAIL: feel-fix debt deleted with no device check: " + FEEL_DEBT,
+                      out.splitlines())
+
+    def test_feel_debt_deleted_with_a_device_check_passes(self):
+        # Paired with an unchecked feel-fix in the same diff: the checked debt must not be named.
+        self.put(CHECKED_DEBT, CHECKED_TEXT)
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.delete(CHECKED_DEBT, FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [FEEL_DEBT], out)
+
+    def test_plain_debt_deleted_passes(self):
+        # Paired with an unchecked feel-fix in the same diff: the plain debt must not be named.
+        self.put(PLAIN_DEBT, PLAIN_TEXT)
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.delete(PLAIN_DEBT, FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [FEEL_DEBT], out)
+
+    def test_files_given_mode_skips_the_feel_check(self):
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()  # the same change fails with no file arguments
+        self.assertEqual(rc, 1, out)
+        self.assert_passes(FEEL_DEBT)  # files given: git is not read, so the feel check does not run
 
 
 class ImportTests(unittest.TestCase):
