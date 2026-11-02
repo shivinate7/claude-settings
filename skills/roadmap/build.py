@@ -492,7 +492,8 @@ def live_work(path, steps, slug=None):
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`. The session rows feed only the stale-step upkeep row:
     `sessionSteps` holds the step ids of sessions that are not archived, carrying this repo's cs-repo tag, and `staleWhy`
-    says why that row reads unknown, or None.
+    says why that row reads unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
+    unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
     """
     if not path:
