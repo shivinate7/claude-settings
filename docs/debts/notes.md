@@ -1140,3 +1140,4 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- classifier-refused-read-probe: on 2026-11-02 the auto-mode classifier refused a reviewer's read-only Bash probe of merge/merge.py. The reviewer read the code instead. The coordinator ruled no new allow.
