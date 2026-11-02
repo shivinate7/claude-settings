@@ -19374,8 +19374,10 @@ for _label, _check in (
 
 
 # The prompt grammar (decision owner-override, the orchestrator's call on the keyword grammar). A
-# punctuation mark after the word separates it from its reason or its length: `override, yes` is a
-# one-act override and `override, 15m` a timed one. A word after a length or after `off` grants nothing.
+# punctuation mark after the word, with a space or the end of the prompt after it, separates it from its
+# reason or its length: `override, yes` is a one-act override and `override, 15m` a timed one. A mark run
+# into a word (`override.py`, `override-15m`) belongs to that word and grants nothing. A word after a
+# length or after `off` grants nothing. `override, off` is covered by ov_grammar_off_mark_check.
 # Each row is one prompt, typed in a session of its own at OV_T0. The grant it leaves is "once", "timed"
 # (with minutes) or None for no file. A one-act grant logs its reason, when it has one.
 OV_GRANT_ROWS = (
@@ -19386,6 +19388,7 @@ OV_GRANT_ROWS = (
     ("override - reason", "once", None, "reason"),
     ("override, 15m", "timed", 15, None),
     ("override", "once", None, None),
+    ("override.", "once", None, None),
     ("override: reason", "once", None, "reason"),
     ("override yes", "once", None, "yes"),
     ("override 15m", "timed", 15, None),
@@ -19395,7 +19398,11 @@ OV_GRANT_ROWS = (
     ("override 15m please", None, None, None),
     ("override, 15m please", None, None, None),
     ("please override", None, None, None),
-    ("override, off", None, None, None),
+    ("override.py is broken", None, None, None),
+    ("override-able", None, None, None),
+    ("override-based approach", None, None, None),
+    ("override-15m", None, None, None),
+    ("override.15m", None, None, None),
 )
 
 
@@ -19493,12 +19500,47 @@ def ov_grammar_off_check():
     return True, "`override off` removed the one-act override"
 
 
+def ov_grammar_off_mark_check():
+    """`override, off` is `override off`: the mark is dropped, so it ends an active timed override at
+    once. With no override before it, it leaves no file. The kill is the proof the override was live."""
+    config, rule = ov_config("grant"), "machine-wide-kill"
+    bare = "ov-grant-off-none"
+    note = ov_type(config, bare, "override, off")
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, bare)):
+        return False, "`override, off` left a file with no override before it"
+    session = "ov-grant-off-timed"
+    note = ov_type(config, session, "override 15m")
+    if note:
+        return False, note
+    got, until = ov_grant_of(config, session)
+    if got != "timed" or until != OV_T0 + timedelta(seconds=OV_TIMED_SECONDS):
+        return False, "`override 15m` left %s, want a timed override of 15 minutes" % (got or "no file")
+    ok, why = ov_story([
+        ("kill under the timed override", lambda: ov_kill(config, session, 60), "allow", rule),
+    ])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override, off", 120)
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, session)):
+        return False, "`override, off` left the timed override file"
+    ok, why = ov_story([("kill after `override, off`", lambda: ov_kill(config, session, 180), "deny", rule)])
+    if not ok:
+        return False, why
+    return True, "`override, off` ended the timed override, and left no file with none"
+
+
 for _n, (_prompt, _kind, _minutes, _reason) in enumerate(OV_GRANT_ROWS):
     _check = ov_grant_check("ov-grant-%d" % _n, _prompt, _kind, _minutes, _reason)
     FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((ov_grant_label(_prompt, _kind, _minutes), _check))
 for _label, _check in (
     ("override grammar: `override off` removes the one-act override", ov_grammar_off_check),
+    ("override grammar: `override, off` ends a timed override, and leaves no file with none",
+     ov_grammar_off_mark_check),
     ("override grammar: `override, yes` lifts one kill, then the kill is refused again", ov_grammar_lift_check),
 ):
     FIXTURELESS_CHECKS.add(_check)
