@@ -34,6 +34,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 
 import ast
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -61,6 +62,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -95,6 +97,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -115,6 +118,7 @@ FAMILIES = {
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -124,6 +128,7 @@ FAMILIES = {
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
+    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -470,6 +475,18 @@ GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is 
 # else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
 # setup if gh resolves here.
 GHNONE_PATH = GHNONE
+# lane-closes-after-records: the step slug a lane's cs-step tag carries, and the head its pull request names.
+ARCHIVE_SLUG = "lane-closes-after-records"
+# A lane's own pull request has a head ref equal to its step slug, exactly (the roadmap ruling: a step is live when
+# an open pull request's branch equals the step id). Near misses that only contain the slug or a lane's id do not count.
+ARCHIVE_HEAD = ARCHIVE_SLUG
+ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open: the refusal
+ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
+ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
+ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
+ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
+ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
+ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -818,6 +835,9 @@ def make_blind_git(folder):
 
 FAKE_GH_PY = r'''import json, os, re, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
+    with open(state["count_file"], "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + "\n")
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
@@ -898,9 +918,12 @@ else:
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": "feat%d" % o["number"], "sha": o["head"]},
-                       base={"ref": o.get("base", "main")}) for o in state["others"]]
-        print(listing([dict(state["pr"], number=state["number"])] + others, None, fields, flags))
+        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
+                       base={"ref": o.get("base", "main")}, state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
+        rows = [dict(state["pr"], number=state["number"])] + others
+        if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
+            rows = [row for row in rows if row["state"] == "open"]
+        print(listing(rows, None, fields, flags))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
@@ -929,8 +952,12 @@ else:
 
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
-                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None):
+                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
+                 count_file=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
+    JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -982,7 +1009,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
         "page_cap": page_cap,
-        "others": [dict(o) for o in others],  # more open pull requests on the base, each {number, head, draft, checks}: the batch brake reads them
+        "others": [dict(o) for o in others],  # more pull requests on the base, each {number, head, draft, checks, ref, state, merged}: the batch brake and the archive guard read them; ref defaults to feat<number>, state to open
         "required": list(required),  # the names the base's protection requires
         "protection": protection,  # None: the read answers `required`; "absent": 404; "server": 500; "network": a refused connection
         "runs": runs if runs is not None else [
@@ -991,6 +1018,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
+        "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -1187,6 +1215,23 @@ def build_fixtures():
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
     make_fake_gh(GHDEV, "dev", delay=1)
+    # lane-closes-after-records. `need` pins the repo the guard reads: from the lane's cs-repo tag, as `repos/o/r/...`.
+    # A call that names another repo, or `{owner}/{repo}`, answers as a broken tool.
+    slug_head = {"number": 13, "head": "d" * 40, "ref": ARCHIVE_HEAD}
+    make_fake_gh(ARCHOPEN, "main", need=["o/r"], others=[slug_head])
+    make_fake_gh(ARCHCLOSED, "main", need=["o/r"], others=[dict(slug_head, state="closed")])
+    make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
+    # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
+    # every page sees it. The two rows before it name other lanes.
+    make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
+        {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
+        {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
+        dict(slug_head, number=15, head="3" * 40)])
+    # Open pull requests on a near-miss head, one per fake. Each holds a lane's id or slug as a substring only: an
+    # exact read of the open list allows an archive of the lane named in the case beside it.
+    make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
+    make_fake_gh(ARCHNEAR_C10X, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/c10-x1")])
+    make_fake_gh(ARCHNEAR_CI, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/fix-ci-retry-x1")])
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8089,11 +8134,26 @@ def role_tag_call(tool_id, session=ROLE_OWN):
             role_result(tool_id, "ok")]
 
 
+def role_target_call(tool_id, tags, target=ROLE_OTHER):
+    """One paired get_session call for another session, `target`, whose record carries `tags`."""
+    return [role_use(tool_id, GET_SESSION, {"session_id": target}),
+            role_result(tool_id, role_record(tags, target, "a lane session"))]
+
+
 def role_said(text):
     """A user message: words typed or pasted, never a tool's result."""
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+# lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
+ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
+ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
+ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
+ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
+# A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
+ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
 ROLE_LINES = {
@@ -8121,6 +8181,17 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # lane-closes-after-records shapes. The batch runner (ROLE_OWN) reads its own record, then the target
+    # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
+    "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
+    "archive-lane-c1": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_C1_TAGS),
+    "archive-lane-ci": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_CI_TAGS),
+    "archive-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS),
+    "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
+    "archive-no-target": role_call("r0", RUNNER_TAGS),
+    "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
+                               + role_target_call("t2", ARCH_LANE_TAGS),
 }
 
 
@@ -8298,6 +8369,82 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+
+# =========================================================================== 5g. archive of a lane
+FAMILY = "lane-closes-after-records"
+#
+# Rule lane-closes-after-records. The cases pin when archive_session of a lane is refused and when it is allowed.
+# A lane must not close while its records pull request is open, or those records are lost. The guard reads
+# the target's newest get_session record in this session's own transcript, as merge-role-proof and
+# trust-card-in-build read theirs:
+#   - the record has no cs-build:lane tag: allow, the target is not a lane;
+#   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
+#   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
+#     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
+# The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
+ARCHIVE_RULE = "lane-closes-after-records"
+ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
+ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
+ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
+
+
+def fake_gh_path(folder):
+    """The PATH a guard run gets to find the fake gh in `folder`, as the merge cases give it."""
+    return folder + os.pathsep + PY_PATH
+
+
+def archive_refuse(name, transcript, env_path, carries=()):
+    """An archive_session of the target the guard refuses. The reason names its rule, never the tool."""
+    add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
+        session_id=ROLE_OTHER)
+
+
+def archive_allow(name, transcript, env_path):
+    """An archive_session of the target the guard lets through silently."""
+    add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+
+
+# A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
+archive_refuse("a lane whose open head is exactly its slug is refused", role_path("archive-lane"),
+               fake_gh_path(ARCHOPEN))
+# A lane whose slug pull request was closed as replaced, or merged, has no open one: the archive is allowed.
+archive_allow("a lane whose slug pull request was closed as replaced is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHCLOSED))
+archive_allow("a lane whose slug pull request was merged is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHMERGED))
+# The match is exact: an open head that only contains the lane's step id is another pull request, not the lane's.
+archive_allow("a lane c1 with an open head c10 is allowed: c10 is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10))
+archive_allow("a lane c1 with an open head claude/c10-x1 is allowed: that head is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10X))
+archive_allow("a lane ci with an open head claude/fix-ci-retry-x1 is allowed: that head is not ci",
+              role_path("archive-lane-ci"), fake_gh_path(ARCHNEAR_CI))
+# A target whose record names no lane is not judged, even with an open pull request on the slug.
+archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
+              role_path("archive-triage"), fake_gh_path(ARCHOPEN))
+# No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
+# gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
+archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
+               role_path("archive-no-target"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
+archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
+               role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# A read that cannot run denies: a broken gh, and a missing gh.
+archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
+               fake_gh_path(GHBROKEN))
+archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+# Every page of the open list is read: the slug's pull request sits on page two.
+archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHPAGE))
+# The newest record of the target counts. A read untagged, then a read tagged lane, is a lane.
+archive_refuse("a target read untagged, then tagged lane, is refused: the newest record counts",
+               role_path("archive-stale-then-lane"), fake_gh_path(ARCHOPEN))
+# No transcript at all: no record can be read, so the target's tags are unknown, and the call is refused.
+archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
 
 
 # =========================================================================== 5d. cite by id
@@ -11221,6 +11368,153 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+# ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
+# several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
+# impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
+FAMILY = "lane-closes-after-records"
+
+
+def archive_override_call(config, seconds):
+    """One archive_session of a lane at OV_T0 + seconds, from the calling session the override names."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "session": ARCHIVE_OWNER,
+        "env_path": fake_gh_path(ARCHOPEN), "config": config, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV, LOCAL_TIME_NOW=ov_clock(seconds)),
+        "tool_input": {"session_id": ROLE_OTHER}, "transcript": role_path("archive-lane"),
+    })
+
+
+def archive_override_case():
+    """The owner override lifts the archive refusal: refused before a timed override, allowed under it."""
+    config = ov_config("archive-lane")
+    problem = ov_want(*archive_override_call(config, 0), "deny", ARCHIVE_RULE)
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, ARCHIVE_OWNER, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: archive_override_call(config, 60), "allow",
+                         ARCHIVE_RULE)], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def archive_matcher_case():
+    """A guard matcher in settings.json covers archive_session, so the guard sees the call at all."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["PreToolUse"]
+    matchers = [entry.get("matcher", "") for entry in entries
+                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    if any(re.fullmatch(matcher, ARCHIVE_TOOL) for matcher in matchers):
+        return True, "a guard matcher covers archive_session"
+    return False, "no guard matcher covers archive_session: %r" % (matchers,)
+
+
+FIXTURELESS_CHECKS.add(archive_matcher_case)
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an owner override lifts the archive refusal",
+                         archive_override_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher routes archive_session to the guard",
+                         archive_matcher_case))
+
+
+# The cost of lane-closes-after-records, pinned: one archive of a lane makes one gh call, a non-lane archive makes
+# none, and an archive writes no file in the folders the session owns. Each check builds its own counted fake, so no
+# other fake logs a call.
+ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
+
+
+def archive_judged(transcript, folder):
+    """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
+    tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
+    folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
+    finds the merge tool there."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
+        "transcript": transcript,
+    })
+
+
+def archive_counted_gh():
+    """A counted pull request tool. Its one open pull request is on no slug, so an archive of a lane reads the open
+    list and is allowed: a lane archive is allowed only after that read succeeds."""
+    folder = os.path.join(ROOT, "archcount")
+    make_fake_gh(folder, "main", need=["o/r"], count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def gh_calls_taken(folder):
+    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
+    path = os.path.join(folder, ARCHIVE_CALLS)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        calls = [line for line in handle.read().splitlines() if line.strip()]
+    os.remove(path)
+    return calls
+
+
+def tree_files(*roots):
+    """Every file under `roots`, as path -> sha256, so a new file, a removed file and a changed byte each show."""
+    files = {}
+    for root in roots:
+        for folder, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(folder, name)
+                with open(path, "rb") as handle:
+                    files[path] = hashlib.sha256(handle.read()).hexdigest()
+    return files
+
+
+def archive_lane_one_read_case():
+    """An archive of a lane reads the open pull requests in one gh call, and its open list names no slug: allowed."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-lane"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane with no slug pull request on its open list: %s (%r)" % (decision, reason)
+    if len(calls) != 1:
+        return False, "one gh call wanted for the open list, %d seen: %r" % (len(calls), calls)
+    return True, "one gh call, and the lane is allowed"
+
+
+def archive_non_lane_no_read_case():
+    """A target that is no lane is not judged: its archive is allowed and makes no gh call, though its record carries
+    a step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-triage-slug"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "a non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+def archive_writes_nothing_case():
+    """An archive of a lane writes no file in its working folder, its transcript folder or the config folder."""
+    folder = archive_counted_gh()
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the snapshot
+    trees = (NOGIT, ROLE_DIR, MERGECFG)
+    before = tree_files(*trees)
+    decision, _ = archive_judged(role_path("archive-lane"), folder)
+    after = tree_files(*trees)
+    gh_calls_taken(folder)
+    if decision != "allow":
+        return False, "the lane archive was %s, not allowed, so it is not the allow path under test" % decision
+    changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
+    if changed:
+        return False, "the archive wrote %d file(s): %r" % (len(changed), changed[:5])
+    return True, "no file changed in the working, transcript or config folder"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive reads the open pull requests in one gh call",
+                         archive_lane_one_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no gh call",
+                         archive_non_lane_no_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
+                         archive_writes_nothing_case))
+
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
@@ -12204,21 +12498,28 @@ wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
 
 
+def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
+    """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
+    Returns the printed stdout, empty when the guard allowed the call."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    run = subprocess.run([sys.executable, WP_GUARD],
+                         input=json.dumps({"tool_name": "Artifact", "cwd": cwd,
+                                           "tool_input": {"url": url, "file_path": file_path}}),
+                         capture_output=True, text=True, env=env, timeout=120)
+    return run.stdout.strip()
+
+
 def wp_stamp_case():
     """An allowed publish of a page with live data writes main's blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
         os.remove(stamp)
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
-    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    run = subprocess.run([sys.executable, WP_GUARD],
-                         input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
-                                           "tool_input": {"url": PQ_URL, "file_path": WP_WRITER}}),
-                         capture_output=True, text=True, env=env, timeout=120)
-    if run.stdout.strip():
-        return False, "the publish of a page with live data was refused: %r" % run.stdout[:100]
+    out = wp_publish_run(WP_WRITER)
+    if out:
+        return False, "the publish of a page with live data was refused: %r" % out[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -12231,6 +12532,345 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live data writes the stamp", wp_stamp_case))
+
+
+# --------------------------------------------------------------------------- a design picture is checked at write
+#
+# Rule page-item-design (decision page-item-design). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option with `design` runs skills/waiting-page/check_designs.mjs against the
+# published file stamped at <git common dir>/waiting-page-published. A miss denies, with the page's own
+# sentence. Unknown (no stamp, the file gone, exit 3) allows and logs one `noted` line. A write with no designs
+# never runs the checker: `_run_check_designs` is the seam, and the seam's call count is what the case reads.
+# Each case gets a checkout and a config folder of its own, so no case reads another case's stamp.
+FAMILY = "page-item-design"
+
+PD_STAMP = "waiting-page-published"  # the stamp file, in the git common dir
+PD_DOC = "fill-of-volume-card"
+PD_PAGE = os.path.join(ROOT, "pd", "design-page.html")  # main's page, with the mockups the cases name
+PD_SLOT = '<script type="application/json" id="designData">{}</script>'
+PD_MOCKS = {
+    "m1": '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>',
+    "m2": '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>',  # a strip, drawn at 2400
+}
+with open(WP_SOURCE, encoding="utf-8", newline="") as _handle:
+    _pd_template = _handle.read()
+wp_must(_pd_template.count(PD_SLOT) == 1, "main's page holds its designData slot once")
+wp_put(PD_PAGE, _pd_template.replace(
+    PD_SLOT, '<script type="application/json" id="designData">'
+    + json.dumps(PD_MOCKS).replace("<", "\\u003c") + "</script>", 1))
+
+
+def pd_node_ready():
+    """True when node can launch a Chromium through playwright, with the environment the guard's checker gets."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    probe = subprocess.run([node, "-e", "require('playwright').chromium.launch().then(b => b.close())"],
+                           capture_output=True, text=True, env=dict(os.environ), timeout=120)
+    return probe.returncode == 0
+
+
+# The deny cases render a page through the checker, so they need Chromium. GUARD_CHROMIUM=1 is set only on the
+# CI step that installs Chromium: there, a node that cannot launch it fails the run. Without the marker, a
+# machine that cannot launch Chromium skips those cases and says so (the rule of testing/skip-locally-fail-in-ci.mjs).
+def pd_chromium_missing():
+    """The marker says this run has Chromium. A node that cannot launch it is a failure, not a skip."""
+    return False, ("GUARD_CHROMIUM=1, but node cannot launch Chromium through playwright, so the checker's deny "
+                   "cases cannot run")
+
+
+PD_MARKER = os.environ.get("GUARD_CHROMIUM") == "1"
+PD_NODE = pd_node_ready()
+PD_NEEDS_NODE = PD_NODE or PD_MARKER
+if PD_MARKER and not PD_NODE:
+    LOG_CHECKS_EXTRA.append(("page-item-design: GUARD_CHROMIUM=1 and node cannot launch Chromium", pd_chromium_missing))
+elif not PD_NODE:
+    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped",
+          file=sys.stderr)
+
+
+def pd_repo(name, stamp):
+    """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    where = os.path.join(ROOT, "pd", name)
+    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+    wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
+    wp_git(where, "init", "-q")
+    wp_git(where, "add", "-A")
+    wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
+    if stamp is not None:
+        wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
+    return where
+
+
+def pd_item(designs=None, **over):
+    """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
+    item = {"id": PD_DOC, "kind": "decision", "status": "open", "title": "Which fill should the volume card show?",
+            "context": "The volume card shows the stock level.",
+            "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                        {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
+            "designs": designs if designs is not None else
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+    item.update(over)
+    return with_stake(item, departs=True)
+
+
+def pd_plain():
+    """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
+    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open",
+                       "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
+                       "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
+                                   {"key": "b", "label": "Build first", "how": "The build before any design review."}]},
+                      departs=True)
+
+
+def pd_body(repo, data, action="set"):
+    return {"tool_name": "ArtifactData", "cwd": repo,
+            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+
+
+def pd_run(name, body):
+    """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
+    folder = os.path.join(ROOT, "pd", "cfg-" + name)
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+                         env=env, timeout=120)
+    if got.returncode != 0:
+        return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
+    decision, reason = read_decision(got.stdout)
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return decision, reason, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_case(label, name, stamp, data, want, fragment="", action="set", note=False):
+    """Register one check: a checkout with `stamp`, one ArtifactData write of `data`, and the verdict wanted.
+    A deny's reason must carry `fragment` and no forbidden target. `note` wants one noted line for the rule."""
+    def check():
+        repo = pd_repo(name, stamp)
+        decision, reason, rows = pd_run(name, pd_body(repo, data, action))
+        problems = []
+        if decision != want:
+            problems.append("want %s, got %s: %s" % (want, decision, reason[:160]))
+        if want == "deny" and fragment and fragment not in reason:
+            problems.append("the reason does not carry %r: %s" % (fragment, reason[:160]))
+        leak = names_the_target(reason, "page-item-design") if want == "deny" else ""
+        if leak:
+            problems.append("the reason names the forbidden target %r" % leak)
+        if note:
+            noted = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+        return (not problems), ("; ".join(problems) or "%s, as wanted" % want)
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+# The deny cases read the checker's answer, so they run only where the checker can render.
+if PD_NEEDS_NODE:
+    pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names")
+    pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            "deny", fragment="a state its mockup does not draw")
+    pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
+            pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                              "drawn": 2400}]),
+            "deny", fragment="option A")
+    pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names", action="update")
+
+pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
+pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        "allow")
+pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
+pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
+        pd_item(), "allow", note=True)
+
+
+def pd_stamp_case():
+    """An allowed publish of this repo's waiting page writes the absolute path of the published file to
+    <git common dir>/waiting-page-published. A relative file path resolves against the checkout, and a refused
+    publish leaves the stamp as it was."""
+    materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
+    stamp = os.path.join(WP_CHECK, ".git", PD_STAMP)
+
+    def stamped():
+        return open(stamp, encoding="utf-8").read().strip() if os.path.isfile(stamp) else None
+
+    def names(got):
+        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_WRITER)
+
+    if os.path.exists(stamp):
+        os.remove(stamp)
+    if wp_publish_run(WP_WRITER):  # a page with live data: main's raw page is refused as a republish
+        return False, "the publish of a page with live data was refused"
+    if not names(stamped()):
+        return False, "after an allowed publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_WRITER)
+    os.remove(stamp)
+    if wp_publish_run(os.path.relpath(WP_WRITER, WP_CHECK)):
+        return False, "the publish by a relative file path was refused"
+    if not names(stamped()):
+        return False, "after a relative publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_WRITER)
+    behind = wp_publish_run(WP_BEHIND)
+    if "page-stale" not in behind:
+        return False, "a behind publish was not refused by page-stale: %r" % behind[:100]
+    if not names(stamped()):
+        return False, "a refused publish changed the stamp to %r" % stamped()
+    return True, "an allowed publish stamps its absolute path, and a refused one leaves the stamp"
+
+
+FIXTURELESS_CHECKS.add(pd_stamp_case)  # builds only the copy it runs, as wp_stamp_case does
+LOG_CHECKS_EXTRA.append(("page-item-design: an allowed publish of the waiting page stamps the published file",
+                         pd_stamp_case))
+
+
+def pd_rows(folder):
+    """The guard.log rows of one config folder, split on tabs."""
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_noted(rows):
+    """The page-item-design noted rows. A row has six columns, the session last."""
+    return [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+
+
+def pd_judged(payload, name, seam=None, patches=None):
+    """(seam calls, printed output, guard.log rows) for one call, judged in this process with its own config folder.
+    The seam is the real _run_check_designs unless `seam` replaces it. `patches` sets module constants, created when absent."""
+    from unittest import mock
+    module = _load_guard_module()
+    real = module._run_check_designs
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return (seam or real)(*args, **kwargs)
+    folder = os.path.join(ROOT, "pd", "judged-" + name)
+    os.makedirs(folder, exist_ok=True)
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = folder
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(module, "_run_check_designs", spy))
+            for key, value in (patches or {}).items():
+                stack.enter_context(mock.patch.object(module, key, value, create=True))
+            out = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            try:
+                module.judge(payload)
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    return len(calls), out.getvalue(), pd_rows(folder)
+
+
+def pd_seam_case():
+    """The guard calls _run_check_designs once for a write with designs, and never for a write without them."""
+    module = _load_guard_module()
+    if not hasattr(module, "_run_check_designs"):
+        return False, "the guard has no _run_check_designs seam"
+    repo = pd_repo("seam", PD_PAGE)
+    with_calls, with_out, _ = pd_judged(pd_body(repo, pd_item()), "seam-with")
+    without_calls, without_out, _ = pd_judged(pd_body(repo, pd_plain()), "seam-without")
+    problems = []
+    if with_calls != 1:
+        problems.append("a write with designs called the seam %d times, want 1" % with_calls)
+    if with_out.strip():
+        problems.append("a good write with designs was refused: %s" % with_out[:120])
+    if without_calls != 0:
+        problems.append("a write with no designs called the seam %d times, want 0" % without_calls)
+    if without_out.strip():
+        problems.append("a write with no designs was refused: %s" % without_out[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the seam runs once for a write with designs, and never for one without"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
+
+
+def pd_partial_options():
+    """Two options with gain and lose, one with a picture. A partial update's options must pass the form rule too."""
+    return with_stake({"options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                                   {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
+
+
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+
+
+def pd_partial(label, name, data, judged):
+    """One update case of rule page-item-design. A write that carries options or designs but not both is not
+    judged: the checker is not called, the write is allowed, and one noted line says partial. A write that
+    carries both is judged, so the checker is called once."""
+    def check():
+        repo = pd_repo(name, PD_PAGE)
+        calls, out, rows = pd_judged(pd_body(repo, data, "update"), name)
+        noted = pd_noted(rows)
+        problems = []
+        if judged:
+            if calls != 1:
+                problems.append("a write that carries both was judged %d times, want 1" % calls)
+            if out.strip():
+                problems.append("a good write that carries both was refused: %s" % out[:120])
+        else:
+            if calls != 0:
+                problems.append("a partial update called the checker %d times, want 0" % calls)
+            if out.strip():
+                problems.append("a partial update was refused: %s" % out[:120])
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+            elif "partial" not in "\t".join(noted[0]):
+                problems.append("the noted line does not say partial: %r" % noted[0])
+        return (not problems), ("; ".join(problems) or "as wanted")
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+pd_partial("a partial update with options and no designs is not judged: one noted line, no checker call",
+           "partial-options", {"options": pd_partial_options()}, judged=False)
+pd_partial("a partial update with designs and no options is not judged: one noted line, no checker call",
+           "partial-designs", {"designs": PD_FULL_DESIGN}, judged=False)
+pd_partial("an update that carries both options and designs is judged",
+           "update-both", {"options": pd_partial_options(), "designs": PD_FULL_DESIGN}, judged=True)
+
+
+def pd_budget_case():
+    """Pictured items in one batch share one deadline. When the budget is spent, the rest are allowed with a noted
+    line, and the checker is not called for them. The checker is a stand-in that sleeps, so the case stays fast."""
+    import time
+
+    def slow(page_file, item):
+        time.sleep(0.6)
+        return 0, ""
+    repo = pd_repo("budget", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": "budget-%d" % i, "data": pd_item(id="budget-%d" % i)}
+              for i in range(3)]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    calls, out, rows = pd_judged(payload, "budget", seam=slow, patches={"PAGE_ITEM_DESIGN_BATCH_SECONDS": 1.0})
+    noted = pd_noted(rows)
+    problems = []
+    if calls != 2:
+        problems.append("three pictured items in one batch called the checker %d times, want 2 (one deadline per batch)"
+                        % calls)
+    if out.strip():
+        problems.append("a batch with no miss was refused: %s" % out[:120])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for the item past the budget, found %d" % len(noted))
+    return (not problems), ("; ".join(problems) or "two judged, one noted, one deadline for the batch")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
@@ -13797,13 +14437,8 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
-def crash_log_case():
-    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
-    folder = os.path.join(ROOT, "crashlog")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "guard.log")
-    if os.path.exists(path):
-        os.remove(path)
+def _crash_judge_run(folder):
+    """Runs the guard with its judge raising, under CLAUDE_CONFIG_DIR = folder. Returns the run."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = folder
     code = ("import io, sys, importlib.util as u\n"
@@ -13812,8 +14447,18 @@ def crash_log_case():
             "g.judge = lambda payload: 1 / 0\n"
             "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
             "g.main()\n" % GUARD)
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                            env=env, timeout=60)
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env=env, timeout=60)
+
+
+def crash_log_case():
+    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
+    folder = os.path.join(ROOT, "crashlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    result = _crash_judge_run(folder)
     if result.returncode != 0 or result.stdout.strip():
         return False, "expected a silent exit 0, got %d %r" % (result.returncode, result.stdout[:80])
     if not os.path.exists(path):
@@ -14764,6 +15409,9 @@ FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "g
 # rule 8's reason too.
 REASON_MAY_NAME = {
     "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
+    # The refusal names the handoff the session must read: under the config folder, which is ROOT here
+    # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
+    "handoff-unread": (ROOT, slash(ROOT), ".claude"),
 }
 
 
@@ -17674,6 +18322,30 @@ RELOAD_CHECKS = (
 )
 for _label, _check in RELOAD_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def reload_crash_stamp_case():
+    """reload-stamp: when guard_core stays broken, guard.py's fallback writer logs one guard-crash line, and
+    its time (field 0) carries the colon UTC offset. The run is reload_stuck_case's run, with no fix."""
+    name = "crash-stamp"
+    folder, good = _reload_copy(name, INSTALL_ID)
+    _damage_truncated(folder, good)
+    cfg = os.path.join(ROOT, "reload-cfg", name)
+    shutil.rmtree(cfg, ignore_errors=True)
+    run, _fixed = _reload_run(folder, name)
+    path = os.path.join(cfg, "guard.log")
+    if not os.path.exists(path):
+        return False, "the broken guard wrote no guard.log line (exit %d)" % run.returncode
+    with open(path, encoding="utf-8") as handle:
+        rows = [line.split("\t") for line in handle.read().splitlines() if line.strip()]
+    crash = [fields for fields in rows if len(fields) > 3 and fields[2:4] == ["crash", "guard-crash"]]
+    if len(crash) != 1:
+        return False, "want one crash guard-crash line, found %d in %r" % (len(crash), rows)
+    return _stamp_verdict(crash[0][0])
+
+
+LOG_CHECKS_EXTRA.append(("reload-stamp: the fallback writer's crash line carries the colon UTC offset",
+                         reload_crash_stamp_case))
 # guard.py stamped and guard_core.py with no INSTALL_ID line at all is a mixed set, not a match: the
 # guard must wait and reload it like any other mismatch, and refuse it when it never clears. The
 # repo's own set, every file on the commented placeholder, is a match, and is allowed at once.
@@ -17931,6 +18603,69 @@ LOG_CHECKS_EXTRA.append(("session-log: the writer with no session argument write
                          "line", session_log_writer_case))
 LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never changes the "
                          "verdict", session_log_unwritable_case))
+
+
+# The time in field 0 of a written line: ISO 8601 with a colon UTC offset, as guard_core.record() writes it.
+STAMP_SHAPE = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d"
+
+
+def _stamp_verdict(stamp):
+    """(ok, message) for one written time: the colon shape, this machine's own offset, and the current instant."""
+    if not re.fullmatch(STAMP_SHAPE, stamp):
+        return False, "field 0 is %r, want ISO 8601 with a colon offset, like 2026-11-01T16:55:00-06:00" % stamp
+    parsed = datetime.fromisoformat(stamp)
+    local = datetime.now().astimezone().utcoffset()
+    if parsed.utcoffset() != local:
+        return False, "field 0 is %r with offset %s, want this machine's %s" % (stamp, parsed.utcoffset(), local)
+    if abs(datetime.now(timezone.utc) - parsed) > timedelta(minutes=5):
+        return False, "field 0 is %r, which is not the current time" % stamp
+    return True, "field 0 is %s, with this machine's offset and the current time" % stamp
+
+
+def session_log_stamp_offset_case():
+    """session-log: record() writes field 0 with its UTC offset, as ISO 8601 with a colon. The writer is
+    called in process as session_log_writer_case calls it, so the one line it writes is read back here.
+    """
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import guard_core  # noqa: F401  (imported for its sys.modules entry)
+    core = sys.modules["guard_core"]
+    folder = _session_log_fresh("sessionlog-stamp")
+    saved = core.config_dir
+    core.config_dir = lambda: folder
+    try:
+        core.record("Bash", "deny", "shared-tree", "git stash")
+    finally:
+        core.config_dir = saved
+    rows = _session_log_rows(folder)
+    if rows is None or len(rows) != 1:
+        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
+    return _stamp_verdict(rows[0].split("\t")[0])
+
+
+def crash_log_stamp_case():
+    """session-log: the crash line the judge's exception writes through record() carries the colon UTC
+    offset in field 0. The run is the one crash_log_case makes, through the shared step.
+    """
+    folder = os.path.join(ROOT, "crashstamp")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    _crash_judge_run(folder)
+    if not os.path.exists(path):
+        return False, "no crash line was logged"
+    with open(path, encoding="utf-8") as handle:
+        fields = handle.read().strip().split("\t")
+    if len(fields) < 4 or fields[2:4] != ["crash", "guard-crash"]:
+        return False, "unexpected crash line: %r" % fields
+    return _stamp_verdict(fields[0])
+
+
+LOG_CHECKS_EXTRA.append(("session-log: record() writes its time with a colon UTC offset",
+                         session_log_stamp_offset_case))
+LOG_CHECKS_EXTRA.append(("session-log: a guard crash line's time carries the colon UTC offset",
+                         crash_log_stamp_case))
 
 
 # A guard_core that lacks set_log_session is covered by the stale-core case below: that case drops
@@ -19304,6 +20039,341 @@ for _label, _check in (
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
     ("override: a guard copy that cannot import override never allows on an override",
      ov_no_module_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# =========================================================================== handoff-unread
+# After compaction, the guard refuses each call it judges until the session reads its handoff. The flag
+# is set at PostCompact and cleared by a Read of the handoff (hooks/reread_check.py). Its Stop mode
+# refuses only at the end of a turn, so a turn could run before the read; this refusal is the PreToolUse
+# half of that check (the precompact-handoff decision, item 9).
+FAMILY = "handoff-unread"
+HU_RULE = "handoff-unread"
+HU_SID = "3c6e1f2a-0000-4000-8000-00000000c0de"   # the main session in these cases
+HU_AGENT = "a7f3c9e10b2d4e58"                     # an agent's id on the payload
+HU_TEXT = "# Handoff\n"
+READ_CHECK = os.environ.get("READ_CHECK_UNDER_TEST") or os.path.join(HERE, "reread_check.py")
+HU_BOTH = os.path.join(ROOT, "hu-both")                  # the flag is set and the handoff is present
+HU_FLAG_ONLY = os.path.join(ROOT, "hu-flag-only")        # the flag is set and the handoff is missing
+HU_HANDOFF_ONLY = os.path.join(ROOT, "hu-handoff-only")  # the handoff is present and the flag is absent
+
+
+@contextlib.contextmanager
+def hu_config(config):
+    """CLAUDE_CONFIG_DIR is `config` for the block, as the guard and the hooks read it."""
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = config
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def hu_paths(config, session):
+    """(handoff, flag) under `config`, from precompact_handoff, the one home of both paths."""
+    with hu_config(config):
+        return ph.handoff_path(session), ph.reread_flag_path(session)
+
+
+def hu_files(config, flag, handoff):
+    """Write the flag and the handoff under `config`, or leave out whichever is False."""
+    handoff_file, flag_file = hu_paths(config, HU_SID)
+    if handoff:
+        write(handoff_file, HU_TEXT)
+    if flag:
+        write(flag_file, "1")
+
+
+def _build_hu_both():
+    hu_files(HU_BOTH, flag=True, handoff=True)
+
+
+def _build_hu_flag_only():
+    hu_files(HU_FLAG_ONLY, flag=True, handoff=False)
+
+
+def _build_hu_handoff_only():
+    hu_files(HU_HANDOFF_ONLY, flag=False, handoff=True)
+
+
+lazy_fixture([HU_BOTH], _build_hu_both)
+lazy_fixture([HU_FLAG_ONLY], _build_hu_flag_only)
+lazy_fixture([HU_HANDOFF_ONLY], _build_hu_handoff_only)
+HU_HANDOFF, HU_FLAG = hu_paths(HU_BOTH, HU_SID)
+
+# The refusal names the handoff and says to Read it, for each tool the guard judges. The handoff check
+# runs before every other rule, so each refusal below is this rule's.
+for _tool, _input in (
+        ("Bash", {"command": "echo hi"}),
+        ("Edit", {"file_path": os.path.join(NOGIT, "notes.md"), "old_string": "a", "new_string": "b"}),
+        ("Write", {"file_path": os.path.join(NOGIT, "notes.md"), "content": "x"}),
+        ("Agent", {"description": "look", "prompt": "read the repo"})):
+    add("handoff-unread: after compaction, %s is refused while the handoff is unread" % _tool,
+        "deny", HU_RULE, tool=_tool, cwd=NOGIT, session=HU_SID, config=HU_BOTH,
+        carries=((HU_HANDOFF, slash(HU_HANDOFF)), "Read"), **_input)
+add("handoff-unread: a payload that carries agent_id is allowed while the handoff is unread",
+    "allow", cwd=NOGIT, session=HU_SID, config=HU_BOTH, agent_id=HU_AGENT, silent=True, command="echo hi")
+add("handoff-unread: a call is allowed when the flag is absent, though the handoff is present",
+    "allow", cwd=NOGIT, session=HU_SID, config=HU_HANDOFF_ONLY, silent=True, command="echo hi")
+add("handoff-unread: a call is allowed when the flag is set and the handoff is missing",
+    "allow", cwd=NOGIT, session=HU_SID, config=HU_FLAG_ONLY, silent=True, command="echo hi")
+
+
+def hu_call(tool, tool_input, config, session, agent_id=None):
+    """One guard call, built as decide() builds a case: the config folder, the session and the payload."""
+    return decide({"raw": None, "tool": tool, "tool_input": tool_input, "cwd": NOGIT,
+                   "session": session, "env_path": None, "config": config, "agent_id": agent_id})
+
+
+def hu_hook(mode, payload, config):
+    """One run of hooks/reread_check.py in `mode`, with `config` as its config folder."""
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = config
+    return subprocess.run([sys.executable, READ_CHECK, mode], input=json.dumps(payload),
+                          capture_output=True, text=True, env=env, timeout=120)
+
+
+def hu_cycle_check():
+    """PostCompact sets the flag, the guard refuses a Bash call, a Read of the handoff clears the flag,
+    and the same Bash call is then allowed."""
+    cfg = os.path.join(ROOT, "hu-cycle")
+    handoff, flag = hu_paths(cfg, HU_SID)
+    write(handoff, HU_TEXT)
+    post = hu_hook("--post-compact", {"session_id": HU_SID}, cfg)
+    if post.returncode != 0 or not os.path.isfile(flag):
+        return False, "PostCompact did not set the flag (exit %d)" % post.returncode
+    bash = {"command": "echo hi"}
+    ok, why = ov_story([("after compaction, before the read",
+                         lambda: hu_call("Bash", bash, cfg, HU_SID), "deny", HU_RULE)])
+    if not ok:
+        return False, why
+    read = hu_hook("--pre-read", {"session_id": HU_SID, "tool_name": "Read",
+                                  "tool_input": {"file_path": handoff}}, cfg)
+    if read.returncode != 0 or os.path.isfile(flag):
+        return False, "a Read of the handoff left the flag set (exit %d)" % read.returncode
+    ok, why = ov_story([("after the read", lambda: hu_call("Bash", bash, cfg, HU_SID), "allow", None)])
+    if not ok:
+        return False, why
+    return True, "PostCompact sets the flag, Bash is refused, a Read of the handoff clears it, Bash is allowed"
+
+
+def hu_cost_check():
+    """With the flag absent, unread_handoff makes one existence check, on the flag. It writes nothing and
+    starts no process. Every existence check and write is counted in-process, around the one call."""
+    import builtins
+    try:
+        mod = _hu_reread()
+    except (Exception, SystemExit) as e:
+        return False, "reread_check does not load: %s" % e
+    cfg = os.path.join(ROOT, "hu-cost")
+    handoff, flag = hu_paths(cfg, HU_SID)
+    write(handoff, HU_TEXT)   # the handoff is present, so only the flag can decide the answer
+    seen = {"exists": [], "writes": [], "starts": []}
+    real_open = builtins.open
+    real_popen = subprocess.Popen
+
+    def counting(bucket, name, real):
+        def wrapper(*args, **kwargs):
+            seen[bucket].append((name, args[0] if args else None))
+            return real(*args, **kwargs)
+        return wrapper
+
+    def counted_open(file, mode="r", *args, **kwargs):
+        if any(c in str(mode) for c in "wax+"):
+            seen["writes"].append(("open", (file, mode)))
+        return real_open(file, mode, *args, **kwargs)
+
+    class CountingPopen(real_popen):
+        def __init__(self, *args, **kwargs):
+            seen["starts"].append(args[0] if args else None)
+            super().__init__(*args, **kwargs)
+
+    patches =[(os.path, n, counting("exists", "os.path." + n, getattr(os.path, n)))
+               for n in ("isfile", "exists", "lexists", "isdir")]
+    patches += [(os, n, counting("writes", "os." + n, getattr(os, n)))
+                for n in ("remove", "unlink", "rename", "replace", "makedirs", "mkdir", "rmdir", "utime")]
+    saved = [(owner, name, getattr(owner, name)) for owner, name, _ in patches]
+    try:
+        for owner, name, replacement in patches:
+            setattr(owner, name, replacement)
+        builtins.open = counted_open
+        subprocess.Popen = CountingPopen
+        with hu_config(cfg):
+            result = mod.unread_handoff({"session_id": HU_SID})
+    except Exception as e:
+        return False, "unread_handoff raised %s" % e
+    finally:
+        for owner, name, real in saved:
+            setattr(owner, name, real)
+        builtins.open = real_open
+        subprocess.Popen = real_popen
+    if result != "":
+        return False, "unread_handoff gave %r with the flag absent, want an empty string" % (result,)
+    checks = seen["exists"]
+    if len(checks) != 1:
+        return False, "%d existence checks, want exactly 1: %r" % (len(checks), [c[0] for c in checks])
+    name, target = checks[0]
+    if os.path.normcase(os.path.normpath(str(target))) != os.path.normcase(os.path.normpath(flag)):
+        return False, "the one check was %s on %r, not the flag" % (name, target)
+    if seen["writes"] or seen["starts"]:
+        return False, "%d writes and %d process starts, want none: %r" % (
+            len(seen["writes"]), len(seen["starts"]), seen["writes"] or seen["starts"])
+    return True, "one existence check (%s) on the flag, no write, no process start" % name
+
+
+def hu_copy_check():
+    """With reread_check.py missing beside guard.py, the guard fails open: a call that an intact copy refuses
+    for the unread handoff is allowed. The intact copy is the control, so the fixture is shown to bite.
+    `echo hi` is allowed by every rule, so a copy that crashes and allows everything passes it too. So the
+    dropped copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the model floor refuses."""
+    cfg = os.path.join(ROOT, "hu-copy")
+    hu_files(cfg, flag=True, handoff=True)
+    intact = _guard_copy("hu-intact", None)
+    dropped = _guard_copy("hu-no-reread", "reread_check.py")
+    control = _hu_copy_run(intact, cfg)
+    why = ov_want(*_decision(control), "deny", HU_RULE)
+    if why:
+        return False, "the intact copy, the control: %s" % why
+    run = _hu_copy_run(dropped, cfg)
+    decision, reason = _decision(run)
+    if run.returncode != 0 or decision != "allow" or reason:
+        return False, "without reread_check.py the call is %r (exit %d), want a silent allow" % (
+            decision, run.returncode)
+    spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
+    why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
+    if why:
+        return False, "without reread_check.py a Haiku spawn is not refused: %s (exit %d)" % (
+            why, spawn.returncode)
+    return True, ("reread_check.py missing: the call is allowed, exit 0, and a Haiku spawn is refused by the "
+                  "model floor; the intact copy refuses the call")
+
+
+def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
+    """One call through a copy's guard.py, with `config` as its config folder and the session on the payload.
+    The call is `echo hi` in Bash unless `tool` and `tool_input` name another call."""
+    if tool_input is None:
+        tool_input = {"command": "echo hi"}
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT,
+                          "session_id": HU_SID})
+    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+                          capture_output=True, text=True, env=env, timeout=120)
+
+
+def hu_override_check():
+    """An owner override lifts the unread-handoff refusal once, then the refusal stands again. The rule is
+    not in never_lifted, so an override reaches it."""
+    config = ov_config("handoff-unread-once")
+    hu_files(config, flag=True, handoff=True)
+    bash = {"command": "echo hi"}
+
+    def call(seconds):
+        return lambda: ov_call("Bash", bash, NOGIT, config, HU_SID, seconds)
+
+    ok, why = ov_story([("with no override", call(0), "deny", HU_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, HU_SID, "override")
+    ok, why = ov_story([("first call", call(60), "allow", None),
+                        ("second call, override spent", call(120), "deny", HU_RULE)], note)
+    if not ok:
+        return False, why
+    return True, "refused with no override, allowed once after `override`, then refused again"
+
+
+def _hu_reread():
+    """hooks/reread_check.py loaded as a module of its own, from READ_CHECK."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("reread_check_under_test", READ_CHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _hu_unread(mod, config, payload):
+    with hu_config(config):
+        return mod.unread_handoff(payload)
+
+
+def hu_contract_check():
+    """unread_handoff returns the handoff path only for a non-empty str session id, with no agent_id, the
+    flag set and the handoff present. Every other payload gives '' and never raises."""
+    for config in (HU_BOTH, HU_FLAG_ONLY, HU_HANDOFF_ONLY):
+        materialize(config)
+    try:
+        mod = _hu_reread()
+    except (Exception, SystemExit) as e:
+        return False, "reread_check does not load: %s" % e
+    rows = (
+        ("the flag set and the handoff present", HU_BOTH, {"session_id": HU_SID}, HU_HANDOFF),
+        ("an agent_id on the payload", HU_BOTH, {"session_id": HU_SID, "agent_id": HU_AGENT}, ""),
+        ("the flag absent", HU_HANDOFF_ONLY, {"session_id": HU_SID}, ""),
+        ("the handoff missing", HU_FLAG_ONLY, {"session_id": HU_SID}, ""),
+    )
+    bad = (None, [], "text", {}, {"session_id": None}, {"session_id": ""}, {"session_id": 7},
+           {"session_id": ["a"]})
+    problems = []
+    for label, config, payload, want in rows:
+        try:
+            got = _hu_unread(mod, config, payload)
+        except Exception as e:
+            problems.append("%s raised %s" % (label, e))
+            continue
+        if got != want:
+            problems.append("%s gave %r, want %r" % (label, got, want))
+    for payload in bad:
+        try:
+            got = _hu_unread(mod, HU_BOTH, payload)
+        except Exception as e:
+            problems.append("payload %r raised %s" % (payload, e))
+            continue
+        if got != "":
+            problems.append("payload %r gave %r, want an empty string" % (payload, got))
+    if problems:
+        return False, "; ".join(problems[:3])
+    return True, "the path comes back only when every condition holds; a bad payload gives '' and never raises"
+
+
+def hu_import_check():
+    """Importing reread_check never ends the process, even when its sibling precompact_handoff cannot
+    import. The copy stands alone in its folder, so the sibling import fails."""
+    folder = os.path.join(ROOT, "hu-import")
+    os.makedirs(folder, exist_ok=True)
+    shutil.copy(READ_CHECK, os.path.join(folder, "reread_check.py"))
+    code = ("import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import reread_check\n"
+            "print('imported')\n")
+    run = subprocess.run([sys.executable, "-I", "-c", code, folder], capture_output=True, text=True,
+                         timeout=120)
+    if run.returncode != 0 or "imported" not in run.stdout:
+        return False, "exit %d, stdout %r: the import ended the process before the next line" % (
+            run.returncode, run.stdout.strip()[:60])
+    return True, "reread_check imports with no sibling precompact_handoff, and the process goes on"
+
+
+for _label, _check in (
+    ("handoff-unread: PostCompact sets the flag, Bash is refused, a Read of the handoff clears it, Bash is allowed",
+     hu_cycle_check),
+    ("handoff-unread: unread_handoff makes one existence check, on the flag, with no write or process start",
+     hu_cost_check),
+    ("handoff-unread: a guard copy without reread_check.py fails open, and the intact copy refuses",
+     hu_copy_check),
+    ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
+     hu_override_check),
+    ("handoff-unread: unread_handoff returns the path only when every condition holds, and never raises",
+     hu_contract_check),
+    ("handoff-unread: importing reread_check does not end the process when precompact_handoff cannot import",
+     hu_import_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
