@@ -903,6 +903,97 @@ class ExitCodeTest(FinderCase):
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
 
 
+# ---- review round 1: helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
+
+class HelperTaintTest(FinderCase):
+    def test_js_helper_that_reads_a_clock_taints_neither_name_nor_result(self):
+        text = src(
+            "const until = async (c) => { const s = Date.now(); while (!c() && Date.now() - s < 1000) {} return c(); };",
+            "expect(await until(f)).toBe(true);",
+        )
+        self.put("tests/until.test.js", text)
+        code, out = self.report()
+        hit = {line for path, line, cat in self.rows(out) if cat == "elapsed-assert"}
+        self.assertNotIn(lineno(text, "expect(await until(f))"), hit)
+
+    def test_swift_closure_that_reads_a_clock_taints_neither_name_nor_result(self):
+        text = src(
+            "import XCTest",
+            "final class HelperTests: XCTestCase {",
+            "    func testClosure() {",
+            "        let h = { () -> Double in let t = Date(); return 1 }",
+            "        XCTAssertEqual(h(), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/HelperTests.swift", text)
+        code, out = self.report()
+        hit = {line for path, line, cat in self.rows(out) if cat == "elapsed-assert"}
+        self.assertNotIn(lineno(text, "XCTAssertEqual(h(), 1)"), hit)
+
+
+class AssertArgumentTest(FinderCase):
+    def test_python_clock_in_assert_message_or_input_is_clean(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class MsgTest(unittest.TestCase):",
+            "    def test_msg(self):",
+            '        self.assertTrue(x, f"{time.time()}")',
+            "        self.assertEqual(sweep(now=time.time()), [])",
+            "        t0 = time.monotonic()",
+            "        assert time.monotonic() - t0 < 1",
+        )
+        self.put("tests/test_msg.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_msg.py", text, ("assert time.monotonic() - t0 < 1", "elapsed-assert")))
+
+    def test_js_clock_in_assert_message_or_input_is_clean(self):
+        text = src(
+            "assert.ok(x, `at ${Date.now()}`);",
+            "expect(run(Date.now())).toEqual([]);",
+            "const s = Date.now();",
+            "expect(Date.now() - s).toBeLessThan(150);",
+        )
+        self.put("tests/msg.test.js", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/msg.test.js", text, ("expect(Date.now() - s)", "elapsed-assert")))
+
+
+class WaitForTimeoutTest(FinderCase):
+    def test_playwright_wait_for_timeout_is_a_sleep(self):
+        text = src(
+            "import { test } from '@playwright/test';",
+            "test('waits', async ({ page }) => {",
+            "  await page.waitForTimeout(500);",
+            "});",
+        )
+        self.put("tests/page.spec.ts", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/page.spec.ts", text, ("page.waitForTimeout(500)", "sleep")))
+
+
+class UnlistableFolderTest(FinderCase):
+    def test_unlistable_folder_is_unread_and_exits_2(self):
+        self.put("locked/tests/test_hidden.py", PY_SLEEP + "\n")
+        locked = os.path.join(self.root, "locked")
+        os.chmod(locked, 0)
+        try:
+            if os.access(locked, os.R_OK | os.X_OK):
+                # Root reads a mode-000 folder, so no permission can make the walk fail here.
+                self.skipTest("folder stays readable (running as root); unlisting is not testable")
+            proc = run(self.root)
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            unread = [line for line in proc.stdout.splitlines() if line.startswith("UNREAD ") and "locked" in line]
+            self.assertTrue(unread, proc.stdout + proc.stderr)
+        finally:
+            os.chmod(locked, 0o755)
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
