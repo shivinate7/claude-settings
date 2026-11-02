@@ -943,3 +943,6 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- pick-carries-generic-line: `carries` matches any send that contains a label-only or generic first line, such as "Options:" or "Which option?" (lint/report_guard.py `carries`). Decision: questions-go-to-owner.
+- pick-writes-item-full-line: `_writes_item` matches the full first line of a pick, not its first 60 characters (lint/report_guard.py `_writes_item`). Decision: questions-go-to-owner.
+- pick-repeat-counts-as-sent: a new pick word-for-word the same as one sent in the last 24 hours is treated as sent (lint/report_guard.py). Decision: questions-go-to-owner.
