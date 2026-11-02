@@ -14412,12 +14412,19 @@ LANE_REPO = os.path.join(ROOT, "lanerepo")      # a checkout whose origin is cla
 LANE_PROXY = os.path.join(ROOT, "laneproxy")    # the same repo, its origin behind the agent proxy's host
 LANE_GIT = os.path.join(ROOT, "lanegit")        # the same repo, its origin with a `.git` suffix
 LANE_LOCAL = os.path.join(ROOT, "lanelocal")    # the same repo, its origin a local path with no scheme
+LANE_SCP = os.path.join(ROOT, "lanescp")        # the same repo, its origin in scp form
+LANE_SSH = os.path.join(ROOT, "lanessh")        # the same repo, its origin an ssh URL with a port
 LANE_ORIGINS = {
     LANE_REPO: "https://github.com/shivinate7/claude-settings",
     LANE_PROXY: "http://local_proxy@127.0.0.1:1234/git/shivinate7/claude-settings",
     LANE_GIT: "https://github.com/shivinate7/claude-settings.git",
     LANE_LOCAL: "/srv/repos/shivinate7/claude-settings.git",
+    LANE_SCP: "git@github.com:shivinate7/claude-settings.git",
+    LANE_SSH: "ssh://git@github.com:22/shivinate7/claude-settings",
 }
+# The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
+# A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
+RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
 OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
 
 
@@ -14546,6 +14553,106 @@ add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
 add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
+add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
+# extras() and github_slug()), so that name wins over the origin's path. The origin here is not a GitHub URL.
+LANE_EXTRAS = os.path.join(ROOT, "laneextras")  # a non-GitHub origin, and an extras file that names org/name
+
+
+def _build_lane_extras():
+    """A real checkout whose extras file names org/name, with a non-GitHub origin. A lane case names it by `cwd`."""
+    make_repo(LANE_EXTRAS, {"README.md": "# r\n",
+                            ".claude/layout-extras.json": json.dumps({"roadmap": {"github": "org/name"}}) + "\n"})
+    added = run_vcs(LANE_EXTRAS, "remote", "add", "origin", "https://git.example.com/x/y")
+    if added.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                 % (LANE_EXTRAS, added.stderr.strip()))
+
+
+lazy_fixture([LANE_EXTRAS], _build_lane_extras)
+add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:org/name"])
+add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:x/y"])
+
+# A denial names the tag the call must carry, so the agent can add it.
+add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
+    carries="cs-repo:shivinate7/claude-settings")
+
+
+# ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
+# other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
+# argv starts with git is the rule's read of the origin.
+def lane_cost_run(body):
+    """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
+    os.makedirs(LB_DIR, exist_ok=True)
+    run = tempfile.mkdtemp(dir=LB_DIR)
+    try:
+        side_file = os.path.join(run, "probe.json")
+        cfg = os.path.join(run, "cfg")
+        os.makedirs(cfg)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = cfg
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+        spec = {"mode": "judge", "reading": LB_NORMAL}
+        done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
+                              input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
+        try:
+            with open(side_file, "r", encoding="utf-8") as handle:
+                side = json.load(handle)
+        except Exception:
+            return [], "", "", "the probe wrote nothing: " + done.stderr.strip()[-160:]
+        decision, reason = read_decision(done.stdout)
+        return side.get("children", []), decision, reason, side.get("probe_error", "")
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+
+
+def is_git_child(child):
+    return child.lstrip("[").lstrip("'\"").startswith("git")
+
+
+def lane_cost_check(label, body, want_git, want_decision):
+    def check():
+        children, decision, _reason, error = lane_cost_run(body)
+        if error:
+            return False, "the probe failed: " + error
+        git = [c for c in children if is_git_child(c)]
+        if len(git) != want_git:
+            return False, "%d git process(es), want %d: %s" % (len(git), want_git, (git or children)[:3])
+        if decision != want_decision:
+            return False, "decided %s, want %s" % (decision, want_decision)
+        return True, "%d git process(es), decided %s" % (len(git), decision)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS}}, 1, "allow")
+lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
+lane_cost_check("lane-repo-tag: a Read call starts no git process",
+                {"tool_name": "Read", "session_id": "lane-cost-read", "cwd": LANE_REPO,
+                 "tool_input": {"file_path": os.path.join(LANE_REPO, "README.md")}}, 0, "allow")
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
