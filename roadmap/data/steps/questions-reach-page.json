@@ -1,0 +1,9 @@
+{
+ "title": "Every owner question reaches the page at once",
+ "phase": "now",
+ "status": "doing",
+ "order": 479,
+ "why": "Owner, chat, Nov 1 23:31 CST, pick a: every owner question goes to the page writer in the same turn it is asked, and an owner answer in chat closes the page item. No 5-minute wait. Logged as Queue item 158.",
+ "note": "Lane session_013NEJL1ZBXHMUwyb8FNiUAJ mechanizes it and rewrites rule questions-go-to-owner's 5-minute clause. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T05:36:00Z"
+}
