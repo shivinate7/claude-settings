@@ -877,4 +877,9 @@
 - recovered-sidechain-boundary: the Recovered guard's boundary scan does not skip `isSidechain` records, so an agent's compaction, if inlined in the main transcript, would demand the line once (lint/report_guard.py recovered_problem). Decision: precompact-handoff
 - recovered-rewrite-crash: in the rewrite path, a crash in recovered_problem reaches the outer except and drops the Unstarted and model reasons too (lint/report_guard.py rewrite_problems). Decision: precompact-handoff
 - recovered-missing-report-tail: the missing-report block does not name the Recovered line, so a compacted session gets a second block on the rewrite (lint/report_guard.py BLOCK_REASON_TAIL). Decision: precompact-handoff
-- recovered-prose-match: a `Recovered:` line in a mid-turn prose reply, or a report skipped after another Stop hook's block, satisfies or delays the demand (lint/report_guard.py RECOVERED_RE). Decision: precompact-handoff
+- recovered-prose-match: a `Recovered:` line in a mid-turn prose reply, or a report skipped after another Stop hook's block, satisfies or delays the demand (lint/report_guard.py CARRY_LINES). Decision: precompact-handoff
+- carry-start-separators: `CARRY_START` does not count `Handoff gave:` after ",", "and", a dash or a pipe. The demand stays pending (lint/report_guard.py). Decision: precompact-handoff
+- carry-none-forms: `(none)`, `[none]`, "no losses" and "n/a" are judged as Recovered items that need a source (lint/report_guard.py). Decision: precompact-handoff
+- carry-bare-wrap: under a bare `Recovered:`, a wrapped line or sub-bullet becomes an extra item with no source (lint/report_guard.py). Decision: precompact-handoff
+- carry-label-lookahead: the Recovered and Handoff gave exclusion in `LABEL_RE` has no word boundary, so `**Recovered work:**` is not read as a label. It passes report shape, and a bold carry line under Done joins the last Done item (lint/report_guard.py). Decision: precompact-handoff
+- carry-pre-deploy: a session compacted before the guard lands gets one demand at its first report (lint/report_guard.py). Decision: precompact-handoff

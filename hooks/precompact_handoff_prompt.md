@@ -60,7 +60,7 @@ weak or stale premise, check it. Then rewrite its line with the new source and d
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each
-kind, and which kinds are weak: docs/decisions/premise-format.md. After a compaction, put two lines under Deviations: `Recovered: <each ruling or fact you recovered, with its source: git, page or digest; items split on ";" outside parentheses>` or `Recovered: none`, and `Handoff gave: <facts the handoff supplied that the summary did not>` or `Handoff gave: none`. Start each line with its label, at line start or after a report label. The report guard (`lint/report_guard.py`) accepts each line in the report and asks until it lands after the compaction. Triage counts the `Handoff gave:` lines at each roadmap review.
+kind, and which kinds are weak: docs/decisions/premise-format.md. After a compaction, put two lines under Deviations: `Recovered: <each ruling or fact you recovered, with its source: git, page or digest; items split on ";" outside parentheses>` or `Recovered: none`, and `Handoff gave: <facts the handoff supplied that the summary did not>` or `Handoff gave: none`. Start each line with its label, at line start or after a report label. The report guard (`lint/report_guard.py`) accepts each line in the report and refuses until it lands after the compaction. Triage counts the `Handoff gave:` lines at each roadmap review.
 
 ## 6. Update the plan, only when it changed
 
