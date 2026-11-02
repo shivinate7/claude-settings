@@ -855,9 +855,13 @@ LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its po
 
 
 # A label's opening letter tag: "B:", "B -", "B)", "(B)", "[B]", "Option B" and "Option B:". The tag is one
-# letter that no word continues ("AI-first", "B2B", "A rail", "A/B" and "E.g." are not tags).
+# letter that no word continues ("AI-first", "B2B", "A rail", "A/B" and "E.g." are not tags). Markdown bold or
+# italics may wrap the letter ("**B:**", "**B**:", "_B:_"). After "Option" only a capital counts, so prose such
+# as "Option a rail" passes; the other forms fold case.
 LABEL_TAG = re.compile(
-    r"\s*(?:(?i:option)\s+([a-z])(?!\w)|\(([a-z])\)|\[([a-z])\]|([a-z])(?:\)|\s*:|\s+[-\u2013\u2014]))", re.I)
+    r"\s*(?:(?i:option)\s+([A-Z])(?!\w)"
+    r"|\((?i:([a-z]))\)|\[(?i:([a-z]))\]"
+    r"|[*_]*(?i:([a-z]))[*_]*(?:\)|\s*:|\s+[-\u2013\u2014]))")
 
 
 def label_tag_letter(label) -> str:
