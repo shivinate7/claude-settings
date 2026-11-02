@@ -194,10 +194,8 @@ It reads the same files and units as Supersede. It reads the records from the de
 parent clone, never the child's own. It holds no copy of them. Before it compares, it drops headings, `Kind:`,
 `Plan:` and `Home:` lines, HTML comments, code spans, quoted text, numbers and time zones, on both sides.
 
-A unit is a hit in either case:
-
-- Runs of 5 or more words that it shares with records cover at least 12 of its words and at least half of them.
-- It names a record by its slug, and holds a date and time that the same record holds.
+A unit is a hit when runs of 5 or more words that it shares with records cover at least 12 of its words
+and at least half of them. A line that names a record and its ruling time cites it, and passes.
 
 An item names the file, the line and the record. It never prints record text.
 

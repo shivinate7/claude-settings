@@ -73,9 +73,8 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   folder of this script's own checkout, never the child's. Before it compares, it drops headings, `Kind:`, `Plan:`
   and `Home:` lines, HTML comments, code spans, double-quoted text, numbers and time zones, on both sides. A unit
   is refused when its runs of SHARED_RUN or more words that a record also holds cover at least SHARED_MIN of its
-  words and at least RESTATES_SHARE of them. A unit is also refused when it names a record by slug and holds a
-  `YYYY-MM-DD HH:MM` that the same record holds. An item names the file, the line and the record, and the remedy;
-  it never prints record text. An unreadable records folder or no record makes the group unknown. A claude-settings
+  words and at least RESTATES_SHARE of them. A line that names a record and its ruling time cites it, and passes.
+  An item names the file, the line and the record, and the remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A claude-settings
   checkout is n/a.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
@@ -436,7 +435,9 @@ def child_units(root):
     """((file, first line, text) of each unit in the child's rule Markdown, the number of files read). A file
     reached twice is read once."""
     units, seen = [], set()
-    for rel in [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]:
+    # A symlink is read after the files, so a file reached by both names is reported under its real one.
+    for rel in sorted((f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)),
+                      key=lambda f: os.path.islink(os.path.join(root, *f.split("/")))):
         real = os.path.realpath(os.path.join(root, *rel.split("/")))
         if real in seen:
             continue
@@ -479,7 +480,6 @@ def probe_supersede(root):
 
 # A child unit that copies the text of a claude-settings record. The record text is read live from this script's own
 # checkout, so the probe keeps no copy (decision child-cites-not-copies).
-RECORD_DATE_TIME = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
 # One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
@@ -502,8 +502,8 @@ def plain_words(unit):
 
 
 def record_index():
-    """({word run of SHARED_RUN: [slug of each record that holds it]}, {slug: its ruling times}), read from the
-    decisions folder of this script's own checkout."""
+    """{word run of SHARED_RUN: [slug of each record that holds it]}, read from the decisions folder of this script's
+    own checkout."""
     base = os.path.dirname(HERE)
     try:
         folder = os.path.join(base, *layout.path(base, "decisions").split("/"))
@@ -512,20 +512,19 @@ def record_index():
         raise CannotRun("the records folder cannot be read: %s" % type(err).__name__)
     if not names:
         raise CannotRun("the records folder holds no record")
-    runs, times = {}, {}
+    runs = {}
     for name in names:
         slug = name[:-len(".md")]
         text = read(folder, name)
         if text is None:
             raise CannotRun("cannot read record %s" % slug)
-        times[slug] = set(RECORD_DATE_TIME.findall(text))
         for _, unit in paragraphs(text, slug):
             words = plain_words(unit)
             for at in range(len(words) - SHARED_RUN + 1):
                 holders = runs.setdefault(tuple(words[at:at + SHARED_RUN]), [])
                 if slug not in holders:
                     holders.append(slug)
-    return runs, times
+    return runs
 
 
 def shared_with_records(words, runs):
@@ -543,23 +542,17 @@ def probe_restates(root):
     if is_settings(root, live_anchors()):
         print("restates: n/a - this is claude-settings")
         return 0
-    runs, times = record_index()
+    runs = record_index()
     units, files = child_units(root)
     hits = []
     for rel, number, paragraph in units:
         words = plain_words(paragraph)
         per_record, covered = shared_with_records(words, runs)
-        if covered >= SHARED_MIN and covered >= RESTATES_SHARE * len(words):
-            slug = max(sorted(per_record), key=per_record.get)
-            why = "%d of %d words copy the record %s" % (covered, len(words), slug)
-        else:
-            stamped = set(RECORD_DATE_TIME.findall(paragraph))
-            slug = next((s for s in times if stamped & times[s]
-                         and re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(s), paragraph)), None)
-            if slug is None:
-                continue
-            why = "names the record %s and copies its ruling time" % slug
-        hits.append("  copies a record: %s:%d: %s; name the record, keep only what applies to this repo" % (rel, number, why))
+        if covered < SHARED_MIN or covered < RESTATES_SHARE * len(words):
+            continue
+        slug = max(sorted(per_record), key=per_record.get)
+        hits.append("  copies a record: %s:%d: %d of %d words copy the record %s; name the record, keep only what "
+                    "applies to this repo" % (rel, number, covered, len(words), slug))
     if hits:
         return finish("restates", hits, "out - %d line(s) to read in %d file(s)" % (len(hits), files), 1)
     return finish("restates", hits, "in shape - %d file(s) read" % files, 0)
