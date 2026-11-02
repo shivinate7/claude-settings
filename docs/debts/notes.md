@@ -886,3 +886,6 @@
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
 - coordinator-explore-has-bash: Explore agents have Bash, so an agent of a coordinator can run a merge, because a call with an agent_id is exempt from coordinator-scope. Decision: session-tiers.
 - coordinator-override-offer-wording: the refusal lists `override 15m` in its override offer, while waiting-page item 112 a says one act. Decision: session-tiers.
+- coordinator-tag-tier-fails-open: with no role file, the tag tier holds only if the transcript has a get_session result for the session's own id; after /clear or with an unreadable transcript `_own_tag_tier` returns '' and the guard fails open (hooks/guard.py). Decision: session-tiers.
+- coordinator-merge-r-after-pr: `gh pr -R o/r merge N`, with -R after `pr`, is not read as a coordinator merge (hooks/guard.py, merge_call_of). Decision: session-tiers.
+- coordinator-disable-auto-anywhere: the --disable-auto exemption checks for the token anywhere in the call, so a call that also merges can pass (hooks/guard.py, coordinator merge check). Decision: session-tiers.

@@ -122,7 +122,7 @@ Other tools, in `judge` order:
                        the call (`-a`: the modified tracked files too). A git read that fails judges nothing.
                        The reason says to brief a lane session. An override lifts it.
                        COORDINATOR_SCOPE_MODE "ask" turns the deny into an ask.
-                       The same rule id refuses a coordinator's acts (waiting-page ruling 111 a, 2026-11-01):
+                       The same rule id refuses a coordinator's acts (waiting-page ruling 111 a):
                        a spawn (Agent or Task) whose subagent_type is not one of COORDINATOR_AGENT_ROLES, an
                        empty or missing type included; a Workflow with an agent() call whose agentType is outside
                        them, missing or unreadable; a merge, by the host's merge tool, `gh pr merge` or the merge
@@ -3196,7 +3196,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 
 
 # Rule coordinator-scope (records session-tiers and roles-orchestrator-never-builds; incident: a cloud
-# coordinator edited another repo's instructions file itself, 2026-10-31). A cloud coordinator briefs lane
+# coordinator edited another repo's instructions file itself). A cloud coordinator briefs lane
 # sessions and writes records. Its own write goes only to a record home, its own scratchpad, or a path in no
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
@@ -3226,7 +3226,7 @@ COORDINATOR_SCOPE_REASON = (
     "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
-# A coordinator's acts (rule coordinator-scope, waiting-page ruling 111 a, 2026-11-01 11:53 CST): in a coordinator build
+# A coordinator's acts (rule coordinator-scope, waiting-page ruling 111 a): in a coordinator build
 # only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only for a type of
 # COORDINATOR_AGENT_ROLES, compared exactly. Cost: the role file is read once per call, shared with
 # coordinator_scope_hit (_cloud_coordinator), and the transcript once per call, only when the role file is missing;
