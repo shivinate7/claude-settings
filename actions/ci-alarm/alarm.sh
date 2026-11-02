@@ -2,11 +2,14 @@
 # Alarm when the newest completed run of any (workflow, event group) on BRANCH is red. Groups and
 # the judged events are in events.json, the one home merge/merge.py reads too. A failed run R with a
 # red job (conclusion neither success, skipped, neutral nor cancelled) is cleared by a run N of the same
-# workflow and another group only when N is newer than R, is the newest of its group, succeeded, and
-# every job name of R is a job of N, exact match, with conclusion success. An R with no red job (no jobs,
-# all passed, cancelled or skipped only) is never cleared this way. The jobs of R and N are read only
-# for a failed group that has such an N (one read each); a failed read is unknown. The same rule as
-# Host.base_state. Env: BRANCH, SELF
+# workflow and another group only when all of these hold: N is newer than R, is the newest of its group
+# and succeeded; N's head sha equals R's, or GitHub's compare of R's sha...N's sha reads ahead or
+# identical (one read, only when the shas differ; a missing sha on either side clears nothing); and every
+# job name of R that has an entry neither success nor skipped is a job of N, exact match, each of its
+# entries success. A job of R that passed or was skipped needs no entry in N. An R with no red job (no
+# jobs, all passed, cancelled or skipped only) is never cleared this way. The jobs of R and N are read
+# only for a failed group that has such an N (one read each); a failed jobs or compare read is unknown.
+# The same rule as Host.base_state. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
 set -o pipefail
@@ -14,7 +17,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"
 unknown() { echo unknown; echo "::warning::ci-alarm: $1"; exit 0; }
 runs="$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$branch" --status completed \
-  --limit 100 --json workflowName,workflowDatabaseId,databaseId,conclusion,createdAt,url,event)" \
+  --limit 100 --json workflowName,workflowDatabaseId,databaseId,conclusion,createdAt,url,event,headSha)" \
   || unknown "gh run list failed"
 jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave no list of runs"
 # Only workflow files under .github/workflows count, whatever their state but "deleted" (a disabled one
@@ -49,15 +52,22 @@ failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_
   || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
-  cands="$(jq -r --argjson r "$r" '.[] | select(.workflowDatabaseId == $r.workflowDatabaseId and .group != $r.group
-    and .createdAt > $r.createdAt and .conclusion == "success") | .databaseId' <<<"$newest")" || unknown "could not read the runs"
+  cands="$(jq -c --argjson r "$r" '.[] | select(.workflowDatabaseId == $r.workflowDatabaseId and .group != $r.group
+    and .createdAt > $r.createdAt and .conclusion == "success" and .headSha != null and $r.headSha != null) | {id: .databaseId, sha: .headSha}' <<<"$newest")" \
+    || unknown "could not read the runs"
   if [ -n "$cands" ]; then
     rjobs="$(jobs_of "$(jq -r .databaseId <<<"$r")")" || unknown "gh api jobs failed"
     if jq -e 'any(.[]; .status == "completed" and (.conclusion | IN("success", "skipped", "neutral", "cancelled") | not))' >/dev/null <<<"$rjobs"; then
-      while IFS= read -r n; do
+      rsha="$(jq -r .headSha <<<"$r")"
+      while IFS= read -r cand; do
+        n="$(jq -r .id <<<"$cand")"; nsha="$(jq -r .sha <<<"$cand")"
         njobs="$(jobs_of "$n")" || unknown "gh api jobs failed"
-        if jq -e --argjson n "$njobs" '[.[].name] | unique | all(. as $x | ($n | map(select(.name == $x))) as $m
-            | ($m | length) > 0 and all($m[]; .conclusion == "success"))' >/dev/null <<<"$rjobs"; then continue 2; fi
+        # the cover set: each job name of R with an entry neither success nor skipped must be in N, each entry success
+        jq -e --argjson n "$njobs" '[.[] | select(.conclusion | IN("success", "skipped") | not) | .name] | unique | all(. as $x | ($n | map(select(.name == $x))) as $m
+            | ($m | length) > 0 and all($m[]; .conclusion == "success"))' >/dev/null <<<"$rjobs" || continue
+        [ "$rsha" = "$nsha" ] && continue 2
+        st="$(gh api "repos/$GITHUB_REPOSITORY/compare/$rsha...$nsha" --jq .status)" || unknown "gh api compare failed"
+        case "$st" in ahead|identical) continue 2 ;; esac
       done <<<"$cands"
     fi
   fi

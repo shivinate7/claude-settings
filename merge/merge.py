@@ -1025,11 +1025,14 @@ class Host:
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
         not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
-        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
-        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
-        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
-        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
-        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        with at least one red job is cleared by a run N of the same file and another group only when all of these hold: N is newer than R, is
+        the newest completed run of its own group and concluded success; N's head_sha equals R's, or GitHub's compare of R's commit...N's reads
+        ahead or identical (one read, only when the shas differ; a missing head_sha on either side clears nothing); and every job name of R
+        that has an entry neither success nor skipped (the cover set: a failed or cancelled job) is in N's jobs, compared exactly, each of its
+        entries success. A job of R that passed or was skipped needs no entry in N. So a green nightly that skipped the failed job never clears a
+        failed push. An R with no red job (no jobs, all passed, cancelled or skipped jobs only) is never cleared across groups; an unknown R stays
+        unknown. N's jobs are read only when R has a red job and such an N exists (one read each, cached); a failed jobs or compare read is
+        unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
@@ -1049,17 +1052,23 @@ class Host:
             newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
             age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
 
+            def cover(r):  # the job names of r that N must pass: each with an entry that is neither success nor skipped
+                return {j["name"] for j in jobs_of(r) if (j.get("conclusion") if j.get("status") == "completed" else None) not in ("success", "skipped")}
+
             def cleared(r):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
-                names = {j["name"] for j in jobs_of(r)}
+                """True when a newer, newest-of-its-group, successful run of another group of r's file, on r's commit or one that holds it, passed every job in cover(r). Call it only for an r with a red job."""
+                need = cover(r)
                 for n in newest.values():
-                    if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
-                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"):
+                    if (not need or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
+                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success" or not r.get("head_sha") or not n.get("head_sha")):
                         continue
                     theirs = {}
                     for j in jobs_of(n):
                         theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
-                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in names):
+                    if not all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need):
+                        continue
+                    # last, so the read is made only for an N that passed: a failed read raises Stop, which the outer handler reports as unknown
+                    if r["head_sha"] == n["head_sha"] or self.holds_head(r["head_sha"], n["head_sha"]):
                         return True
                 return False
             for r in newest.values():
