@@ -907,3 +907,4 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- pair-title-quotes-short-id: a pull title that quotes a short step id, such as "Revert r5 and c91", names every id it quotes, so a todo r5 goes red; false-alarm risk, a debt on a real incident (skills/roadmap/build.py).

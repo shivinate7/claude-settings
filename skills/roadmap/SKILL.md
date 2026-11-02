@@ -112,8 +112,9 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 
 The build exits 1 when a `todo` step is named by an open pull request. It prints
 `todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
-step when its branch is the step id, or its title holds the id as a whole word, in any case. The
-fix is to set the step to `doing`, or to close the pull. With no usable `--live` read, the line reads
+step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
+fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
+`pulls` (the `sessions` list is not needed), the line reads
 `todo step with an open PR: unknown (<why>)` and the build exits 0. The conflict-marker refusal also
 exits 1. The printed line tells the two apart.
 
@@ -153,7 +154,7 @@ After each build the builder prints the upkeep list for the triage thread. It na
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step is named by it (the same rule as the red line). Each entry is `#N (<branch or
+  live session step equals its branch exactly (the same rule as the in-progress row). Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - `Step:` trailers that name no step.
