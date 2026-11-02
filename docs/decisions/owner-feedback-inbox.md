@@ -40,13 +40,15 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   `not-a-grant` when the message holds a grant word that is no grant. `standing` (a session-only process):
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,
-  go ahead, "permission to", "permissions to"; whole words, any case) needs one of three homes: a
+  authorised, go ahead, go-ahead, "permission to", "permissions to"; whole words, any case) and an act
+  or scope word (merge, push, ready, delete, close, deploy, release, publish, any, all, always, every,
+  standing, "from now on"), fenced text left out, needs one of three homes: a
   `ruling` item whose home passes, an open `page` item with its send, or a `note` item `-> not-a-grant`.
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
   incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the
   owner-feedback audit (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`). Landed
-  2026-11-02. Cost: one regex on text in memory.
+  2026-11-02. Cost: two regexes on text in memory.
 - **The guard.** A Stop check refuses to end a turn in four base cases, and in the Pages, grant and
   closed-note cases below. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
@@ -71,22 +73,29 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   per Stop, only while an open page item exists. It writes no file and starts no process. Risk kind:
   named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at 15:41 and never sent to
   the page writer, who asked again at 16:07. Landed 2026-10-30.
-  A chat pick needs the same proof. An owner block whose whole text is page picks (`<n> <letter>`, an
-  optional parenthetical, comma-separated, as in `137 a, 138 b (done)`), in a repo with a waiting page
-  (layout `waiting_page`), needs a send for each n, with or without a `page` item. An n that an open
-  `page` item of the block names is left to that item. Prose that holds a number is no pick. Risk kind:
-  named incident. F46 (the answer "143 b" never reached the page writer) and F43 ("99 a (done)", the same
-  shape), same audit. Landed 2026-11-02. Cost: the transcript is read only for a pick block in a repo with
-  a waiting page, or for an open page item; no file, no process (a case proves it). Known gap: a pick
-  answered in a block that also holds a non-page item is not checked. A prose answer to a page item that
-  names no pick is not caught either: the guard cannot know which prose answers a page item.
+  A chat answer to a page item needs the same proof. An owner block whose whole text is such answers
+  (`<n> <letter>`, letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`; an optional parenthetical;
+  answers separated by commas or lines, as in `137 a, 138 b (done)`), in a repo with a waiting page
+  (layout `waiting_page`), needs a send for each n. Only an n that an open `page` item of the block names
+  is left to that item. No other item line stands in for the send. Prose that holds a number is no
+  answer, and `1 y, 2 n` is none. Risk kind: named incident. F46 (the answer "143 b" never reached the
+  page writer) and F43 ("99 a (done)", the same shape), same audit. Landed 2026-11-02. Cost: for each
+  such block, one `git rev-parse` and one transcript read, inside the Stop process. The transcript is
+  read only for such a block in a repo with a waiting page, or for an open page item. No file written (a
+  case proves it). Known gap: an answer
+  to a page item inside a longer message, or in prose, is not caught: the guard cannot know which prose
+  answers a page item.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
-  home holds it for good. The guard stops asking for a closed standing id in the handoff. A closed note
+  home holds it for good. An item is closed by `[closed]` as a whole token after the home, with trailing
+  text allowed, or by `[closed]` at the line end. The guard stops asking for a closed standing id in the
+  handoff. A closed note
   needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on
-  some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` is no home
-  for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88
+  some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` and
+  `process-only` are no home for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88
   (a closed item with no step, record or answer behind it) is the related incident, not a measured one.
-  Landed 2026-11-02. Cost: one git read per closed note, inside the Stop process.
+  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, `git rev-parse`, `git for-each-ref` and
+  `git cat-file`, inside the Stop process. No file written. When the folder is in no repo, the check
+  passes and a systemMessage names the closed note homes.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand.
 - **Compaction.** The compact hook lists open item ids.
