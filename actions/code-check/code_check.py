@@ -10,7 +10,7 @@ Rare false alarm: a deleted module paired by git with an unrelated, similar new 
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
 a dev machine). Formatter layers are skipped until o2 (one layout) lands; their rows say so.
-It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python lines the change adds
+It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
 which GitHub fetches whole at the pinned sha."""
 import argparse, json, os, re, subprocess, sys
