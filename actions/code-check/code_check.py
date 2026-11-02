@@ -9,7 +9,10 @@ Known limit: a move whose edits fall below git's 50% rename similarity reads as 
 Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
-a dev machine). Formatter layers are skipped until o2 (one layout) lands; their rows say so."""
+a dev machine). Formatter layers are skipped until o2 (one layout) lands; their rows say so.
+It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python lines the change adds
+since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
+which GitHub fetches whole at the pinned sha."""
 import argparse, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +23,35 @@ ZERO = "0" * 40
 def sh(cmd, cwd, text=True):
     # nowindow: runs on a Linux CI runner only; the action may be used without hooks/_nowindow.py
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=text)
+
+
+COMMENT_CHECK = os.path.join(HERE, "..", "..", "lint", "check_comment_narration.py")
+
+
+def comment_check(root, base, exclude):
+    """Failures from the comment check on lines added since base. No base is a skip, an unread diff is unknown;
+    neither fails. The check is the one in lint/, run as a child, so it has one home."""
+    if not base or base == ZERO:
+        print("comment check: skipped, no base to diff against")
+        return []
+    if not os.path.isfile(COMMENT_CHECK):
+        print("comment check: unknown, %s is not in this copy of the action" % os.path.normpath(COMMENT_CHECK))
+        return []
+    cmd = [sys.executable, COMMENT_CHECK, "--base", base] + ["--exclude=" + e for e in exclude if e.strip().strip("/")]
+    p = sh(cmd, root)
+    if p.returncode == 0:
+        print("comment check: pass")
+        return []
+    rows = [r for r in p.stdout.splitlines() if r.strip()]
+    err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
+    hits = ["comment check: %s" % r for r in rows]
+    if p.returncode == 2:  # an unread file ends the run, but hits found before it still fail
+        print("comment check: unknown, %s" % err)
+        return hits
+    if p.returncode == 1 and rows:
+        return hits
+    # exit 1 with no hit row is a crash, and any other code is no verdict: never a clean diff
+    return hits + ["comment check could not run: %s" % err]
 
 
 def load_standard():
@@ -283,6 +315,7 @@ def main(argv):
             problems = execute(plan[0], plan[1], root)
             print("code-check: %s %s: %s %s" % (lang, layer, plan[0], "FAIL" if problems else "pass"))
             failures += problems
+    failures += comment_check(root, args.base, cfg.get("exclude", []))
     for f in failures:
         print(f)
         if f and not f.startswith((" ", "\t")):
