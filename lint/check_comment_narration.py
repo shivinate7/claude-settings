@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Fails when a change adds a comment or docstring line that narrates history or review.
 
-    python3 lint/check_comment_narration.py --base origin/main
+    python3 lint/check_comment_narration.py --base origin/main [--exclude PREFIX ...]
 
 Rule: building-comments-say-why. A comment says what complex code does and why.
 Only lines the diff against the merge base adds can fail, so old lines never do.
-Only .py files are read. Comments come from `tokenize`, docstrings from `ast`,
+--exclude PREFIX (repeatable) drops each path that starts with PREFIX, a folder prefix such as `vendor/`.
+Only Python files are read: .py, .pyi, and an extensionless file whose first line is a python shebang. Comments come from `tokenize`, docstrings from `ast`,
 so the same words in any other string never fail.
 
 Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
@@ -31,6 +32,21 @@ PATTERNS = {
 }
 REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
+PY_SHEBANG = re.compile(rb"^#!\s*(?:\S*/)?(?:env\s+(?:-\S+\s+)*)?python[\d.]*(?:\s|$)")
+
+
+def is_python(path):
+    """True for .py and .pyi, and for an extensionless file whose first line is a python shebang."""
+    ext = os.path.splitext(os.path.basename(path))[1]
+    if ext in (".py", ".pyi"):
+        return True
+    if ext:
+        return False
+    try:
+        with open(path, "rb") as f:
+            return bool(PY_SHEBANG.match(f.readline(200)))
+    except OSError:
+        return False
 
 
 class Unread(Exception):
@@ -45,14 +61,16 @@ def git(*args):
 
 
 def added_lines(base):
-    """Map each changed .py path to the set of line numbers the diff adds."""
+    """Map each changed Python path to the set of line numbers the diff adds."""
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
-    diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork, "--", "*.py")
+    diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
     added, path = {}, None
     for row in diff.split("\n"):
         if row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
+            if path and not is_python(path):
+                path = None
         elif path and (m := HUNK.match(row)):
             start, count = int(m.group(1)), int(m.group(2) or 1)
             added.setdefault(path, set()).update(range(start, start + count))
@@ -84,10 +102,14 @@ def narrated_lines(path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="ref the change is measured against, such as origin/main")
+    ap.add_argument("--exclude", action="append", default=[], metavar="PREFIX",
+                    help="skip each path that starts with PREFIX (repeatable)")
     args = ap.parse_args(argv)
     hits = 0
     try:
         for path, lines in sorted(added_lines(args.base).items()):
+            if path.startswith(tuple(args.exclude)):
+                continue
             for n, text in sorted(set(narrated_lines(path))):
                 if n in lines:
                     for name, pat in PATTERNS.items():
