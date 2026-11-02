@@ -4,7 +4,7 @@
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker or no test ran, else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
-# N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`), and the lines that start `SKIP ` or `SKIPPED`. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
+# N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP ` or `SKIPPED`. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -18,8 +18,13 @@ HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
 ST_FAILED = re.compile(r"Test run with \d+ tests?\b.{0,100}?\bfailed after")  # `swift test` can exit 0 on it; its XCTest line says 0
 SGR = rb"\x1b\[[0-9;]*m"
-# XCTest first (its match swallows its own "M tests skipped"), then unittest, then pytest/jest/vitest/playwright/case_runner summaries
-SKIPPED = re.compile(rb"Executed \d+ tests?, with (\d+) tests? skipped|\bskipped=(\d+)|\b(\d+) skipped\b")
+# XCTest first (its match swallows its own "M tests skipped"), then unittest, then pytest/jest/vitest/playwright/case_runner, then node (TAP `#`, spec `ℹ`) summaries.
+# Gaps are runs of spaces because a blanked colour code becomes spaces. Digits and gaps are bounded: each match stays shorter than OVERLAP, and int() never meets a long run.
+# A run of 10 or more digits before " skipped" matches only at its last 10 digits.
+SKIPPED = re.compile(rb"(?m)Executed \d{1,10} tests?, with (\d{1,10}) tests? skipped|\bskipped=(\d{1,10})|(\b\d{1,9}|\d{10}) {1,64}skipped\b"
+                     rb"|^ {0,64}(?:#|\xe2\x84\xb9) {1,64}skipped {1,64}(\d{1,10})")
+HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
+def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED)", re.M)  # a runner may print one such line per skip, with or without a summary
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
@@ -95,8 +100,8 @@ def main(argv):
                 # Colour codes become spaces of the same length: no word edge sits between a code and its number, and offsets stay true.
                 for m in SKIPPED.finditer(re.sub(SGR, lambda g: b" " * len(g.group()), raw)):
                     if pos == start or m.start():  # a later chunk overwrites a count cut at its edge
-                        if m.group(1): xct[pos + m.start()] = int(m.group(1))
-                        else: summaries[pos + m.start()] = int(m.group(2) or m.group(3))
+                        if m.group(1): xct[pos + m.start()] = count(m.group(1))
+                        else: summaries[pos + m.start()] = count(m.group(2) or m.group(3) or m.group(4))
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
