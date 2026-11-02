@@ -14629,6 +14629,17 @@ add("floor: start_session naming the full haiku id is denied", "deny", "agent-mo
     model="claude-haiku-5-5")
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
+# create_session starts a session on a named model, so the floor judges it as start_session does
+# (decision agent-model-cap, the floor). Failure classes: a false allow (a haiku session slips
+# through because only start_session was judged), a false deny (sonnet, opus or no model refused).
+CREATE_SESSION_CALL = "mcp__claude-code-remote__create_session"
+for _model in ("haiku", "claude-haiku-5-5", "Claude-HAIKU-5-5", ["haiku"]):
+    add("floor: create_session naming %r is denied" % (_model,), "deny", "agent-model-floor",
+        tool=CREATE_SESSION_CALL, prompt="x", model=_model)
+for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
+    add("floor: create_session naming %s is allowed" % (_model,), "allow",
+        tool=CREATE_SESSION_CALL, prompt="x", model=_model)
+add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
