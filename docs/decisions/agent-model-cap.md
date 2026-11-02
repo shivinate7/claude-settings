@@ -182,9 +182,11 @@ write that changes the fallback stays: a write is a standing change, not a dispa
 Agent and Task calls, and each Workflow `agent()` call whose `agentType` and model are string literals (the same static
 scan as the Haiku floor and the step-up). Item 127 pick a and the coordinator ruling of 2026-11-01 22:54 CST rule that
 a variable brief, or a prompt key beside a spread, grants nothing. It is judged as an empty brief. The override or a literal
-brief lifts the refusal. A call whose model or `agentType` the scan cannot read is skipped. The floor reads the model only, and
-the step-up skips an unread brief. A call that names no model, or sets one through a variable, is unseen by all four
-(`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus.
+brief lifts the refusal. A call whose model or `agentType` the scan cannot read is skipped. The floor reads the model, and the role only to exempt
+a Haiku role. The step-up skips an unread brief. A Workflow `agent()` call that sets its model through a variable is unseen by all four
+checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges it: a builder
+brief with `Round 3 of 3` is refused. The role row refuses it on an Agent or Task call only, when the role's agent file
+pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus.
 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
 Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
