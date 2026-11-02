@@ -4531,15 +4531,6 @@ class AgentEndRulingTests(_AgentEndFixture):
                     return line[len("locked"):].strip()
         return None
 
-    @staticmethod
-    def dead_pid():
-        gone = subprocess.Popen([sys.executable, "-c", "pass"])
-        gone.wait()
-        pid = gone.pid
-        del gone  # Windows reads an exited pid as live while this process still holds its handle
-        gc.collect()
-        return pid
-
     def sleeper(self, cwd):
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -4635,14 +4626,17 @@ class AgentEndRulingTests(_AgentEndFixture):
         idle first, decide_worktree reads a stale lock early, and remove_worktree unlocks by
         name later. The injection runs inside processes_in: after the lock read, before the
         unlock. The lock names a separate child, never a host pid. The own tree is always kept,
-        so only another tree reaches the unlock. The control twin has the same dead-pid lock
-        with no injection, and must be removed, so the case reaches the unlock path."""
+        so only another tree reaches the unlock. The control twin has the same stale lock with no
+        injection, and must be removed, so the case reaches the unlock path. Both stale locks name
+        a sleeper that holds its pid for the whole case, with a start time that cannot match it.
+        A pid-only lock would not do: where a freed pid is reused by a live process, the verdict
+        cannot tell the reused pid from its holder and keeps the tree."""
         ending = self.add("relend")
         control, subject = self.control_tree("reltwin"), self.control_tree("relock")
-        dead = self.dead_pid()
-        self.lock(control, "claude agent agent-reltwin (pid %d)" % dead)
-        self.lock(subject, "claude agent agent-relock (pid %d)" % dead)
         holder = self.sleeper(self.root)
+        stale = "claude agent agent-%s (pid %d start Sat Jan 15 00:00:00 2000)"
+        self.lock(control, stale % ("reltwin", holder.pid))
+        self.lock(subject, stale % ("relock", holder.pid))
         live = "claude agent agent-relock (pid %d)" % holder.pid
         real_processes_in = sweep.processes_in
         injected = []
@@ -4661,7 +4655,7 @@ class AgentEndRulingTests(_AgentEndFixture):
         self.age_control(subject)
         with mock.patch.object(sweep, "processes_in", new=take_live_lock):
             self.run_in_process("relend", ending)
-        with self.subTest(control="dead-pid lock, no injection, is removed"):
+        with self.subTest(control="stale-start lock on a held pid, no injection, is removed"):
             self.assertRemoved(control)
         with self.subTest(arm="live lock taken between the lock read and the unlock"):
             self.assertTrue(injected, "the fault never landed: processes_in was not read for the subject")
