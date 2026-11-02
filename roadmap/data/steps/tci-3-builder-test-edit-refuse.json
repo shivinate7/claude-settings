@@ -1,9 +1,9 @@
 {
  "title": "The builder's test-edit check refuses again, not only logs",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.3375003,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 3 of 12, ranked by harm avoided.",
- "note": "Repo: claude-settings. Owner ruling Oct 2 (decision builders-cannot-edit-tests) made it log only because a wrong base gave false alarms; fix the base defect, then restore the refusal with its undo route and once-only stop. Debt refusal-route-around-guard. Ready. Port: yes.",
- "updatedAt": "2026-11-02T00:35:00Z"
+ "note": "Repo: claude-settings. Owner ruling Oct 2 (decision builders-cannot-edit-tests) made it log only because a wrong base gave false alarms; fix the base defect, then restore the refusal with its undo route and once-only stop. Debt refusal-route-around-guard. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane session_013NEJL4LWMqYCsYAAqkNbne.",
+ "updatedAt": "2026-11-02T00:37:00Z"
 }

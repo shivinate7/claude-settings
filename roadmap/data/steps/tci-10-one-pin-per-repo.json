@@ -1,9 +1,9 @@
 {
  "title": "Each repo's shared action pins move to one current main commit",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.337501,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 10 of 12, ranked by harm avoided.",
- "note": "Each repo. Done when each repo has one pin. home waits on the owner's go. Ready for the rest. Port: yes.",
- "updatedAt": "2026-11-02T00:35:00Z"
+ "note": "Each repo. Done when each repo has one pin. home waits on the owner's go. Ready for the rest. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held.",
+ "updatedAt": "2026-11-02T00:37:00Z"
 }
