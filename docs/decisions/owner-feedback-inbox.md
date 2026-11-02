@@ -7,6 +7,11 @@ must jot each of its messages down as kinded items before a turn can end. No wor
 capture (owner, 2026-10-26 20:57 CDT). Reason: a session acted on the first item of a burst
 and lost the rest, and the old `fb` and `fb done` words were easy to forget.
 
+Each repo has one feedback inbox that every session writes to (owner, 2026-11-01 17:44 CST).
+Feedback given in any session reaches the repo it is about, not only the session's own inbox.
+The repo's inbox is its triage session (project-ops operating model, Filing). There is no new
+store: cloud sessions share no `~/.claude`, so a file under it would not reach them.
+
 - **Capture.** The UserPromptSubmit hook appends each owner message verbatim, with its Central time,
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a
   waiting-page card is captured the same way. A PostToolUse
@@ -40,6 +45,10 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   task. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
   `not-a-grant` when the message holds a grant word that is no grant. `standing` (a session-only process):
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
+  `repo` (feedback about another repo): home `repo:<owner>/<name>`. The session sends the owner's
+  message, with its items, to that repo's triage session (tags `cs-build:triage` and
+  `cs-repo:<owner>/<name>`), or to its coordinator when no triage lives. Feedback about the
+  session's own repo keeps the ruling and task homes.
   A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,
   authorised, go ahead, go-ahead, "permission to", "permissions to"; whole words, any case) and an act
   or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
@@ -57,7 +66,7 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. A message
   with no items is reported with the inbox file's path, its heading line and line number, and an
   example item, then each kind's home (`ruling -> <homes>; task -> <homes>; question -> answered; note -> noted;
-  standing -> handoff; page -> page:<n>`, with the closed-note and grant homes in the note's text). Items added in any later turn count, so the session needs no new heading. A home outside
+  standing -> handoff; page -> page:<n>; repo -> repo:<owner>/<name>`, with the closed-note and grant homes in the note's text). Items added in any later turn count, so the session needs no new heading. A home outside
   its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
   nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
   judges repeats (the Repeats bullet). When the session's
@@ -87,6 +96,18 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   case proves it). Known gap: an answer
   to a page item inside a longer message, or in prose, is not caught: the guard cannot know which prose
   answers a page item.
+- **Repos.** `repo` items (feedback about another repo): the home is `repo:<owner>/<name>`. The guard
+  checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
+  It blocks until the transcript shows, after the owner's message, a send_message or SendMessage whose
+  text names `<owner>/<name>` as a whole token. Letter case is ignored; a trailing period or URL path
+  still counts. The home is read as a ruling home is (`home_path`). Backticks or quotes come off only when
+  both ends match. A `#anchor` drops. A trailing `:,;.` strips. Then the `<owner>/<name>` check runs. A home
+  part that is not letters, digits, `.`, `_` or `-` is malformed and blocks. Same anchoring and owner-record
+  rules as Pages. The stand-down systemMessage starts "Feedback guard: repo sends not checked"; the page one
+  starts "Feedback guard: page sends not checked". Cost: the one transcript read Pages makes, per Stop, only while an open page or repo item
+  exists. No file written, no process started. Risk kind: likely risk (owner-named gap, 2026-11-01).
+  Landed 2026-11-01. Known gap: the guard cannot tell the send went to that repo's triage, only that it
+  names the repo.
 - **Repeats.** A model matches each new item's owner message, by meaning, against older feedback and
   work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
   glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New

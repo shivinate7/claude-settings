@@ -232,6 +232,7 @@
 - records-page-handwritten-header: a hand-written page opening '# Records index' reads as generated (hooks/guard_merge.py)
 - records-page-reader-gaps: the records-page guard misses commit -i, rebase, cherry-pick, am, revert, sh -c scripts and python -m generator runs (hooks/guard_merge.py)
 - reload-missing-file-unpinned: no kept case covers a missing guard_pointer.py during the reload wait (hooks/test_guard.py, hooks/guard.py)
+- repo-home-backtick-then-comma: a repo home of a backtick, then a comma, still blocks as malformed, because unwrap runs before the comma strip. Ruling homes behave the same. Decision: owner-feedback-inbox.
 - rm-shim-bypass-forms: /bin/rm, command rm and find -delete skip the rm shim (bin/rm)
 - rm-shim-call-cost: a recursive rm costs about 40 ms, and the marker search reads byte by byte (bin/rm)
 - rm-shim-cloud-path: the PATH step skips cloud mode, so the rm shim is off in cloud sessions (install.sh)
@@ -996,6 +997,7 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- repo-item-judged-as-repeat: a `[repo]` item is feedback about another repo, but the repeat check (hooks/feedback_guard.py `new_items`, `PROMPT`) judges it against this repo's roadmap, backlog and inboxes. So a "may repeat roadmap:x" flag can be a wrong-repo false alarm. The flag is advisory, and no case covers it. Fix idea: skip `[repo]` items in `new_items`. Decision: owner-feedback-inbox.
 - ready-heal-second-run: a ready head may already hold its page. If the base gains a record during the wait, the page conflicts. prove() then heals and pushes a merge commit after green, so CI runs twice. The batch brake keeps the base still during a batch run (review round 1 of PR #1035, read from code). Decision: records-index-at-merge
 - ready-resumed-claim-page-push: a resumed claim head with a stale page still pushes a page-only commit to a ready PR, since the draft step refuses a claim head (merge/merge.py confirm; PR #1035). Decision: records-index-at-merge
 - claim-remedy-wording-narrow: the claim-head remedy says the base "claims nothing for" the claim; it also fires when the base has kinds but the claim made no numbers. The remedy is still right (review round 2 of PR #1035). Decision: records-index-at-merge
