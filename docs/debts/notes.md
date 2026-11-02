@@ -907,6 +907,7 @@
 - repeat-mark-lone-cr: mark_items reads bytes and parse reads text, so a lone CR in an owner message shifts item lines and the mark is reported "not marked" (hooks/feedback_guard.py mark_items). Decision: owner-feedback-inbox
 - repeat-inbox-ref-same-minute: two blocks in one minute share an inbox ref, so the last label wins (hooks/feedback_guard.py). Decision: owner-feedback-inbox
 - repeat-mark-append-race: the inbox rewrite on a hit can lose a capture append that lands in the same instant; there is no lock (hooks/feedback_guard.py mark_items). Decision: owner-feedback-inbox
+- marker-flags-unmutated: the `(?im)` flags on the BRIEF_MARKERS rows in hooks/shared_names.py have no mutant, because mutate_guard TARGETS has no shared_names entry. Dropping the round row's flag would miss a Round on line two. Decision: agent-model-cap
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
