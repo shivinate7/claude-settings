@@ -132,6 +132,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
   time. With `filed`, it says "Answered, filed in <home>" (the item's `home`) and the filed time. With only `read`, it
   also says "Read by <owner>" and the time.
+- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
+  (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
+  `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
+  went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
+  guard. An ask with `reply` is answered. The page lists asks newest first by `at` and shows each waiting one
+  and the newest 3 answered; no session deletes an ask.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
@@ -315,6 +322,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
+- The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
+  An ask is never a grant: an act that needs one becomes an item.
 
 ## Route and close
 
@@ -353,6 +362,18 @@ item and leaves it open until the lane takes the answer. Then it closes the item
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+
+## Route an ask
+
+An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
+holds its subject:
+
+1. Write `owner` (itself, or that session) and `read` set to now.
+2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
+   (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
+4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
 
 ## Make a repo's page
 
