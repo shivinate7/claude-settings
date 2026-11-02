@@ -44,7 +44,7 @@ P4. Make each failure message name one cause.
 - claude-settings hooks/mutate_guard.py — a red on the wrong case reads WRONG CAUSE, not a kill.
 Applies to: every test; guards and checks.
 
-P5. Use a marker file or a condition, an injected clock or a same-process ratio; never a fixed sleep, wall-clock wait bound, or real clock or machine load in an assert.
+P5. Never use a fixed sleep or a wall-clock wait bound; wait on a marker file or a condition. Never put a real clock or machine load in an assert; use an injected clock or a same-process ratio.
 - claude-settings plan c95-step2-escapes (roadmap branch) — 24 of 34 red runs on main were timing or load asserts.
 - q_max b14be7a95 — a fixed wait went false-green under load.
 - mailaudit 99bc9df — cases that waited real seconds moved to a virtual clock, asserts unchanged.
@@ -69,14 +69,14 @@ P8. Build fixtures that reach the states real use reaches, the empty and full-si
 Applies to: fixtures; every test that builds a store or a dataset.
 
 P9. Delete or loosen a test only with proof that coverage holds: one mutant per removed case, red on what stays, and delete a test that cannot fail.
+- q_max dafd0f11c — cases deleted, each with a mutant that turns the remaining check red.
 - mailaudit ccc1454 — a case never shown to fail was deleted.
 - Counter: joyous 29eb4e0 then da58dcf — a builder dropped a working test to fit a test count in its brief.
-- Counter: claude-settings 93ab8a20a, restored in b5f976ff7 — red cases removed in the same commit as the fix.
 Applies to: every change that removes or loosens a test case.
 
 P10. A reviewer reads the recorded red run; if it is missing or in doubt, it makes a mutant on a scratch copy and watches the named case go red (`roles-each-layer-proves-once`).
 - q_max ac3397064 — a mutant stayed green because an earlier error response answered first.
-- q_max, no hash in evidence — round-2 mutants stayed green on the round-1 test file.
+- q_max decision D-804 — round-2 mutants stayed green on the round-1 test file.
 - claude-settings decision mutation-report-scores-suites — hand-written mutants that each name their case: 367 of 367 killed; sampled ast rates are upper bounds, not gold.
 Applies to: review.
 
