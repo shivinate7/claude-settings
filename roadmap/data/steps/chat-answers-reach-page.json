@@ -1,9 +1,9 @@
 {
-  "title": "An owner's chat answer to a page item reaches the page writer",
-  "phase": "cleanup",
-  "status": "doing",
-  "order": 103.33752,
-  "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
-  "note": "Lane session_013NEJL2aEYN1uRGADDZ5nr4. Cause: on Oct 30 shiv answered the item 98 outcome question to the coordinator in chat, and the page writer did not hear it. Done check: an answer given in chat to a page item reaches the page writer, who closes or updates the item.",
-  "updatedAt": "2026-10-30T21:32:00Z"
+ "title": "An owner's chat answer to a page item reaches the page writer",
+ "phase": "cleanup",
+ "status": "done",
+ "order": 103.33752,
+ "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
+ "note": "Lane session_013NEJL2aEYN1uRGADDZ5nr4. Cause: on Oct 30 shiv answered the item 98 outcome question to the coordinator in chat, and the page writer did not hear it. Done check: an answer given in chat to a page item reaches the page writer, who closes or updates the item. Done: lane page-answer-send merged to main in batch 42 (503b198f); lane idle since Nov 1 05:12 CST, archived by the coordinator.",
+ "updatedAt": "2026-11-02T00:58:00Z"
 }
