@@ -973,7 +973,7 @@ class Host:
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    newer = [c for (p, g), c in picks.items() if p == path and g != group and done.index(c) < done.index(r)]
+                    newer = [c for (p, g), c in picks.items() if p.split("@")[0] == path.split("@")[0] and g != group and done.index(c) < done.index(r)]
                     if not self.cleared(listed, min(newer, key=done.index, default=None)):
                         red.append(f"{where}: " + "; ".join(jobs))
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
