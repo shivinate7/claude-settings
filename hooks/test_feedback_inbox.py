@@ -131,6 +131,7 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
+<<<<<<< HEAD
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
     the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
     off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
@@ -140,6 +141,29 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     `message` names `<owner>/<name>` as a whole token, compared without case, after the owner record
     that anchors the block. Other tools never count. A missing transcript passes with a systemMessage,
     as for pages. A page item and a repo item share one transcript read per Stop.
+=======
+  - Chat picks (F46, F43). An owner block whose text holds page picks (`<n> <letter>`, letters a to h, an
+    optional `(done)`, picks separated by commas or lines; `143b` and `143: b` count), in a repo whose
+    extras name a waiting page (layout.waiting_page), blocks until the transcript shows a send naming each
+    n (the Pages proof). Its item lines do not stand in for the send. Prose that merely holds a number
+    passes, and so does a pick in a repo with no waiting page, and "1 y, 2 n", whose letters are no pick.
+  - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
+    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead; whole
+    words, any case) and, in the same message outside any fence, an act or scope word (merge, push, delete,
+    deploy, release, publish, always, standing, from now on, and all, any or every before repo, repos, PR,
+    PRs, branch or branches) blocks unless
+    the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
+    `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or .claude/CLAUDE.md
+    at the repo root, each tracked; a plain ruling there still blocks. Bare "permission" is no grant word,
+    so a pasted "Permission denied" passes. The reason names the message by its stamp or the start of its
+    text.
+  - Closed notes (F88, likely risk; F88 is the related incident, not a measured one). A `[closed]` note's
+    home must be a tracked file, `step:<slug>` where roadmap/data/steps/<slug>.json is a blob on some ref,
+    or `page:<n>`. `[closed]` is a whole token after the home, and trailing text is allowed. Other kinds
+    are as before.
+  - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
+    page item.
+>>>>>>> c117b6cc
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -337,6 +361,18 @@ def make_repo(name, tracked=(), untracked=(), extras=None):
     for rel in untracked:
         write_file(os.path.join(root, *rel.split("/")), "x\n")
     return root
+
+
+def lane_file(root, rel):
+    """Commits `rel` on a lane branch only, then checks main out again: a branch's tree holds the file,
+    main's work tree does not. Returns the file's absolute path."""
+    git(root, "checkout", "-q", "-b", "lane")
+    path = os.path.join(root, *rel.split("/"))
+    write_file(path, "x\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "lane record")
+    git(root, "checkout", "-q", "main")
+    return path
 
 
 FIXTURE = []
@@ -847,15 +883,10 @@ def case_guard_tracked_homes_pass_without_the_handoff():
                       "- fb-4 [ruling] -> `CLAUDE.md#rule:some-anchor`",
                       "- fb-5 [task] -> debts/a-task.md: the second half",)))
     lane = make_repo("lane", tracked=("decisions/x.md",))
-    git(lane, "checkout", "-q", "-b", "lane")
-    write_file(os.path.join(lane, "decisions", "new-ruling.md"), "x\n")
-    git(lane, "add", "-A")
-    git(lane, "commit", "-q", "-m", "lane record")
-    git(lane, "checkout", "-q", "main")
+    record = lane_file(lane, "decisions/new-ruling.md")
     cfg = new_cfg()
     expect_silent("homes: a record committed on a lane branch only, by absolute path, passes",
-                  homed(cfg, "r-lane", ("- fb-6 [ruling] -> %s" % os.path.join(
-                      lane, "decisions", "new-ruling.md"),)))
+                  homed(cfg, "r-lane", ("- fb-6 [ruling] -> %s" % record,)))
 
 
 def case_guard_standing_homed_to_handoff_passes():
@@ -1034,14 +1065,15 @@ def send_rec(message):
     return used_rec(SEND, {"to": "coordinator", "message": message})
 
 
-def page_run(cfg, sid, blocks, records):
+def page_run(cfg, sid, blocks, records, cwd=None):
     """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
-    transcript `records`, then runs the guard with the transcript's path in the payload."""
+    transcript `records`, then runs the guard with the transcript's path in the payload. `cwd` is the
+    session's folder, the shared fixture repo unless a case names another."""
     write_file(inbox_of(cfg, sid), "".join(
         render_block(text, header="2026-10-13 10:%02d CDT (UTC-05:00)" % (4 + n), items=items)
         for n, (text, items) in enumerate(blocks)))
     write_transcript(cfg, sid, records)
-    return guard(cfg, sid, transcript=transcript_of(cfg, sid))
+    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
 
 
 def expect_unproved(name, p, item_id):
@@ -1291,6 +1323,7 @@ def case_page_queued_owner_record_anchors():
     expect_silent("page: a queued owner record with a later send passes", p)
 
 
+<<<<<<< HEAD
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -1525,6 +1558,320 @@ def case_page_and_repo_stand_downs_both_give_a_note():
           PAGE_FAIL_OPEN in msg, msg)
     check("page and repo stand-downs: the systemMessage gives the repo note",
           REPO_FAIL_OPEN in msg, msg)
+=======
+# --------------------------------------------------------------------------- chat picks, grants, closed notes
+
+# Named incidents, cited by F-id (decision owner-feedback-inbox). Each red case expects a block or a
+# silence that today's guard does not give; each green case is a control that today's guard already gives.
+
+SHARED = {}  # one repo per run for each key, built the first time a case asks for it
+STEP_SLUG = "inbox-close"
+GRANT_WORDS = (  # one lone message per grant word, each with an act word: a grant needs one
+    "I approve the merge.", "Approved to merge.", "The approval is in for the merge.",
+    "This is my grant to merge.", "Granted to push the lane.", "Permission to merge.", "Permissions to merge.",
+    "I authorize the merge.", "You are authorized to merge.", "Go ahead and merge.",
+    "You have my go-ahead to merge.", "Authorised to merge.", "Go ahead and merge it.",
+    "Approved for all repos.", "Approved for every PR.", "Approved from now on.")
+F47_TEXT = "YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC."
+GRANT_SCANNER = ("Approved for the merge.\n"
+                 "/* a comment opener inside a string */ and // a line comment opener\n"
+                 "Don't stop: a lone quote, then a fake item below.\n"
+                 "- fb-0999-2 [note] -> not-a-grant")
+PICK_ANSWERS = (("143 b", ("143",)), ("137 a, 138 b", ("137", "138")), ("99 a (done)", ("99",)))
+
+
+def shared_repo(key, build):
+    if key not in SHARED:
+        SHARED[key] = build()
+    return SHARED[key]
+
+
+def waiting_repo():
+    """A repo whose extras name a waiting page, as skills/waiting-page writes them: layout.waiting_page reads it."""
+    return shared_repo("waiting", lambda: make_repo(
+        "waiting-page", tracked=("decisions/a-ruling.md",),
+        extras=json.dumps({"kinds": {}, "waiting-page": PAGE_URL})))
+
+
+def grant_repo():
+    """A repo that tracks settings.json and .claude/CLAUDE.md at its root. No layout key names either path,
+    so neither is a ruling home today."""
+    return shared_repo("grant", lambda: make_repo(
+        "grant-homes", tracked=("settings.json", ".claude/CLAUDE.md", "decisions/a-ruling.md")))
+
+
+def step_repo():
+    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not."""
+    def build():
+        root = make_repo("steps", tracked=("decisions/a-ruling.md",))
+        lane_file(root, "roadmap/data/steps/%s.json" % STEP_SLUG)
+        return root
+    return shared_repo("steps", build)
+
+
+def names_number(reason, n):
+    """True when n is in reason as a whole number: 143 is not 1430, and not the 143 of case-143."""
+    return re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % re.escape(n), reason) is not None
+
+
+def expect_numbers_named(name, p, numbers):
+    reason = block_reason(p) or ""
+    check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    for n in numbers:
+        check("%s: names item %s" % (name, n), names_number(reason, n), reason)
+
+
+def expect_grant_block(name, p, text):
+    reason = block_reason(p) or ""
+    check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check(name + ": names the message", names_message(reason, stamp_of(BLOCK_HEADER), text), reason)
+
+
+# Chat picks: F46 and F43. A pick is a chat answer to a waiting-page item, so the owner's pick needs a send.
+
+def case_chat_pick_without_a_send_blocks():
+    """F46, the owner's chat answer "143 b" to waiting-page item 143, never reached the page writer, who
+    asked again. F43, "99 a (done)", has the same shape. A lone short pick is no burst and has no item, so
+    today's guard passes it. The transcript holds the owner's record and no send."""
+    repo = waiting_repo()
+    for text, numbers in PICK_ANSWERS:
+        p = page_run(new_cfg(), "pick-no-send", [(text, ())], [owner_rec(text), said_rec("Noted.")], cwd=repo)
+        expect_numbers_named("pick answer: %r with no send" % text, p, numbers)
+    p = page_run(new_cfg(), "pick-wrong-number", [("143 b", ())],
+                 [owner_rec("143 b"), send_rec("Ruling on page 1430: b")], cwd=repo)
+    expect_numbers_named("pick answer: a send naming 1430 does not prove item 143", p, ("143",))
+
+
+def case_chat_multi_pick_partial_send_blocks():
+    """A multi-pick needs a proof for each of its numbers. A send that proves only 137 leaves 138 unproven, so
+    the block names 138. Red today: no pick check runs."""
+    p = page_run(new_cfg(), "pick-partial", [("137 a, 138 b", ())],
+                 [owner_rec("137 a, 138 b"), send_rec("Ruling on page 137: a")], cwd=waiting_repo())
+    expect_numbers_named("pick answer: a send proving only 137 leaves 138 unproven", p, ("138",))
+
+
+def expect_numbers_in_reason(name, p, numbers):
+    """Blocks, and the reason holds each number as text. For the shapes whose reason may quote the pick."""
+    reason = block_reason(p) or ""
+    check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    for n in numbers:
+        check("%s: names item %s" % (name, n), n in reason, reason)
+
+
+PICK_ITEMS = (("- fb-0958-3 [question] -> answered",), ("- fb-0958-4 [note] -> noted",),
+              ("- fb-0958-1 [ruling] -> decisions/a-ruling.md",))
+
+
+def case_chat_pick_with_items_blocks():
+    """A pick block that also holds items still needs its send: an item does not stand in for the page writer
+    (F46). Red now: the pick check reads only blocks with no item lines."""
+    repo = waiting_repo()
+    for items in PICK_ITEMS:
+        p = page_run(new_cfg(), "pick-items", [("143 b", items)], [owner_rec("143 b"), said_rec("Noted.")],
+                     cwd=repo)
+        expect_numbers_named("pick answer: 143 b, with its item %r and no send" % items[0], p, ("143",))
+
+
+def case_chat_pick_shapes_block():
+    """Picks in shapes the check misses: a full stop after the letter, no space, a colon, and one pick per
+    line. Each needs its send (F46). Red now."""
+    repo = waiting_repo()
+    for text, numbers in (("143 b.", ("143",)), ("143b", ("143",)), ("143: b", ("143",)),
+                          ("143 b\n138 a", ("143", "138"))):
+        p = page_run(new_cfg(), "pick-shape", [(text, ())], [owner_rec(text), said_rec("Noted.")], cwd=repo)
+        expect_numbers_in_reason("pick answer: %r with no send" % text, p, numbers)
+
+
+def case_chat_pick_with_a_send_passes():
+    """A send naming each number after the owner's record proves it, as Pages.sent accepts it today."""
+    repo = waiting_repo()
+    for text, records in (
+            ("143 b", [owner_rec("143 b"), send_rec("Ruling on page item 143: b")]),
+            ("137 a, 138 b", [owner_rec("137 a, 138 b"), send_rec("Ruling on pages 137 and 138: a, b")]),
+            ("99 a (done)", [owner_rec("99 a (done)"), used_rec("ArtifactData", {
+                "action": "set", "collection": "items", "doc_id": "99", "data": {"n": 99}})])):
+        p = page_run(new_cfg(), "pick-sent", [(text, ())], records, cwd=repo)
+        expect_silent("pick answer: %r with a send proving its numbers passes" % text, p)
+
+
+def case_chat_prose_and_no_waiting_page_pass():
+    """Prose that holds a number is no pick. A pick in a repo with no waiting page is not checked."""
+    repo = waiting_repo()
+    for text in ("fix 3 bugs", "143 b is the one I meant"):
+        p = page_run(new_cfg(), "pick-prose", [(text, ())], [owner_rec(text), said_rec("Noted.")], cwd=repo)
+        expect_silent("pick answer: %r is prose, passes" % text, p)
+    p = page_run(new_cfg(), "pick-no-page", [("143 b", ())], [owner_rec("143 b"), said_rec("Noted.")])
+    expect_silent("pick answer: 143 b in a repo with no waiting page passes", p)
+
+
+# Grants: F47 and F31. A grant is a ruling, a page answer, or a note that says it is no grant.
+
+def case_grant_without_a_home_blocks():
+    """F47, the owner's all-repos grant, sat in chat with no home. F31, a grant homed to the handoff, is the
+    same gap: its standing id is in the handoff, so only the grant check can block it. A lone short message
+    needs no items today, so each row is red today."""
+    for text in GRANT_WORDS + (F47_TEXT,):
+        p = homed(new_cfg(), "grant-lone", (), text=text)
+        expect_grant_block("grant home: %r with no item" % text[:30], p, text)
+    p = homed(new_cfg(), "grant-standing", ("- fb-0958-2 [standing] -> handoff",),
+              handoff_ids=("fb-0958-2",), text=F47_TEXT)
+    expect_grant_block("grant home: F47 with [standing] -> handoff, id in the handoff (F31's form)", p, F47_TEXT)
+
+
+def case_grant_with_a_home_passes():
+    """The three homes a grant may take: a ruling whose home passes, a page answer with its send, and a note
+    that says the grant word is no grant. Each passes today too."""
+    p = homed(new_cfg(), "grant-ruling", ("- fb-0958-1 [ruling] -> decisions/a-ruling.md",), text=F47_TEXT)
+    expect_silent("grant home: F47 with [ruling] -> decisions/a-ruling.md passes", p)
+    p = homed(new_cfg(), "grant-note", ("- fb-0958-3 [note] -> not-a-grant",), text=F47_TEXT)
+    expect_silent("grant home: F47 with [note] -> not-a-grant passes", p)
+    p = page_run(new_cfg(), "grant-page", [(F47_TEXT, (PAGE_ITEM,))],
+                 [owner_rec(F47_TEXT), send_rec("Ruling on page 98: approval")])
+    expect_silent("grant home: F47 with [page] -> page:98 and its send passes", p)
+
+
+def case_grant_root_home_passes():
+    """A grant's [ruling] item may name settings.json or .claude/CLAUDE.md at the repo root, each tracked. The
+    audit's proposed check names both beside a chat grant (F31, F47). Red today: neither is a ruling home."""
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "grant-root", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=grant_repo(),
+                  text=F47_TEXT)
+        expect_silent("grant home: F47 with [ruling] -> %s, tracked at the root, passes" % path, p)
+
+
+def case_grant_ruling_home_still_refused():
+    """The controls around the root homes: a plain ruling to either file is refused, an untracked file is
+    refused even for a grant, and a grant ruling homed to the handoff is refused as today. Each blocks today."""
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "plain-root", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=grant_repo(),
+                  text="Rebase the lane on main.")
+        expect_block("grant home: a plain ruling homed to %s still blocks" % path, p, named=("fb-0958-1",))
+    untracked = shared_repo("grant-untracked", lambda: make_repo(
+        "grant-untracked", tracked=("decisions/a-ruling.md",), untracked=("settings.json", ".claude/CLAUDE.md")))
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "grant-untracked", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=untracked,
+                  text=F47_TEXT)
+        expect_block("grant home: F47 with [ruling] -> an untracked %s still blocks" % path, p,
+                     named=("fb-0958-1",))
+    p = homed(new_cfg(), "grant-handoff", ("- fb-0958-1 [ruling] -> handoff",), text=F47_TEXT)
+    expect_block("grant home: F47 with [ruling] -> handoff still blocks, as today", p, named=("fb-0958-1",))
+
+
+def case_grant_fake_item_in_the_fence_blocks():
+    """F47's grant check, with a fence trap. The message's fence holds a fake `[note] -> not-a-grant` line,
+    beside a comment opener and a lone quote. Only a real item line counts. The message has a real standing
+    item, so today no check blocks it: the grant check is what is missing."""
+    cfg, sid = new_cfg(), "grant-fence"
+    write_file(inbox_of(cfg, sid), render_block(GRANT_SCANNER, items=("- fb-0958-2 [standing] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n- fb-0958-2 standing\n")
+    expect_grant_block("grant home: a fake [note] -> not-a-grant inside the fence does not count",
+                       guard(cfg, sid), GRANT_SCANNER)
+
+
+def case_grant_words_as_parts_of_words_pass():
+    """Whole words only: a grant word inside another word is no grant. Bare "permission" is no grant word, so
+    a pasted "Permission denied" error passes. Each passes today too."""
+    for text in ("The migrant job is done.", "The grantor field is blank.", "Permission denied",
+                 "Rebase the lane on main."):
+        expect_silent("grant home: %r holds no grant word, passes" % text,
+                      homed(new_cfg(), "no-grant", (), text=text))
+
+
+FENCED_LOG = ("The run failed, and this is the log, pasted:\n"
+              "```\n"
+              "authorized: true\n"
+              "merge: ready, push: enabled\n"
+              "```\n"
+              "Fix the lint and rerun.")
+
+
+def case_grant_fenced_text_is_not_scanned_passes():
+    """Fenced text is a pasted log, not the owner's words, so its grant and act words are not scanned. The fence
+    holds "authorized: true" beside act words, which would refuse if read. Red now."""
+    cfg, sid = new_cfg(), "grant-log"
+    write_file(inbox_of(cfg, sid), render_block(FENCED_LOG, items=("- fb-0958-2 [note] -> noted",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("grant home: a pasted log in a fence, with grant and act words, passes", guard(cfg, sid))
+
+
+def case_grant_needs_an_act_word_passes():
+    """A grant word alone is no grant: a grant needs an act or scope word in the same message. Each
+    row holds a grant word and no act word. F47 still refuses, as its act words sit in its message. Red now."""
+    for text in ("Go ahead and fix the typo.", "The grant check misses closed items.", "Authorized: true."):
+        expect_silent("grant home: %r has a grant word and no act word, passes" % text,
+                      homed(new_cfg(), "no-act", (), text=text))
+
+
+def case_grant_act_words_narrowed_passes():
+    """The act and scope words are merge, push, delete, deploy, release, publish, always, standing, from now on,
+    and all, any or every before a scope noun (repo, repos, PR, PRs, branch, branches). "ready" and "close" are
+    no act word, and "all" or "any" before a plain noun is no scope. Each row holds a grant word and no act or
+    scope word, so each passes. Red now: today's act list still holds these words."""
+    for text in ("go ahead and run all the tests", "yes go ahead, it's ready",
+                 "looks good, go ahead with the fix for any remaining failures",
+                 "Why did you close the PR without approval?"):
+        expect_silent("grant home: %r has a grant word and no act or scope word, passes" % text,
+                      homed(new_cfg(), "narrowed", (), text=text))
+
+
+def case_pick_letters_a_to_h_passes():
+    """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
+    p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
+                 cwd=waiting_repo())
+    expect_silent("pick answer: \"1 y, 2 n\" is no pick, passes", p)
+
+
+# Closed notes: F88. A closed note holds for good only with a tracked file, a step on some ref, or a page.
+
+def case_closed_note_without_a_home_blocks():
+    """Risk kind: likely risk. F88 is the related incident, not a measured one. Its audit row is the grey Send
+    button. The audit's proposed checks replay F88 as an inbox item that closes with no step, record or
+    answer, so the line `[note] -> noted [closed]` is reconstructed, not measured: the line the session wrote
+    is unmeasured. A step with no file on any branch is no home either. Red today: no check reads a closed
+    note's home."""
+    p = homed(new_cfg(), "close-noted", ("- fb-0958-4 [note] -> noted [closed]",), text="closed without a home")
+    expect_block("close home: a closed note homed to noted blocks", p, named=("fb-0958-4",))
+    p = homed(new_cfg(), "close-missing-step", ("- fb-0958-4 [note] -> step:no-such-step [closed]",),
+              cwd=step_repo(), text="closed against a missing step")
+    expect_block("close home: a closed note homed to a step with no file on any branch blocks", p,
+                 named=("fb-0958-4",))
+    for item in ("- fb-0958-4 [note] -> process-only [closed]", "- fb-0958-4 [note] -> noted [closed] (done)"):
+        p = homed(new_cfg(), "close-odd", (item,), text="closed with an odd home")
+        expect_block("close home: %r blocks" % item, p, named=("fb-0958-4",))
+
+
+def case_closed_note_with_a_home_passes():
+    """A closed note with a tracked file, a step on a lane branch, or a page passes. So do a closed question
+    and an open note. Each passes today too."""
+    p = homed(new_cfg(), "close-file", ("- fb-0958-4 [note] -> decisions/a-ruling.md [closed]",))
+    expect_silent("close home: a closed note homed to a tracked file passes", p)
+    p = homed(new_cfg(), "close-step", ("- fb-0958-4 [note] -> step:%s [closed]" % STEP_SLUG,), cwd=step_repo())
+    expect_silent("close home: a closed note homed to a step on a lane branch passes", p)
+    p = homed(new_cfg(), "close-page", ("- fb-0958-4 [note] -> page:98 [closed]",))
+    expect_silent("close home: a closed note homed to a page passes", p)
+    p = homed(new_cfg(), "close-trailing", ("- fb-0958-4 [note] -> decisions/a-ruling.md [closed] (done)",))
+    expect_silent("close home: a tracked file, [closed] and trailing text, passes", p)
+    p = homed(new_cfg(), "close-question", ("- fb-0958-3 [question] -> answered [closed]",))
+    expect_silent("close home: a closed question homed to answered stays green", p)
+    p = homed(new_cfg(), "open-note", ("- fb-0958-4 [note] -> noted",))
+    expect_silent("close home: an open note homed to noted stays green", p)
+
+
+# Cost: the transcript is read only for a pick block in a repo with a waiting page, or for an open page item.
+
+def case_page_check_reads_no_transcript_for_other_blocks():
+    """A directory at transcript_path stands a block down with a systemMessage, so silence proves that no
+    read happened. Neither row is a pick in a waiting-page repo, and neither has an open page item. Green
+    today, by design: today's guard reads the transcript only for an open page item."""
+    for label, cwd, text in (("prose with a number, in a repo with a waiting page", waiting_repo(), "fix 3 bugs"),
+                             ("a pick, in a repo with no waiting page", fixture_repo(), "143 b")):
+        cfg, sid = new_cfg(), "cost"
+        write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-0958-4 [note] -> noted",)))
+        write_file(handoff_of(cfg, sid), "# Handoff\n")
+        os.makedirs(transcript_of(cfg, sid))
+        expect_silent("cost: %s reads no transcript" % label,
+                      guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid)))
+>>>>>>> c117b6cc
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -2834,6 +3181,7 @@ CASES = (
     case_page_owner_record_missing_stands_down,
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
+<<<<<<< HEAD
     case_repo_send_naming_the_repo_passes,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
@@ -2855,6 +3203,27 @@ CASES = (
     case_repo_home_in_backticks_or_with_a_comma_is_not_malformed,
     case_repo_only_stand_down_names_repo_sends_not_page,
     case_page_and_repo_stand_downs_both_give_a_note,
+=======
+    case_chat_pick_without_a_send_blocks,
+    case_chat_multi_pick_partial_send_blocks,
+    case_chat_pick_with_items_blocks,
+    case_chat_pick_shapes_block,
+    case_pick_letters_a_to_h_passes,
+    case_chat_pick_with_a_send_passes,
+    case_chat_prose_and_no_waiting_page_pass,
+    case_grant_without_a_home_blocks,
+    case_grant_with_a_home_passes,
+    case_grant_root_home_passes,
+    case_grant_ruling_home_still_refused,
+    case_grant_fake_item_in_the_fence_blocks,
+    case_grant_words_as_parts_of_words_pass,
+    case_grant_fenced_text_is_not_scanned_passes,
+    case_grant_needs_an_act_word_passes,
+    case_grant_act_words_narrowed_passes,
+    case_closed_note_without_a_home_blocks,
+    case_closed_note_with_a_home_passes,
+    case_page_check_reads_no_transcript_for_other_blocks,
+>>>>>>> c117b6cc
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,

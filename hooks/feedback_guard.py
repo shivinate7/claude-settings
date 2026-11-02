@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, a repo item with no send naming the repo, or an open standing item whose id is missing from the handoff. It also marks a new item that repeats older feedback or work, which one model call judges.
+It also blocks a chat answer to a page item with no send to the page writer, a grant word with no home, and a closed note with no home.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
 and the session's handoff beside it. A burst is the messages saved since the last Stop when they are
@@ -12,7 +13,8 @@ a turn end in these cases:
   - a burst's message has no item lines under it. The reason gives the inbox file's absolute path, the
     message's heading line and its line number, and an example item. Items added in any later turn
     count, because each Stop reads the whole file;
-  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page, repo;
+  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page, repo
+    (KIND_WORDS: the home each kind without a file home takes);
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
@@ -38,6 +40,36 @@ a turn end in these cases:
     `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
     transcript read and the anchoring of the page check (Pages.sent takes the proof). Its stand-down systemMessage reads
     "Feedback guard: repo sends not checked" and the page one reads "page sends not checked";
+  - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
+    (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
+    parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
+    (layout.waiting_page, as for any waiting-page read), needs for each n the same send proof
+    Pages.sent accepts. The block's item lines never stand in for the send. Only an n that an open
+    page item of the block names is left to that item's check. Risk kind: named incident. F46 (the
+    answer "143 b" never reached the page writer) and F43 ("99 a (done)", same shape), in the
+    owner-feedback audit. Cost: one git rev-parse per such block, and a transcript read, inside the
+    Stop process. No file written. The transcript is read only for such a block in a repo with a
+    waiting page, or for an open page item. The cost case proves it;
+  - chat-grant-needs-home. An owner block whose text, fenced text left out, holds a grant word
+    (GRANT: approval, approve, approved, grant, granted, authorize, authorized, authorised, go ahead,
+    go-ahead, "permission to", "permissions to"; whole words, any case; a bare "permission" is none)
+    and an act or scope word (ACT: merge, push, delete, deploy, release, publish, always, standing,
+    "from now on", and all, any or every right before repo, repos, PR, PRs, branch or branches) needs one real item line of these: a `[ruling]` item
+    (its home gets the check above), an open `[page]` item (its send gets the check above), or
+    `[note] -> not-a-grant`. Lines inside the message's fence are text, never items. For a block
+    with a grant, a ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root
+    (GRANT_ROOT_HOMES), if some branch tracks it. A lone short message counts. Risk kind: named
+    incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), same
+    audit. Cost: two regexes on text already in memory;
+  - inbox-close-needs-home. A closed note needs a home that is a file some branch tracks,
+    `step:<slug>` (roadmap/data/steps/<slug>.json, resolved by ruling_home.value_resolves), `page:<n>`
+    or `not-a-grant`. `noted` and `process-only` are not one. An item is closed by `[closed]` as a
+    whole token after the home, with trailing text allowed (CLOSED_TOKEN), or by `[closed]` at the
+    line end. A closed `[question] -> answered` is never checked. Risk kind: likely risk. F88 (a
+    closed note with no step, record or answer behind it) is the related incident, not a measured
+    one. Cost: git rev-parse, for-each-ref and cat-file, inside the Stop process, per closed note
+    homed to a file or a step. When the cwd is in no git repo, the check passes and a systemMessage
+    says so;
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -83,6 +115,23 @@ KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
+STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
+STEP_PATH = "roadmap/data/steps/%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
+NOT_A_GRANT = "not-a-grant"  # the home of a [note] that says its grant word is no grant
+# A chat answer to waiting-page item n: `<n> <letter>` (a to h), an optional parenthetical, one per
+# comma or line. Letters outside a to h are no answer, so "1 y, 2 n" passes.
+_ONE_ANSWER = r"\d+[ \t]*:?[ \t]*[a-hA-H]\.?(?:[ \t]*\([^)\n]*\))?"
+ANSWER = re.compile(r"%s(?:[ \t]*[,\n]\s*%s)*" % (_ONE_ANSWER, _ONE_ANSWER))
+# Whole words, any case. A bare "permission" is no grant word, so a pasted "Permission denied" passes.
+_WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
+GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
+                   re.IGNORECASE)
+# A grant word alone is no grant: the message also names an act or a scope.
+ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
+                 r"|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)", re.IGNORECASE)
+CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
+# A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
+GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
@@ -90,16 +139,20 @@ HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer e
 HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
 # The home each kind without a file home takes, as the decision gives it.
-KIND_WORDS = {"question": "answered", "note": "noted", "standing": "handoff", "page": "page:<n>",
+KIND_WORDS = {"question": "answered", "note": "noted (closed: a tracked file, step:<slug> or page:<n>; "
+              "not-a-grant when a grant word is no grant)", "standing": "handoff", "page": "page:<n>",
               "repo": "repo:<owner>/<name>"}
 EXAMPLE_KIND = "note"  # a key of KIND_WORDS
-EXAMPLE_HOME = KIND_WORDS[EXAMPLE_KIND]
+EXAMPLE_HOME = "noted"
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
               "task": ("todo", "debts", "debt-notes")}
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
+FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
+GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, or a"
+               " [note] item `-> %s` when the words are no grant" % NOT_A_GRANT)
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -173,7 +226,8 @@ def item(ln):
     if m is None:
         return None
     rest = m.group(2) or ""
-    return m.group(1), rest, JOT.match(rest) is not None, rest.rstrip().endswith("[closed]")
+    closed = rest.rstrip().endswith("[closed]") or CLOSED_TOKEN.search(rest.partition("->")[2]) is not None
+    return m.group(1), rest, JOT.match(rest) is not None, closed
 
 
 def open_ids(blocks, kinds=OPEN_KINDS):
@@ -233,47 +287,93 @@ class Homes:
     down, once, for the systemMessage line."""
 
     def __init__(self, cwd):
-        self.cwd, self.skip = cwd, None
+        self.cwd, self.skip, self.skip_closed = cwd, None, None
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
         return os.path.realpath(run.stdout.strip()) if run.returncode == 0 and run.stdout.strip() else None
 
-    def problem(self, item_id, kind, rest):
-        """None when the home is good or the check stood down, else the reason text."""
+    def _locate(self, found, closed=False):
+        """(root, rel, error) for the path a home names. `root` is None with `error` set when an absolute
+        path is in no git repo, and with no error when the session's folder is in none: the check stands down."""
+        if os.path.isabs(found):
+            parent = os.path.dirname(found)
+            root = self._root(parent) if os.path.isdir(parent) else None
+            if root is None:
+                return None, None, "names %s, which is in no git repo" % found
+            return root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"), None
+        start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+        root = self._root(start) if start else None
+        if root is None:
+            self._stand_down("the session's folder is in no git repo", closed)
+            return None, None, None
+        return root, os.path.normpath(found).replace(os.sep, "/"), None
+
+    def problem(self, item_id, kind, rest, grant=False):
+        """None when the home is good or the check stood down, else the reason text. `grant` is true in a
+        block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES file, if git tracks it."""
         try:
             import layout  # lint/layout.py, the one home of where each kind lives
         except ImportError as e:
             return self._stand_down(e)
         try:
-            found = home_path(rest)
-            if os.path.isabs(found):
-                parent = os.path.dirname(found)
-                root = self._root(parent) if os.path.isdir(parent) else None
-                if root is None:
-                    return "%s [%s] names %s, which is in no git repo" % (item_id, kind, found)
-                rel = os.path.relpath(os.path.realpath(found), root)
-            else:
-                start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
-                root = self._root(start) if start else None
-                if root is None:
-                    self.skip = self.skip or "the session's folder is in no git repo"
-                    return None
-                rel = os.path.normpath(found)
-            rel = rel.replace(os.sep, "/")
-            homes = kind_homes(layout, root, kind)
-            keys = ", ".join(HOME_KINDS[kind])
-            if not homes:
-                return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
-                        % (item_id, kind, kind, keys))
-            if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home"
-                        % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes)))
+            root, rel, err = self._locate(home_path(rest))
+            if err:
+                return "%s [%s] %s" % (item_id, kind, err)
+            if root is None:
+                return None
+            if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
+                homes = kind_homes(layout, root, kind)
+                keys = ", ".join(HOME_KINDS[kind])
+                if not homes:
+                    return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
+                            % (item_id, kind, kind, keys))
+                if not any(rel == h or rel.startswith(h + "/") for h in homes):
+                    return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home"
+                            % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes)))
             if not ruling_home.value_resolves(rel, root):
                 return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
             return None
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
+
+    def closed_problem(self, item_id, rest):
+        """None when a closed note's home is a page, a not-a-grant verdict, a `step:<slug>` whose step file
+        some branch holds, or a file git tracks; else the reason text. None too when the check stood down."""
+        word = home_word(rest)
+        if PAGE_HOME.fullmatch(word) or word == NOT_A_GRANT:
+            return None
+        if ruling_home._unwrap(word) == ruling_home.PROCESS_ONLY:  # value_resolves accepts it; a close needs a file
+            return self._closed_reason(item_id)
+        step = STEP_HOME.fullmatch(word)
+        try:
+            root, rel, err = self._locate(STEP_PATH % step.group(1) if step else home_path(rest), True)
+            if err:
+                return "%s [note] %s" % (item_id, err)
+            if root is None or ruling_home.value_resolves(rel, root):
+                return None
+        except ruling_home._GitFailure as e:
+            return self._stand_down(e, True)
+        return self._closed_reason(item_id)
+
+    @staticmethod
+    def _closed_reason(item_id):
+        return ("%s [note] is closed with no home: a closed note needs a tracked file, `step:<slug>` naming a"
+                " step file that some branch holds, `page:<n>` or `not-a-grant`" % item_id)
+
+    def has_waiting_page(self):
+        """(found, why): `found` is true when the repo of the session's folder names a waiting page
+        (layout.waiting_page, the one home of that read). `why` holds the reason the read stood down."""
+        try:
+            import layout
+        except ImportError as e:
+            return False, " ".join(str(e).split()) or "ImportError"
+        try:
+            start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+            root = self._root(start) if start else None
+            return (root is not None and layout.waiting_page(root) != "unknown"), None
+        except (layout.LayoutError, ruling_home._GitFailure) as e:
+            return False, " ".join(str(e).split()) or type(e).__name__
 
     def homes_line(self):
         """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
@@ -294,8 +394,13 @@ class Homes:
         return "; ".join("%s -> %s" % (k, KIND_WORDS[k] if k in KIND_WORDS
                                        else ", ".join(found.get(k) or ()) or "a tracked file") for k in KINDS)
 
-    def _stand_down(self, e):
-        self.skip = self.skip or " ".join(str(e).split()) or type(e).__name__
+    def _stand_down(self, e, closed=False):
+        """Records why a check stood down, once per check: the ruling and task homes, or the closed note homes."""
+        why = " ".join(str(e).split()) or type(e).__name__
+        if closed:
+            self.skip_closed = self.skip_closed or why
+        else:
+            self.skip = self.skip or why
         return None
 
 
@@ -325,7 +430,7 @@ class Pages:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
-    def _stand_down(self, label, why):
+    def stand_down(self, label, why):
         self.skip.setdefault(label, [])
         if why not in self.skip[label]:
             self.skip[label].append(why)
@@ -335,11 +440,11 @@ class Pages:
         k-th block with this text. True too when the check stands down: no transcript, or no such
         owner record."""
         if not self._load():
-            self._stand_down(label, self.unread)
+            self.stand_down(label, self.unread)
             return True
         anchors = [i for i, said in self.owners if said == text]
         if len(anchors) < k:
-            self._stand_down(label, "the transcript has no owner record %d for the message at %s" % (k, stamp))
+            self.stand_down(label, "the transcript has no owner record %d for the message at %s" % (k, stamp))
             return True
         return any(proof(use) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
                    for use in _transcript.tool_uses(r))
@@ -432,6 +537,76 @@ def repo_problem(item_id, rest, text, k, stamp, pages):
             " owner's message to that repo's triage session (send_message naming %s)" % (item_id, slug, slug, slug))
 
 
+def answer_numbers(text):
+    """The item numbers of a message that is only chat answers to page items (`143 b`, `137 a, 138 b (done)`),
+    else []."""
+    return re.findall(r"\d+", re.sub(r"\([^)\n]*\)", "", text)) if ANSWER.fullmatch(text) else []
+
+
+def answer_problem(b, text, k, homes, pages):
+    """The reason for a chat answer to a page item with an item number the transcript shows no send for,
+    else None. Runs for every block, in a repo with a waiting page. Only a number that an open page item of
+    the block names is left to that item: no other item line stands in for the send. The transcript and the
+    repo load only for a block that matches."""
+    numbers = answer_numbers(text)
+    if not numbers or homes is None or pages is None:
+        return None
+    found, why = homes.has_waiting_page()
+    if why:
+        pages.stand_down("page", why)
+    if not found:
+        return None
+    own = set()
+    for ln in b["items"]:
+        it = item(ln)
+        m = PAGE_HOME.fullmatch(home_word(it[1])) if it and it[2] and not it[3] and it[1].startswith("[page]") else None
+        if m:
+            own.add(m.group(1))
+    unsent = [n for n in dict.fromkeys(numbers) if n not in own and not pages.sent(text, k, lambda use: _proves(use, n), b["stamp"])]
+    if not unsent:
+        return None
+    return ("the owner's chat answer at %s names page item %s, and the transcript shows no send of it to the"
+            " page writer after the owner's message; send each answer to the page writer (send_message naming"
+            " the item number, or an ArtifactData write with n set to it)" % (b["stamp"], ", ".join(unsent)))
+
+
+def unfenced(text):
+    """`text` without the lines of its own code fences, an unclosed fence running to the end."""
+    kept, fence = [], None
+    for ln in text.split("\n"):
+        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
+        if fence is None:
+            if mark:
+                fence = mark.group(1)
+            else:
+                kept.append(ln)
+        elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
+            fence = None
+    return "\n".join(kept)
+
+
+def is_grant(text):
+    """True when the message, fenced text left out, holds a grant word and an act or scope word."""
+    plain = unfenced(text)
+    return GRANT.search(plain) is not None and ACT.search(plain) is not None
+
+
+def grant_problem(b, text, items):
+    """The reason for a message that grants and has no home for it, else None. A home is a [ruling] item
+    (its own check judges the path), an open [page] item (its own check judges the send), or a
+    `[note] -> not-a-grant` item. `items` holds item() of each item line of the block."""
+    if not is_grant(text):
+        return None
+    for it in items:
+        if it is None or not it[2]:
+            continue
+        if it[1].startswith("[ruling]") or (it[1].startswith("[page]") and not it[3]) or (
+                it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT):
+            return None
+    return ("the message at %s (%s) holds a grant word and has no home for it: add %s"
+            % (b["stamp"], text.split("\n")[0][:40], GRANT_HOMES))
+
+
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
     out, seen = [], {}
     for n, b in enumerate(blocks):
@@ -439,6 +614,11 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
         seen[text] = seen.get(text, 0) + 1
         if not b["items"] and n in burst:
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
+        grant = is_grant(text)
+        for found in (answer_problem(b, text, seen[text], homes, pages),
+                      grant_problem(b, text, [item(ln) for ln in b["items"]])):
+            if found:
+                out.append(found)
         for ln in b["items"]:
             it = item(ln)
             if it is None:
@@ -454,7 +634,11 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
                 if found:
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
-                found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1])
+                found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant)
+                if found:
+                    out.append(found)
+            elif homes is not None and it[3] and it[1].startswith("[note]"):
+                found = homes.closed_problem(it[0], it[1])
                 if found:
                     out.append(found)
         for i in open_ids([b], ("[standing]",)):
@@ -780,6 +964,8 @@ def main():
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
                 [FAIL_OPEN_SENDS % (label, "; ".join(why)) for label, why in sorted(
                     pages.skip.items(), key=lambda kv: kv[0] != "page")])
+            if homes.skip_closed:
+                notes.append(FAIL_OPEN_CLOSED % homes.skip_closed)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
