@@ -77,8 +77,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
-  roadmap-one-writer   deny. A `git push` whose destination is the checkout's record branch (lint/layout.py
-                       record_branch, else "roadmap"), unless the session's own get_session record (read
+  roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
+                       the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
+                       dry run, unless the session's own get_session record (read
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
                        it. No record, no transcript or no env id is a refusal. An override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
@@ -2715,7 +2716,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 

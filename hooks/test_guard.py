@@ -8129,6 +8129,14 @@ ROLE_LINES = {
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
     "triage-then-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1"),
+    # A set_session_tags call on another session leaves the own record current (ruling: lane orchestrator,
+    # 2026-11-01 about 19:00 CST).
+    "triage-then-other-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
+    "triage-then-tags-no-ids": role_call("g1", TRIAGE_TAGS) + [role_use("t1", SET_SESSION_TAGS, {"add": ["x"]}),
+                                                               role_result("t1", "ok")],
+    "untagged-then-other-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER),
+    "untagged-then-both-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER)
+    + role_tag_call("t2"),
     "triage-title": role_call("g1", LANE_TAGS, title="handed to cs-build:triage"),
     "other-triage": role_call("g1", TRIAGE_TAGS, session=ROLE_OTHER),
     "triage-then-lane": role_call("g1", TRIAGE_TAGS) + role_call("g2", LANE_TAGS),
@@ -8292,6 +8300,43 @@ record_refuse("a lane's HEAD push from the roadmap checkout is refused", VCS + "
 # A fork's record branch is its own. Its extras file names roadmap-fork, so that push is refused there.
 record_refuse("a lane's push of roadmap-fork is refused in the fork that names it its record branch",
               VCS + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=RECFORK)
+# The default name stays a record branch in a fork too (ruling: lane orchestrator, 2026-11-01 18:59 CST): a fork's
+# lane still may not write `roadmap`. These two replace the cases that allowed it.
+record_refuse("a lane's push to roadmap in the fork is refused, since roadmap is a record branch in a fork too",
+              VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
+record_refuse("a lane's push to roadmap with git -C into the fork is refused, roadmap being a record branch in a fork too",
+              VCS + " -C " + slash(RECFORK) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECROADMAP)
+# git -C moves the judgment to that checkout: the fork's own name is refused from a checkout that does not name it.
+record_refuse("a lane's push of roadmap-fork with git -C into the fork is refused, judged by that checkout",
+              VCS + " -C " + slash(RECFORK) + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=PUSHFEAT)
+# A push handed to a shell, eval or ssh is still a push (decision guard-reads-wrapped-commands).
+record_refuse("a push to roadmap inside bash -c is refused",
+              'bash -c "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_refuse("a push to roadmap inside sh -lc with single quotes is refused",
+              "sh -lc '" + VCS + " push origin roadmap'", LANE_TRANSCRIPT)
+record_refuse("a push to roadmap inside eval is refused", 'eval "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_refuse("a bare push inside bash -c is judged by the checkout the call runs in",
+              'bash -c "' + VCS + ' push"', LANE_TRANSCRIPT, cwd=RECROADMAP)
+record_refuse("a push inside bash -c after a cd is judged by the folder it moved to",
+              "cd " + slash(RECROADMAP) + ' && bash -c "' + VCS + ' push"', LANE_TRANSCRIPT)
+record_allow("a push to lane/foo inside bash -c is allowed", 'bash -c "' + VCS + ' push origin lane/foo"',
+             LANE_TRANSCRIPT)
+record_allow("a triage session's push to roadmap inside bash -c is allowed",
+             'bash -c "' + VCS + ' push origin roadmap"', TRIAGE_TRANSCRIPT)
+# A dry run moves no branch, so it stays allowed (read_verb in guard.py).
+record_allow("a lane's dry run of a push to roadmap with --dry-run is allowed",
+             VCS + " push --dry-run origin roadmap", LANE_TRANSCRIPT)
+record_allow("a lane's dry run of a push to roadmap with -n is allowed", VCS + " push -n origin roadmap",
+             LANE_TRANSCRIPT)
+record_refuse("a push to roadmap after a dry run in another segment is still refused",
+              VCS + " push -n origin lane/foo && " + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+# A set_session_tags call on another session leaves the own proof current. One on the own session voids it.
+record_allow("a triage record then a tag call on another session is allowed", VCS + " push origin roadmap",
+             role_path("triage-then-other-tags"))
+record_refuse("a triage record then a tag call that names no sessions is refused, it may have named this one",
+              VCS + " push origin roadmap", role_path("triage-then-tags-no-ids"))
+record_refuse("a triage record then a tag call on another session and on this one is refused",
+              VCS + " push origin roadmap", role_path("untagged-then-both-tags"))
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
 record_refuse("a comment opener inside a string does not hide a push to roadmap",
               'echo "# note" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
@@ -8333,10 +8378,6 @@ record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS +
              LANE_TRANSCRIPT)
 record_allow("a lane's bare push from the feat checkout is allowed", VCS + " push", LANE_TRANSCRIPT)
 record_allow("a lane's HEAD push from the feat checkout is allowed", VCS + " push origin HEAD", LANE_TRANSCRIPT)
-record_allow("a lane's push to roadmap in the fork is allowed, since the fork's record is roadmap-fork",
-             VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
-record_allow("a lane's push with git -C into the fork is allowed, judged by the fork's record branch",
-             VCS + " -C " + slash(RECFORK) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECROADMAP)
 # Text that names the push is text, in quotes, a heredoc body, a comment and a commit message.
 record_allow("a push to roadmap named in single quotes is text", "echo '" + VCS + " push origin roadmap'",
              LANE_TRANSCRIPT)
@@ -8411,6 +8452,10 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-tags"), carries=("get_session",))
     trust_allow(_trust_word + " after a set_session_tags call and then a newer untagged read allows",
                 _trust_tool, role_path("tags-then-untagged"))
+    trust_allow(_trust_word + " after an untagged read and then a set_session_tags call on another session allows",
+                _trust_tool, role_path("untagged-then-other-tags"))
+    trust_refuse(_trust_word + " after an untagged read and set_session_tags calls on another session and on this one is refused",
+               _trust_tool, role_path("untagged-then-both-tags"), carries=("get_session",))
     trust_refuse(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
                _trust_tool, role_path("tags-then-coordinator"))
     trust_refuse(_trust_word + " after an untagged read and then a newer lane read is refused",
