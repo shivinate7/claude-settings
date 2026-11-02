@@ -26,6 +26,13 @@ lifts it: then the call is allowed and no later rule runs, so `never_lifted` che
 override lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
+Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
+set_override_veto and session_home_keep):
+  handoff-unread       deny. After compaction, a call from the main session while its handoff is
+                       unread. The reason names the handoff and says to Read it. A payload with
+                       `agent_id` passes. An override lifts it. A failed import allows.
+                       (precompact-handoff, item 9)
+
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
@@ -338,7 +345,11 @@ while True:
             os.makedirs(folder, exist_ok=True)
             text = " ".join(("%s: %s: %s" % (_loading, type(exc).__name__, exc)).split())[:120]
             with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
-                handle.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), "", "crash", "guard-crash",
+                # Same form as record(): ISO 8601 with a colon UTC offset. datetime is imported here, not
+                # taken from guard_core, so the writer survives the failure it reports.
+                from datetime import datetime
+                stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+                handle.write("\t".join([stamp, "", "crash", "guard-crash",
                                         text, "-"]) + "\n")  # the one literal "-": guard_core failed to load
         except Exception:
             pass
@@ -860,6 +871,11 @@ WORKTREE_HOME_REASON = (
     "Rule (worktree home): this agent's own working tree is gone, or this call reaches outside "
     "it. "
     "Remedy: make no further change. Stop, and report this to your orchestrator."
+)
+
+HANDOFF_UNREAD_REASON = (
+    "Rule (handoff unread): context was compacted and this session has not read its handoff. "
+    "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
 
 OTHER_CHECKOUT_REASON = (
@@ -2016,20 +2032,19 @@ def role_model_table(pointer_root):
     return table or None
 
 
-def role_has_model_pin(pointer_root, role):
-    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
-    frontmatter, False when none does, None when the folder cannot be read."""
+def role_agent_keys(pointer_root):
+    """Yield the frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with
+    frontmatter, in file order, one file read at a time. Raises OSError when the folder or a file cannot be read, so
+    a caller that stops early never reads the files after its match. The reader of agent frontmatter for the role
+    rules. In lint/check_agent_models.py, main() reads the same files and frontmatter() parses their text for its
+    own model check."""
     folder = os.path.join(pointer_root, "agents")
-    try:
-        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
-    except OSError:
-        return None
-    for name in files:
+    for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
         try:
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 lines = handle.read(ROLE_TABLE_MAX).splitlines()
-        except (OSError, ValueError):
-            return None
+        except ValueError as exc:
+            raise OSError("agent file is not text: %s" % name) from exc
         if not lines or lines[0].strip() != "---":
             continue
         keys = {}
@@ -2038,9 +2053,56 @@ def role_has_model_pin(pointer_root, role):
                 break
             key, _, value = line.partition(":")
             keys.setdefault(key.strip(), value.strip())
-        if keys.get("name", "").lower() == role.lower() and keys.get("model"):
-            return True
+        yield keys
+
+
+def role_has_model_pin(pointer_root, role):
+    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
+    frontmatter, False when none does, None when the folder cannot be read."""
+    try:
+        for keys in role_agent_keys(pointer_root):
+            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+                return True
+    except OSError:
+        return None
     return False
+
+
+# General-purpose and claude have no agents/ file, so they are listed here to count as real roles. Plan and Explore
+# have agents/ files and are listed too, so the check does not depend on those files.
+ROLE_BUILTINS = (ROLE_DEFAULT, "claude", "Plan", EXPLORE_ROLE)
+
+
+def role_list_drift(pointer_root):
+    """One line per disagreement between the role table and the three role lists, [] when all agree or when the
+    table or the agents folder cannot be read (the lint check reports that as unknown). Lint-time only. Cost per
+    lint run: each agent file is read 3 times and the table twice. main() in lint/check_agent_models.py reads each
+    file once (frontmatter() parses that text), role_list_problems reads the table and the files once to test
+    readability, and this function reads both again. floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
+    A real role has an agents/ file `name` or is built in, which drops the table's non-role keys."""
+    table = role_model_table(pointer_root)
+    if table is None:
+        return []
+    try:
+        agents = list(role_agent_keys(pointer_root))
+    except OSError:
+        return []
+    import override
+    real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
+    on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
+    # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137 (which model a search agent may run). Remove it then.
+    standing_want = on["opus"] | {EXPLORE_ROLE}
+    override_want = {role for role in table if role in real} - on["opus"] - {EXPLORE_ROLE}
+    lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
+             ("OPUS_STANDING_ROLES", "hooks/guard.py", set(OPUS_STANDING_ROLES), standing_want, "an opus row"),
+             ("OPUS_ROLES", "hooks/override.py", set(override.OPUS_ROLES), override_want, "a row below opus"))
+    lines = []
+    for name, home, have, want, row in lists:
+        for role in sorted(have - want):
+            lines.append("%s lists %s, but the role table does not put it on %s (%s)" % (name, role, row, home))
+        for role in sorted(want - have):
+            lines.append("%s lacks %s, which the role table puts on %s (%s)" % (name, role, row, home))
+    return lines
 
 
 def role_name(table, subagent_type) -> str:
@@ -3339,6 +3401,15 @@ def judge(payload) -> None:
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
+    # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
+    # Not in never_lifted: the owner may mean the call. A failed import allows.
+    try:
+        from reread_check import unread_handoff
+    except Exception:
+        unread_handoff = None
+    unread = unread_handoff(payload) if unread_handoff else ""
+    if unread:
+        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
