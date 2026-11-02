@@ -46,7 +46,8 @@ of the repo's waiting page: {"n": int, "status": str, "home": str}. An item is l
 is "closed", its home (trimmed, with an optional leading "step " dropped) equals the id of a step that
 is not done, and none of that step's note, why or ask matches `item <n>` (any case, an optional #).
 Each entry reads `<step id> (page item <n>)`. The row reads one unknown entry, never an empty list,
-when the live file is missing or unreadable, has no items list, or holds an item row of the wrong shape.
+when the live file is missing or unreadable, its readAt is bad (the stale-step row's readAt cases), it has no
+items list, or it holds an item row of the wrong shape. A skipped session row does not blank this row.
 
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
@@ -545,6 +546,7 @@ def live_work(path, steps, slug=None):
             why.append("unknown (the live file was read %d minutes ago; read it again)" % minutes)
         elif minutes < -FUTURE_MINUTES:
             why.append("unknown (the live file's readAt is in the future)")
+    read_why = why[0] if why else None  # the page-ruling row takes the readAt reasons only, never the sessions ones
     if not isinstance(raw.get("sessions"), list):
         why.append("unknown (the live file has no sessions list)")
     elif not slug:
@@ -566,7 +568,9 @@ def live_work(path, steps, slug=None):
         why.append("unknown (%d pull rows skipped)" % pulls_skipped)
     stale_why = why[0] if why else None
     page_items, items_why = None, None
-    if not isinstance(raw.get("items"), list):
+    if read_why:
+        items_why = read_why
+    elif not isinstance(raw.get("items"), list):
         items_why = "unknown (the live file has no items list)"
     elif not all(isinstance(r, dict) and type(r.get("n")) is int and isinstance(r.get("status"), str)
                  and isinstance(r.get("home"), str) for r in raw["items"]):

@@ -134,12 +134,16 @@ After each build the builder prints the upkeep list for the triage thread. It na
     lane as live), or is more than 5 minutes ahead;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
-  optional leading `step ` is dropped, and the rest must equal the step id exactly. A cite is the
-  words `item <n>` in any case, with an optional `#` (`page item 9`). Each entry reads
-  `<id> (page item <n>)`. Triage files the ruling on the step's note. The row reads one
-  `unknown (<why>)` entry, never an empty list, when `--live` is missing or unreadable, has no
-  `items` list, or holds an `items` row of the wrong shape (`n` not an int, `status` or `home` not a
-  string). An empty `items` list reads zero;
+  optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
+  is the words `item <n>` in any case, with an optional `#` (`page item 9`). Each item is cited on its
+  own: "items 9 and 10" cites item 10 only. Each entry reads `<id> (page item <n>)`. Triage files
+  the ruling on the step's note. The row reads one `unknown (<why>)` entry, never an empty list, when:
+  - `--live` is missing or unreadable;
+  - `readAt` is not an ISO time, has no time zone, is over 60 minutes old or is more than 5 minutes ahead;
+  - there is no `items` list;
+  - an `items` row has the wrong shape (`n` not an int, `status` or `home` not a string).
+
+  A skipped session row does not blank this row. An empty `items` list reads zero;
 - `Step:` trailers that name no step.
 
 ## Cost
