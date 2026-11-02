@@ -852,12 +852,22 @@ LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its po
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
                       "item's text by that letter (option A, pick b), never by any other key. A label carries "
                       "no letter of its own: the page key is the only letter.")
-# A label's opening letter tag: B:, B -, B., (B), [B], each with an optional leading "Option ". The dot and
-# the dash need a space or the end after them, so "B2B", "B-tree" and "B.C." are not tags. A word such as A
-# or I that opens a sentence has none of these marks after it, so it is not a tag.
+# A label's opening letter tag: B:, B -, B., B), (B), [B], each with an optional leading "Option ". The dot, the
+# parenthesis and the dash (hyphen, en dash, em dash) need a space or the end after them, so "B2B", "B-tree" and
+# "B.C." are not tags. A word such as A or I that opens a sentence has none of these marks after it.
+# A label that is only "Option B" is a tag too.
 LABEL_TAG = re.compile(
-    r"^\s*(?:option\s+)?(?:\(([a-z])\)|\[([a-z])\]|([a-z])(?:\s*:|(?:\s*[.\-\u2013\u2014])(?=\s|$)))",
+    r"^\s*(?:option\s+([a-z])\s*$"
+    r"|(?:option\s+)?(?:\(([a-z])\)|\[([a-z])\]|([a-z])(?:\s*:|(?:\s*[.)\-\u2013\u2014])(?=\s|$))))",
     re.I)
+
+
+def _label_tag_hit(label, keys, what: str) -> str:
+    """The matched tag when `label` opens with a letter tag naming a letter that is none of `keys`, else ""."""
+    tag = LABEL_TAG.match(label) if isinstance(label, str) else None
+    if tag and next(g for g in tag.groups() if g).lower() not in keys:
+        return what + " that opens with a letter tag for another letter: " + tag.group(0).strip()
+    return ""
 
 
 def _letter_of(index: int) -> str:
@@ -884,6 +894,25 @@ def key_named_hit(texts) -> str:
     return ""
 
 
+def _design_label_hit(designs, options) -> str:
+    """The matched tag when a design's label opens with a letter tag naming none of the keys of the options
+    that carry the design (the page's optionDesigns: by slug, or by the design's own `option`). A design no
+    option carries has no key to judge."""
+    if not isinstance(designs, list):
+        return ""
+    for d in designs:
+        if not isinstance(d, dict):
+            continue
+        keys = {o["key"] for o in options if o.get("design") == d.get("slug") and d.get("option") in (None, o["key"])}
+        if isinstance(d.get("option"), str):
+            keys.add(d["option"])
+        if keys:
+            hit = _label_tag_hit(d.get("label"), keys, "design label")
+            if hit:
+                return hit
+    return ""
+
+
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
     position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
@@ -906,12 +935,12 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
-            label = o.get("label")
-            tag = LABEL_TAG.match(label) if isinstance(label, str) else None
-            if tag:
-                named = next(g for g in tag.groups() if g).lower()
-                if named != key:
-                    return "option label that opens with a letter tag for another letter: " + tag.group(0).strip()
+            hit = _label_tag_hit(o.get("label"), {key}, "option label")
+            if hit:
+                return hit
+        hit = _design_label_hit(data.get("designs"), options)
+        if hit:
+            return hit
     return key_named_hit(_item_text_fields(data))
 
 
