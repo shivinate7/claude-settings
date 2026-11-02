@@ -85,7 +85,6 @@ NEWEST = 5
 # The extras: {"map": "<path of the repo map>", "github": "<owner>/<repo>"}. The rolled-out layout
 # extras file holds them under "roadmap"; else the record branch holds them in EXTRAS.
 EXTRAS = "roadmap/extras.json"
-GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
 COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
 BOARD_WHY = ("unknown (session-board's store lives on one machine, so a cloud build cannot read it; "
              "Live work reads project threads and GitHub instead)")
@@ -98,6 +97,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
@@ -357,11 +357,8 @@ def extras(repo, source):
 
 
 def github_slug(repo, extra):
-    if isinstance(extra.get("github"), str):
-        return extra["github"]
-    url = (git(repo, "remote", "get-url", "origin") or "").strip()
-    hit = GITHUB.search(url)
-    return (hit.group(1) or hit.group(2)) if hit else None
+    """The repo's `owner/name`: the extras' "github" key, else the origin (git_reads.github_repo, shared with the guard)."""
+    return git_reads.github_repo(repo, extra)
 
 
 def shallow_edge(repo):

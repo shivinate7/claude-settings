@@ -1,6 +1,7 @@
 """The git and session reads the guard and the janitor share: one `git` call, the primary
 checkout, a tree's status, the default branch, a branch's proof of survival, a worktree's lock
-and whether a live session stands in it.
+and whether a live session stands in it. The roadmap build also imports it for `github_repo`, the one
+reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
@@ -240,6 +241,54 @@ def read_default_base(where: str, remote: str = "origin"):
 def resolve_default_base(where: str, remote: str = "origin"):
     """The short ref name of the default branch, or None when none answers (`read_default_base`)."""
     return read_default_base(where, remote)[0]
+
+
+# The repo's layout extras file, from its root. lint/layout.json "extras" holds the same path; the guard reads this
+# literal so a lane create_session reads one file, not the layout file too.
+LAYOUT_EXTRAS = (".claude", "layout-extras.json")
+_READ_EXTRAS = object()
+
+
+def origin_slug(url):
+    """`owner/name` from the last two segments of an origin URL's path, `.git` and a trailing slash stripped, or None.
+    The host is never read: the cloud proxy serves `http://local_proxy@127.0.0.1:<port>/git/<owner>/<name>`.
+    `scheme://host[:port]/path` keeps the path; scp `user@host:path` (a colon before the first slash) keeps what
+    follows the colon; a POSIX path with no scheme is the path itself."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if "://" in url:
+        path = url.split("://", 1)[1].partition("/")[2]
+    elif ":" in url.partition("/")[0]:
+        path = url.partition(":")[2]
+    else:
+        path = url
+    segments = [part for part in path.split("/") if part]  # an empty part, as from a trailing slash, is dropped
+    if len(segments) < 2:
+        return None
+    owner, name = segments[-2], segments[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return "%s/%s" % (owner, name) if owner and name else None
+
+
+def github_repo(root, extras=_READ_EXTRAS):
+    """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
+    "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it
+    already found; the guard passes none, so this reads the "roadmap" object of `root`'s layout extras file: one
+    file read. The origin costs one git start, and only when the extras name no repo."""
+    if extras is _READ_EXTRAS:
+        try:
+            with open(os.path.join(root, *LAYOUT_EXTRAS), encoding="utf-8") as handle:
+                extras = json.load(handle).get("roadmap")
+        except Exception:  # no file, or one that does not parse: the origin decides
+            extras = None
+    if isinstance(extras, dict) and isinstance(extras.get("github"), str):
+        return extras["github"]
+    done = _git(str(root), "remote", "get-url", "origin")
+    if done is None or done.returncode != 0:
+        return None
+    return origin_slug(done.stdout)
 
 
 def branch_is_ancestor(where: str, base: str, branch: str):
