@@ -1,0 +1,9 @@
+{
+ "title": "Each repo's page is titled \"<repo> Cockpit\"",
+ "phase": "now",
+ "status": "doing",
+ "order": 484.100004,
+ "why": "Owner ruling in chat, Nov 2 11:12 CST: each repo's page is titled just \"<repo> Cockpit\".",
+ "note": "Lane page-title-cockpit (session_013NEJL1fXkpTkTyXnWoLpvb), started 11:13 CST by the coordinator. After it merges, each page writer republishes its page; triage 5 republishes the claude-settings page. Port: yes, every repo's page.",
+ "updatedAt": "2026-11-02T17:16:00Z"
+}
