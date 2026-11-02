@@ -81,7 +81,8 @@ def kind_of(rel):
 
 def list_files(root):
     """Tracked files when root is a git tree, else every file outside WALK_SKIP. None when git fails."""
-    if os.path.exists(os.path.join(root, ".git")):
+    dotgit = os.path.join(root, ".git")
+    if os.path.isfile(dotgit) or os.path.exists(os.path.join(dotgit, "HEAD")):  # an empty `.git` folder is no repo
         proc = _nowindow.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
         if proc.returncode != 0:
             return None  # a walk would add untracked files, so the result is unknown

@@ -273,6 +273,9 @@ jobs:
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
 
+      - name: Time-pinned finder fixture suite
+        run: python3 lint/test_find_time_pinned.py
+
       - name: Mod version fixture suite
         run: python3 lint/test_check_mod_versions.py
 
