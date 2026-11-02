@@ -18,13 +18,13 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null or one role}. It lives beside the override, so the two never
-replace each other. It lifts only the Opus spawn ask of guard rule agent-model-cap, never that
+replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
 rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
-roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn ask that no Opus override
+roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
 one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
 payload's session id. Exactly one step must bind the lane, with status not done and a grant whose role
@@ -49,13 +49,19 @@ from datetime import datetime, timedelta, timezone
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
-PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the first word, then the rest
+# The first word, then one mark (`,` `.` `!` `;` or a dash) that is dropped, then the rest. A mark counts
+# only with whitespace or the end after it, so `override.py` and `override-15m` grant nothing. A bare
+# `:` counts as on main (`override:reason`).
+PROMPT = re.compile(
+    r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
+    re.I | re.S)
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
-OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn ask
-# The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan and Explore,
-# which run Opus by standing grant (OPUS_STANDING_ROLES in hooks/guard.py).
+OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
+# The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
+# grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
+# refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (decision agent-model-cap).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
               "general-purpose", "claude")
 LOG_REASON_MAX = 300
@@ -287,7 +293,7 @@ def _take_step(session_id, spawn_role, cwd):
     lane = _lane_id(session_id)
     if lane is None or not isinstance(cwd, str) or not cwd:
         return None
-    import git_reads  # lazy: only an Opus spawn ask that no Opus override lifted needs it
+    import git_reads  # lazy: only an Opus spawn refusal that no Opus override lifted needs it
     hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, STEP_REF, "--", STEP_DIR)
     if hits is None or hits.returncode != 0:
         return None  # no ref, no repository, no hit or a git error: no lift
@@ -331,7 +337,7 @@ def step_read():
 def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None):
     """LIFTED when the override lifts this refusal (a one-act override is spent), UNREAD when its file
     exists but cannot be read, else None. Of calls racing for one one-act override, only the one that
-    creates its claim marker wins. For the Opus spawn ask (rule OPUS_RULE with a spawn_role) the Opus
+    creates its claim marker wins. For the Opus spawn refusal (rule OPUS_RULE with a spawn_role) the Opus
     override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
     spends no one-act override. `cwd` is the call's directory, where the step grant is read."""
     opus = _take_opus(session_id, spawn_role, at) if rule == OPUS_RULE and spawn_role is not None else None
