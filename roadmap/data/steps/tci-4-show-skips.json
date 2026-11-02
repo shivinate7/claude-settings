@@ -1,0 +1,9 @@
+{
+ "title": "Skipped tests show as a count, so CI cannot look green while tests never run",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3375004,
+ "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 4 of 12, ranked by harm avoided.",
+ "note": "Repos: claude-settings (verdict prints SKIP), then ios-adblock and banchi CI steps print a skip count. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T00:35:00Z"
+}

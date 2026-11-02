@@ -1,9 +1,9 @@
 {
-  "title": "The shared browser setup's cache key names the OS version, so a runner upgrade never reuses a stale browser",
-  "phase": "cleanup",
-  "status": "doing",
-  "order": 103.33771,
-  "why": "Incident (joyous lane, Nov 1, coordinator 16:52 CST): ubuntu-latest moved to 26.04, and actions/playwright-setup's cache key carries no OS version, so a WebKit cached on 24.04 fails with a missing libicudata.so.74.",
-  "note": "Lane session_013NEJL2RL1oJ8YaGiAAB5i7, started Nov 1 16:52 CST (coordinator). Fix in one home: actions/playwright-setup adds the runner's OS version to its cache key; every repo that pins the action picks it up with its next pin move (c76). Stopgap: joyous pins ubuntu-24.04; that pin is a debt in joyous's own debt store, removed once joyous moves its pin to the fixed action. degen's own failure is fixed by degen #313 (Playwright 1.64.1), which waits on shiv: the cloud refused attaching degen, so no session here can merge it. Linked: c78 (one shared browser setup). Placed after one-model-rule (triage 5): a live CI break in a child repo.",
-  "updatedAt": "2026-11-01T22:54:00Z"
+ "title": "The shared browser setup's cache key names the OS version, so a runner upgrade never reuses a stale browser",
+ "phase": "cleanup",
+ "status": "done",
+ "order": 103.33771,
+ "why": "Incident (joyous lane, Nov 1, coordinator 16:52 CST): ubuntu-latest moved to 26.04, and actions/playwright-setup's cache key carries no OS version, so a WebKit cached on 24.04 fails with a missing libicudata.so.74.",
+ "note": "Lane session_013NEJL2RL1oJ8YaGiAAB5i7, started Nov 1 16:52 CST (coordinator). Fix in one home: actions/playwright-setup adds the runner's OS version to its cache key; every repo that pins the action picks it up with its next pin move (c76). Stopgap: joyous pins ubuntu-24.04; that pin is a debt in joyous's own debt store, removed once joyous moves its pin to the fixed action. degen's own failure is fixed by degen #313 (Playwright 1.64.1), which waits on shiv: the cloud refused attaching degen, so no session here can merge it. Linked: c78 (one shared browser setup). Placed after one-model-rule (triage 5): a live CI break in a child repo.\nDone: landed in batch 58, PR #977, merged Nov 1 18:28 CST.",
+ "updatedAt": "2026-11-02T00:35:00Z"
 }

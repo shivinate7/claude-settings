@@ -1,0 +1,9 @@
+{
+ "title": "A lane PR with new tests carries their red run on the old code",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3375002,
+ "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 2 of 12, ranked by harm avoided.",
+ "note": "Repo: claude-settings. Fix the test-author wording; done when a check refuses a lane PR with new tests and no red run. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T00:35:00Z"
+}

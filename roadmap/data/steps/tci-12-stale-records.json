@@ -1,0 +1,9 @@
+{
+ "title": "The stale claude-settings test records are fixed",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3375012,
+ "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 12 of 12, ranked by harm avoided.",
+ "note": "Repo: claude-settings. Fix docs/decisions/same-check-kinds.md, lint/rule_mechanisms.json and the cap comments in .github/workflows/checks.yml. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T00:35:00Z"
+}

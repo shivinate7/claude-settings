@@ -1,0 +1,9 @@
+{
+ "title": "The shared Playwright setup works on Ubuntu 26.04 in every repo",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3375001,
+ "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 1 of 12, ranked by harm avoided.",
+ "note": "Repo: degen first, then claude-settings if the shared action needs it. Done when degen main is green and each other repo (mailaudit included) has a green browser run, or a recorded check that its Playwright version supports Ubuntu 26.04. Related: playwright-cache-os-key landed in PR #977; callers still move their pins. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T00:35:00Z"
+}

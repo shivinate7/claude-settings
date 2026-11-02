@@ -1,0 +1,9 @@
+{
+ "title": "Each shipped platform names where it is tested",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3375005,
+ "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 5 of 12, ranked by harm avoided.",
+ "note": "Repos: degen, mailaudit, banchi, home, ios-adblock. Each shipped platform gets a CI job or a named local check, with a green run on the last merge. Waits on page item 133 (Swift tests in CI). Port: yes.",
+ "updatedAt": "2026-11-02T00:35:00Z"
+}
