@@ -699,8 +699,10 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 50 min, about 1.5x the slowest of 30 runs, 32.7 min (decision ci-job-caps).
-    timeout-minutes: 50
+    # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps (the 80% target was
+    # already met): slowest 37.1 min is 67% of it (range 25.6-37.1, median 31.1, n 15 green runs of 20,
+    # 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -714,8 +716,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Own cap: slowest 16.62 min is 76% of it, so a hang reads red at this step.
       - name: Guard fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        timeout-minutes: 22
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
