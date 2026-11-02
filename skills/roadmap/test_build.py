@@ -556,11 +556,13 @@ class UpkeepFixture(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None):
-        """Write the --live file. The sessions key appears only when given. readAt is five minutes old by default."""
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None):
+        """Write the --live file. The sessions and items keys appear only when given. readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
         if sessions is not None:
             value["sessions"] = list(sessions)
+        if items is not None:
+            value["items"] = items
         self.write_live(value)
         return value
 
@@ -789,6 +791,345 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-repo:Owner/Fixture", "cs-step:c1")])
         self.assertEqual(self.stale(self.out_with_live()), (1, "c2 (set to todo)"))
+
+
+class PageRulings(UpkeepFixture):
+    """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
+    The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
+    `<step id> (page item <n>)` per item, or one `unknown (<why>)` when the --live file cannot say."""
+
+    ROW = "page rulings not on their step"
+    CITE = "Ruling (page item 9): keep"
+    UNKNOWN = r"unknown \((?:[^()]|\([^()]*\))*\)"  # one entry, with at most one level of parentheses inside
+
+    def item(self, n, home="c153", status="closed"):
+        """One row of the --live file's items list, as the publisher copies it from the waiting page."""
+        return {"n": n, "status": status, "home": home}
+
+    def rulings(self, out):
+        return self.row(out, self.ROW)
+
+    def listed(self, entries):
+        return sorted(entries.split(", ")) if entries else []
+
+    def assert_unknown(self, out):
+        """The row reads exactly one unknown entry: never a list, never an empty row. Returns the entry."""
+        count, entries = self.rulings(out)
+        self.assertEqual(count, 1, out)
+        self.assertIsNotNone(re.fullmatch(self.UNKNOWN, entries), entries)
+        return entries
+
+    def test_closed_item_whose_step_does_not_cite_it_is_listed(self):
+        """The incident: item 9 closed, step c153 open, its note never cites item 9. The file has no
+        sessions key and the fixture has no GitHub origin, and the row still reads."""
+        self.commit_step("c153", note="Waiting on the cull.")
+        self.publish(items=[self.item(9)])
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+
+    def test_the_same_item_cited_in_the_step_note_is_not_listed(self):
+        self.commit_step("c153", note=self.CITE)
+        self.publish(items=[self.item(9)])
+        self.assertEqual(self.rulings(self.out_with_live()), (0, ""))
+
+    def test_a_cite_in_why_or_ask_counts_too(self):
+        self.commit_step("c310", note="Waiting.", why=self.CITE)
+        self.commit_step("c311", note="Waiting.", ask=self.CITE)
+        self.commit_step("c312", note="Waiting.")  # control: listed, so an empty row cannot pass
+        self.publish(items=[self.item(9, home=sid) for sid in ("c310", "c311", "c312")])
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c312 (page item 9)"))
+
+    def test_cite_forms_match_the_item_number_only(self):
+        forms = {"page item 9": True, "waiting page item 9 a": True, "Item #9": True, "ITEM  9": True,
+                 "item 90": False, "item 19": False, "Ruling: keep": False}
+        steps = ["c%d" % (320 + i) for i in range(len(forms))]
+        for sid, note in zip(steps, forms):
+            self.commit_step(sid, note=note)
+        self.publish(items=[self.item(9, home=sid) for sid in steps])
+        expect = sorted("%s (page item 9)" % sid for sid, cited in zip(steps, forms.values()) if not cited)
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)), (len(expect), expect))
+
+    def test_a_cite_clears_only_its_own_item_number(self):
+        self.commit_step("c153", note=self.CITE)  # cites item 9 only
+        self.publish(items=[self.item(9), self.item(10)])
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)), (1, ["c153 (page item 10)"]))
+
+    def test_a_list_of_items_cites_only_the_number_right_after_item(self):
+        """Pins current behaviour: "page items 9 and 10" cites neither item, because the cite needs `item`
+        directly before the number. "item 9 and 10" cites 9 only, so 10 still lists."""
+        self.commit_step("c1", note="page items 9 and 10")
+        self.commit_step("c2", note="item 9 and 10", order=2)  # both steps written before the build, which checks out main
+        self.publish(items=[self.item(9, home="c1"), self.item(10, home="c1"),
+                            self.item(9, home="c2"), self.item(10, home="c2")])
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)),
+                         (3, sorted(["c1 (page item 9)", "c1 (page item 10)", "c2 (page item 10)"])))
+
+    def test_open_item_is_never_listed(self):
+        self.commit_step("c153", note="Waiting.")
+        self.commit_step("c154", note="Waiting.", order=2)  # control: closed, so an empty row cannot pass
+        self.publish(items=[self.item(9, status="open"), self.item(10, home="c154")])
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c154 (page item 10)"))
+
+    def test_home_that_names_no_step_is_never_listed(self):
+        self.commit_step("c154", note="Waiting.")
+        self.commit_step("c204", note="Waiting.", order=2)  # open, so "c204 (zoomed in)" fails on the exact compare
+        self.publish(items=[self.item(9, home="decision x"), self.item(10, home="c204 (zoomed in)"),
+                            self.item(11, home=""), self.item(12, home="c999"), self.item(13, home="c154")])
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)), (1, ["c154 (page item 13)"]))
+
+    def test_home_matches_a_step_id_exactly_after_trimming_and_the_step_prefix(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9, home="  c153 "), self.item(10, home="step c153"),
+                            self.item(11, home="STEP c153"), self.item(12, home="C153")])
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)),
+                         (3, sorted(["c153 (page item 9)", "c153 (page item 10)", "c153 (page item 11)"])))
+
+    def test_item_whose_step_is_done_is_never_listed(self):
+        self.commit_step("c2", status="done", note="Waiting.", order=2)
+        self.commit_step("c154", note="Waiting.", order=3)  # control: listed
+        self.publish(items=[self.item(9, home="c2"), self.item(10, home="c154")])
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c154 (page item 10)"))
+
+    def test_a_step_that_is_not_done_is_listed_in_any_status(self):
+        statuses = ("todo", "doing", "active")
+        steps = ["c%d" % (330 + i) for i in range(len(statuses))]
+        for i, (sid, status) in enumerate(zip(steps, statuses)):
+            self.commit_step(sid, status=status, note="Waiting.", order=2 + i)
+        self.publish(items=[self.item(20 + i, home=sid) for i, sid in enumerate(steps)])
+        expect = sorted("%s (page item %d)" % (sid, 20 + i) for i, sid in enumerate(steps))
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)), (len(expect), expect))
+
+    def test_no_live_file_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        _, out = self.build_from_main()
+        self.assertIn("--live", self.assert_unknown(out))
+
+    def test_live_file_with_no_items_list_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        for label, items in (("missing", None), ("an object", {}), ("a string", "c153")):
+            with self.subTest(items=label):
+                self.publish(items=items)
+                self.assertIn("items", self.assert_unknown(self.out_with_live()))
+
+    def test_an_empty_items_list_reads_zero_not_unknown(self):
+        self.publish(items=[])
+        self.assertEqual(self.rulings(self.out_with_live()), (0, ""))
+
+    def test_an_item_row_of_the_wrong_shape_reads_the_row_unknown_once(self):
+        self.commit_step("c154", note="Waiting.")
+        good = self.item(10, home="c154")  # a builder that skips the bad row and lists this one fails here
+        bad_rows = [
+            "c153 (page item 9)",
+            {"n": "9", "status": "closed", "home": "c153"},
+            {"n": True, "status": "closed", "home": "c153"},
+            {"n": 9.0, "status": "closed", "home": "c153"},
+            {"n": 9, "status": None, "home": "c153"},
+            {"n": 9, "status": "closed", "home": 153},
+            {"n": 9, "status": "closed"},
+            {"n": 9, "home": "c153"},
+        ]
+        for bad in bad_rows:
+            with self.subTest(row=bad):
+                self.publish(items=[good, bad])
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_live_file_without_items_still_bakes_live_work(self):
+        """Only the page-ruling row reads items: a file without the key keeps its threads and read time."""
+        value = self.publish(threads=[{"title": "Build a", "state": "working"}])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        self.assertEqual([t["title"] for t in build_info(page)["live"]["threads"]], ["Build a"])
+
+    def test_a_read_at_over_an_hour_old_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)], read_at=iso_ago(5))  # control: a fresh read lists the item
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for minutes in (61, 120):
+            with self.subTest(minutes=minutes):
+                self.publish(items=[self.item(9)], read_at=iso_ago(minutes))
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_read_at_that_is_not_an_iso_time_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)])  # control: a fresh read lists the item
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for read_at in ("yesterday", "2026-13-45T99:00:00Z"):
+            with self.subTest(read_at=read_at):
+                self.publish(items=[self.item(9)], read_at=read_at)
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_read_at_more_than_five_minutes_ahead_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)], read_at=iso_ago(-2))  # control: within five minutes ahead, the item lists
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for minutes in (6, 90):
+            with self.subTest(minutes=minutes):
+                self.publish(items=[self.item(9)], read_at=iso_ago(-minutes))
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_skipped_session_row_does_not_make_the_row_unknown(self):
+        """The sessions list feeds the stale-step row only. A wrong-shape session row is skipped there,
+        and this row still lists its uncited item."""
+        self.commit_step("c153", note="Waiting.")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING"), "session_test03"],
+                     items=[self.item(9)])
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertIn("session 2", build_info(page)["live"]["skipped"])
+        self.assertEqual(self.rulings(out), (1, "c153 (page item 9)"))
+
+
+class DatedClaims(UpkeepFixture):
+    """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
+    whole days old. A claim is `Finding` or `Checked` (any case), then a date with no "." or newline between
+    and within 40 characters. The date is `Mon D` or `Month D`, optionally with `, YYYY` or ` YYYY`, or ISO
+    `YYYY-MM-DD`. A date with no year takes this year, or the year before if it is in the future. The row
+    reads `<step id> (<date as written>)` per step."""
+
+    ROW = "dated claims to re-check before a lane starts"
+    MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December")
+
+    def today(self):
+        return datetime.datetime.now(datetime.timezone.utc).date()  # the clock the build reads
+
+    def ago(self, days):
+        return self.today() - datetime.timedelta(days=days)
+
+    def md(self, d):
+        """`Mon D` in English. A fixed table, not strftime: `%-d` is glibc-only and `%b` follows the locale."""
+        return "%s %d" % (self.MONTHS[d.month - 1][:3], d.day)
+
+    def full(self, d):
+        return "%s %d" % (self.MONTHS[d.month - 1], d.day)
+
+    def claims(self, out):
+        return self.row(out, self.ROW)
+
+    def listed(self, entries):
+        """Sorted `<id> (<date>)` entries. A date can hold a comma, so match whole entries, not split on commas."""
+        return sorted(m.group(0) for m in re.finditer(r"\S+ \([^()]*\)", entries))
+
+    def build(self):
+        """The build with no --live file: the row reads notes only, so it must not need the live file."""
+        return self.build_from_main()[1]
+
+    def control(self):
+        """A doing step whose claim is STALE_DAYS old, so each negative case also has a listed row. Returns its entry."""
+        self.commit_step("ctl", status="doing", note="Finding, %s: control." % self.md(self.ago(10)))
+        return "ctl (%s)" % self.md(self.ago(10))
+
+    def test_the_incident_shape_is_listed(self):
+        """Incident: step r5 is doing, and its only claim is ten days old."""
+        self.commit_step("r5", status="doing", note="Finding, %s: ios-adblock, joyous and degen: each a drifted "
+                         "impeccable skill." % self.md(self.ago(10)))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "r5 (%s)" % self.md(self.ago(10))])))
+
+    def test_a_newer_claim_wins_whichever_comes_first(self):
+        """The newest claim decides, so a fresh Checked clears an old Finding in either order."""
+        old = "Finding, %s: drifted skills." % self.md(self.ago(10))
+        new = "Checked, %s: gone." % self.md(self.ago(1))
+        self.commit_step("newer-first", status="doing", note="%s %s" % (new, old))
+        self.commit_step("newer-last", status="doing", note="%s %s" % (old, new))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_an_active_step_is_listed(self):
+        self.commit_step("a1", status="active", note="Finding, %s: x." % self.md(self.ago(10)))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "a1 (%s)" % self.md(self.ago(10))])))
+
+    def test_todo_done_and_other_statuses_are_never_listed(self):
+        stale = "Finding, %s: x." % self.md(self.ago(10))
+        for sid, status in (("t1", "todo"), ("d1", "done"), ("b1", "blocked")):
+            self.commit_step(sid, status=status, note=stale)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_a_gap_over_40_characters_a_period_or_a_newline_does_not_count(self):
+        stale = self.md(self.ago(10))
+        self.commit_step("far", status="doing", note="Finding, %s%s: x." % ("word " * 12, stale))  # 62 characters between
+        self.commit_step("dot", status="doing", note="Finding. %s: x." % stale)
+        self.commit_step("newline", status="doing", note="Finding,\n%s: x." % stale)
+        self.commit_step("near", status="doing", note="Finding, after the cull, %s: x." % stale)  # 18 between: counts
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "near (%s)" % stale])))
+
+    def test_an_iso_date_is_read_as_written(self):
+        iso = self.ago(10).isoformat()
+        self.commit_step("iso", status="doing", note="Checked %s: x." % iso)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "iso (%s)" % iso])))
+
+    def test_a_yearless_date_in_the_future_takes_the_year_before(self):
+        # Feb 29 has no year before a common year, so the case steps past it.
+        future = next(d for d in (self.today() + datetime.timedelta(days=n) for n in range(3, 9))
+                      if (d.month, d.day) != (2, 29))
+        self.commit_step("fut", status="doing", note="Finding, %s: x." % self.md(future))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "fut (%s)" % self.md(future)])))
+
+    def test_an_explicit_year_is_kept_as_written(self):
+        day = self.ago(10)
+        self.commit_step("comma", status="doing", note="Finding, %s, %d: x." % (self.md(day), day.year))
+        self.commit_step("space", status="doing", note="Checked %s %d: x." % (self.md(day), day.year))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (3, sorted([
+            ctl, "comma (%s, %d)" % (self.md(day), day.year), "space (%s %d)" % (self.md(day), day.year)])))
+
+    def test_each_written_form_is_read_as_the_spec_says(self):
+        """One step per form, one build. A form that lists gives its date as written; the rest give None."""
+        day = self.ago(10)
+        forms = [  # (step id, note and why, date as written or None when the step must not list)
+            ("full", {"note": "Finding, %s: x." % self.full(day)}, self.full(day)),
+            ("upper", {"note": "checked %s: x." % self.md(day).upper()}, self.md(day).upper()),
+            ("five", {"note": "Finding, %s: x." % self.md(self.ago(5))}, self.md(self.ago(5))),
+            ("four", {"note": "Finding, %s: x." % self.md(self.ago(4))}, None),
+            ("fresh", {"note": "Checked %s: x." % self.md(self.ago(1))}, None),
+            ("no-claim", {"note": "Waiting on the cull. The lane ran 10 days ago."}, None),
+            ("word-only", {"note": "Finding, nothing dated here."}, None),
+            ("why-only", {"note": "Waiting on the cull.", "why": "Finding, %s: x." % self.md(day)}, None),
+        ]
+        for sid, fields, _ in forms:
+            self.commit_step(sid, status="doing", **fields)
+        ctl = self.control()
+        expect = sorted([ctl] + ["%s (%s)" % (sid, date) for sid, _, date in forms if date])
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (len(expect), expect))
+
+    def test_a_hyphenated_word_is_not_a_claim(self):
+        """`checked` or `finding` inside a hyphenated word is not a claim. Each note holds a stale date after it."""
+        stale = self.md(self.ago(10))
+        self.commit_step("h1", status="doing", note="lane c146-checked-map (coordinator, %s 16:13 CDT)" % stale)
+        self.commit_step("h2", status="doing", note="Re-checked %s: x." % stale)
+        self.commit_step("h3", status="doing", note="finding-x %s: x." % stale)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_a_lowercase_may_is_not_a_month(self):
+        """Lowercase `may` is an ordinary word, so `may 2` is no date. Capitalized `May 2` still is. The day is
+        20 on the days when May 2 is too recent to be stale, so the lowercase text would be stale if read."""
+        today = self.today()
+        day = 20 if datetime.date(today.year, 5, 2) <= today <= datetime.date(today.year, 5, 6) else 2
+        self.commit_step("lc", status="doing", note="Finding: this may %d lanes re-run." % day)
+        self.commit_step("cap", status="doing", note="Finding, May %d: x." % day)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "cap (May %d)" % day])))
 
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
