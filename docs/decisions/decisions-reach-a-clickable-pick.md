@@ -16,7 +16,7 @@ The refusal is one line: "Pick guard: Input Needed offers a pick with options an
 
 Incident, named: on 2026-10-27 a degen session put "Two ways: A (my pick) ... B ..." under Input Needed as report text only. No control offered a click, and the owner found it late. This guard is the answer to that named incident. It also guards a likely risk: any session ends a report this way.
 
-Incident, named: owner, 2026-11-01 23:26 CST. A coordinator promised "send after 5 min" in each report from 22:25 and sent none until 23:25. The pick-send check and the lane pick guard answer it. Kind: named incident. Landed 2026-11-02.
+Incident, named: owner, 2026-11-01 23:26 CST. A coordinator promised "send after 5 min" in each report from 22:25 and sent none until 23:25. Its lanes kept their picks in their own chat. The pick-send check and the lane pick guard answer it. Kind: named incident. Landed 2026-11-02.
 
 **What counts as a pick with options.** `OPTION_LINE_RE`, `OPTION_INLINE_RE`, `OPTION_TAG_RE`, `OPTION_BARE_RE` and `OPTION_OR_RE` in `lint/report_guard.py` hold it. It reads the Input Needed item only.
 
