@@ -192,7 +192,7 @@ record. A child names the record and keeps only what applies to its repo (decisi
 The fix goes in the child: replace the copy with the record's name.
 It reads the same files and units as Supersede. It reads the records from the decisions folder of the
 parent clone, never the child's own. It holds no copy of them. Before it compares, it drops headings, `Kind:`,
-`Plan:` and `Home:` lines, HTML comments, code spans, quoted text, numbers and time zones, on both sides.
+`Plan:` and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read.
 
 A unit is a hit when runs of 5 or more words that it shares with records cover at least 12 of its words
 and at least half of them. A line that names a record and its ruling time cites it, and passes.

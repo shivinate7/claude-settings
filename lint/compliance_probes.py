@@ -71,10 +71,11 @@ slugs: a record file this change adds against origin/main, in the child's own re
 restates: a unit of the child's rule Markdown that copies the text of a claude-settings record (decision
   child-cites-not-copies). It reads the same files and units as supersede, and the records of the decisions
   folder of this script's own checkout, never the child's. Before it compares, it drops headings, `Kind:`, `Plan:`
-  and `Home:` lines, HTML comments, code spans, double-quoted text, numbers and time zones, on both sides. A unit
-  is refused when its runs of SHARED_RUN or more words that a record also holds cover at least SHARED_MIN of its
-  words and at least RESTATES_SHARE of them. A line that names a record and its ruling time cites it, and passes.
-  An item names the file, the line and the record, and the remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A claude-settings
+  and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read: a
+  copy in quotes is a copy. A unit is refused when its runs of SHARED_RUN or more words that a record also holds
+  cover at least SHARED_MIN of its words and at least RESTATES_SHARE of them. A line that names a record and its
+  ruling time cites it, and passes. An item names the file, the line and the record, and the remedy; it never
+  prints record text. An unreadable records folder or no record makes the group unknown. A claude-settings
   checkout is n/a.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
@@ -483,8 +484,8 @@ def probe_supersede(root):
 HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
 # One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
-# length), an HTML comment, or a double-quoted span. An opener with no closer is plain text.
-STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->|\"[^\"]*\"|“[^”]*”")
+# length) or an HTML comment. An opener with no closer is plain text. Quoted text is read: a copy in quotes is a copy.
+STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->")
 NUMBERED = re.compile(r"\S*\d\S*")
 TIME_ZONES = {"utc", "gmt", "cst", "cdt", "est", "edt", "pst", "pdt", "mst", "mdt"}
 SHARED_RUN = 5  # words in a row that a unit and a record hold
@@ -494,7 +495,7 @@ RESTATES_SHARE = 0.5
 
 def plain_words(unit):
     """The lowercase words of `unit` that a comparison reads: no heading, Kind/Plan/Home line, comment, code span,
-    quote, number or time zone."""
+    number or time zone."""
     if HEADING_LINE.match(unit) or META_LINE.match(unit):
         return []
     words = re.findall(r"[a-z]+", NUMBERED.sub(" ", STRIPPED.sub(" ", unit)).lower())
