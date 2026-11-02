@@ -9012,6 +9012,26 @@ class RedMainBrake(Env):
     def test_a_green_schedule_run_clears_an_older_red_push_run(self):
         self.green_run_of("schedule")
 
+    def test_a_green_push_run_does_not_clear_an_older_red_schedule_run(self):
+        # a schedule run is judged in its own group: a newer green push never hides it
+        rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")], {920: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 920", out)
+
+    def test_a_green_schedule_run_clears_an_older_red_schedule_run(self):
+        rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_a_dynamic_event_run_is_not_judged(self):
+        # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
+        rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")], {925: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_base_events_are_the_keys_of_the_events_file(self):
+        # one home: the events are the keys of actions/ci-alarm/events.json, so a copy in merge.py cannot drift from it
+        with open(os.path.join(REPO, "actions", "ci-alarm", "events.json")) as f:
+            self.assertEqual(set(merge.Host.BASE_EVENTS), set(json.load(f)))
+
     def test_a_pull_request_run_is_not_judged(self):
         rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
