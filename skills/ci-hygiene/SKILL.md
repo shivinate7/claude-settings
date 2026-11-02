@@ -33,7 +33,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    as `snippets.md`, section 4 shows. A draft run skips every job (step 11), so it must never cancel
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
 5. **Cap each job's time.** Caps are generous on purpose, as a stopgap, until the repo's
-   time-pinned tests are gone. Decision `ci-job-caps` (each job's cap) holds the rule, the table and how to measure again. A new job's provisional cap
+   time-pinned tests are gone. Decision `ci-job-caps` (each job's cap)
+   holds the rule, the table and how to measure again. A new job's provisional cap
    is 60 min. Mark it `# provisional` until it has 5 green runs. The owner may set another
    provisional cap. Keep `merge.deadlineMinutes` in `.github/stamp.json` at least the largest cap
    plus 5. The merge tool's `warn` mode flags a job past 70% of its cap. A job that ends at its cap with no red CI
