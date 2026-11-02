@@ -2321,7 +2321,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI
             if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree
                 raise Stop(f"the records page on the ready #{n} is stale, and there is no claim to make or resume, so a page-only push would restart its CI. "
-                           f"Nothing was claimed or pushed. {stale_page_remedy(n, head_claim(wt))}")
+                           f"Nothing was claimed or pushed. {stale_page_remedy(n, head_claim(wt))} {RECORDS_CITE}")
             if trailer or rebuilt:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
