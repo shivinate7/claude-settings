@@ -552,6 +552,25 @@ WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
 
+# BASE COPIES (the base-copies incident, Nov 1 22:41 CST). A worktree whose staged files are byte-equal to
+# its branch base, with no unpushed commit, must remove. BCINC is that state: its branch moved onto P1 with
+# `update-ref`, so its index holds the base P0, an ancestor of HEAD. Each other tree breaks one condition
+# of BCINC. BCORIGIN is a bare origin. BCMAIN and BCSECOND are clones of it: BCMAIN is the primary every
+# tree hangs from, and BCSECOND is the other tree that pushes P1.
+BCORIGIN = os.path.join(ROOT, "bc-origin.git")
+BCSEED = os.path.join(ROOT, "bc-seed")
+BCMAIN = os.path.join(ROOT, "bc-main")
+BCSECOND = os.path.join(ROOT, "bc-second")
+BCINC = os.path.join(ROOT, "bc-inc")                # case 1: the incident state, no other condition
+BCUNIQUE = os.path.join(ROOT, "bc-unique")          # case 2: a worktree edit whose content is in no commit
+BCUNTRACKED = os.path.join(ROOT, "bc-untracked")    # case 3: an untracked file beside the incident
+BCUNPUSHED = os.path.join(ROOT, "bc-unpushed")      # case 4: an unpushed commit on HEAD beside the incident
+BCBYPASS = os.path.join(ROOT, "bc-bypass")          # case 5: a staged blob held only by an unpushed commit
+BCCLEAN = os.path.join(ROOT, "bc-clean")            # case 6: a clean tree on a pushed branch
+BCLOCKED = os.path.join(ROOT, "bc-locked")          # the incident tree, locked
+BCLIVE = os.path.join(ROOT, "bc-live")              # the incident tree, with a live session standing in it
+BCLIVECFG = os.path.join(ROOT, "bc-livecfg")        # the config folder holding that session's record
+
 # SYMLINK WORKTREES (the feed-build incident). An agent linked
 # `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
 # (`?? app/node_modules`), and removing the link deletes only the link, never its target. So an
@@ -1721,6 +1740,134 @@ def _build_worktrees():
             % (prune_clean_check.stdout, prune_clean_check.stderr)
         )
 
+# The status lines of the incident state: f.txt staged as its base copy, and g.txt staged as a deletion.
+BC_INCIDENT = ["M  f.txt", "D  g.txt"]
+
+
+def _base_git(where, *args):
+    """One git call for the base-copy fixture. A failed call stops the suite, as the other builders do."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: git %s failed in %r. stderr: %s"
+                 % (" ".join(args), where, done.stderr.strip()))
+    return done
+
+
+def _base_copy_tree(where, branch, moved=True):
+    """Build one base-copy tree at `where`: a linked worktree of BCMAIN on `branch`, pushed at the base P0.
+    When `moved`, BCSECOND pushes P1 (a change to f.txt, and a new g.txt) to that branch. BCMAIN then fetches
+    it and moves the branch onto P1 with `update-ref`, which leaves the worktree's index on P0."""
+    _base_git(BCMAIN, "worktree", "add", "-q", where, "-b", branch)
+    _base_git(where, "push", "-q", "origin", branch)
+    if not moved:
+        return
+    _base_git(BCSECOND, "fetch", "-q", "origin")
+    _base_git(BCSECOND, "checkout", "-q", "-B", branch, "origin/" + branch)
+    write(os.path.join(BCSECOND, "f.txt"), "changed on %s\n" % branch)
+    write(os.path.join(BCSECOND, "g.txt"), "new on %s\n" % branch)
+    _base_git(BCSECOND, "add", "-A")
+    _base_git(BCSECOND, *IDENT, "commit", "-q", "-m", "change " + branch)
+    _base_git(BCSECOND, "push", "-q", "origin", branch)
+    _base_git(BCMAIN, "fetch", "-q", "origin")
+    _base_git(BCMAIN, "update-ref", "refs/heads/" + branch, "refs/remotes/origin/" + branch)
+
+
+def _require_base_copy(where, status, unpushed, staged_ancestor=True):
+    """Stop the suite unless `where` really shows the status lines named, `unpushed` commits of HEAD on no
+    remote-tracking ref, and, for the incident shape, a staged f.txt that equals the base copy and not HEAD.
+    A case refused for the wrong reason would pass unnoticed otherwise, so each shape is read back with git."""
+    lines = sorted(_porcelain(where))
+    if lines != sorted(status):
+        sys.exit("fixture setup failed in build_fixtures: %r git status --porcelain is %r, want %r"
+                 % (where, lines, sorted(status)))
+    missing = run_vcs(where, "rev-list", "HEAD", "--not", "--remotes").stdout.split()
+    if len(missing) != unpushed:
+        sys.exit("fixture setup failed in build_fixtures: %r has %d commits of HEAD on no remote-tracking "
+                 "ref, want %d" % (where, len(missing), unpushed))
+    if staged_ancestor:
+        index = run_vcs(where, "rev-parse", ":f.txt").stdout.strip()
+        base = run_vcs(where, "rev-parse", "origin/main:f.txt").stdout.strip()
+        head = run_vcs(where, "rev-parse", "HEAD:f.txt").stdout.strip()
+        if not index or index != base or index == head:
+            sys.exit("fixture setup failed in build_fixtures: %r staged f.txt is not the base copy: "
+                     "index %r, base %r, HEAD %r" % (where, index, base, head))
+
+
+def _build_base_copies():
+    """The base-copy trees. BCINC is the incident state, and each other tree breaks one condition of it.
+    Built once, on the first case that names one of them."""
+    _base_git(ROOT, "init", "-q", "--bare", BCORIGIN)
+    _base_git(BCORIGIN, "symbolic-ref", "HEAD", "refs/heads/main")
+    make_repo(BCSEED, {"f.txt": "base\n", "k.txt": "k base\n"})
+    _base_git(BCSEED, "remote", "add", "origin", BCORIGIN)
+    _base_git(BCSEED, "push", "-q", "origin", "main")
+    _base_git(ROOT, "clone", "-q", BCORIGIN, BCMAIN)
+    _base_git(ROOT, "clone", "-q", BCORIGIN, BCSECOND)
+
+    # Case 1: the incident. Nothing else is wrong with this tree.
+    _base_copy_tree(BCINC, "bc-inc")
+    _require_base_copy(BCINC, BC_INCIDENT, 0)
+
+    # Case 2: one worktree edit whose content is in no commit. Its index blob is still the base copy.
+    _base_copy_tree(BCUNIQUE, "bc-unique")
+    write(os.path.join(BCUNIQUE, "k.txt"), "unique text, in no commit\n")
+    _require_base_copy(BCUNIQUE, BC_INCIDENT + [" M k.txt"], 0)
+
+    # Case 3: an untracked file beside the incident.
+    _base_copy_tree(BCUNTRACKED, "bc-untracked")
+    write(os.path.join(BCUNTRACKED, "new.txt"), "untracked\n")
+    _require_base_copy(BCUNTRACKED, BC_INCIDENT + ["?? new.txt"], 0)
+
+    # Case 4: one unpushed commit on HEAD, beside the incident. The commit is limited to u.txt, so the
+    # staged base copies stay staged and the tree stays dirty, as in case 1.
+    _base_copy_tree(BCUNPUSHED, "bc-unpushed")
+    write(os.path.join(BCUNPUSHED, "u.txt"), "local only\n")
+    _base_git(BCUNPUSHED, "add", "u.txt")
+    _base_git(BCUNPUSHED, *IDENT, "commit", "-q", "-m", "local only", "--", "u.txt")
+    _require_base_copy(BCUNPUSHED, BC_INCIDENT, 1)
+
+    # Case 5: the staged f.txt is the blob of one unpushed commit X, which only HEAD's reflog keeps. HEAD is
+    # then moved back to the pushed tip with `update-ref`, so the index keeps X and HEAD is fully pushed.
+    _base_copy_tree(BCBYPASS, "bc-bypass", moved=False)
+    write(os.path.join(BCBYPASS, "f.txt"), "unpushed text, in one local commit\n")
+    _base_git(BCBYPASS, "add", "f.txt")
+    _base_git(BCBYPASS, *IDENT, "commit", "-q", "-m", "local only")
+    local_commit = _base_git(BCBYPASS, "rev-parse", "HEAD").stdout.strip()
+    _base_git(BCBYPASS, "update-ref", "refs/heads/bc-bypass", "refs/remotes/origin/bc-bypass")
+    _require_base_copy(BCBYPASS, ["M  f.txt"], 0, staged_ancestor=False)
+    staged = _base_git(BCBYPASS, "rev-parse", ":f.txt").stdout.strip()
+    committed = _base_git(BCBYPASS, "rev-parse", local_commit + ":f.txt").stdout.strip()
+    reflog = _base_git(BCBYPASS, "log", "-g", "--format=%H", "HEAD").stdout.split()
+    on_remote = _base_git(BCBYPASS, "branch", "-r", "--contains", local_commit).stdout.strip()
+    if staged != committed or local_commit not in reflog or on_remote:
+        sys.exit("fixture setup failed in build_fixtures: the bypass tree does not hold the unpushed blob in "
+                 "HEAD's reflog only: staged %r, committed %r, in reflog %r, on a remote %r"
+                 % (staged, committed, local_commit in reflog, on_remote))
+
+    # Case 6: a clean tree on a pushed branch, with no condition broken.
+    _base_copy_tree(BCCLEAN, "bc-clean", moved=False)
+    _require_base_copy(BCCLEAN, [], 0, staged_ancestor=False)
+
+    # Locked: the incident tree, locked. The lock is the only condition that refuses it.
+    _base_copy_tree(BCLOCKED, "bc-locked")
+    _base_git(BCMAIN, "worktree", "lock", BCLOCKED, "--reason", "fixture")
+    _require_base_copy(BCLOCKED, BC_INCIDENT, 0)
+
+    # Live session: the incident tree, with one record whose cwd is the tree and whose pid is this run's own.
+    _base_copy_tree(BCLIVE, "bc-live")
+    self_pid = os.getpid()
+    os.makedirs(os.path.join(BCLIVECFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(BCLIVECFG, "sessions", "%d.json" % self_pid),
+        json.dumps({"pid": self_pid, "cwd": slash(BCLIVE), "startedAt": _real_process_start_ms(self_pid)}),
+    )
+    _require_base_copy(BCLIVE, BC_INCIDENT, 0)
+
+
+lazy_fixture([BCMAIN, BCINC, BCUNIQUE, BCUNTRACKED, BCUNPUSHED, BCBYPASS, BCCLEAN, BCLOCKED, BCLIVE,
+              BCLIVECFG], _build_base_copies)
+
+
 def _build_links():
     """The symlink worktrees: a link to a folder outside, a link to a tracked file, and controls."""
     # ----------------------------------------------------------------- symlink worktrees
@@ -2825,6 +2972,33 @@ sh("worktree remove: a session record for a pid that is no longer running does n
    VCS + " worktree remove " + slash(WTDEADSESSION), "allow", cwd=WTMAIN, config=WTDEADCFG)
 sh("worktree remove: a live pid whose recorded start time does not match does not deny",
    VCS + " worktree remove " + slash(WTSTALESTART), "allow", cwd=WTMAIN, config=WTSTALESTARTCFG)
+
+# BASE COPIES. Each case is a tree in the state built by _build_base_copies. Case 1 is the incident: its
+# staged files are the base copy, an ancestor of HEAD, and nothing else is wrong, so it passes. Cases 2 to 5
+# each break one condition, and cases 7 and 8 keep the locked and live reads on the incident tree. Each of
+# those is refused today on the dirty read. After the build, each must be refused on its own condition.
+# Case 5 pairs with case 1: the matching commit is pushed in case 1 and unpushed in case 5. Case 6 is a
+# clean tree on a pushed branch, and it keeps today's allow.
+sh("worktree remove: base copies, the incident tree, whose index is an ancestor of HEAD, passes",
+   VCS + " worktree remove " + slash(BCINC), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, the same incident tree passes with the force flag",
+   VCS + " worktree remove --force " + slash(BCINC), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, one worktree edit whose content is in no commit still denies",
+   VCS + " worktree remove " + slash(BCUNIQUE), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, an untracked file beside the incident tree still denies",
+   VCS + " worktree remove " + slash(BCUNTRACKED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, an unpushed commit on HEAD still denies",
+   VCS + " worktree remove " + slash(BCUNPUSHED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, a staged blob held only by an unpushed commit still denies",
+   VCS + " worktree remove " + slash(BCBYPASS), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, the same staged blob with the force flag still denies",
+   VCS + " worktree remove --force " + slash(BCBYPASS), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, a clean tree on a pushed branch keeps today's allow",
+   VCS + " worktree remove " + slash(BCCLEAN), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, the incident tree, locked, still denies",
+   VCS + " worktree remove " + slash(BCLOCKED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, the incident tree under a live session still denies",
+   VCS + " worktree remove " + slash(BCLIVE), "deny", "shared-tree", cwd=BCMAIN, config=BCLIVECFG)
 
 # `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
 # is an ASK, never a deny, whatever the run location.
