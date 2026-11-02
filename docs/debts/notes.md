@@ -891,6 +891,9 @@
 - pw-26-04-cause-unread: the decision cites `libicudata.so.74` on 26.04 from the joyous lane's report, not a log this lane read (docs/decisions/one-browser-setup-no-apt.md). Decision: one-browser-setup-no-apt
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
+- page-ruling-recite: the roadmap upkeep row "page rulings not on their step" lists a closed item again when a rewrite of its step note drops the `item <n>` cite (skills/roadmap/build.py, unfiled).
+- page-ruling-free-home: that row matches only a bare step id or `step <id>` as an item's home, so a free-text home such as "c204 (zoomed picture)" is a silent miss (skills/roadmap/build.py, unfiled).
+- page-ruling-doc-gaps: build.py's module docstring omits two unknown cases that SKILL.md lists (not a JSON object; no threads or pulls list), and no test covers them (skills/roadmap/build.py, test_build.py).
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
