@@ -306,6 +306,157 @@ def branch_is_empty(where: str, base: str, branch: str):
     return None if proof is None else bool(proof)
 
 
+# ------------------------------------------------------------------ a worktree of pushed copies
+#
+# A worktree whose branch ref moved under its index shows staged files that equal an older commit,
+# so `git status` is dirty although every byte already sits in a pushed commit. The record is the
+# decision when-a-worktree-may-be-removed.
+#
+# TRUE only when ALL hold; a read that fails is None, anything else False:
+#   - no untracked file, and no unmerged path;
+#   - `git rev-list HEAD --not --remotes` is empty: local refs only, no fetch, no network;
+#   - each dirty path's index entry AND worktree content equal that path's entry (mode and blob, or
+#     its absence for a deletion) in ONE candidate commit, and that commit is on a remote-tracking
+#     ref. Candidates: HEAD, HEAD's merge-base with the default branch, HEAD's reflog (capped).
+#     A blob found only in a local-only commit never counts.
+# No `--find-object` and no history walk: the candidate set is bounded.
+#
+# COST, per call, and only on `git worktree remove` with a dirty tree: at most 14 fixed git process
+# starts, then one `ls-tree` per candidate tried (stops once every path matched; at most
+# 2 + BASE_COPY_REFLOG_CAP) and one `for-each-ref --contains` per candidate a match uses. Files
+# written: none. No timer, no log, no long-lived process.
+BASE_COPY_REFLOG_CAP = 20
+BASE_COPY_PATH_CAP = 200  # one command line carries the paths; more than this is not judged
+
+
+def _z_names(answer):
+    """NUL-split names of a `-z` read, or None when the read failed."""
+    if answer is None or answer.returncode != 0:
+        return None
+    return [name for name in answer.stdout.split("\0") if name]
+
+
+def _tree_entries(where: str, rev: str, paths):
+    """{path: (mode, blob)} for PATHS in commit REV (a missing path is absent), None on failure.
+    Literal pathspecs: a name holding a glob character names only itself."""
+    answer = _git(where, "--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev, "--", *paths)
+    if answer is None or answer.returncode != 0:
+        return None
+    entries = {}
+    for record in answer.stdout.split("\0"):
+        head, _, name = record.partition("\t")
+        parts = head.split()
+        if len(parts) == 3 and name:
+            entries[name] = (parts[0], parts[2])
+    return entries
+
+
+def _index_entries(where: str, paths):
+    """{path: (mode, blob)} of PATHS in the index, None on failure or when a path is unmerged."""
+    answer = _git(where, "--literal-pathspecs", "ls-files", "-s", "-z", "--full-name", "--", *paths)
+    if answer is None or answer.returncode != 0:
+        return None
+    entries = {}
+    for record in answer.stdout.split("\0"):
+        head, _, name = record.partition("\t")
+        parts = head.split()
+        if len(parts) == 3 and name:
+            if parts[2] != "0" or name in entries:
+                return None
+            entries[name] = (parts[0], parts[1])
+    return entries
+
+
+def _worktree_entries(where: str, paths):
+    """{path: (mode, blob) or None} for the worktree content of PATHS (None: file deleted).
+    False when a path is a link or a directory (not judged), None when the read failed."""
+    entries, hashed = {}, []
+    for path in paths:
+        full = os.path.join(where, path)
+        if not os.path.lexists(full):
+            entries[path] = None
+        elif os.path.islink(full) or not os.path.isfile(full):
+            return False
+        else:
+            hashed.append(path)
+    if hashed:
+        answer = _git(where, "hash-object", "--", *hashed)
+        if answer is None or answer.returncode != 0:
+            return None
+        blobs = answer.stdout.split()
+        if len(blobs) != len(hashed):
+            return None
+        for path, blob in zip(hashed, blobs):
+            executable = os.stat(os.path.join(where, path)).st_mode & 0o111
+            entries[path] = ("100755" if executable else "100644", blob)
+    return entries
+
+
+def dirty_paths_are_pushed_copies(where: str, lines):
+    """True when every dirty path of the worktree at WHERE equals a copy held by a pushed commit
+    (see the block comment above), False when one does not or the tree is not judged, None when a
+    read failed. LINES are the `git status --porcelain` lines the caller already holds."""
+    for line in lines:
+        if line.startswith("?? ") or "U" in line[:2] or line[:2] in ("AA", "DD"):
+            return False
+    unpushed = _git(where, "rev-list", "HEAD", "--not", "--remotes")
+    if unpushed is None or unpushed.returncode != 0:
+        return None
+    if unpushed.stdout.strip():
+        return False
+    staged = _z_names(_git(where, "diff-index", "--cached", "--name-only", "-z", "HEAD"))
+    edited = _z_names(_git(where, "diff-files", "--name-only", "-z"))
+    if staged is None or edited is None:
+        return None
+    paths = sorted(set(staged) | set(edited))
+    # A name git printed that this decode altered cannot be looked up again, so it proves nothing.
+    if not paths or len(paths) > BASE_COPY_PATH_CAP or any("�" in path for path in paths):
+        return False
+    index = _index_entries(where, paths)
+    if index is None:
+        return None
+    changed = _worktree_entries(where, [p for p in paths if p in set(edited)])
+    if changed is None:
+        return None
+    if changed is False:
+        return False
+    # What the worktree holds: the index entry, unless the file differs from the index.
+    held = {p: (index.get(p), changed[p] if p in changed else index.get(p)) for p in paths}
+    if any(entry and entry[0] == "160000" for pair in held.values() for entry in pair):
+        return False  # a submodule is not a blob
+    head = _git(where, "rev-parse", "HEAD")
+    if head is None or head.returncode != 0:
+        return None
+    candidates = [head.stdout.strip()]
+    base = resolve_default_base(where)
+    if base:
+        merged = _git(where, "merge-base", "HEAD", base)
+        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
+            candidates.append(merged.stdout.strip())
+    reflog = _git(where, "log", "-g", "--format=%H", "-n", str(BASE_COPY_REFLOG_CAP), "HEAD")
+    if reflog is not None and reflog.returncode == 0:
+        candidates.extend(reflog.stdout.split())
+    remaining, tried = set(paths), set()
+    for commit in candidates:
+        if not remaining:
+            break
+        if commit in tried:
+            continue
+        tried.add(commit)
+        tree = _tree_entries(where, commit, sorted(remaining))
+        if tree is None:
+            continue
+        matched = {p for p in remaining if held[p][0] == held[p][1] == tree.get(p)}
+        if not matched:
+            continue
+        on_remote = branch_on_remote(where, commit)
+        if on_remote is None:
+            return None
+        if on_remote:
+            remaining -= matched
+    return not remaining
+
+
 def worktree_locked(where: str, target: str):
     """True when TARGET is registered as a locked worktree, False when it is registered and
     unlocked, None when the registration cannot be read, or TARGET is not a registered worktree

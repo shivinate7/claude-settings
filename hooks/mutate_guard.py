@@ -169,8 +169,8 @@ MUTATIONS = [
      'return _absolute(arg, where)\n    return ""', "guard",
      'worktree remove: the force flag does not skip the subject read'),
     ("worktree-remove: uncommitted and untracked work no longer denies",
-     '.rstrip("/"))))]\n    if lines:\n        return False',
-     '.rstrip("/"))))]\n    if False:\n        return False',
+     '    if lines and not dirty_paths_are_pushed_copies(target, lines):',
+     '    if False and not dirty_paths_are_pushed_copies(target, lines):',
      "guard", 'worktree remove: uncommitted and untracked work denies'),
     ("worktree-remove: a locked tree no longer denies",
      '    locked = worktree_locked(where, target)\n    if locked is None:\n        return None\n'
