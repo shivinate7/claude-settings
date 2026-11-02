@@ -88,6 +88,8 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
+  The lane first runs `merge --lane-lint <pr>`. The batch runner runs it again on each lane head
+  before the join, and refuses a red lane (claude-settings record `lanes-run-no-full-ci-job`).
   A lane never rebases onto main and never merges.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner

@@ -22,9 +22,10 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before th
 
 <The checks that prove the task done, and who reviews the diff.>
 
-Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane joins a batch, run
-`bin/ci-job checks --lint --base origin/main` once and report its verdict. It runs the fast lint steps
-of the checks job, the STE lint among them, and no full suite.
+Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
+`~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
+`bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
+among them, and no full suite. A red lane does not hand off.
 
 ## Report
 

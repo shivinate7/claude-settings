@@ -58,7 +58,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `bin/ci-job checks --lint --base origin/main` before it joins. A lane never runs a whole CI job
+   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
+   each lane head before the join. A red lane does not join. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run.
