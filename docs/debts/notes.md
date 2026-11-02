@@ -1030,3 +1030,6 @@
 - time-pinned-offset-clock-input: an injected clock with an offset is listed as elapsed-assert: `edit_idle(tree, time.monotonic() - 1)` inside `assertIsNone` (claude-settings janitor/test_sweep.py:5178). The finder reads a `-` inside a call's arguments as a measured duration, though the test sets a clock, not a speed (lint/find_time_pinned.py). Decision: test-strategy-reset.
 - time-pinned-bracket-scan-slow: each hit can start a bracket scan across much of the file, so a multi-MB file with many hits is slow: a mutated 4.4 MB file took 12 s. Real files are unaffected (lint/find_time_pinned.py). Decision: test-strategy-reset.
 - interrupt-tool-refused: a test-author agent called interrupt_session by mistake, and the auto-mode classifier refused it, with no effect. Step: refusal-stricter-fixes (refusals narrowed to their rule).
+- page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
+- clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
+- close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
