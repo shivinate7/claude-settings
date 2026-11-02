@@ -176,11 +176,21 @@ DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
                        r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
+# The new-thing change side, "adds <X>": group 1 is X.
+PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
                   "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+
+
+def departs_sides(rest):
+    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
+    if len(parts) < 2:
+        return rest.strip(), "", False
+    return parts[0].strip(), parts[1].strip(), True
 
 
 def departs_hit(text) -> str:
@@ -193,13 +203,13 @@ def departs_hit(text) -> str:
     if not lines:
         return "no Departs from line"
     for rest in lines:
-        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-        if len(parts) < 2:
+        main, change, split = departs_sides(rest)
+        if not split:
             return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
-        main, change = parts[0].strip(), parts[1].strip()
         if not main or not change:
             return "Departs from line with an empty side"
-        if is_placeholder(main) or is_placeholder(change):
+        added = PORT_NEW_THING.fullmatch(change)
+        if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
@@ -221,22 +231,29 @@ PORT_REASON = ("A question about a port or redesign of an existing app is asked 
                "for a new thing), leave out holds, or set port to false if this is not a port.")
 
 
-# A port's Departs from line names the place on main as "<file>:<symbol>", or says "main" for a new thing
-# and then "adds <X>". Group 1 of the file:symbol form is the whole main side.
-PORT_MAIN_SIDE = re.compile(r"[\w./-]+:(?!//)[\w.$-]+(?:\(\))?")
-PORT_NEW_THING = re.compile(r"adds\b.*\S", re.I)
+# A port's Departs from line names the place on main as "<file>:<symbol>" (backticks around it are read, and
+# a path may hold [id], (group) and @ for a Next.js or alias path), or says "main" for a new thing and then
+# "adds <X>".
+PORT_MAIN_SIDE = re.compile(r"[\w./@\[\]()-]+:(?!//)[\w.$-]+(?:\(\))?")
 
 
 def port_departs_miss(text) -> str:
-    """The miss reason when a port's Departs from line, any of them, does not name `<file>:<symbol>` on main
-    (or `main` with `adds <X>`) and a change. "" when each does. A text with no such line is judged elsewhere."""
-    for rest in DEPARTS_LINE.findall(str(text or "")):
-        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-        main, change = (parts[0].strip(), parts[1].strip()) if len(parts) == 2 else (rest.strip(), "")
-        if main.lower() == "main" and PORT_NEW_THING.fullmatch(change):
+    """The miss reason when a port's Departs from line, any of them, is not a valid Departs from line (the
+    one predicate, departs_hit: no placeholder or no-change side) or does not name `<file>:<symbol>` on main
+    (or `main` with `adds <X>`). "" when each does. A text with no such line is judged elsewhere."""
+    text = str(text or "")
+    miss = departs_hit(text)
+    if miss:
+        return miss
+    for rest in DEPARTS_LINE.findall(text):
+        main, change, _ = departs_sides(rest)
+        main = main.strip("`").strip()
+        if main.lower() == "main":
+            if PORT_NEW_THING.fullmatch(change):
+                continue
+        elif PORT_MAIN_SIDE.fullmatch(main):
             continue
-        if not PORT_MAIN_SIDE.fullmatch(main) or not change:
-            return "port item whose Departs from line names no <file>:<symbol> on main"
+        return "port item whose Departs from line names no <file>:<symbol> on main"
     return ""
 
 

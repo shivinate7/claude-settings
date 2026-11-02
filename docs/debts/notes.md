@@ -907,3 +907,5 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- question-placeholder-trailing-period: a Goal, Problem or Based on line that is a placeholder followed by a period passes, because the check is a fullmatch of one `<...>` (hooks/question_form.py is_placeholder). Decision: question-form.
+- port-str-replace-no-symbol: a `context` str_replace on a port item skips the file:symbol rule, because the stored port flag is unseen there (hooks/question_form.py form_str_replace_hit). Decision: port-keeps-behaviour.
