@@ -67,7 +67,7 @@
         "kind": "guard",
         "ref": "coordinator-scope"
       },
-      "test": "hooks/test_guard.py::coordinator-scope: product_code_denied, Edit of src/app.py"
+      "test": "hooks/test_guard.py::coordinator-scope: product_code_denied, Edit of src/app.py; hooks/test_guard.py::coordinator-scope: coordinator_builder_spawn_denied"
     },
     "roles-one-role-per-agent": {
       "mechanism": {

@@ -122,6 +122,13 @@ Other tools, in `judge` order:
                        the call (`-a`: the modified tracked files too). A git read that fails judges nothing.
                        The reason says to brief a lane session. An override lifts it.
                        COORDINATOR_SCOPE_MODE "ask" turns the deny into an ask.
+                       The same rule id refuses a coordinator's acts (waiting-page ruling 111 a, 2026-11-01):
+                       a spawn (Agent or Task) whose subagent_type is not one of COORDINATOR_AGENT_ROLES, an
+                       empty or missing type included; a Workflow with an agent() call whose agentType is outside
+                       them, missing or unreadable; a merge, by the host's merge tool, `gh pr merge` or the merge
+                       tool's `--confirm`. create_session and start_session pass. It runs before the merge check
+                       and the shell judge, so a refused merge reads nothing from the network. The reasons name
+                       no target. An override lifts one act. COORDINATOR_SCOPE_MODE applies to these too.
                        (session-tiers, roles-orchestrator-never-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -259,7 +266,7 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
-        from shared_names import read_merge_role  # the one reader of the role file, for rule coordinator-scope
+        from shared_names import read_merge_role, role_path  #the one reader of the role file, for rule coordinator-scope
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
@@ -285,7 +292,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, _add_shape, _commit_shape,
             _is_python, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
+            merge_call_of, merge_check, merge_check_reason, merge_confirm_of, records_page_hit, role_proof_hit, settings_roots,
             TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -3219,6 +3226,22 @@ COORDINATOR_SCOPE_REASON = (
     "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
+# A coordinator's acts (rule coordinator-scope, waiting-page ruling 111 a, 2026-11-01 11:53 CST): in a coordinator build
+# only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only for a type of
+# COORDINATOR_AGENT_ROLES, compared casefolded. Cost: the role file is read once per call, shared with
+# coordinator_scope_hit (_cloud_coordinator); a spawn or Workflow call reads nothing else, and a shell call adds no
+# process (a string scan of the command).
+COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
+COORDINATOR_SPAWN_REASON = (
+    "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own. "
+    "Remedy: brief a lane session to do this work, with the files and the check that proves it. "
+    "Only Plan, Explore and claude-code-guide agents run in a coordinator session."
+)
+COORDINATOR_MERGE_REASON = (
+    "Rule (Roles): in a coordinator build only the batch runner merges. "
+    "Remedy: hand the branch, head and PR to the batch runner, or brief a lane session to do it."
+)
+_COORDINATOR_ROLE = {}
 # The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default,
 # laid out by its scaffold.py. skills/roadmap/build.py (record_source, DATA) tells the checkout apart the same
 # way. Not imported from there: that module is a builder script, and the guard must not load it per call.
@@ -3545,16 +3568,69 @@ def coordinator_interpreter_hit(command: str, cwd: str, session_id: str) -> str:
     return ""
 
 
+def _cloud_coordinator(payload) -> bool:
+    """True for a cloud session's own call (no agent_id, no agent_type, CLAUDE_CODE_REMOTE true) whose merge role is
+    `coordinator`. The role file is read once per process for one session id and config folder, so the two coordinator
+    rules share one read."""
+    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
+        return False
+    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
+        return False
+    key = (os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"), str(role_path()))
+    if key not in _COORDINATOR_ROLE:
+        _COORDINATOR_ROLE[key] = read_merge_role() == "coordinator"
+    return _COORDINATOR_ROLE[key]
+
+
+def _coordinator_type_refused(agent_type) -> bool:
+    """True when an agent type is not one a coordinator may run: missing, empty, not a string, or outside
+    COORDINATOR_AGENT_ROLES once casefolded."""
+    if not isinstance(agent_type, str):
+        return True
+    return agent_type.strip().casefold() not in {role.casefold() for role in COORDINATOR_AGENT_ROLES}
+
+
+def coordinator_act_hit(payload, tool: str, tool_input: dict):
+    """Rule coordinator-scope, the acts: (reason, matched) when a cloud coordinator's own call spawns an agent outside
+    COORDINATOR_AGENT_ROLES, runs a Workflow with such an agent() call, or merges; else ("", "")."""
+    if not isinstance(tool_input, dict):
+        return "", ""
+    is_workflow = tool == "Workflow" and isinstance(tool_input.get("script"), str)
+    if tool not in SPAWN_TOOLS and tool not in MERGE_TOOLS and tool not in SHELL_TOOLS and not is_workflow:
+        return "", ""
+    if not _cloud_coordinator(payload):
+        return "", ""
+    if tool in SPAWN_TOOLS:
+        if _coordinator_type_refused(tool_input.get("subagent_type")):
+            return COORDINATOR_SPAWN_REASON, "spawn " + str(tool_input.get("subagent_type") or "(no type)")[:40]
+        return "", ""
+    if is_workflow:
+        for _, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if "agentType" in unseen or "..." in unseen or _coordinator_type_refused(keys.get("agentType")):
+                return COORDINATOR_SPAWN_REASON, "workflow agent " + str(keys.get("agentType") or "(unread type)")[:40]
+        return "", ""
+    if tool in MERGE_TOOLS:
+        return COORDINATOR_MERGE_REASON, "merge tool"
+    for segment in split_segments(strip_heredoc_bodies(str(tool_input.get("command", "") or ""))):
+        if not segment.strip():
+            continue
+        if merge_call_of(segment) is not None:
+            return COORDINATOR_MERGE_REASON, "gh pr merge"
+        if merge_confirm_of(segment):
+            return COORDINATOR_MERGE_REASON, "merge --confirm"
+    return "", ""
+
+
 def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path
     that is no record home and not its scratchpad, or commits one, else ''."""
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
         return ""
-    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
-        return ""
-    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
-        return ""
-    if read_merge_role() != "coordinator":
+    if not _cloud_coordinator(payload):
         return ""
     session_id = session_id_of(payload)
     if tool in WRITE_TOOLS:
@@ -3634,6 +3710,9 @@ def judge(payload) -> None:
     scope_hit = coordinator_scope_hit(payload, tool, tool_input, cwd)
     if scope_hit:
         refuse(tool, COORDINATOR_SCOPE_MODE, "coordinator-scope", COORDINATOR_SCOPE_REASON, scope_hit)
+    act_reason, act_matched = coordinator_act_hit(payload, tool, tool_input)
+    if act_reason:
+        refuse(tool, COORDINATOR_SCOPE_MODE, "coordinator-scope", act_reason, act_matched)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.

@@ -487,11 +487,11 @@ ROLE_REASON = (
 )
 
 
-def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+def _merge_tool_args(segment: str, wide: bool = False):
+    """The argument words after the command word when the segment runs the merge tool, else None.
 
-    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on `merge/merge.py` or
+    `merge/launch.py`. `wide` also takes `merge.cmd` and python on the shim file, `python3 bin/merge`.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -503,11 +503,25 @@ def role_call_of(segment: str):
     rest = tokens[index + 1:]
     if word.startswith("python"):
         script = next((t for t in rest if not t.startswith("-")), None)
-        if script is None or basename(script) not in ("merge.py", "launch.py") \
-                or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
+        if script is None:
+            return None
+        shim = wide and basename(script) in ("merge", "merge.cmd")
+        if not shim and (basename(script) not in ("merge.py", "launch.py")
+                         or basename(os.path.dirname(script.replace("\\", "/"))) != "merge"):
             return None
         rest = rest[rest.index(script) + 1:]
-    elif word != "merge":
+    elif word != "merge" and not (wide and word == "merge.cmd"):
+        return None
+    return rest
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+
+    A role flag with no value gives ''.
+    """
+    rest = _merge_tool_args(segment)
+    if rest is None:
         return None
     for at, arg in enumerate(rest):
         if arg == "--role":
@@ -515,6 +529,13 @@ def role_call_of(segment: str):
         if arg.startswith("--role="):
             return arg[len("--role="):]
     return None
+
+
+def merge_confirm_of(segment: str) -> bool:
+    """True when the segment runs the merge tool with `--confirm`, the form that merges. A bare `merge <pr>` is a
+    preview and passes."""
+    rest = _merge_tool_args(segment, wide=True)
+    return rest is not None and any(arg == "--confirm" or arg.startswith("--confirm=") for arg in rest)
 
 
 def _own_session_read(transcript: str, own_id: str):
