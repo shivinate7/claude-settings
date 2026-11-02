@@ -239,8 +239,8 @@ test('nothing imports the broken file', () => {
   assert.equal(1, 1);
 });
 """
-GATE_SRC = "export function gate(n) {\n  if (n > 1) {\n    return true;\n  }\n  return false;\n}\n"
-GATE_TEST = JS_HEAD + """
+CHECK_SRC = "export function gate(n) {\n  if (n > 1) {\n    return true;\n  }\n  return false;\n}\n"
+CHECK_TEST = JS_HEAD + """
 import { gate } from '../src/gate.mjs';
 
 test('gate opens above one', () => {
@@ -378,7 +378,7 @@ def edge_fixture():
                 2: pull_request(repo, 2, "Parse error",
                                 {"src/broken.mjs": "export const x = ;\n", "test/broken.test.mjs": BROKEN_TEST}),
                 3: pull_request(repo, 3, "Gate deletes a red suite",
-                                {"src/gate.mjs": GATE_SRC, "test/gate.test.mjs": GATE_TEST,
+                                {"src/gate.mjs": CHECK_SRC, "test/gate.test.mjs": CHECK_TEST,
                                  "test/old.test.mjs": None})}
         CACHE["edge"] = {"repo": repo, "sha": shas}
     return CACHE["edge"]
