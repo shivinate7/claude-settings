@@ -17,6 +17,8 @@ import merge  # noqa: E402
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
@@ -537,6 +539,47 @@ class Flow(Env):
         self.assertEqual(methods, ["merge"])  # the default method
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
+
+
+class ShallowMain(unittest.TestCase):
+    """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
+    between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(dir=self.run_dir)
+        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
+        put(os.path.join(other, "old.txt"), "old\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
+        self.old = sh(other, "git", "rev-parse", "HEAD")
+        put(os.path.join(other, "new.txt"), "new\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "new"); sh(other, "git", "push", "-q", "origin", "main")
+        # A shallow clone of origin, then the older commit fetched at depth 1: its object is present, and the history
+        # between it and main is cut. A plain --depth 1 clone lacks the object, and then ff_main stops for another reason.
+        self.shallow = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(bare, self.shallow, self.old)
+        if error:
+            raise RuntimeError("shallow fixture could not be built: " + error)
+
+    def test_the_shallow_clone_holds_the_commit_but_cuts_its_path_to_main(self):
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(subprocess.run(["git", "cat-file", "-e", self.old + "^{commit}"], cwd=self.shallow).returncode, 0)
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", self.old, "refs/remotes/origin/main"],
+                                        cwd=self.shallow, capture_output=True).returncode, 1)
+
+    def test_ff_main_in_a_shallow_clone_does_not_say_the_commit_is_off_main(self):
+        main_before = sh(self.shallow, "git", "rev-parse", "refs/heads/main")
+        with self.assertRaises(merge.Stop) as cm:  # no Stop is a failure: ff_main must refuse to move main here
+            merge.ff_main(self.shallow, "main", self.old)
+        self.assertNotIn("is not on origin/main", str(cm.exception))  # the Stop may name the shallow clone, not a false claim
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "refs/heads/main"), main_before, "main moved")
+
 
 class ClaudeMdFlag(Env):
     """A CLAUDE.md change is flagged and only reported (decision claude-md-change-is-flagged).
@@ -1735,12 +1778,13 @@ class CutLanes(Env):
     def proof_fails_for(self, tip):
         """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
         c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
-        real = merge.sh
-        def broken(args, *a, **k):
+        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
+        real = git_reads._git
+        def broken(where, *args, **k):
             if "merge-base" in args and tip in args and "origin/main" not in args:
-                return 128, "fatal: simulated: the ancestry proof cannot run"
-            return real(args, *a, **k)
-        return unittest.mock.patch.object(merge, "sh", broken)
+                return subprocess.CompletedProcess(args, 128, "", "fatal: simulated: the ancestry proof cannot run")
+            return real(where, *args, **k)
+        return unittest.mock.patch.object(git_reads, "_git", broken)
 
     def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
         # Fixpoint: lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
@@ -1961,12 +2005,13 @@ class CutLanes(Env):
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
         tips = lane_batch(self, "lane1", "lane2")
-        real = merge.sh
-        def broken(args, *a, **k):
+        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
+        real = git_reads._git
+        def broken(where, *args, **k):
             if "merge-base" in args and tips["lane1"] in args and "origin/main" in args:
-                return 128, "fatal: simulated"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", broken):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
+            return real(where, *args, **k)
+        with unittest.mock.patch.object(git_reads, "_git", broken):
             rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("git merge-base failed", out)
@@ -3742,7 +3787,7 @@ class GhHalf(Env):
     LOCK_MARGIN = 300  # seconds, written as a literal so these cases do not read merge.LOCK_MARGIN
 
     def rate_waits_the_whole_ladder(self, out):
-        """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's 600 s cap). The run waits
+        """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's take expiry). The run waits
         the whole ladder, 60 + 300 + 900 s, and only then stops as a network error: it never stops for the lock. As each wait starts, the lock on origin
         (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait."""
         self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER, out)
@@ -8480,7 +8525,7 @@ class BeforeWaitHost(FakeHost):
         return super().wait_checks(n, sha, d, prior)
 
 class LockExtensionReachesHost(Env):
-    """A rate wait is the exception to the lock's 600 s cap. So once the lock is
+    """A rate wait is the exception to the lock's take expiry. So once the lock is
     taken, confirm hands the host the lock's own extend_for (host.before_wait): the host runs it before each rate wait. It hands over no bound
     (host.until) that stops a wait at the end of the lock's spare."""
     def test_the_run_hands_the_host_the_lock_extension_before_its_first_wait(self):
@@ -8796,6 +8841,68 @@ class LockExtendsForRateWaits(unittest.TestCase):
         self.assertNotIn("lock-commit-post", steps)
         self.assertEqual(steps.count("pause"), 1)  # the wait itself still happens
         self.assertIsNone(self.lock.until)
+
+class LockProseStatesTheCode(unittest.TestCase):
+    """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its file."""
+    GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
+    README = os.path.join(os.path.dirname(HERE), "README.md")
+    MERGE = os.path.join(HERE, "merge.py")
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def lock_bullet(self):
+        """The top-level bullet of the standing merge grant that names LOCK_MAX_HOLD, with its continuation lines."""
+        bullets, cur = [], None
+        for line in self.read(self.GRANT).splitlines():
+            if line.startswith("- "):
+                cur = [line]
+                bullets.append(cur)
+            elif cur is not None and line.startswith("  "):
+                cur.append(line)
+            else:
+                cur = None
+        named = [" ".join(b) for b in bullets if "`LOCK_MAX_HOLD`" in " ".join(b)]
+        self.assertEqual(len(named), 1, "the grant record must hold one bullet that names LOCK_MAX_HOLD")
+        return named[0]
+
+    def test_the_grant_bullet_states_the_margin_and_the_hold_as_the_code_values(self):
+        bullet = self.lock_bullet()
+        margin = re.search(r"`LOCK_MARGIN`\D{0,40}?(\d+) s\b", bullet)
+        self.assertIsNotNone(margin, f"the bullet does not state LOCK_MARGIN as a number of seconds: {bullet}")
+        self.assertEqual(int(margin.group(1)), merge.LOCK_MARGIN, bullet)
+        hold = re.search(r"`LOCK_MAX_HOLD`\D{0,40}?(\d+) h\b", bullet)
+        self.assertIsNotNone(hold, f"the bullet does not state LOCK_MAX_HOLD as a number of hours: {bullet}")
+        self.assertEqual(int(hold.group(1)), merge.LOCK_MAX_HOLD // 3600, bullet)
+
+    def test_the_grant_bullet_names_the_take_expiry_terms_and_not_the_old_cap(self):
+        bullet = self.lock_bullet()
+        for term in ("`WAITS`", "`merge.deadlineMinutes`"):
+            self.assertIn(term, bullet, f"the bullet does not name {term} as a term of the take expiry: {bullet}")
+        self.assertNotIn("600 s lock cap", bullet)
+
+    def test_the_grant_bullet_and_the_take_call_state_the_same_ten_minute_spare(self):
+        bullet = self.lock_bullet()
+        self.assertIn("+ 10 minutes", bullet, f"the bullet does not state the take's ten-minute spare: {bullet}")
+        take = self.read(self.MERGE)
+        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, \(WAITS \* m\["deadlineMinutes"\] \+ 10\) \* 60\)', take),
+                             "merge.py's take call does not hold the ten-minute spare that the bullet states")
+
+    def assert_unlock_line_never_checks_the_holder(self, line):
+        self.assertNotIn("Reads no lock state", line)
+        self.assertIn("Never checks the holder", line, f"the --unlock line does not say it never checks the holder: {line}")
+
+    def test_the_readme_unlock_line_says_it_never_checks_the_holder(self):
+        section = self.read(self.README).split("\n## The `merge` command\n", 1)[1].split("\n## ", 1)[0]
+        lines = [l for l in section.splitlines() if l.startswith("merge --unlock")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assert_unlock_line_never_checks_the_holder(lines[0])
+
+    def test_the_module_docstring_unlock_line_says_it_never_checks_the_holder(self):
+        lines = [l.strip() for l in merge.__doc__.splitlines() if l.strip().startswith("merge --unlock")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assert_unlock_line_never_checks_the_holder(lines[0])
 
 class GitLockExtendsForRateWaits(Env):
     """GitLock and Host under a rate-limited `gh` call: the run hands Host.before_wait the lock's extend_for, as confirm does
@@ -9385,6 +9492,13 @@ MAIN_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
+LINKS_PATH = ".github/workflows/links.yml"  # one job, run on a schedule and by dispatch: the two event groups of one file
+LINKS_WORKFLOW = "\n".join([
+    "name: links", "on:", "  schedule:", "    - cron: \"0 6 * * *\"", "  workflow_dispatch:", "jobs:",
+    "  readme-links:", "    runs-on: ubuntu-latest", "    timeout-minutes: 15", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
 def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml"):
     """One run on main, as `GET actions/runs` lists it."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
@@ -9399,13 +9513,14 @@ def main_job(name, conclusion, minutes=1):
 
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
+        self.jobs_fail_of = jobs_fail_of or {}
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
@@ -9419,8 +9534,9 @@ class MainRunsHost(FakeHost, merge.Host):
         self.reads.append(rel)
         m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
         assert m and key == "jobs", rel
-        if self.jobs_fail:
-            raise merge.Stop(f"reading {rel} from GitHub failed: {self.jobs_fail}")
+        fail = self.jobs_fail_of.get(int(m.group(1)), self.jobs_fail)
+        if fail:
+            raise merge.Stop(f"reading {rel} from GitHub failed: {fail}")
         return self.jobs[int(m.group(1))]
 
 
@@ -9428,7 +9544,7 @@ class RedMainBrake(Env):
     """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # the caps the timeout verdict reads
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW, LINKS_PATH: LINKS_WORKFLOW})  # the caps the timeout verdict reads, and the files judged
 
     def go(self, runs, jobs, *flags, confirm=True, **kw):
         self.host = MainRunsHost(self.co, self.other, runs, jobs, **kw)
@@ -9503,23 +9619,152 @@ class RedMainBrake(Env):
         self.merged(rc, out)
 
     def green_run_of(self, event):
-        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
+        # a newer dispatch and an older push share the head group: the dispatch supersedes the push, whatever its jobs
+        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")],
+                             {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]})
         self.merged(rc, out)
 
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
         self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
-    def test_a_green_schedule_run_does_not_clear_an_older_red_push_run(self):
-        # runs are grouped by workflow and event: a schedule run never hides a red push run (roadmap step ci-alarm-reads-by-event)
-        rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
+    def test_a_green_schedule_run_without_the_red_job_does_not_clear_an_older_red_push_run(self):
+        # runs are grouped by workflow and event; a run of another group clears a red run only when it passes every job of that run
+        rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")],
+                                  {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]})
         self.refused(rc, out, before)
         self.assertIn("run 914", out)
+        self.assertIn("checks: fail", out)
 
-    def test_a_green_push_run_does_not_clear_an_older_red_schedule_run(self):
-        # a schedule run is judged in its own group: a newer green push never hides it
-        rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")], {920: [main_job("checks", "failure", 20)]})
+    def test_a_green_push_run_without_the_red_job_does_not_clear_an_older_red_schedule_run(self):
+        # a schedule run is judged in its own group; a newer green push of another group clears it only when it passes every job of it
+        rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")],
+                                  {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success")]})
         self.refused(rc, out, before)
         self.assertIn("run 920", out)
+        self.assertIn("checks: fail", out)
+
+    def test_a_green_dispatch_run_with_every_job_of_a_red_schedule_run_clears_it(self):
+        # schedule is its own group, so a newer dispatch run of the same one job clears a red schedule run
+        rc, out, _ = self.go([main_run(931, "success", name="links", event="workflow_dispatch", path=LINKS_PATH),
+                              main_run(930, "failure", name="links", event="schedule", path=LINKS_PATH)],
+                             {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
+        self.merged(rc, out)
+
+    def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
+        rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
+                             {940: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                              941: [main_job("checks", "success", 20), main_job("scope", "success")]})
+        self.merged(rc, out)
+
+    def test_a_green_run_that_lacks_a_job_of_the_red_run_does_not_clear_it(self):
+        # a passing job of the red run counts too: its name must be in the green run
+        rc, out, before = self.go([main_run(951, "success", event="workflow_dispatch"), main_run(950, "failure", event="schedule")],
+                                  {950: [main_job("checks", "failure", 20), main_job("scope", "success")], 951: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 950", out)
+        self.assertIn("checks: fail", out)
+
+    def test_a_job_named_by_a_prefix_or_suffix_of_a_red_job_does_not_clear_it(self):
+        # names match exactly: `checks` is not `checks-macos`, and `checks-macos` is not `checks`
+        for red_job, green_job in (("checks", "checks-macos"), ("checks-macos", "checks"), ("old-checks", "checks"), ("checks", "old-checks")):
+            with self.subTest(red=red_job, green=green_job):
+                rc, out, before = self.go([main_run(961, "success", event="workflow_dispatch"), main_run(960, "failure", event="schedule")],
+                                          {960: [main_job(red_job, "failure", 20)], 961: [main_job(green_job, "success", 20)]})
+                self.refused(rc, out, before)
+                self.assertIn("run 960", out)
+                self.assertIn(f"{red_job}: fail", out)
+
+    def test_a_red_job_skipped_in_the_green_run_does_not_clear_it(self):
+        rc, out, before = self.go([main_run(971, "success", event="workflow_dispatch"), main_run(970, "failure", event="schedule")],
+                                  {970: [main_job("checks", "failure", 20)], 971: [main_job("checks", "skipped")]})
+        self.refused(rc, out, before)
+        self.assertIn("run 970", out)
+        self.assertIn("checks: fail", out)
+
+    def test_a_green_run_that_did_not_succeed_clears_nothing(self):
+        # cancelled, failure, timed_out, neutral and skipped clear nothing, though the red run's job passes in the green one
+        for conclusion in ("cancelled", "failure", "timed_out", "neutral", "skipped"):
+            with self.subTest(conclusion=conclusion):
+                rc, out, before = self.go([main_run(981, conclusion, event="workflow_dispatch"), main_run(980, "failure", event="schedule")],
+                                          {980: [main_job("checks", "failure", 20)], 981: [main_job("checks", "success", 20)]})
+                self.refused(rc, out, before)
+                self.assertIn("run 980", out)
+
+    def test_a_green_run_still_going_clears_nothing_and_is_not_read(self):
+        rc, out, before = self.go([main_run(1021, None, status="in_progress", event="workflow_dispatch"), main_run(1020, "failure", event="schedule")],
+                                  {1020: [main_job("checks", "failure", 20)], 1021: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1020", out)
+        self.assertNotIn("actions/runs/1021/jobs", self.host.reads, "a run still going is not judged, so it is not read")
+
+    def test_a_green_run_that_is_not_the_newest_of_its_group_clears_nothing(self):
+        # the newest schedule run is red: the green schedule run beneath it is not the group's verdict, so it clears nothing
+        rc, out, before = self.go([main_run(1032, "failure", event="schedule"), main_run(1031, "success", event="schedule"), main_run(1030, "failure")],
+                                  {1030: [main_job("checks", "failure", 20)], 1031: [main_job("checks", "success", 20)],
+                                   1032: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1030", out)
+        self.assertNotIn("actions/runs/1031/jobs", self.host.reads, "only the newest completed run of a group can clear another group's red run")
+
+    def test_a_green_run_older_than_the_red_run_clears_nothing_and_is_not_read(self):
+        rc, out, before = self.go([main_run(1041, "failure"), main_run(1040, "success", event="schedule")],
+                                  {1041: [main_job("checks", "failure", 20)], 1040: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1041", out)
+        self.assertNotIn("actions/runs/1040/jobs", self.host.reads, "only a run created after the red one can clear it")
+
+    def test_a_red_run_with_no_jobs_is_not_cleared_across_groups(self):
+        rc, out, before = self.go([main_run(1051, "success", event="schedule"), main_run(1050, "startup_failure")],
+                                  {1050: [], 1051: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1050", out)
+        self.assertIn("startup_failure", out)
+
+    def failed_push_under_a_green_schedule(self, red_id, red_jobs):
+        # a newer schedule run passed `checks`, the one job of an older push run that ended failure with no red job: that run stays red
+        rc, out, before = self.go([main_run(red_id + 1, "success", event="schedule"), main_run(red_id, "failure")],
+                                  {red_id: red_jobs, red_id + 1: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn(f"run {red_id}", out)
+
+    def test_a_failed_run_whose_only_job_passed_is_not_cleared_across_groups(self):
+        self.failed_push_under_a_green_schedule(1101, [main_job("checks", "success", 20)])
+
+    def test_a_failed_run_whose_only_job_was_cancelled_short_is_not_cleared_across_groups(self):
+        # a cancelled job short of its cap is no red job, so a failed run whose only job it is has no red job either
+        self.failed_push_under_a_green_schedule(1102, [main_job("checks", "cancelled", 2)])
+
+    def test_a_failed_run_whose_only_job_was_skipped_is_not_cleared_across_groups(self):
+        self.failed_push_under_a_green_schedule(1103, [main_job("checks", "skipped")])
+
+    def test_an_unknown_run_is_not_cleared_by_a_green_run_of_another_group(self):
+        rc, out, before = self.go([main_run(1061, "success", event="workflow_dispatch"), main_run(1060, "cancelled", event="schedule")],
+                                  {1060: [main_job("checks", "cancelled", 2)], 1061: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 1060", out)
+
+    def test_unreadable_jobs_of_the_green_run_are_unknown_and_refuse(self):
+        rc, out, before = self.go([main_run(1071, "success", event="workflow_dispatch"), main_run(1070, "failure", event="schedule")],
+                                  {1070: [main_job("checks", "failure", 20)], 1071: [main_job("checks", "success", 20)]},
+                                  jobs_fail_of={1071: "HTTP 404"})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("HTTP 404", out)
+        self.assertNotIn("is red", out, "an unread run is never called red")
+
+    def test_a_candidate_green_run_costs_one_jobs_read(self):
+        # the red run's jobs once, and the green run's jobs once, because the red run has a candidate
+        rc, out, _ = self.go([main_run(1081, "success", event="workflow_dispatch"), main_run(1080, "failure", event="schedule")],
+                             {1080: [main_job("checks", "failure", 20)], 1081: [main_job("checks", "success", 20)]})
+        self.merged(rc, out)
+        self.assertEqual(self.host.reads.count("actions/runs/1080/jobs"), 1)
+        self.assertEqual(self.host.reads.count("actions/runs/1081/jobs"), 1)
+
+    def test_a_red_run_with_no_candidate_reads_no_other_jobs(self):
+        rc, out, before = self.go([main_run(1091, "failure", event="schedule")], {1091: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertEqual([r for r in self.host.reads if r.endswith("/jobs")], ["actions/runs/1091/jobs"])
 
     def test_a_green_schedule_run_clears_an_older_red_schedule_run(self):
         rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
