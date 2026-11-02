@@ -1795,6 +1795,10 @@ MUTATIONS = [
      '        if not repo and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
      '        if tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
      "guard", "lane-repo-tag: origin with a .git suffix, another repo's tag is denied"),
+    ("lane-repo-tag: with no readable origin, every lane is allowed (the no-origin fallback is dropped)",
+     '    repo = origin_repo(cwd)\n    for tag in tags:',
+     '    repo = origin_repo(cwd)\n    if not repo:\n        return ""\n    for tag in tags:',
+     "guard", "lane-repo-tag: a checkout with no origin, short repo form is denied"),
 ]
 
 

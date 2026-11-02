@@ -14495,6 +14495,33 @@ add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "d
     tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
+# No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
+# With no origin to compare to, a full `cs-repo:<owner>/<name>` tag passes; the short form and no repo tag
+# are denied. Three cases per checkout: the full tag, the short form, and no repo tag.
+LANE_NO_ORIGIN = os.path.join(ROOT, "lanenoorigin")  # a git checkout with no origin remote
+
+
+def _build_lane_no_origin():
+    """A real checkout that holds no `origin` remote. A lane case names it by `cwd`."""
+    make_repo(LANE_NO_ORIGIN, {"README.md": "# r\n"})
+
+
+lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
+add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
 add("floor: Workflow role spoofed in the prompt string is denied", "deny", "agent-model-floor",
