@@ -1544,136 +1544,154 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     return ""
 
 
-ENTRY_OWN = re.compile(r"^(?:commit|cherry-pick|revert|am)\b")
+# HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
+# `commit (merge)`. A replay the agent resolved or chose: a hand-resolved cherry-pick, a revert, and a
+# rebase step that is no plain pick. A plain cherry-pick, rebase pick or `am` copies a commit someone
+# else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
+ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
-ENTRY_RECEIVED = re.compile(r"^(?:reset|checkout|clone|branch|merge|pull)\b")
+ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
+REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
+# How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
+# rebase kept (that also lifts the refusal of the same path elsewhere).
+OWN, NOTED, KEPT = "own", "noted", "kept"
 
 
 def entry_kind(subject: str) -> str:
-    """'own' for a HEAD reflog entry the agent made, 'received' for one that handed it a commit,
-    '' for any other. A rebase step other than start, finish and abort replays or makes the agent's
-    own commit. An entry kind this reader does not know is no base: that errs toward a refusal."""
+    """OWN, NOTED (a replay the agent resolved or chose), 'start' (a rebase start) or '' for one HEAD
+    reflog subject."""
     rebase = ENTRY_REBASE.match(subject)
     if rebase:
         step = rebase.group(1).strip()
         if step.startswith("start"):
-            return "received"
-        return "" if step.startswith(("finish", "abort")) else "own"
+            return "start"
+        return "" if step.startswith(REBASE_PLAIN_STEPS) else NOTED
     if ENTRY_OWN.match(subject):
-        return "own"
-    return "received" if ENTRY_RECEIVED.match(subject) else ""
+        return OWN
+    return NOTED if ENTRY_RESOLVED.match(subject) else ""
 
 
-def touched_paths(root: str, commits):
-    """{commit: the paths it changed against each parent (a root commit: against nothing)}; None when
-    git failed. Paths are as git spells them (posix, repo-relative)."""
-    found = {}
-    for sha in commits:
-        answer = guard_core._git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root",
-                                 "--no-renames", "-z", sha)
-        if answer is None or answer.returncode != 0:
-            return None
-        found[sha] = {p for p in answer.stdout.split("\0") if p}
-    return found
-
-
-def conflict_paths(root: str, merge: str):
-    """The paths BOTH sides of a hand-committed merge changed since their merge base, or None when git
-    failed. The resolution of such a path chose what it holds, whichever side it ended on."""
-    parents = guard_core._git(root, "show", "-s", "--format=%P", merge)
-    if parents is None or parents.returncode != 0:
+def git_names(root: str, *args):
+    """The NUL-separated names one git call prints, or None when git failed."""
+    answer = guard_core._git(root, *args)
+    if answer is None or answer.returncode != 0:
         return None
-    parents = parents.stdout.split()
-    if len(parents) < 2:
-        return set()
-    # A merge that HEAD no longer holds (reset away) leaves no resolution in the tree.
-    held = guard_core._git(root, "merge-base", "--is-ancestor", merge, "HEAD")
+    return [p for p in answer.stdout.split("\0") if p]
+
+
+def changed_paths(root: str, old: str, new=None):
+    """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
+    and its untracked files when `new` is None; None when git failed."""
+    if new is not None:
+        return git_names(root, "diff", "--name-only", "-z", "--no-renames", old, new)
+    tracked = git_names(root, "diff", "--name-only", "-z", "--no-renames", old)
+    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z")
+    if tracked is None or fresh is None:
+        return None
+    return tracked + sorted(fresh)
+
+
+def merge_tree(root: str, ours: str, theirs: str):
+    """The tree git's own merge of two commits makes, each conflict left as markers; None when git
+    failed. A path that differs from it is one the agent resolved or added. Needs git 2.38 or newer
+    (`merge-tree --write-tree`), and writes the merged objects to the object store."""
+    answer = guard_core._git(root, "merge-tree", "--write-tree", "--no-messages", "-z", ours, theirs)
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.stdout.split("\0", 1)[0].strip() or None
+
+
+def upstream_kept(root: str, orig: str, onto: str):
+    """The paths a rebase of `orig` onto `onto` replayed that hold `onto`'s bytes again in the working
+    tree: the agent kept the upstream side. Empty when HEAD no longer holds `onto`; None when git
+    failed."""
+    held = guard_core._git(root, "merge-base", "--is-ancestor", onto, "HEAD")
     if held is None or held.returncode not in (0, 1):
         return None
     if held.returncode:
-        return set()
-    sides = []
-    for tip in parents[1:]:
-        mb = guard_core._git(root, "merge-base", parents[0], tip)
-        if mb is None or mb.returncode != 0 or not mb.stdout.strip():
-            return None
-        base = mb.stdout.strip()
-        changed = []
-        for end in (parents[0], tip):
-            names = guard_core._git(root, "diff", "--name-only", "-z", "--no-renames", base, end)
-            if names is None or names.returncode != 0:
-                return None
-            changed.append({p for p in names.stdout.split("\0") if p})
-        sides.append(changed[0] & changed[1])
-    return set.union(*sides)
+        return []
+    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig)
+    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto)
+    if replayed is None or moved is None:
+        return None
+    return [p for p in replayed if p not in set(moved)]
 
 
-def diff_bases(root: str):
-    """What this agent's own work is measured against, as `(bases, aside, conflicts)`; None when git
-    could not answer: unknown, never clear.
+def own_changes(root: str):
+    """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
+    unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
 
-    A base is any commit HEAD was handed, read from the HEAD reflog (it survives a new branch name,
-    which a branch reflog would not):
-      - the oldest entry: the commit the worktree was cut from;
-      - the target of a reset or checkout, the result of a pull, a fast-forward or a clean merge,
-        and the commit a rebase starts on;
-      - each non-first parent of a merge commit: the tip merged in. A merge the agent resolved
-        by hand (`commit (merge)`) is its own commit, and only these parents count from it;
-      - the merge base of HEAD with the default branch, which moves forward as main is merged in.
-    `aside[base]` holds the paths the agent's OWN commits (reflog `commit`, `commit (amend)`,
-    `commit (merge)`, cherry-pick, a rebase pick) changed, among those the base holds: the base
-    carries the agent's change there, so it is no base for those paths only. A base the agent's
-    commit sits under still vouches for every other path, such as a test-author's commit on top.
-    `conflicts` holds the paths both sides changed in each hand-resolved merge HEAD still holds."""
+    OWN (a builder's test path in it is refused):
+      - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
+        still holds, against its first parent. A merge commit is measured against git's own merge of
+        its parents, so only what the agent resolved or added counts;
+      - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
+        HEAD and MERGE_HEAD.
+    NOTED (logged, never refused): a replay the agent resolved or chose (a hand-resolved cherry-pick, a
+    revert, a rebase squash, fixup or continue), and the working tree while a replay is in progress.
+    KEPT (logged, and not refused anywhere): a path a held rebase replayed that holds the rebase
+    start's bytes again.
+    A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
+    people's commits, and are not read."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
-    if log is None or log.returncode != 0:
+    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
+    merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
         return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
-    if not entries:
-        return None
-    bases, own, merges = [entries[0][0]], [], []
-    default = resolve_default_base(root)
-    if default:
-        merged = guard_core._git(root, "merge-base", "HEAD", default)
-        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
-            bases.append(merged.stdout.strip())
-    for sha, subject in entries[1:]:
+    kinds = {}
+    for sha, subject in entries:
         kind = entry_kind(subject)
-        if kind == "own":
-            own.append(sha)
-        elif kind == "received":
-            bases.append(sha)
-        if subject.startswith("commit (merge)"):
-            merges.append(sha)
-        if subject.startswith("commit (merge)") or (kind == "received" and "Merge made" in subject):
-            parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
-            if parents is None or parents.returncode != 0:
-                return None
-            bases.extend(parents.stdout.split()[1:])
-    bases = list(dict.fromkeys(bases))
-    own = list(dict.fromkeys(own))
-    aside = {base: set() for base in bases}
-    if own:
-        touched = touched_paths(root, own)
-        if touched is None:
+        if kind in (OWN, NOTED):
+            kinds.setdefault(sha, kind)
+    lost = set()
+    if kinds:
+        # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
+        answer = guard_core._git(root, "rev-list", *kinds, "--not", "HEAD")
+        if answer is None or answer.returncode != 0:
             return None
-        for base in bases:
-            # `own --not base` lists what the base does not reach: an own commit absent from the
-            # list is one the base holds.
-            lost = guard_core._git(root, "rev-list", *own, "--not", base)
-            if lost is None or lost.returncode != 0:
-                return None
-            lost = set(lost.stdout.split())
-            for sha in own:
-                if sha not in lost:
-                    aside[base] |= touched[sha]
-    conflicts = set()
-    for sha in dict.fromkeys(merges):
-        found = conflict_paths(root, sha)
-        if found is None:
+        lost = set(answer.stdout.split())
+    changes = []
+    for sha, kind in kinds.items():
+        if sha in lost:
+            continue
+        parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
+        if parents is None or parents.returncode != 0:
             return None
-        conflicts |= found
-    return bases, aside, conflicts
+        parents = parents.stdout.split()
+        if len(parents) > 2:
+            return None
+        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
+        if old is None:
+            return None
+        paths = (changed_paths(root, old, sha) if old else
+                 git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
+                           "--no-renames", sha))
+        if paths is None:
+            return None
+        changes.append((old, sha, paths, kind))
+    old = "HEAD"
+    if merging.returncode == 0:
+        old = merge_tree(root, "HEAD", merging.stdout.strip())
+        if old is None:
+            return None
+    paths = changed_paths(root, old)
+    if paths is None:
+        return None
+    replaying = merging.returncode != 0 and any(
+        os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
+    changes.append((old, None, paths, NOTED if replaying else OWN))
+    for index, (sha, subject) in enumerate(entries):
+        if index and entry_kind(subject) == "start":
+            kept = upstream_kept(root, entries[index - 1][0], sha)
+            if kept is None:
+                return None
+            if kept:
+                changes.append((sha, None, kept, KEPT))
+    return changes
 
 
 def package_json_author_ok(old: str, new: str) -> bool:
@@ -1722,38 +1740,26 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def base_text(root: str, base: str, rel: str) -> str:
-    """The file's text at the base commit, or '' when it did not exist there."""
-    answer = guard_core._git(root, "show", base + ":" + norm(rel))
+def text_at(root: str, rev, rel: str) -> str:
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+    when it does not exist there or `rev` is '' (no commit)."""
+    if rev is None:
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+                return handle.read()
+        except Exception:
+            return ""
+    if not rev:
+        return ""
+    answer = guard_core._git(root, "show", rev + ":" + norm(rel))
     return answer.stdout if answer is not None and answer.returncode == 0 else ""
 
 
-def work_text(root: str, rel: str) -> str:
-    try:
-        with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
-            return handle.read()
-    except Exception:
-        return ""
-
-
-def disabling_added(root: str, base: str, rel: str) -> bool:
-    """True when the lines a change ADDS to one file, against the base, disable tests."""
-    return disables_tests(work_text(root, rel).splitlines(), base_text(root, base, rel).splitlines())
-
-
-def role_offences(root: str, top: str, base: str, role: str):
-    """The paths whose change, against ONE base, the role may not make; None when git failed.
-
-    The files are the working tree against the base (committed, staged and unstaged work in one
-    read; a change put back to the base's own bytes is no change) plus untracked files. Each path
-    is checked as spelled and as resolved through symlinks."""
-    tracked = guard_core._git(root, "diff", "--name-only", "-z", "--no-renames", base)
-    fresh = guard_core._git(root, "ls-files", "--others", "--exclude-standard", "-z")
-    if tracked is None or fresh is None or tracked.returncode or fresh.returncode:
-        return None
+def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
+    """The paths among `paths`, changed from `old` to `new` (see `own_changes`), whose change the role
+    may not make. Each path is checked as spelled and as resolved through symlinks."""
     found = []
-    for rel in [p for p in tracked.stdout.split("\0") if p] + sorted(
-            p for p in fresh.stdout.split("\0") if p):
+    for rel in paths:
         # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
@@ -1761,70 +1767,44 @@ def role_offences(root: str, top: str, base: str, role: str):
         if role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(base_text(root, base, rel), work_text(root, rel))
+                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
+                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (
-                is_test_config_rel(rel) and disabling_added(root, base, rel))
+            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines()))
         if bad:
             found.append(rel)
     return found
 
 
-def independent_tips(root: str, bases):
-    """The bases no other base descends from (a newer received tip supersedes its ancestors); None
-    when git failed."""
-    if len(bases) < 2:
-        return list(bases)
-    tips = guard_core._git(root, "merge-base", "--independent", *bases)
-    if tips is None or tips.returncode != 0:
-        return None
-    tips = set(tips.stdout.split())
-    return [base for base in bases if base in tips]
-
-
 def diff_violation(root: str, role: str):
-    """Judge the agent's whole result. Returns ('', bases) when clean, (the first offending path,
-    bases) when not, and (None, []) when git could not answer: UNKNOWN, never clear. The bases are
-    the ones that judged the offending path: the refusal tells the agent to restore from them.
-
-    A path is judged against the bases that vouch for it: every base but those whose own commits
-    changed it, cut to the newest tips (see `diff_bases`). It offends only if it offends against
-    EVERY one of them, or if no base vouches for it. A builder's test file that both sides changed in
-    a hand-resolved merge offends whatever it holds: the test-author resolves that conflict."""
-    basis = diff_bases(root)
+    """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
+    may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
+    a builder changed that are logged and never refused. Every offence of another role is logged only."""
+    changes = own_changes(root)
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
-    if not basis or top is None or top.returncode != 0:
+    if changes is None or top is None or top.returncode != 0:
         return None, []
-    bases, aside, conflicts = basis
     top = os.path.realpath(top.stdout.strip())
-    sets = {}
-    for base in bases:
-        found = role_offences(root, top, base, role)
+    builder = role == BUILDER_ROLE
+    kept = {rel for _old, _new, paths, kind in changes if kind == KEPT for rel in paths}
+    noted = []
+    for old, new, paths, kind in changes:
+        if kind == KEPT and not builder:
+            continue
+        found = role_offences(root, top, role, paths, old, new)
         if found is None:
             return None, []
-        sets[base] = set(found)
-    cut = {}
-    for rel in dict.fromkeys(p for base in bases for p in sorted(sets[base])):
-        vouching = tuple(base for base in bases if rel not in aside[base])
-        if vouching not in cut:
-            cut[vouching] = independent_tips(root, vouching)
-            if cut[vouching] is None:
-                return None, []
-        if all(rel in sets[base] for base in cut[vouching]):
-            return rel, cut[vouching] or bases
-    if role == BUILDER_ROLE:
-        for rel in sorted(conflicts):
-            real = os.path.relpath(os.path.realpath(os.path.join(top, rel)), top)
-            if is_test_rel(rel) or is_test_rel(real):
-                tips = independent_tips(root, bases)
-                return rel, bases if tips is None else tips
-    return "", bases
+        for rel in found:
+            if not builder or (kind == OWN and rel not in kept):
+                return rel, noted
+            noted.append(rel)
+    return "", noted
 
 
 def diff_rule(role: str) -> str:
@@ -1832,38 +1812,38 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
-def builder_diff_reason(bases) -> str:
+def builder_diff_reason() -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
-        BUILDER_TEST_REASON + " Your diff holds a test change. Restore each test file from the base "
-        "it came from. Bases: %s. This refusal is final: never write the files another way."
-        % (", ".join(base[:12] for base in bases) or "<none>")
+        BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
+        "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
+        "you added. If a commit of yours holds the change, stop and report it. This refusal is final: "
+        "never write the files another way."
     )
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Judge a role's diff at commit or push. A builder's test change DENIES (rule `builder-diff`,
-    with the undo route). Any other role's offence is logged for the reviewer, and so is a diff
-    that could not be read: a refusal on an unread diff would be a false alarm. The base is the
-    commits the agent received (`diff_bases`), so a parent branch's files are not the agent's own."""
-    found, bases = diff_violation(root, role)
+    """Judge a role's own change at commit or push. A builder's test change DENIES (rule `builder-diff`,
+    with the undo route). A builder's logged change, any other role's offence, and a change that could
+    not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
+    found, noted = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
-        refuse(tool, "deny", diff_rule(role), builder_diff_reason(bases), found)
-    elif found:
-        record(tool, "noted", diff_rule(role), found)
+        refuse(tool, "deny", diff_rule(role), builder_diff_reason(), found)
+    elif found or noted:
+        record(tool, "noted", diff_rule(role), found or noted[0])
 
 
 def judge_stop(payload) -> None:
-    """A builder, test-author or record-writer that stops has its whole diff judged. A builder's
-    test change BLOCKS the first stop (rule `builder-diff`, with the undo route). A second stop
-    (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its
-    tree never loops. The other roles' offences log as `author-diff` or `writer-diff` and never
-    block. A cwd that is the main checkout and a diff that could not be read log too, and allow. A
-    missing cwd logs nothing."""
+    """A builder, test-author, record-writer or designer that stops has its own change judged. A
+    builder's test change BLOCKS the first stop (rule `builder-diff`, with the undo route). A second
+    stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
+    its tree never loops. A builder's logged change and the other roles' offences log under the role's
+    rule and never block. A cwd that is the main checkout and a change that could not be read log too,
+    and allow. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
@@ -1873,17 +1853,17 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, bases = diff_violation(where, role)
+    found, noted = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(bases)}))
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
         sys.exit(0)
-    elif found:
-        record("SubagentStop", "noted", diff_rule(role), found)
+    elif found or noted:
+        record("SubagentStop", "noted", diff_rule(role), found or noted[0])
 
 
 SPAWN_TOOLS = ("Agent", "Task")

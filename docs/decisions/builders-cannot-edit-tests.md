@@ -4,28 +4,29 @@
 
 A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in the diff (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads one diff at three points:
+Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points:
 
-- A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route. No override lifts it.
-- A builder's SubagentStop. A test change blocks the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
+- A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route: restore a changed test file, delete a new one. No override lifts it.
+- A builder's SubagentStop. A test change refuses the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It refuses. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
 
-An unreadable diff logs `role-diff-unread` and is allowed. A second stop with an unreadable diff logs `role-diff-unresolved`.
+An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
 
-**Ruling.** Coordinator, 2026-11-01 20:32 CST, restored the refusal. The Oct 2 owner ruling set its condition: the base defect is fixed. The base rule below is that fix. Incident 95b4348b (lane page-item-checked-at-write, 2026-11-01) is pinned by the first `builder-refuse` case.
+**Ruling.** Coordinator, 2026-11-01 20:32 CST, restored the refusal. Coordinator, 2026-11-01 21:40 CST, narrowed the refused act to the test changes the builder wrote itself: a tree rebuilt from the reflog broke wherever git combines other people's commits. Incident 95b4348b (lane page-item-checked-at-write, 2026-11-01) is pinned by the first `builder-refuse` case.
 
-## The base rule
+## What the builder wrote
 
-The diff is judged against bases. A wrong base made a refusal a false alarm, and a false alarm spends the guard (`verification-cry-wolf-guard-is-spent`). A base is a commit the agent received. Read them from the HEAD reflog. Those are the start commit, each reset, checkout, pull, fast-forward or clean merge target, and rebase start. Add each merged-in parent of a merge commit, and the merge base with the default branch. Only independent tips count. A base that another base descends from does not count.
+`own_changes` in `hooks/guard.py` reads the HEAD reflog, and judges only what the builder made:
 
-- A base that holds the agent's own commits is set aside only for the paths those commits touched.
-- A path offends only if it differs from every independent tip that vouches for it.
-- A test path that both sides changed in a merge the builder committed by hand offends. Resolving that conflict chooses what the test checks.
-- The deny names the independent tip shas that judged the path, 12 characters each, and no path.
+- **Refused.** Each commit the builder made (`commit`, `commit (amend)`, `commit (merge)`) that HEAD still holds, against its first parent. A merge commit is measured against git's own merge of its parents (`git merge-tree`), so only what the builder resolved or added counts. A test path that both sides changed and the builder resolved is refused, whichever side it kept. Also the working tree and its untracked files against HEAD. While a merge is in progress, they are measured against git's own merge of HEAD and MERGE_HEAD.
+- **Logged only.** A replay the builder resolved or chose: a hand-resolved cherry-pick, a revert, a rebase squash, fixup or continue. The working tree while a replay is in progress (a cherry-pick, revert, squash or rebase). A path that a rebase replayed and that holds the upstream side again.
+- **Not read.** A plain cherry-pick, rebase pick or `am`, a clean merge, a reset, a checkout and a pull. Each brings other people's commits.
 
-**Cost.** Git reads only. No timer and no long-lived process. Each commit, push and stop costs one reflog read and one merge base with the default branch. Per base it costs about two reads (tracked diff, untracked list), and one rev-list when the agent has own commits. Per own commit it costs one diff-tree. Per hand merge it costs a few reads. A log line is written only for an offence or an unread diff.
+**Known gap.** A squash merge or a `cherry-pick -n`, once committed, is a plain own commit: git removes its marker at the commit. Its test change is refused at push and stop.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: all 37 `builder-refuse` cases pass on this tip. The coordinator measured 25 of 25 `role-diff` mutants killed (`hooks/mutate_guard.py`) before three more were added. Those three are unmeasured.
+**Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
+
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 46 of 49 `builder-refuse` cases pass on this tip. Three fail: the squash and the committed `cherry-pick -n` (the known gap), and the case that wants the deny to name base commits, which this rule no longer has.
 
 ## Roles
 
