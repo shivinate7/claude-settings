@@ -1460,8 +1460,25 @@ def is_test_rel(rel: str) -> bool:
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
         or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
-        or any(p.lower() in TEST_DIRS for p in parts)
+        or _in_test_dir(parts)
     )
+
+
+# `spec` is a test folder for code (`spec/foo_spec.rb`) and for its fixtures, but a Markdown or text
+# file there is a document (`docs/spec/api.md`), not a test.
+SPEC_DOC_EXTENSIONS = {".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc"}
+
+
+def _in_test_dir(parts) -> bool:
+    for index, part in enumerate(parts):
+        name = part.lower()
+        if name not in TEST_DIRS:
+            continue
+        if (name == "spec" and index < len(parts) - 1
+                and os.path.splitext(parts[-1])[1].lower() in SPEC_DOC_EXTENSIONS):
+            continue
+        return True
+    return False
 
 
 def is_test_config_rel(rel: str) -> bool:
@@ -1546,6 +1563,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
+    # A path in no repository is no test of this one, as for the author above.
+    if repo_rel(target, cwd, outside=False) is None:
+        return ""
     if is_test_rel(rel):
         return target
     if is_test_config_rel(rel) and any(
