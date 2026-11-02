@@ -15797,11 +15797,11 @@ def worktree_home_cross_checkout_override_case():
     return ok, why or "refused before the override, lifted under it"
 
 
-# other-checkout's `cd` act (owner ruling item 143 b, 2026-11-01). Incident: banchi PR #1003, where a
-# `cd` into another checkout let a build or a write through the write scan.
+# other-checkout's `cd` act. A `cd` into another checkout would let a build or a write run past the
+# write scan, so the act refuses the `cd` before that scan reads the command.
 CD_AGENT_HOME = "xcoagenta1"     # an agent id, whose worktree is the recorded home
 CD_AGENT_SIBLING = "xcoagentb2"  # a second agent id, whose worktree sits beside that home
-CD_DENY_FORMS = (
+CD_REFUSE_FORMS = (
     "cd TARGET",
     "cd TARGET && npm run build",
     "cd TARGET && make up",
@@ -15828,11 +15828,11 @@ def worktree_home_cd_into_other_checkout_case():
     """Rule 0, other-checkout, the `cd` act: a Bash `cd` into another checkout of the clone is
     refused, bare or chained to a build, a write or a folder made. It is judged from the primary and
     from a lane, into a lane or into the primary, and the refusal names no path.
-    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md (owner ruling item 143 b)."""
+    Decision: an-agent-outside-its-home-tree-must-stop."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
     problems = []
     for cwd, target in ((primary, lane_b), (lane_a, lane_b), (lane_a, primary)):
-        for form in CD_DENY_FORMS:
+        for form in CD_REFUSE_FORMS:
             command = form.replace("TARGET", slash(target))
             label = "%s from %s" % (command, os.path.relpath(cwd, ROOT))
             got, reason = _decide_full("Bash", cwd, command=command)
@@ -15955,7 +15955,7 @@ CD_TEXT_ALLOW = (
     'echo "line one\ncd TARGET && make\nend"',
     'echo "Don\'t" ; ls',
 )
-CD_TEXT_DENY = (
+CD_TEXT_REFUSE = (
     'echo "# note" && cd TARGET && make',
     'echo "a // b" ; cd TARGET && make',
     'echo "/*" ; cd TARGET && make',
@@ -15974,7 +15974,7 @@ def worktree_home_cd_text_case():
     for template in CD_TEXT_ALLOW:
         command = template.replace("TARGET", slash(lane_b))
         _expect_call(problems, repr(command), "allow", "Bash", lane_a, None, command)
-    for template in CD_TEXT_DENY:
+    for template in CD_TEXT_REFUSE:
         command = template.replace("TARGET", slash(lane_b))
         got, reason = _decide_full("Bash", lane_a, command=command)
         problems += _other_checkout_problems(repr(command), got, reason,
