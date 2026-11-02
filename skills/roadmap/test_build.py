@@ -1098,6 +1098,27 @@ class DatedClaims(Fixture):
         count, entries = self.claims(self.build())
         self.assertEqual((count, self.listed(entries)), (len(expect), expect))
 
+    def test_a_hyphenated_word_is_not_a_claim(self):
+        """`checked` or `finding` inside a hyphenated word is not a claim. Each note holds a stale date after it."""
+        stale = self.md(self.ago(10))
+        self.commit_step("h1", status="doing", note="lane c146-checked-map (coordinator, %s 16:13 CDT)" % stale)
+        self.commit_step("h2", status="doing", note="Re-checked %s: x." % stale)
+        self.commit_step("h3", status="doing", note="finding-x %s: x." % stale)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_a_lowercase_may_is_not_a_month(self):
+        """Lowercase `may` is an ordinary word, so `may 2` is no date. Capitalized `May 2` still is. The day is
+        20 on the days when May 2 is too recent to be stale, so the lowercase text would be stale if read."""
+        today = self.today()
+        day = 20 if datetime.date(today.year, 5, 2) <= today <= datetime.date(today.year, 5, 6) else 2
+        self.commit_step("lc", status="doing", note="Finding: this may %d lanes re-run." % day)
+        self.commit_step("cap", status="doing", note="Finding, May %d: x." % day)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "cap (May %d)" % day])))
+
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
