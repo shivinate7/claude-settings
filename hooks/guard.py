@@ -3495,7 +3495,7 @@ COORDINATOR_SCOPE_REASON = (
 COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own "
-    "(decision session-tiers, a coordinator in a build never runs its own build or review agent). "
+    "(decision session-tiers, Spawns and merges: a spawn of any type but Plan, Explore and claude-code-guide is refused). "
     "Remedy: brief a lane session to do this work, with the files and the check that proves it. "
     "Only Plan, Explore and claude-code-guide agents run in a coordinator session."
 )
