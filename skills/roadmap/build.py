@@ -750,6 +750,26 @@ def added_at(source):
     return seen
 
 
+def is_feel(d):
+    """A step is a feel-fix unless `feel` is absent, false or null; a misread value keeps it open, never closes it."""
+    feel = d.get("feel")  # identity tests: 0 == False in Python, and 0 is a misread value
+    return feel is not None and feel is not False
+
+
+def device_check(d):
+    """"none" (absent or null), "valid" (how is simulator or device, at is an ISO time with a zone), or "bad"."""
+    check = d.get("deviceCheck")
+    if check is None:
+        return "none"
+    if not isinstance(check, dict) or check.get("how") not in ("simulator", "device") or not isinstance(check.get("at"), str):
+        return "bad"
+    try:
+        zoned = datetime.datetime.fromisoformat(check["at"].replace("Z", "+00:00")).tzinfo is not None
+    except ValueError:
+        zoned = False
+    return "valid" if zoned else "bad"
+
+
 def unlaned(open_, marks, work):
     """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
     work = work or {"read": "unknown (no --live file)"}
@@ -763,6 +783,8 @@ def unlaned(open_, marks, work):
         if status not in KNOWN_STATUS:
             out.append('%s (unknown status "%s")' % (k, status))
         elif status in ("doing", "active") and k not in live:
+            if k in marks and is_feel(d) and device_check(d) != "valid":
+                continue  # the device row lists it; it must not read "set to done" before a device check
             out.append("%s (set to done: landed in %s)" % (k, ", ".join(marks[k])) if k in marks
                        else "%s (set to todo)" % k)
     return out
@@ -853,12 +875,22 @@ def upkeep(steps, added, marks, strays, work=None):
               and "Placed ahead of" not in (d.get("note") or "")]
     if not added:
         jumped = ["unknown (git log could not run)"]
+    waiting, closing = [], []
+    for k, v in sorted(marks.items()):
+        d, got = steps[k], ", ".join(v)
+        if not is_feel(d):
+            closing.append("%s (%s)" % (k, got))
+        elif device_check(d) == "valid":
+            closing.append("%s (%s; open a try-it item)" % (k, got))
+        else:
+            waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
-            ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
+            ("landed, waiting for a device trial", waiting),
+            ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", []))]
