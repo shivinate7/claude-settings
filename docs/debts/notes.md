@@ -877,6 +877,6 @@
 - page-ruling-recite: the roadmap upkeep row "page rulings not on their step" lists a closed item again when a rewrite of its step note drops the `item <n>` cite (skills/roadmap/build.py, unfiled).
 - page-ruling-free-home: that row matches only a bare step id or `step <id>` as an item's home, so a free-text home such as "c204 (zoomed picture)" is a silent miss (skills/roadmap/build.py, unfiled).
 - page-ruling-doc-gaps: build.py's module docstring omits two unknown cases that SKILL.md lists (not a JSON object; no threads or pulls list), and no test covers them (skills/roadmap/build.py, test_build.py).
-- dated-claim-year-digits: the upkeep row "dated claims to re-check before a lane starts" reads any four digits after the day as a year, so "Checked Nov 1 1830 CDT" lists a fresh claim (skills/roadmap/build.py, CLAIM).
+- dated-claim-year-digits: the dated-claims upkeep row reads any four digits after the day as a year. So "Checked Nov 1 1830 CDT" lists a fresh claim (skills/roadmap/build.py, CLAIM).
 - dated-claim-dot-stops: that row stops at any ".", so "Checked hooks/guard.py on main Oct 20", "Oct. 28" and "Sept 28" are misses (skills/roadmap/build.py, CLAIM).
-- dated-claim-edges: that row counts days in UTC, not Central; an explicit future year masks older claims; "_Checked_" is a miss; a future plan date after the word rolls to last year and lists (skills/roadmap/build.py, dated_claims).
+- dated-claim-edges: that row counts days in UTC, not Central. An explicit future year masks older claims. "_Checked_" is a miss. A future plan date after the word rolls to last year and lists (skills/roadmap/build.py, dated_claims).
