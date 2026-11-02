@@ -9661,8 +9661,8 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
-    # Batch 65, PR #1090 (2026-11-02 06:18 CST): main's schedule run R was cancelled on an old head with no red job. The push run N
-    # after it, on the new head, passed every job R ran; each case changes one thing of this incident.
+    # The stale-cancel shape (decision no-merge-onto-red-main): main's schedule run R was cancelled on an old head with no red job.
+    # The push run N after it, on the new head, passed every job R ran; each case changes one thing of this shape.
     INC_R, INC_N = 1110, 1111
     OLD_HEAD, NEW_HEAD = "a" * 40, "b" * 40
     R_JOBS = [main_job("scope", "success"), main_job("checks", "cancelled", 2), main_job("checks-macos", "success"),
