@@ -7594,6 +7594,17 @@ for _label, _command in (
 ):
     sh("env heredoc: a nested python3 block and an env read written to %s, denies" % _label,
        _command, "deny", "env-file", cwd=NOGIT)
+# A written file that a runner reads on stdin, or a shell runs through -c, or a runner loads past its
+# option values, runs the body. The option value (-r X) is skipped, and the next word is the script.
+for _run in (
+    "bash -s < deploy",
+    "python3 < deploy",
+    "cat deploy | python3 -",
+    "node -r X deploy",
+    "sh -c './deploy'",
+):
+    sh("env heredoc: a nested python3 block and an env read written to deploy, then %s, denies" % _run,
+       "cat > deploy <<'EOF'\n" + _NESTED_BODY + "EOF\n" + _run, "deny", "env-file", cwd=NOGIT)
 
 
 # =========================================================================== git env set
