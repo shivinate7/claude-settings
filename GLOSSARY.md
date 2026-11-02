@@ -69,3 +69,4 @@ one name for each thing, and a list of names to avoid.
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
 | fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |
+| Red-run trailer | A commit-message line on the commit that adds test lines: `Red-run: <command> -> <N> failed on <sha>`, or `Red-run: none: <reason>`. It records that each new case failed on the old code. | `docs/decisions/red-run-trailer-on-test-commits.md` | — |
