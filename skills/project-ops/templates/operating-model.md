@@ -31,7 +31,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   the PR ready, so the branch is final at ready (claude-settings
   record `records-index-at-merge`). Then it runs `--confirm` again to merge.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
+  runs every merge in a coordinator build, on the coordinator's merge go, and asks the owner for no merge. Each merge it
   runs names `frozen at <sha>`. It prints the merge output on the terminal, never
   to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
@@ -90,8 +90,8 @@ parent, or miss a message while busy.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
   A lane never rebases onto main and never merges.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
-  standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
-  runs the merge tool on it. The owner is not asked.
+  standing merge grant, the coordinator holds it and gives each merge go under it. In a coordinator
+  build only the batch runner runs the merge tool, on that go. The owner is not asked.
   - The merge go is one message, in one fixed form: the PR number, the head commit, each review
     round with its reviewer's role, model and verdict, and the CI state of that head. The message
     shows the review itself. Its effect on the auto-mode classifier is unmeasured.
