@@ -882,6 +882,9 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- page-design-band-comment: test comments call the 390x56 band "near 1" in scale, but it measures 0.75 (skills/waiting-page/tests/test_check_designs.mjs). Decision: page-item-design
+- page-design-stamp-path: the published stamp holds a path, not a copy, so an edit to that file after the publish changes what the next item write is checked against (hooks/guard.py, skills/waiting-page/stale_pages.py). Decision: page-item-design
+- page-design-closed-update: an update with no status to a closed item is still checked, though the page never draws closed items (hooks/question_form.py). Decision: page-item-design
 - option-letter-keys-label-word-tag: a label that opens with a word tag other than Option, such as "Approach B:" or "Plan B:", passes LABEL_TAG. It is kept out because "Plan B" is plain English (hooks/question_form.py LABEL_TAG; decision option-keys-are-letters)
 - report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
 - report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
