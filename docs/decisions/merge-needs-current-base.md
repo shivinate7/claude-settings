@@ -5,6 +5,7 @@
 Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main.
 
 - The merge tool refuses a head that does not hold the base tip. The refusal names the fix: merge the base into the branch, push, and run again. It also says why the green run cannot stand.
+- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
 - A small move is the one exception: the green run stands when all of these hold, and any read that fails refuses.
   - The paths main changed since the merge base share no path with the batch's paths. The records page is the one exception, because the generator proves it on the merge.
   - The head and the base tip merge cleanly.
@@ -15,7 +16,6 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
     - A node or bash suite is hit when its source names any of those words.
     - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
-- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
 
