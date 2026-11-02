@@ -552,11 +552,20 @@ def temp_set_age(path, hours_ago):
     os.utime(path, (stamp, stamp))
 
 
-def temp_dead_pid():
-    """A pid whose process has already run to its end, so no live process holds it."""
-    child = subprocess.Popen([sys.executable, "-c", "pass"])
-    child.wait(timeout=30)
-    return child.pid
+def held_sleeper(case, cwd=None):
+    """A child that sleeps 120 s, stopped by CASE's cleanup. While it runs, no other process can take
+    its pid. A test that names the pid can then pick the start time, and no freed pid reuse can
+    change the answer."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    case.addCleanup(_stop_held, proc)
+    return proc
+
+
+def _stop_held(proc):
+    proc.kill()
+    proc.wait(timeout=10)
 
 
 def temp_make_link(link, target, junction=False):
@@ -723,14 +732,19 @@ class TempSweepTests(unittest.TestCase):
         dead = self.make_session(dead_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
         control = self.make_session(control_id, transcript_hours=TEMP_IDLE_HOURS)
         self.write_session_record(live_id, os.getpid(), this_process_start_ms())
-        self.write_session_record(dead_id, temp_dead_pid(), 0)
+        # The pid is held by a live child, so no other process takes it. The start time is a day
+        # ahead of the real one: the reader then answers False on every OS. A start time of 0 reads
+        # a recycled pid as unknown, which keeps the folder.
+        held = held_sleeper(self)
+        started = int(time.time() * 1000) + 86400000
+        self.write_session_record(dead_id, held.pid, started)
         proc = self.run_step("--confirm")
         self.check_removed(control, "positive control: an idle 25-hour session with no sessions record "
                                     "must be removed in this run", proc)
         self.check_kept(live, "a session whose transcript is idle 25 hours but whose pid is live must "
                               "be kept", proc)
-        self.check_removed(dead, "a session whose transcript is idle 25 hours and whose pid is dead "
-                                 "must be removed", proc)
+        self.check_removed(dead, "a session whose transcript is idle 25 hours and whose record names a "
+                                 "recycled pid, a pid whose start time differs, must be removed", proc)
         self.check_exit(proc)
 
     def test_a_link_inside_a_removed_folder_leaves_its_target_intact(self):
@@ -4532,11 +4546,7 @@ class AgentEndRulingTests(_AgentEndFixture):
         return None
 
     def sleeper(self, cwd):
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        self.addCleanup(self.stop, proc)
-        return proc
+        return held_sleeper(self, cwd)
 
     def test_a_process_inside_a_sibling_tree_is_never_stopped(self):
         """The stop covers the ending agent's own tree only. The sibling is aged 31 minutes, so
