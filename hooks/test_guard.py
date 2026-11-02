@@ -7574,6 +7574,35 @@ sh("env: heredoc-r2: a python body with a qx() string that names an env read, is
    "python3 - <<'EOF'\nx = \"qx(cat " + ENV + ")\"\nEOF", "allow", cwd=NOGIT)
 
 
+# Round 3 red cases, each a shape the guard reads wrong today. A python or ruby body whose string ends in a
+# backslash is read as code. A file written from a body that holds a bash heredoc is run later. A single
+# quote before an unquoted substitution hides the substitution. Prose that names an env example, and a
+# backtick word in an unquoted body, are data and must not refuse.
+sh("env: heredoc-r3: a python body with a Windows path ending in a backslash, then a subprocess cat of an env file, denies",
+   "python3 - <<'EOF'\nx='C:\\\\dir\\\\'\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-r3: a ruby body with a Windows path ending in a backslash, then a system cat of an env file, denies",
+   "ruby - <<'EOF'\np='C:\\\\d\\\\'\nsystem('cat', '" + ENV + "')\nEOF", "deny", "env-file", cwd=NOGIT)
+for _label, _write, _run in (
+    ("sh redirect", "cat > f <<'OUT'\n", "sh < f"),
+    ("a pipe into sh", "cat > f <<'OUT'\n", "cat f | sh"),
+    ("chmod and run", "cat > f <<'OUT'\n", "chmod +x f && ./f"),
+    ("bash on a home path", "cat > $HOME/f <<'OUT'\n", "bash $HOME/f"),
+    ("timeout and sh", "cat > f <<'OUT'\n", "timeout 5 sh f"),
+):
+    sh("env: heredoc-r3: a file written with bash <<EOF and an env read, then run by " + _label + ", denies",
+       _write + "bash <<EOF\ncat " + ENV + "\nEOF\nOUT\n" + _run, "deny", "env-file", cwd=NOGIT)
+sh("env: normalized, glob, heredoc or depth, cat <<EOF, heredoc-r3: a single quote before an unquoted substitution, denies",
+   "cat > n.md <<EOF\n'$(cat " + ENV + ")'\nEOF", "deny", "env-file", cwd=NOGIT)
+for _second in ("bash scripts/test.sh", "source venv/bin/activate", "npm test && sh deploy.sh"):
+    sh("env: heredoc-r3: a quoted prose body that names an env example, then " + _second + ", is allowed",
+       "cat > /tmp/notes.md <<'EOF'\nCopy " + ENV + ".example to " + ENV + " first\n" + _second + "\nEOF",
+       "allow", cwd=NOGIT)
+sh("env: heredoc-r3: an unquoted prose body with a backtick word and an env example, is allowed",
+   "cat > /tmp/n.md <<EOF\nthe `foo` flag; copy " + ENV + ".example to " + ENV + "\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a force push as prose, is allowed",
+   "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
