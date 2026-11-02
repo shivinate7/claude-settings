@@ -104,7 +104,7 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
-    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, and an allowed publish of main's page writes the stamp",
+    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, and an allowed publish of a page with live data writes the stamp",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
@@ -12020,12 +12020,14 @@ LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writ
 # --------------------------------------------------------------------------- a waiting page behind main is not published
 FAMILY = "page-stale"
 #
-# Rule page-stale (hooks/guard.py, the Artifact tool). A publish of this repo's waiting page whose file is
-# behind main's skills/waiting-page/page.html is refused. Main is origin/main of the checkout that holds
-# stale_pages.py, so each case runs a copy of the guard in a checkout whose origin/main this suite
-# controls (WP_CHECK), never the real main. The copy finds stale_pages beside itself, as the guard does.
-# An allowed publish of main's page writes its full blob sha to <git common dir>/waiting-page-built.
-# Unknown, when main or the file cannot be read, allows: the rule fails open.
+# Rule page-stale (hooks/guard.py, the Artifact tool). A republish of this repo's waiting page is refused
+# when its file is behind main's skills/waiting-page/page.html, and when it is main's own page with main's
+# empty designData and roadmap blocks, which would drop the page's live data. A first publish, with no url,
+# is never refused. Main is origin/main of the checkout that holds stale_pages.py, so each case runs a copy
+# of the guard in a checkout whose origin/main this suite controls (WP_CHECK), never the real main. The
+# copy finds stale_pages beside itself, as the guard does. An allowed publish writes main's full blob sha
+# to <git common dir>/waiting-page-built. Unknown, when main or the file cannot be read, allows: the rule
+# fails open.
 
 WP_DIR = os.path.join(ROOT, "pagestale")
 WP_CHECK = os.path.join(WP_DIR, "checkout")        # origin/main is its one commit: main's page.html
@@ -12035,6 +12037,8 @@ WP_GUARD_NOMAIN = os.path.join(WP_NOMAIN, "hooks", "guard.py")
 WP_CURRENT = os.path.join(WP_DIR, "current.html")  # main's page.html, byte for byte
 WP_BEHIND = os.path.join(WP_DIR, "behind.html")    # main's page with one div after its style block
 WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer's designData, roadmap and title text
+WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
+WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
 WP_OTHER_URL = "https://claude.ai/artifact/wpother"
@@ -12058,15 +12062,20 @@ def wp_must(ok, why):
         sys.exit("fixture setup failed in build_page_checkout: %s" % why)
 
 
-def wp_writer(template):
-    """main's page with the three parts a writer's --write keeps live swapped for new text. Each part
-    must match exactly once in main's page."""
+def wp_writer(template, design=True, roadmap=True, title=True):
+    """main's page with the parts a writer's --write keeps live swapped for new text, each part only when
+    its flag is set. Each part must match exactly once in main's page."""
     def swap(pattern, text, repl):
         wp_must(len(pattern.findall(text)) == 1, "%s does not match once in main's page" % pattern.pattern[:40])
         return pattern.sub(repl, text, count=1)
-    text = swap(WP_DESIGN, template, lambda m: m.group(1) + WP_WRITER_DESIGN + m.group(2))
-    text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
-    return swap(WP_TITLE, text, lambda m: "<title>Queue, renamed // not a comment</title>")
+    text = template
+    if design:
+        text = swap(WP_DESIGN, text, lambda m: m.group(1) + WP_WRITER_DESIGN + m.group(2))
+    if roadmap:
+        text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
+    if title:
+        text = swap(WP_TITLE, text, lambda m: "<title>Queue, renamed // not a comment</title>")
+    return text
 
 
 def wp_put(path, text):
@@ -12082,7 +12091,10 @@ def wp_write_pages():
         template = handle.read()
     wp_must(template.count("</style>") == 1, "main's page has no single style block to add a div after")
     behind = template.replace("</style>", "</style>\n<div>x</div>", 1)
-    for path, text in ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template))):
+    pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
+             (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
+             (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)))
+    for path, text in pages:
         wp_put(path, text)
 
 
@@ -12119,7 +12131,8 @@ def wp_control(folder, main):
     """The copy's own stale_pages.py gives the verdicts the cases assume: main's page, the behind page and
     the writer's page against a controlled main, or unknown with no main. A miss stops the run."""
     script = os.path.join(folder, "skills", "waiting-page", "stale_pages.py")
-    wants = [(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0)] if main else [(WP_CURRENT, 2)]
+    wants = ([(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0), (WP_DESIGN_LIVE, 0), (WP_ROADMAP_LIVE, 0)]
+             if main else [(WP_CURRENT, 2)])
     for page, code in wants:
         run = subprocess.run([sys.executable, script, "--page", page], capture_output=True, text=True,
                              cwd=folder, timeout=120)
@@ -12146,14 +12159,17 @@ def build_page_nomain():
     wp_control(WP_NOMAIN, main=False)
 
 
-lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER], build_page_checkout)
+lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE], build_page_checkout)
 lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
 
 
 def wp_publish(name, expected, page, rule=None, guard=None, url=PQ_URL, **extra):
-    """One Artifact publish of `page` to `url`, judged by a copy of the guard in the controlled checkout."""
+    """One Artifact publish of `page`, judged by a copy of the guard in the controlled checkout. A url of
+    None is a first publish: the call carries no url key at all."""
+    if url is not None:
+        extra["url"] = url
     add("page-stale: " + name, expected, rule, tool="Artifact", cwd=PQ_REPO, guard=guard or WP_GUARD,
-        url=url, file_path=page, **extra)
+        file_path=page, **extra)
 
 
 wp_publish("a behind page with no action is refused", "deny", WP_BEHIND, rule="page-stale")
@@ -12163,7 +12179,13 @@ wp_publish("a behind page published to the code form of the waiting page is refu
            rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
 wp_publish("a behind page published to another artifact's code form is allowed", "allow", WP_BEHIND,
            url="https://claude.ai/code/artifact/wpother")
-wp_publish("main's page published to the waiting page is allowed", "allow", WP_CURRENT)
+wp_publish("main's page republished to the waiting page is refused: its designData and roadmap are empty",
+           "deny", WP_CURRENT, rule="page-stale")
+wp_publish("main's page republished to the code form of the waiting page is refused", "deny", WP_CURRENT,
+           rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
+wp_publish("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
+wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
+wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
 wp_publish("a behind page published to another url is allowed", "allow", WP_BEHIND, url=WP_OTHER_URL)
 wp_publish("a read of the waiting page with a behind file is allowed", "allow", WP_BEHIND, action="read")
@@ -12173,7 +12195,7 @@ wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHI
 
 
 def wp_stamp_case():
-    """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
+    """An allowed publish of a page with live data writes main's blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
@@ -12183,10 +12205,10 @@ def wp_stamp_case():
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     run = subprocess.run([sys.executable, WP_GUARD],
                          input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
-                                           "tool_input": {"url": PQ_URL, "file_path": WP_CURRENT}}),
+                                           "tool_input": {"url": PQ_URL, "file_path": WP_WRITER}}),
                          capture_output=True, text=True, env=env, timeout=120)
     if run.stdout.strip():
-        return False, "the publish of main's page was refused: %r" % run.stdout[:100]
+        return False, "the publish of a page with live data was refused: %r" % run.stdout[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -12198,7 +12220,7 @@ def wp_stamp_case():
 
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
-LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
+LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live data writes the stamp", wp_stamp_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
