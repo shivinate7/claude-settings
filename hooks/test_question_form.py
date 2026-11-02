@@ -480,6 +480,21 @@ def case_line_order_and_prose():
 
 # ------------------------------------------------------------------ a press the session makes needs no link
 
+# Decision act-in-place: a session clause that hides an owner press. The press is the owner's, so the option
+# needs a link.
+HIDDEN_OWNER_PRESS = [
+    "The session merges PR #374 after the owner clicks Approve.",
+    "The session merges PR #374 but click Merge first.",
+    "The session merges PR #374, so click Merge.",
+    "The session merges PR #374: press Merge.",
+    "The session merges PR #374 - press Merge on GitHub.",
+    "The session merges PR #374 (press Merge).",
+    "The session merges PR #374 after Shivam approves it on GitHub.",
+]
+# A session clause with no press in it, and a press the session makes after the pick: both pass.
+SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merges PR #374."]
+
+
 def case_session_press_needs_no_link():
     # Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes
     # the press, after the owner's pick, asks him for no press, so it needs no link. An option that asks him to
@@ -511,6 +526,22 @@ def case_session_press_needs_no_link():
                                                                     "Lose: nobody reads it first."},
                            {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
          ("press-link", None))
+    # Decision act-in-place: a session clause that names the owner, or a press set off by a colon, dash,
+    # parenthesis, `but` or `so`, is no session act. The press in it is the owner's and needs a link.
+    def chat_of(option):
+        return {"label": option["label"],
+                "description": "%s Gain: %s Lose: %s" % (option["how"], option["gain"], option["lose"])}
+
+    for how in HIDDEN_OWNER_PRESS:
+        page("a session clause that hides an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_ONLY:
+        page("a session clause with no press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause with no press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
 
 
 # ------------------------------------------------------------------ a press in the how-text only

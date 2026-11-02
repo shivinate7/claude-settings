@@ -13232,6 +13232,19 @@ for label, how in (("Approve on GitHub", "The session records your pick and reru
        pl_item(options=[pl_opt(label, how), PL_KEEP_OPT]))
 pl("a session press after the pick, with no link, is allowed when the pick comes first", "allow",
    pl_item(options=[pl_opt("Merge PR #374", "After the pick, the session merges PR #374."), PL_KEEP_OPT]))
+# Decision act-in-place: a session clause that names the owner, or a press set off by a colon, dash,
+# parenthesis, `but` or `so`, is no session act. The press in it is the owner's and needs a link.
+for how in ("The session merges PR #374 after the owner clicks Approve.",
+            "The session merges PR #374 but click Merge first.",
+            "The session merges PR #374, so click Merge.",
+            "The session merges PR #374: press Merge.",
+            "The session merges PR #374 - press Merge on GitHub.",
+            "The session merges PR #374 (press Merge).",
+            "The session merges PR #374 after Shivam approves it on GitHub."):
+    pl("a session clause that hides an owner press, %r, with no link, is refused" % how, "deny",
+       pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
+pl("a session clause with no press, 'The session merges PR #374.', with no link, is allowed", "allow",
+   pl_item(options=[pl_opt("Merge PR #374", "The session merges PR #374."), PL_KEEP_OPT]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
