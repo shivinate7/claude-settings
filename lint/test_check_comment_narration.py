@@ -136,6 +136,14 @@ class Case(unittest.TestCase):
         os.chmod(os.path.join(folder, name), 0o755)
         return {"PATH": os.pathsep.join([folder, GIT_ENV["PATH"]])}, log
 
+    def path_with(self, *tools):
+        """A PATH holding only the named tools, each linked from this machine. Returns {"PATH": folder}."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        for tool in tools:
+            os.symlink(shutil.which(tool, path=GIT_ENV["PATH"]), os.path.join(folder, tool))
+        return {"PATH": folder}
+
     def hit_line(self, out, path, line):
         """The output line that names path:line, or None."""
         for row in out.splitlines():
@@ -321,6 +329,9 @@ class Ratchet(Case):
         self.change({
             "a.rb": "# fixed in round 2\n",
             "notes.txt": "# owner ruling 2026-10-18\n",
+            "notes.md": "Fixed in round 2. Owner ruling 2026-10-18.\n",
+            "run.sh": "# fixed in round 2\n",
+            "data.txt": "# MEASURED CORRECTED\n",
             "README": "# PR #509\n",
         })
         self.assertClean()
@@ -522,6 +533,35 @@ class JsTsScan(Case):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
+    def test_jsx_expression_comment_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"view.tsx": "export const p = <p>{/* fixed on 2026-10-28 */}</p>;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "view.tsx", 1)
+
+    def test_jsdoc_comment_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": "/**\n * owner ruling 2026-10-18\n */\nexport const x = 1;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "util.ts", 2)
+
+    def test_crlf_line_endings_keep_the_line_numbers(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"crlf.ts": "const a = 1;\r\n// fixed in round 2\r\nexport {a};\r\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "crlf.ts", 2)
+
+    def test_cts_and_mts_files_are_scanned(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"a.cts": "// fixed in round 2\nexport {};\n", "b.mts": "// fixed in round 2\nexport {};\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "a.cts", 1)
+        self.assertHit(out, "b.mts", 1)
+
 
 @NEEDS_TSC
 class AstroScan(Case):
@@ -558,6 +598,26 @@ class AstroScan(Case):
         self.change({"page.astro": "---\nconst n: number = 2;\n---\n<p>fixed in round 2 on 2026-10-28</p>\n"})
         rc, out = self.lint(path_tools=True)
         self.assertEqual(rc, 0, out)
+
+    def test_comment_inside_a_template_expression_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<ul>{items.map(i => /* fixed on 2026-10-28 */ i)}</ul>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 1)
+
+    def test_narrating_words_in_style_are_not_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<p>x</p>\n<style>\n  /* fixed in round 2 */\n  p { color: red; }\n</style>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 0, out)
+
+    def test_script_comment_without_frontmatter_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<script>\n  // fixed in round 2\n</script>\n<p>x</p>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 2)
 
 
 class SwiftScan(Case):
@@ -629,13 +689,13 @@ class SwiftScan(Case):
 
 
 class Degraded(Case):
-    def test_node_failure_still_prints_python_and_swift_hits_and_exits_2(self):
+    def test_node_failure_still_prints_python_and_swift_hits_and_exits_3(self):
         env, _ = self.fake_tool("tsc", "echo bogus >&2\nexit 3\n")
         self.base({"keep.py": "x = 1\n"})
         self.change({"bad.py": "x = 1  # fixed in round 2\n", "Thing.swift": "let a = 1 // fixed on 2026-10-28\n",
                      "app.ts": "const a = 1;\n"})
         rc, out = self.lint(path_tools=True, env=env)
-        self.assertEqual(rc, 2, out)
+        self.assertEqual(rc, 3, out)
         self.assertHit(out, "bad.py", 1)
         self.assertHit(out, "Thing.swift", 1)
 
@@ -664,13 +724,23 @@ class NodeCost(Case):
         self.assertEqual(lines_of(log), [])
 
 
+class NodeTool(Case):
+    def test_no_npx_on_path_exits_3_and_still_prints_the_python_hit(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bad.py": "x = 1  # fixed in round 2\n", "app.js": "const a = 1;\n// fixed on 2026-10-28\n"})
+        rc, out = self.lint(env=self.path_with("git"))
+        self.assertEqual(rc, 3, out)
+        self.assertIn("npx", out)
+        self.assertHit(out, "bad.py", 1)
+
+
 class NpxPath(Case):
     def test_comment_scan_starts_through_npx_with_the_pinned_typescript(self):
         env, log = self.fake_tool("npx", 'printf "%s\\n" "$@" >> "@LOG@"\nexit 1\n')
         self.base({"keep.js": "const k = 1;\n"})
         self.change({"app.js": "const a = 1;\n// fixed in round 2\n"})
         rc, out = self.lint(env=env)
-        self.assertEqual(rc, 2, out)
+        self.assertEqual(rc, 3, out)
         argv = lines_of(log)
         self.assertIn("--yes", argv, out)
         self.assertIn("typescript@" + TS_PIN, argv, out)

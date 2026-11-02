@@ -331,6 +331,14 @@ def one_line_with(out, *needles):
     return any(all(n in row for n in needles) for row in out.splitlines())
 
 
+def path_with(*tools):
+    """A PATH folder that links only the named tools from this machine. Returns the folder."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    for tool in tools:
+        os.symlink(shutil.which(tool), os.path.join(folder, tool))
+    return folder
+
+
 def npx_reaches_registry():
     if not shutil.which("npx"):
         return False
@@ -454,6 +462,12 @@ class CommentCheckLanguages(unittest.TestCase):
                         path_tools=False)
         self.assertNotEqual(rc, 0, out)
         self.assertTrue(one_line_with(out, "app.js:2", "round 2"), out)
+
+    def test_no_npx_is_red_and_says_the_comment_check_could_not_run(self):
+        base = {".code-check.json": config([]), "app.js": JS_BASE}
+        rc, out = check({"app.js": JS_HIT}, base_files=base, path_tools=False, PATH=path_with("git"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("comment check could not run", out)
 
 
 def tearDownModule():
