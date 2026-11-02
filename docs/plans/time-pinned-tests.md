@@ -11,7 +11,7 @@ Working plan for roadmap step time-pinned-tests-go (tests that pass or fail on c
 - test-cap: a per-test or per-suite time limit.
 - wait-cap: a fixed bound on a wait for a condition or a child process. Most are hang guards, which can stay. Each repo's lane judges each one.
 
-Each count is a candidate, not a verdict. A sample read found false alarms in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`), and a name taken for a clock reading (q_max `harness/tests/deleted-chat-send.test.mjs`). The repo lane decides each one.
+Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`). The repo lane decides each one.
 
 ## Counts
 
@@ -19,15 +19,15 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 
 | Repo | Commit | sleep | elapsed-assert | test-cap | wait-cap | Total | Files | Unread | Target (sleep, elapsed, cap) |
 |---|---|---|---|---|---|---|---|---|---|
-| q_max | `e8f99027` | 64 | 18 | 127 | 115 | 324 | 57 | 1 | 0, 0, 0, each wait-cap judged |
+| q_max | `e8f99027` | 64 | 20 | 127 | 115 | 326 | 57 | 1 | 0, 0, 0, each wait-cap judged |
 | banchi | `2e46c112` | 119 | 2 | 0 | 236 | 357 | 54 | 0 | 0, 0, 0, each wait-cap judged |
-| degen | `af1d95ac` | 251 | 15 | 0 | 1075 | 1341 | 218 | 0 | 0, 0, 0, each wait-cap judged |
+| degen | `af1d95ac` | 251 | 20 | 0 | 1075 | 1346 | 219 | 0 | 0, 0, 0, each wait-cap judged |
 | joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, 0, each wait-cap judged |
 | mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, 0, each wait-cap judged |
 | ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, 0, each wait-cap judged |
 
 - home: not scanned. Its lane is held.
-- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 84a56038 the finder lists 207 here (sleep 51, elapsed-assert 7, test-cap 0, wait-cap 149, in 49 files, 1 unread). That list goes to a later claude-settings lane.
+- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 55b27ac2 the finder lists 238 here (sleep 56, elapsed-assert 8, test-cap 0, wait-cap 174, in 51 files, 1 unread). That list goes to a later claude-settings lane.
 
 ## Files
 
@@ -70,7 +70,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `harness/tests/probe-exit-codes.test.mjs`: wait-cap 1
 - `harness/tests/probe-exit-flush.test.mjs`: wait-cap 2
 - `harness/tests/q-standin.test.mjs`: wait-cap 3
-- `harness/tests/races-plant.test.mjs`: elapsed-assert 1
+- `harness/tests/races-plant.test.mjs`: elapsed-assert 3
 - `harness/tests/resilience.test.mjs`: sleep 1
 - `harness/tests/rfp-direct-upload.test.mjs`: sleep 1
 - `harness/tests/rfp-dropzone.test.mjs`: sleep 6, elapsed-assert 1
@@ -192,12 +192,13 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/DegenKit/Tests/DegenKitTests/FeedCancelledFillTests.swift`: sleep 6, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/FeedOnlyNewPagingTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/FeedTgChatTopicTests.swift`: sleep 1
+- `native/DegenKit/Tests/DegenKitTests/FreeSpaceCountSafetyTests.swift`: elapsed-assert 1
 - `native/DegenKit/Tests/DegenKitTests/GridToggleModelTests.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/IgDmReadClientTests.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/IgDmRulesModelTests.swift`: sleep 1, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ImageTimingEntryTests.swift`: wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ImageTimingInFlightTests.swift`: wait-cap 2
-- `native/DegenKit/Tests/DegenKitTests/ImageTimingSupport.swift`: wait-cap 1
+- `native/DegenKit/Tests/DegenKitTests/ImageTimingSupport.swift`: elapsed-assert 2, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ItemListModelTests.swift`: sleep 4
 - `native/DegenKit/Tests/DegenKitTests/JdHubSendTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/JdQueueCancelTests.swift`: sleep 2
@@ -205,7 +206,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/DegenKit/Tests/DegenKitTests/JdSendOutboxTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/LaunchScansSupport.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/LaunchScansTests.swift`: sleep 2, elapsed-assert 2
-- `native/DegenKit/Tests/DegenKitTests/LaunchTraceBufferTests.swift`: sleep 2
+- `native/DegenKit/Tests/DegenKitTests/LaunchTraceBufferTests.swift`: sleep 2, elapsed-assert 2
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionFakeTests.swift`: sleep 6
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionHandChunkTests.swift`: sleep 3
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionSupport.swift`: sleep 2

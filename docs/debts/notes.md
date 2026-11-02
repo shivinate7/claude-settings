@@ -884,3 +884,5 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- time-pinned-nested-def-missed: the time-pinned finder keeps Python taint inside one function, so a nested def that asserts on a name its outer function tainted is not listed (lint/find_time_pinned.py). Decision: test-strategy-reset
+- time-pinned-mock-now-alarm: the time-pinned finder lists `mock.assert_called_once_with(now)` with a clock-tainted `now` as elapsed-assert, though it checks an injected clock, not speed (lint/find_time_pinned.py). Decision: test-strategy-reset

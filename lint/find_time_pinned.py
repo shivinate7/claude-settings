@@ -30,9 +30,14 @@ closes on the same line, so JSX text such as `<p>Don't</p>` stays text. The Swif
 
 Blind spots of the patterns: a delay held in a variable (`setTimeout(r, ms)`) is not a literal, so
 it is not listed. A clock name is tainted by a `const`/`let`/`var` (JS) or `let`/`var` (Swift)
-declaration only, and it holds inside the `{...}` block of that declaration. A function value (an arrow,
-a closure) taints nothing, and neither does a clock handed to a call that only passes it on, because
-decision test-strategy-reset endorses an injected clock. An assert's message argument is not read.Clock reads inside a Swift interpolation hole are masked.
+declaration only, and it holds inside the `{...}` block of that declaration. Python taint stays in its
+own function, so a nested def that asserts on a name its outer function tainted is missed. A function
+value (an arrow or function expression, a closure, a lambda or def) taints its name only when its
+return value reads a clock; a Swift `func` or a JS `function` declaration taints nothing. A clock handed
+to a call is an input, which decision test-strategy-reset endorses, so it taints nothing. In an assert
+it still counts when it is an operand of `-` or the receiver or argument of `.timeIntervalSince` or
+`.duration(to:`: that is a measured duration. An assert's message argument is not read. Clock reads inside a Swift interpolation
+hole are masked.
 
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
@@ -248,9 +253,9 @@ _KEYWORDS = {"if", "while", "for", "switch", "catch", "return", "typeof", "await
 _PAREN_OR_BRACE = re.compile(r"[()\[\]{}]")
 
 
-def inside_foreign_call(m, a, p, pass_through):
-    """True when position p, in an initializer that starts at a, sits inside the arguments of a call that
-    is not one of `pass_through`. A clock handed to such a call is an input, not a measured duration."""
+def open_brackets(m, a, p):
+    """(bracket, callee or None, position) per bracket still open at p, in a value that starts at a. The
+    callee is the called name before a `(`, or "" when a call result is called."""
     stack = []
     for tok in _PAREN_OR_BRACE.finditer(m, a, p):
         ch = tok.group()
@@ -263,55 +268,143 @@ def inside_foreign_call(m, a, p, pass_through):
                     callee = ""
                 elif word and word.group() not in _KEYWORDS:
                     callee = word.group()
-            stack.append(callee)
+            stack.append((ch, callee, tok.start()))
         elif stack:
             stack.pop()
-    return any(c is not None and c not in pass_through for c in stack)
+    return stack
 
 
 _READ = re.compile(r"(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])")
+_DURATION_ARG = re.compile(r"\.\s*(?:timeIntervalSince\s*\(|duration\s*\(\s*to\s*:)\s*$")
+_DURATION_MEMBER = re.compile(r"\s*(?:\?\s*)?\.\s*(?:timeIntervalSince(?:Now)?\b|duration\s*\(\s*to\s*:)")
+_POSTFIX = re.compile(r"\s*(?:\?\s*)?\.\s*[A-Za-z_$][\w$]*|!(?!=)")
+_MINUS_AFTER = re.compile(r"\s*-(?![-=>])")
 
 
-def reads_tainted(m, a, b, tainted, pass_through=None):
-    """True when m[a:b] reads a name inside the block of a tainted declaration of it. An object key or a
-    call label (`at:` after `{`, `,` or `(`) is not a read. With `pass_through`, a read inside the
-    arguments of any other call does not count."""
+def find_open(m, i):
+    """Index of the bracket that opens the one that closes at m[i], or -1."""
+    depth = 0
+    for k in range(i, -1, -1):
+        c = m[k]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            depth -= 1
+            if depth == 0:
+                return k
+    return -1
+
+
+def measured(m, s, e):
+    """True when the value read at m[s:e] is an operand of a binary `-`, or the receiver or argument of
+    `.timeIntervalSince` or `.duration(to:`. That is a measured duration even inside another call's
+    arguments, where a bare clock is only an input."""
+    if _DURATION_ARG.search(m, max(0, s - 80), s):
+        return True
+    j = e
+    if m[j - 1] in "([":  # a clock pattern that ends inside its own call
+        j = find_close(m, j - 1) + 1
+        if j == 0:
+            return False
+    while True:
+        if _DURATION_MEMBER.match(m, j):
+            return True
+        if j < len(m) and m[j] in "([":
+            j = find_close(m, j) + 1
+            if j == 0:
+                return False
+            continue
+        member = _POSTFIX.match(m, j)
+        if not member:
+            break
+        j = member.end()
+    if _MINUS_AFTER.match(m, j):
+        return True
+    before = m[max(0, s - 80):s].rstrip()
+    if not before.endswith("-"):
+        return False
+    left = before[:-1].rstrip()
+    word = re.search(r"[\w$]+$", left)
+    return bool(left) and (left[-1] in ")]" or (word is not None and word.group() not in _KEYWORDS))
+
+
+_FUNCTION_START = re.compile(r"=>|(?<![\w$])function(?![\w$])")
+
+
+def counts(m, a, s, e, pass_through, durations):
+    """True when a clock or tainted name read at m[s:e], in a value that starts at a, is a reading of that
+    value. Inside the arguments of a call that is not a pass-through it is an input. With `durations` (an
+    asserted value) it still counts as a measured duration, but never inside a function or block handed
+    to that call (a wait condition)."""
+    stack = open_brackets(m, a, s)
+    foreign = [k for k, (ch, callee, pos) in enumerate(stack) if callee is not None and callee not in pass_through]
+    if not foreign:
+        return True
+    if not durations:
+        return False
+    inner = foreign[-1]
+    if any(ch == "{" for ch, callee, pos in stack[inner + 1:]) or _FUNCTION_START.search(m, stack[inner][2], s):
+        return False
+    return measured(m, s, e)
+
+
+def reads_clock(m, a, b, clock_re, tainted, pass_through, durations):
+    """True when the value m[a:b] reads a clock or a name inside the block of a tainted declaration of it.
+    An object key or a call label (`at:` after `{`, `,` or `(`) is not a read. A clock handed to a call that
+    is not a pass-through is an injected input, which decision test-strategy-reset endorses. With
+    `durations`, a measured duration in such a call's arguments still counts (see `counts`)."""
+    if any(counts(m, a, hit.start(), hit.end(), pass_through, durations) for hit in clock_re.finditer(m, a, b)):
+        return True
     for hit in _READ.finditer(m, a, b):
         for scope_start, scope_end, decl_pos in tainted.get(hit.group(), ()):
             if scope_start <= hit.start() < scope_end and decl_pos < hit.start():
                 label = m[hit.end():b].lstrip().startswith(":") and m[a:hit.start()].rstrip()[-1:] in ("{", ",", "(")
-                if not label and not (pass_through is not None
-                                      and inside_foreign_call(m, a, hit.start(), pass_through)):
+                if not label and counts(m, a, hit.start(), hit.end(), pass_through, durations):
                     return True
     return False
 
 
-def clock_taint(m, decl_re, clock_re, pass_through, function_value):
-    """{name: [(block start, block end, declaration position)]} for names whose initializer holds a clock
-    reading or a tainted name, repeated until nothing changes."""
+def clock_taint(m, decl_re, clock_re, pass_through, function_returns):
+    """{name: [(block start, block end, declaration position)]} for names whose value reads a clock or a
+    tainted name, repeated until nothing changes. For a function value, the value is what it returns."""
     decls = declarations(m, decl_re)
     ranges = block_ranges(m, [d[1] for d in decls])
+    values = []
+    for name, pos, start, end in decls:
+        returned = function_returns(m, start, end)
+        values.append([(start, end)] if returned is None else returned)
     tainted, done, changed = {}, set(), True
     while changed:
         changed = False
         for idx, (name, pos, start, end) in enumerate(decls):
-            if idx in done or function_value(m, start, end):
-                continue  # a function value only holds a clock; calling it measures nothing
-            clocked = any(not inside_foreign_call(m, start, hit.start(), pass_through)
-                          for hit in clock_re.finditer(m, start, end))
-            if clocked or reads_tainted(m, start, end, tainted, pass_through):
+            if idx not in done and any(reads_clock(m, a, b, clock_re, tainted, pass_through, False)
+                                       for a, b in values[idx]):
                 tainted.setdefault(name, []).append(ranges[pos] + (pos,))
                 done.add(idx)
                 changed = True
     return tainted
 
 
-def reads_clock(m, a, b, clock_re, tainted, pass_through):
-    """True when the asserted value m[a:b] reads a clock or a tainted name. A clock inside the arguments of a
-    call that is not a pass-through is an injected input, which decision test-strategy-reset endorses."""
-    if any(not inside_foreign_call(m, a, hit.start(), pass_through) for hit in clock_re.finditer(m, a, b)):
-        return True
-    return reads_tainted(m, a, b, tainted, pass_through)
+_RETURN = re.compile(r"(?<![\w$.])return(?![\w$])")
+
+
+def block_returns(m, open_idx, opens_function):
+    """Spans of the values that the `return`s of the block at m[open_idx] give back, leaving out each
+    `return` of a function nested inside it."""
+    close = find_close(m, open_idx)
+    if close < 0:
+        return []
+    spans = []
+    for r in _RETURN.finditer(m, open_idx + 1, close):
+        stack = []
+        for tok in re.compile(r"[{}]").finditer(m, open_idx + 1, r.start()):
+            if tok.group() == "{":
+                stack.append(tok.start())
+            elif stack:
+                stack.pop()
+        if not any(opens_function(m, o) for o in stack):
+            spans.append((r.end(), scan_expr(m, r.end())))
+    return spans
 
 
 def asserted_range(m, open_idx, close):
@@ -344,7 +437,8 @@ PY_MARK_CAP = {"pytest.mark.timeout"}
 PY_DECORATOR_CAP = {"timeout", "timeout_decorator.timeout"}
 PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 # A clock handed to any other call (`decisions = sweep(now=time.time())`) is an input, not a measured
-# duration, so the call's result is not tainted. These calls only reshape a number, so they pass it on.
+# duration, so the call's result is not tainted. In an assert, a difference there still counts
+# (`assert to_ms(time.time() - t0) < 100`). These calls only reshape a number, so they pass it on.
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
@@ -428,21 +522,65 @@ def scan_python(text):
     def is_clock(node):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
-    def holds_clock(node, tainted, pass_through_only=False):
+    def holds_clock(node, tainted, durations=False):
+        """True when node reads a clock call or a tainted name. The arguments of a call count only when that
+        call is a pass-through, or, with `durations` (an asserted value), when they hold a difference with a
+        clock in it. A lambda reads what it returns."""
         if isinstance(node, ast.Lambda):
-            return False  # a lambda only holds a clock; calling it measures nothing
-        """True when node reads a clock call or a tainted name. With the flag on, the arguments of a call
-        count only when that call is a pass-through."""
+            return holds_clock(node.body, tainted, durations)
         if isinstance(node, ast.Call):
             if is_clock(node):
                 return True
-            parts = [node.func]
-            if not pass_through_only or names_of(node) & PY_PASS_THROUGH:
-                parts += node.args + [k.value for k in node.keywords]
-            return any(holds_clock(p, tainted, pass_through_only) for p in parts)
+            args = node.args + [k.value for k in node.keywords]
+            if names_of(node) & PY_PASS_THROUGH:
+                return any(holds_clock(p, tainted, durations) for p in [node.func] + args)
+            return holds_clock(node.func, tainted, durations) or (
+                durations and any(holds_difference(p, tainted) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
-        return any(holds_clock(c, tainted, pass_through_only) for c in ast.iter_child_nodes(node))
+        return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
+
+    def holds_difference(node, tainted):
+        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b: a
+        measured duration, not an injected clock. A lambda's body is not searched."""
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
+                holds_clock(node.left, tainted, True) or holds_clock(node.right, tainted, True)):
+            return True
+        return any(holds_difference(c, tainted) for c in ast.iter_child_nodes(node))
+
+    scopes = {}
+
+    def scope_taint(root):
+        """The clock-tainted names of root's own scope, repeated until nothing changes. A def in that scope
+        taints its name when a value it returns reads a clock."""
+        if id(root) in scopes:
+            return scopes[id(root)]
+        tainted = scopes[id(root)] = set()
+        nodes = list(walk_scope(root))
+        assigns = []
+        for n in nodes:
+            if isinstance(n, ast.Assign):
+                assigns.append(([x for t in n.targets for x in target_names(t)], n.value))
+            elif isinstance(n, ast.AnnAssign) and n.value is not None:
+                assigns.append((target_names(n.target), n.value))
+            elif isinstance(n, (ast.AugAssign, ast.NamedExpr)):
+                assigns.append((target_names(n.target), n.value))
+            for child in ast.iter_child_nodes(n):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    inner = scope_taint(child)
+                    if any(isinstance(r, ast.Return) and r.value is not None and holds_clock(r.value, inner)
+                           for r in walk_scope(child)):
+                        tainted.add(child.name)
+        changed = True
+        while changed:
+            changed = False
+            for targets, value in assigns:
+                if not set(targets) <= tainted and holds_clock(value, tainted):
+                    tainted.update(targets)
+                    changed = True
+        return tainted
 
     found = set()
     decorator_calls = {id(d) for n in ast.walk(tree)
@@ -466,25 +604,8 @@ def scan_python(text):
 
     roots = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     for root in roots:
-        nodes = list(walk_scope(root))
-        assigns = []
-        for n in nodes:
-            if isinstance(n, ast.Assign):
-                assigns.append(([x for t in n.targets for x in target_names(t)], n.value))
-            elif isinstance(n, ast.AnnAssign) and n.value is not None:
-                assigns.append((target_names(n.target), n.value))
-            elif isinstance(n, ast.AugAssign):
-                assigns.append((target_names(n.target), n.value))
-            elif isinstance(n, ast.NamedExpr):
-                assigns.append((target_names(n.target), n.value))
-        tainted, changed = set(), True
-        while changed:
-            changed = False
-            for targets, value in assigns:
-                if not set(targets) <= tainted and holds_clock(value, tainted, True):
-                    tainted.update(targets)
-                    changed = True
-        for n in nodes:
+        tainted = scope_taint(root)
+        for n in walk_scope(root):
             if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
@@ -637,7 +758,6 @@ JS_CLOCK = re.compile(r"(?<![\w$])(?:Date\.now|performance\.now)\s*\(|(?<![\w$])
                       r"|(?<![\w$])new\s+Date\s*\(\s*\)")
 JS_PASS_THROUGH = {"round", "floor", "ceil", "trunc", "abs", "max", "min", "Number", "parseInt", "parseFloat",
                    "BigInt", "hrtime"}
-JS_FUNCTION_VALUE = re.compile(r"\s*(?:async\s+)?(?:function\b|\([^()]*\)\s*(?::[^=]+)?=>|[\w$]+\s*=>)")
 JS_DECL = re.compile(r"(?<![\w$.])(?:const|let|var)\s+(?=[A-Za-z_$])")
 JS_ASSERT = re.compile(r"(?<![\w$.])(?:expect|assert)(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*\(")
 JS_TEST_HEAD = re.compile(r"(?<![\w$.])(?:it|test|describe)\b")
@@ -646,9 +766,76 @@ JS_MOD = re.compile(r"\.\s*([A-Za-z_$][\w$]*)")
 JS_TIMEOUT_KEY = re.compile(r"(?<![\w$])timeout\s*:")
 
 
-def js_function_value(m, start, end):
-    """True when the initializer m[start:end] is an arrow or function expression, not a call of one."""
-    return JS_FUNCTION_VALUE.match(m, start, end) is not None
+_JS_ASYNC = re.compile(r"\s*(?:async(?![\w$])\s*)?")
+_JS_FUNCTION = re.compile(r"function(?![\w$])\s*\*?\s*[\w$]*\s*")
+_JS_ARROW_AFTER_PARAMS = re.compile(r"\s*(?::[^;{}]*?)?=>")
+_JS_ARROW_ONE_PARAM = re.compile(r"[A-Za-z_$][\w$]*\s*=>")
+_JS_CONTROL = {"if", "for", "while", "switch", "catch", "with"}
+
+
+def skip_generics(m, i, end):
+    """Index after a `<...>` type parameter list that starts at m[i], and the space after it; else i."""
+    if not m.startswith("<", i):
+        return i
+    depth, k = 0, i
+    while k < end:
+        if m.startswith("=>", k):
+            k += 2
+            continue
+        if m[k] == "<":
+            depth += 1
+        elif m[k] == ">":
+            depth -= 1
+            if depth == 0:
+                k += 1
+                while k < end and m[k] in " \t\r\n":
+                    k += 1
+                return k
+        k += 1
+    return i
+
+
+def js_opens_function(m, o):
+    """True when the `{` at m[o] opens the body of an arrow, a function or a method, not a block or an object."""
+    k = o - 1
+    while k >= 0 and m[k] in " \t\r\n":
+        k -= 1
+    if k >= 1 and m[k - 1:k + 1] == "=>":
+        return True
+    if k < 0 or m[k] != ")":
+        return False
+    p = find_open(m, k)
+    word = re.search(r"[\w$]+\s*$", m[max(0, p - 40):max(p, 0)])
+    return not (word and word.group().strip() in _JS_CONTROL)
+
+
+def js_function_returns(m, start, end):
+    """None when the initializer m[start:end] is not an arrow or a function expression. Else the spans of the
+    values it returns: its expression body, or each `return` of its block body at that body's own level.
+    The parameter list is bracket-matched, so a TS type, a generic or a default call in it parses."""
+    i = _JS_ASYNC.match(m, start, end).end()
+    fn = _JS_FUNCTION.match(m, i, end)
+    if fn:
+        i = skip_generics(m, fn.end(), end)
+        close = find_close(m, i) if m.startswith("(", i) else -1
+        body = m.find("{", close, end) if 0 <= close < end else -1
+        return block_returns(m, body, js_opens_function) if body >= 0 else None
+    i = skip_generics(m, i, end)
+    if m.startswith("(", i):
+        close = find_close(m, i)
+        arrow = _JS_ARROW_AFTER_PARAMS.match(m, close + 1, end) if 0 <= close < end else None
+    else:
+        arrow = _JS_ARROW_ONE_PARAM.match(m, i, end)
+    if not arrow:
+        return None
+    j = arrow.end()
+    while j < end and m[j] in " \t\r\n":
+        j += 1
+    if m.startswith("{", j):
+        return block_returns(m, j, js_opens_function)
+    if js_function_returns(m, j, end) is not None:
+        return []  # it returns a function, and calling that is not a clock reading
+    return [(j, end)]
 
 
 def parse_test_head(m, i):
@@ -718,12 +905,12 @@ def scan_js(text):
             if got and is_num(m[got[1][-1][0]:got[1][-1][1]], True):
                 hits.add(mm.start(), "sleep")
 
-    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_value)
+    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
     for mm in JS_ASSERT.finditer(m):
         got = args_of(mm.end() - 1)
         if got:
             a, b = asserted_range(m, mm.end() - 1, got[0])
-            if reads_clock(m, a, b, JS_CLOCK, tainted, JS_PASS_THROUGH):
+            if reads_clock(m, a, b, JS_CLOCK, tainted, JS_PASS_THROUGH, True):
                 hits.add(mm.start(), "elapsed-assert")
 
     for mm in re.finditer(r"(?<![\w$])jest\s*\.\s*setTimeout\s*\(|(?<![\w$])this\s*\.\s*timeout\s*\(", m):
@@ -861,12 +1048,54 @@ def mask_swift(src):
     return "".join(out)
 
 
-def swift_function_value(m, start, end):
-    """True when the initializer m[start:end] is a closure literal that nothing calls on the spot."""
+_SWIFT_IN = re.compile(r"[()\[\]{}]|(?<![\w$])in(?![\w$])")
+_SWIFT_NOT_HEADER = re.compile(r"(?<![\w$])(?:for|let|var|if|while|guard|return|case|switch)(?![\w$])|;")
+_SWIFT_CONTROL = re.compile(r"\s*(?:\}\s*)?(?:if|guard|for|while|switch|do|else|repeat|catch|defer)(?![\w$])"
+                            r"|.*(?<![\w$])else\s*$", re.S)
+
+
+def swift_opens_function(m, o):
+    """True when the `{` at m[o] opens a closure or a function body, not the block of a control statement."""
+    k = o - 1
+    while k >= 0 and m[k] not in "\n;{}":
+        k -= 1
+    return not _SWIFT_CONTROL.match(m[k + 1 if k < 0 or m[k] != "}" else k:o])
+
+
+def swift_function_returns(m, start, end):
+    """None when the initializer m[start:end] is not a closure literal that nothing calls on the spot. Else
+    the spans of the values it returns: each `return` at its own level, or else its one expression. The
+    `params in` header is left out, so a clock type in it reads nothing."""
     open_idx = start
     while open_idx < end and m[open_idx] in " \t\r\n":
         open_idx += 1
-    return open_idx < end and m[open_idx] == "{" and m[find_close(m, open_idx) + 1:end].strip() == ""
+    if not (open_idx < end and m[open_idx] == "{"):
+        return None
+    close = find_close(m, open_idx)
+    if close < 0 or m[close + 1:end].strip():
+        return None
+    body, depth = open_idx + 1, 0
+    for tok in _SWIFT_IN.finditer(m, open_idx + 1, close):
+        word = tok.group()
+        if word in "([{":
+            depth += 1
+        elif word in ")]}":
+            depth -= 1
+        elif depth == 0:
+            if not _SWIFT_NOT_HEADER.search(m, open_idx + 1, tok.start()):
+                body = tok.end()
+            break
+    spans = block_returns(m, open_idx, swift_opens_function)
+    spans = [(a, b) for a, b in spans if a >= body]
+    if spans:
+        return spans
+    s = body
+    while s < close and m[s] in " \t\r\n":
+        s += 1
+    e = scan_expr(m, s)
+    if s >= close or m[e:close].strip() or re.match(r"(?:let|var)(?![\w$])", m[s:e]):
+        return []
+    return [(s, e)]
 
 
 def scan_swift(text):
@@ -884,12 +1113,12 @@ def scan_swift(text):
         if not declared(mm.start()):
             hits.add(mm.start(), "sleep")
 
-    tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH, swift_function_value)
+    tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH, swift_function_returns)
     for mm in SWIFT_ASSERT.finditer(m):
         close = find_close(m, mm.end() - 1)
         if close >= 0:
             a, b = asserted_range(m, mm.end() - 1, close)
-            if reads_clock(m, a, b, SWIFT_CLOCK, tainted, SWIFT_PASS_THROUGH):
+            if reads_clock(m, a, b, SWIFT_CLOCK, tainted, SWIFT_PASS_THROUGH, True):
                 hits.add(mm.start(), "elapsed-assert")
 
     for mm in re.finditer(r"(?<![\w.])measure\s*[({]|(?<![\w])self\s*\.\s*measure\s*[({]|executionTimeAllowance"
