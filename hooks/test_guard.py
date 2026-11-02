@@ -13830,8 +13830,8 @@ ol("a multi item keyed e2, a and c with a list pick is denied", "deny",
 
 # A label that opens with a letter tag names its option by that letter. The page shows an option by its key's
 # letter, so a tag for another letter gives the owner two letter sets, and an answer "a" reads two ways. A tag is
-# "(X) ", "X: ", "X. ", "X) ", "X — " or "X - " at label start, "Option X:" or "Option X —" at label start,
-# or "Option X" at label end. A letter that only starts a word is no tag: "X-ray", "B2B", "A rail", "A.I.", "e.g.".
+# "(X) ", "[X] ", "X:", "X. ", "X) " or a spaced dash at label start, or "Option X" at label start. A reference
+# mid-label or at label end is no tag. A letter that only starts a word is no tag: "X-ray", "B2B", "A rail", "A.I.", "e.g.".
 INCIDENT_OPTIONS = [
     dict(OL_BASE[0], key="a", label="B: a bottom strip"),
     dict(OL_BASE[1], key="b", label="D: drag sideways"),
