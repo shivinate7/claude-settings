@@ -1200,8 +1200,16 @@ def _read_steps(root):
     try:
         entries = None
         for ref in ("roadmap", "origin/roadmap"):
-            proc.stdin.write(("%s:roadmap/data/steps\n" % ref).encode())
-            proc.stdin.flush()
+            try:
+                proc.stdin.write(("%s:roadmap/data/steps\n" % ref).encode())
+                proc.stdin.flush()
+            except BrokenPipeError:
+                # git exited before it read the request; its stderr says why. The wait is bounded, and the
+                # `finally` below kills and reaps the process on every path.
+                proc.wait(timeout=STEP_GIT_TIMEOUT)
+                if b"not a git repository" in proc.stderr.read(4096):
+                    return {}, "absent"
+                return {}, UNREADABLE + ": git exited early"
             head = proc.stdout.readline().split()
             if len(head) == 2 and head[1] == b"missing":
                 continue
