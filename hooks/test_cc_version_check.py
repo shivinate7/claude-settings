@@ -53,6 +53,10 @@ NAMES = {"obj": "Yz", "N": "N", "I": "I", "Ks": "Ks", "Rd": "Rd", "E": "E", "V":
          "oQt": "oQt", "rjr": "rjr", "gke": "gke", "out": "Pv", "blk": "Ab", "bf": "zb"}
 RENAMED = {"obj": "Mn", "N": "Kp", "I": "Ww", "Ks": "Tq", "Rd": "Zb", "E": "Hb", "V": "Lq",
            "oQt": "Abc", "rjr": "h3m", "gke": "q9z", "out": "Gh", "blk": "Qz", "bf": "Ln"}
+# Two-character names for the summary and reserve identifiers. The same names are assigned
+# elsewhere in DISTRACTOR with other numbers, so a lookup by name alone reads two values.
+RENAMED2 = dict(RENAMED, oQt="ob", gke="fn", out="qe")
+DISTRACTOR = "var zu=function(){fn=7;qe=99;return zu};"
 
 # Text a scanner must step over. Each one comes before the facts, so a scanner that reads a
 # comment opener, an open template literal or a lone quote as code hides the facts after it.
@@ -69,7 +73,7 @@ def _bang(value):
     return "!0" if value else "!1"
 
 
-def binary_text(version, facts, names=NAMES, drop=(), prelude=""):
+def binary_text(version, facts, names=NAMES, drop=(), prelude="", tail=""):
     """Minified JS text with each known fact in its spec shape. A fact that is "unknown" or in
     `drop` has no anchor in the text, so cc_facts must read it as "unknown"."""
     n = names
@@ -102,12 +106,13 @@ def binary_text(version, facts, names=NAMES, drop=(), prelude=""):
     if known("blocking_margin"):
         parts.append('var %s=%s;var %s={buf:(%s.limit)-%s:void 0,id:"autocompact_buffer"};'
                      % (n["blk"], facts["blocking_margin"], n["bf"], n["obj"], n["blk"]))
+    parts.append(tail)
     return "".join(parts)
 
 
-def binary_bytes(version, facts, names=NAMES, drop=(), prelude=""):
+def binary_bytes(version, facts, names=NAMES, drop=(), prelude="", tail=""):
     """A small blob: an ELF-like header, the minified text, and bytes that are not UTF-8."""
-    text = binary_text(version, facts, names, drop, prelude)
+    text = binary_text(version, facts, names, drop, prelude, tail)
     return b"\x7fELF\x02\x01\x01\x00" + text.encode("ascii") + b"\x00\xff\xfe\x80"
 
 
@@ -183,8 +188,8 @@ class ScratchCase(unittest.TestCase):
         with open(BASELINE_PATH, encoding="utf-8") as handle:
             return json.load(handle)
 
-    def write_binary(self, data):
-        path = os.path.join(self.bin, "claude")
+    def write_binary(self, data, name="claude"):
+        path = os.path.join(self.bin, name)
         with open(path, "wb") as handle:
             handle.write(data)
         return path
@@ -398,6 +403,72 @@ class RenamedReserveTests(ScratchCase):
         self.assertEqual(read["blocking_margin"], 13000)
         self.assertEqual(read["output_reserve"], 20000)
         self.assertEqual(check(env=self.env(self.write_binary(data)), config=self.config), "")
+
+
+class ShortNameTests(ScratchCase):
+    def test_two_character_names_with_distractor_assignments_stay_silent(self):
+        facts = self.need("cc_facts")
+        check = self.need("cc_version_check")
+        base = self.baseline()
+        data = binary_bytes(NEXT_VERSION, base["facts"], names=RENAMED2, tail=DISTRACTOR)
+        self.assertEqual(facts(data), dict(base["facts"], version=NEXT_VERSION))
+        self.assertEqual(check(env=self.env(self.write_binary(data)), config=self.config), "")
+
+
+class BaselineFailureTests(ScratchCase):
+    def test_a_failed_baseline_read_does_not_hide_the_change_once_the_baseline_returns(self):
+        check = self.need("cc_version_check")
+        self.need("CC_BASELINE")
+        base = self.baseline()
+        binary = self.write_binary(
+            binary_bytes(NEXT_VERSION, dict(base["facts"], summary_fraction_default=0.25)))
+        good = os.path.join(self.root, "baseline-good.json")
+        with open(good, "w", encoding="utf-8") as handle:
+            json.dump(base, handle)
+        malformed = os.path.join(self.root, "malformed.json")
+        with open(malformed, "w", encoding="utf-8") as handle:
+            handle.write("{not json")
+        broken = {"missing": os.path.join(self.root, "absent.json"), "malformed": malformed}
+        for label, bad in broken.items():
+            with self.subTest(baseline=label):
+                config = self.scratch("config-" + label)
+                env = self.env(binary)
+                try:
+                    with mock.patch.object(precompact_handoff, "CC_BASELINE", bad):
+                        first = check(env=env, config=config)
+                except Exception:
+                    first = None  # raising is a loud failure, which the spec allows
+                if first is not None:
+                    self.assert_one_line(first)
+                with mock.patch.object(precompact_handoff, "CC_BASELINE", good):
+                    second = check(env=env, config=config)
+                self.assert_one_line(second)
+                self.assertIn("summary_fraction_default", second)
+
+
+class TwoPathTests(ScratchCase):
+    def test_two_paths_with_the_same_bytes_read_each_once_and_write_only_on_first_visits(self):
+        check = self.need("cc_version_check")
+        base = self.baseline()
+        data = binary_bytes(VERSION, base["facts"])
+        path_a = self.write_binary(data, name="claude-a")
+        path_b = self.write_binary(data, name="claude-b")
+        visits = [path_a, path_b, path_a, path_b]
+        with contextlib.ExitStack() as stack:
+            reads = {path: stack.enter_context(watch_reads(path)) for path in (path_a, path_b)}
+            for i, path in enumerate(visits):
+                label = "visit %d to %s" % (i + 1, os.path.basename(path))
+                before = self.snapshot()
+                counts = {p: len(reads[p]) for p in reads}
+                line = check(env=self.env(path), config=self.config)
+                self.assertEqual(line, "", label + " printed a line")
+                if i >= 2:  # both paths were seen on visits 1 and 2
+                    self.assertEqual(self.snapshot(), before, label + " wrote the cache again")
+                    self.assertEqual({p: len(reads[p]) for p in reads}, counts,
+                                     label + " read the binary again")
+        for path in (path_a, path_b):
+            self.assertLessEqual(len(reads[path]), 1,
+                                 "%s was read %d times" % (os.path.basename(path), len(reads[path])))
 
 
 def tearDownModule():
