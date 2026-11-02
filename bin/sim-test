@@ -70,7 +70,7 @@ take_over() {
 }
 
 acquire_lock() {
-  local start=$SECONDS told= pid
+  local start=$SECONDS told='' pid
   mkdir -p "$STATE_DIR" || exit 1
   while :; do
     if mkdir "$LOCK" 2>/dev/null; then
