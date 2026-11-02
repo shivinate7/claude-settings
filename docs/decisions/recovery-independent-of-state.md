@@ -9,8 +9,10 @@ already follow it:
 - **Rule 1b, pointer-head.** The rule refuses a command that moves HEAD off `main` in the pointer
   checkout. A move TO `main` is the recovery act, so it passes. That includes `git switch -C main origin/main`
   and `git checkout -B main origin/main`, from a checkout on or off `main`, when local `main` is an ancestor of
-  `origin/main` (one `git merge-base --is-ancestor` read), so the reset drops no local commit. When local `main`
-  holds a commit that `origin/main` lacks, the reset is refused as before. Any other `-C` or `-B` name stays refused.
+  `origin/main`, so the reset drops no local commit. The proof is one `git merge-base --is-ancestor main origin/main`
+  read that exits 0. Exit 1 (local `main` holds a commit that `origin/main` lacks), exit 128 (no local `main` or no
+  `origin/main`) and a read that did not run keep main's verdict, the refusal. Lane orchestrator ruling (process-only):
+  a failed read keeps today's verdict. Any other `-C` or `-B` name stays refused.
 - **The clone is not frozen.** Rule 7 freezes `hooks`, `lint`, `agents` and `state` under the config
   directory, and the live pinned checkout `<clone>-live` and the stamped worktree
   `<clone>-live-<12 hex>` that the pin link points at now. An older stamped worktree stays writable, so
