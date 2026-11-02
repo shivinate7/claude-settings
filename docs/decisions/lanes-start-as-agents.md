@@ -19,7 +19,7 @@ So an orchestrator that starts lanes with `start_session` makes the owner click 
 
 Named limits:
 
-- A background spawn shares the orchestrator's machine and its load brake (`machine-load-brake`). Full refuses every lane call. Busy refuses an Agent call only when it sets `run_in_background`.
+- In a local session, a background spawn shares the orchestrator's machine and its load brake (`machine-load-brake`, local only). Full refuses every lane call. Busy refuses an Agent call only when it sets `run_in_background`.
 - A background spawn ends with the orchestrator's session. A lane that must outlive that session is the owner's ask for a separate session.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-26 21:13 CDT, the degen orchestrator on the Mac started four lanes with `start_session`. The owner had to accept each one, even in Bypass permissions mode (roadmap step c107). Landed 2026-10-27.
