@@ -74,7 +74,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
-                       the working folder or a folder above it, in either shell.
+                       the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
@@ -87,6 +87,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
+  lane-closes-after-records
+                       deny. An archive_session of a lane (newest get_session record of the target, read from the
+                       transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
+                       equal to its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
+                       and a read of the open list that fails (gh missing too) are refusals. A target with no lane
+                       tag passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -117,7 +123,8 @@ Other tools, in `judge` order:
                        files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
                        call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
-                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       `.git`, a target outside the clone, reads and non-writing shell pass. A git
+                       `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   coordinator-scope    deny. A cloud coordinator's own write (no `agent_id`, CLAUDE_CODE_REMOTE true,
                        merge role `coordinator` for the environment's session id) to a repository path
@@ -154,8 +161,16 @@ Other tools, in `judge` order:
                        `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-bypass
+                       deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
+                       Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
+                       path that ends in Simulator.app, `open -b com.apple.iphonesimulator`).
+                       Judged by the command word on the text alone, before any `simctl list`,
+                       and before the two rules below. The remedy is `sim-test`. An override
+                       lifts it. (sim-test-is-the-one-boot-path)
   simulator-boot-cap, simulator-boot-twin
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -260,8 +275,8 @@ while True:
             AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, LOG_MAX_MATCHED, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path, log_path_and_text,
-            nested_script, norm,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path, log_path_and_text,
+            inner_commands, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
@@ -275,7 +290,7 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
@@ -293,7 +308,7 @@ while True:
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, _add_shape, _commit_shape,
             _is_python, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
+            TRUST_REASON, archive_hit, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1874,7 +1889,7 @@ def floor_hit(tool: str, tool_input) -> str:
         model = tool_input.get("model")
         if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
             return str(model)
-    elif tool == SESSION_TOOL:
+    elif tool in (SESSION_TOOL, CREATE_SESSION_TOOL):
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -1901,14 +1916,12 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
-STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
-# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
-# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
-FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
+# The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
+from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
+_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
 
 
 def brief_first_line(brief) -> str:
@@ -1918,16 +1931,36 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
-def brief_markers(brief) -> list:
-    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
-    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
-    home of the marker scan."""
+def marker_scan(brief) -> list:
+    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
+    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
+    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
     if not isinstance(brief, str):
         return []
-    found = STEP_UP_MARKER.findall(brief)
     first = brief_first_line(brief)
-    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
-    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+    starts, leads = [], []
+    for kind, rx, position in _MARKER_ROWS:
+        if position == "line-start":
+            found = list(rx.finditer(brief))
+            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
+        else:
+            hit = rx.search(first)
+            found = [hit] if hit else []
+            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return [(kind, n) for _, kind, n in sorted(starts)] + leads
+
+
+def marker_hits(brief) -> set:
+    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
+    return set(marker_scan(brief))
+
+
+def brief_markers(brief) -> list:
+    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
+    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
+    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
 
 
 def builder_third_round(brief) -> bool:
@@ -1986,7 +2019,7 @@ ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
-# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -2142,8 +2175,7 @@ def role_model_check(tool: str, tool_input):
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
             return "", "", False
-        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
-                                                              brief_first_line(tool_input.get("prompt"))):
+        if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
@@ -2810,11 +2842,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
+def data_tool_judge(tool_input, cwd=""):
+    """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
+    reads the writes again (page-item-design)."""
+    import question_form
+    return question_form.page_item_hit(tool_input, cwd)
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
     filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
-    import question_form
-    return question_form.page_item_hit(tool_input, cwd)[0]
+    return data_tool_judge(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -2832,17 +2870,26 @@ PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, 
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
 
 
+def _waiting_page_folder(name):
+    """The waiting-page skill folder that holds `name`: the one beside this hooks folder, else the config
+    folder's copy. None when neither does."""
+    for folder in (os.path.join(_HERE, "..", "skills", "waiting-page"),
+                   os.path.join(guard_core.config_dir(), "skills", "waiting-page")):
+        if os.path.isfile(os.path.join(folder, name)):
+            return folder
+    return None
+
+
 def _stale_pages_module():
     """stale_pages.py from the skill folder beside this hooks folder, else the config folder's copy; None
     when neither exists. Loaded here and not at the top, so a call that is no waiting-page publish
     never pays for it."""
-    for folder in (os.path.join(_HERE, "..", "skills", "waiting-page"),
-                   os.path.join(guard_core.config_dir(), "skills", "waiting-page")):
-        if os.path.isfile(os.path.join(folder, "stale_pages.py")):
-            if folder not in sys.path:
-                sys.path.insert(0, folder)  # stale_pages imports splice from its own folder
-            return importlib.import_module("stale_pages")
-    return None
+    folder = _waiting_page_folder("stale_pages.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)  # stale_pages imports splice from its own folder
+    return importlib.import_module("stale_pages")
 
 
 def page_stale_hit(tool_input, cwd):
@@ -2884,6 +2931,113 @@ def page_stale_hit(tool_input, cwd):
         return PAGE_STALE_REASON, path
     if blob and not stale_pages.write_stamp(root, blob):
         record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
+    # The file an item write's picture check loads (rule page-item-design): the absolute path of this publish.
+    stale_pages.write_published(root, os.path.abspath(os.path.join(cwd, path) if cwd else path))
+    return None
+
+
+# ------------------------------------------------------------------ a design picture is checked at write
+#
+# Rule `page-item-design` (decision page-item-design). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option `design` runs skills/waiting-page/check_designs.mjs against the page
+# file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
+# sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
+# unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
+CHECK_DESIGNS = "check_designs.mjs"
+CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
+# One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
+PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
+_design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
+PAGE_ITEM_DESIGN_FIX = " Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+
+
+def _run_check_designs(page_file, item):
+    """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
+    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
+    import shutil
+    import subprocess  # TimeoutExpired only; the child starts through _nowindow
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    import tempfile
+    node = shutil.which("node")
+    folder = _waiting_page_folder(CHECK_DESIGNS)
+    if node is None or folder is None:
+        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
+    cap = CHECK_DESIGNS_CAP
+    if _design_deadline[0] is not None:
+        cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
+    with tempfile.TemporaryDirectory() as scratch:
+        item_file = os.path.join(scratch, "item.json")
+        with open(item_file, "w", encoding="utf-8") as handle:
+            json.dump(item, handle)
+        try:
+            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
+                                capture_output=True, text=True, timeout=cap)
+        except subprocess.TimeoutExpired:
+            return 3, "no answer in %d s" % cap
+        except OSError as err:
+            return 3, str(err.strerror or err)
+    lines = run.stdout.strip().splitlines()
+    try:
+        problem = json.loads(lines[-1]).get("problem") if lines else None
+    except ValueError:
+        return 3, "no answer line; exit %d" % run.returncode
+    if run.returncode == 1 and isinstance(problem, str) and problem:
+        return 1, problem
+    if run.returncode == 0:
+        return 0, ""
+    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+
+
+def page_design_hit(writes, tool_input, cwd):
+    """(reason, matched) for the first write in `writes` whose picture the page would refuse, else None. A write
+    with no picture leaves before the record is read. A set is judged whole. An update is judged only when it
+    carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
+    partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
+    on any unread state."""
+    import question_form
+    pictured = []
+    for op, doc_id, data in question_form.design_writes(writes):
+        if op == "update" and not (data.get("options") and data.get("designs")):
+            record(DATA_TOOL, "noted", "page-item-design",
+                   "partial: an update of item %s carries only %s, so its picture is not checked"
+                   % (cap_safe(str(doc_id or data.get("id") or "?"), 40), "options" if data.get("options") else "designs"))
+            continue
+        pictured.append((doc_id, data))
+    if not pictured:
+        return None
+    try:
+        root = question_form.waiting_page_root(tool_input, cwd)
+        stale_pages = _stale_pages_module()
+        if stale_pages is None:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: stale_pages.py not found")
+            return None
+        page_file = stale_pages.read_published(root) if root else None
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if not page_file or not os.path.isfile(page_file):
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
+        return None
+    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    _design_deadline[0] = deadline
+    try:
+        for done, (doc_id, data) in enumerate(pictured):
+            if time.monotonic() >= deadline:
+                record(DATA_TOOL, "noted", "page-item-design",
+                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
+                return None
+            try:
+                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+            except Exception as err:
+                code, text = 3, type(err).__name__ + ": " + str(err)
+            if code == 1:
+                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+            if code != 0:
+                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    finally:
+        _design_deadline[0] = None
     return None
 
 
@@ -2977,16 +3131,28 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# Decision sweep-shuts-down-idle-simulators, rulings 3 and 4. A boot is an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+# A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
+# `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
+def _simctl_boot_args(word: str, rest: list):
+    """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
+    command is no `simctl boot`. The list is empty when xargs feeds the device."""
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"]:
+            return after[1:]
+    return None
+
+
 def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -3002,11 +3168,46 @@ def _sim_boot_names(segment: str) -> list:
                 os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
                 found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
-    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
-        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"] and len(after) > 1:
-            return [after[1]]
     return []
+
+
+def _simulator_app_open(rest: list) -> bool:
+    """True when the arguments of an `open` name Simulator.app: `-a Simulator[.app]`, a path that ends in
+    Simulator.app, or `-b com.apple.iphonesimulator`. macOS reads these names without case."""
+    for i, arg in enumerate(rest):
+        low = arg.lower().rstrip("/")
+        if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg) and i + 1 < len(rest):  # a cluster (`-ga`, `-an`) with a or b takes the next word
+            value = basename(rest[i + 1].rstrip("/"))
+            if ("a" in arg and re.sub(r"\.app$", "", value) == "simulator") or (
+                    "b" in arg and value == "com.apple.iphonesimulator"):
+                return True
+        elif low.endswith("/simulator.app") or low == "simulator.app":
+            return True
+    return False
+
+
+def sim_bypass_hit(segment: str) -> str:
+    """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
+    command word, at each command of the segment and in each command a wrapper hands on
+    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for start in command_indexes(tokens):
+        word, rest = basename(tokens[start]), tokens[start + 1:]
+        if word == "open" and _simulator_app_open(rest):
+            return ("open " + " ".join(rest))[:100]
+        if _simctl_boot_args(word, rest) is not None:
+            return " ".join([tokens[start]] + rest)[:100]
+    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
+                 if (hit := sim_bypass_hit(part))), "")
+
+
+SIM_BYPASS_REASON = (
+    "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
+    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "(decision sim-test-is-the-one-boot-path)"
+)
 
 
 def sim_boot_refusal(tool: str, names: list) -> None:
@@ -3054,7 +3255,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -3100,7 +3301,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
     unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
     that can write. Liftable by an owner override, unlike `worktree_home_hit`
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
     elif tool in SHELL_TOOLS:
@@ -3148,9 +3349,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
-# is left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -3202,7 +3403,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
-        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
+        # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
@@ -3260,6 +3461,8 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
             continue
         for verb, args in verbs:
             if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if verb == "clean" and not clean_deletes_files(args):
                 continue
             if in_primary(folder, folder):
                 return verb
@@ -3847,6 +4050,11 @@ def judge(payload) -> None:
     if matched:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
 
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
         if matched:
@@ -3854,7 +4062,7 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        rule, matched = data_tool_hit(tool_input, cwd)
+        (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
@@ -3882,6 +4090,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if item_writes:
+            unseen = page_design_hit(item_writes, tool_input, cwd)
+            if unseen:
+                refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
         return
 
     if tool == PAGE_TOOL:
@@ -3899,8 +4111,11 @@ def judge(payload) -> None:
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
                         tool_input.get("description") or "")
-            names = [n for seg in split_segments(strip_heredoc_bodies(command))
-                     for n in _sim_boot_names(seg)]
+            segments = split_segments(strip_heredoc_bodies(command))
+            matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
+            if matched:
+                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
+            names = [n for seg in segments for n in _sim_boot_names(seg)]
             if names:
                 sim_boot_refusal(tool, names)
         return
