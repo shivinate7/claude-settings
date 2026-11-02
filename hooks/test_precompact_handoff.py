@@ -351,6 +351,8 @@ def case_settings_json():
         settings = json.load(f)
     check("settings: autoCompactWindow is 500000",
           settings.get("autoCompactWindow") == 500000, "settings: %r" % settings)
+    check("settings: idleCompaction is false",
+          settings.get("idleCompaction") is False, "settings: %r" % settings)
     env = settings.get("env", {})
     check("settings: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is gone -- autoCompactWindow replaces it",
           "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in env, "env: %r" % env)
