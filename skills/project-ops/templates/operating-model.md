@@ -64,10 +64,9 @@ The coordinator does not rotate. It writes its own handoffs and compacts in plac
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads triage's and the batch runner's tally from `get_session`:
+- At each wake, the coordinator reads triage's and the batch runner's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
-  is no reading: the coordinator asks that session for its tally instead. Without a project, each
-  standing session ends every reply with its tally, and the owner reads it.
+  is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
 - The limits are `<triage limit>` and `<batch runner limit>`.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
