@@ -321,7 +321,7 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
 
     def test_the_tier_line_says_only_the_batch_runner_merges(self):
-        # Owner ruling (waiting-page item 111 a, 2026-11-01 11:53 CST): in a coordinator build only the batch runner merges.
+        # A coordinator build has one merger, the batch runner. The tier line must say so (waiting-page item 111 a).
         line = normal_tier_line()
         anchor = "only the batch runner merges"
         self.assertIn(anchor, line, "the tier line does not say that only the batch runner merges")

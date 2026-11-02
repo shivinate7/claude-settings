@@ -19487,7 +19487,7 @@ cs_shell("chained_add_commit_allowed, a comment hides the commit", "allow",
 cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
 cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
 
-# ---- coordinator acts (rule coordinator-scope; owner ruling, waiting-page item 111 a, 2026-11-01 11:53 CST). In a coordinator
+# ---- coordinator acts (rule coordinator-scope, waiting-page item 111 a). In a coordinator
 # build only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only when its type is
 # Plan, Explore or claude-code-guide. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
 # merge`, or the merge tool's --confirm) is refused before any read. create_session and start_session stay allowed.
@@ -19861,7 +19861,7 @@ CS_CHECKS.append(("coordinator-scope tag_cost: a role file that is there is judg
                   cs_tag_cost_check("deny", 0, "coordinator-own", "Write", CS_COST_CODE, role_path("lane"))))
 
 
-# 7. guard.log (owner ruling, waiting-page item 112 a, 2026-11-01 16:45 CST): each coordinator-scope refusal appends
+# 7. guard.log (waiting-page item 112 a): each coordinator-scope refusal appends
 # exactly one guard.log line, and each override that lifts one appends exactly one line. The reader is shiv (rule
 # outcomes-mechanize-rules). A log line costs one append in the guard process already running: no process starts for it.
 CS_LOG_EDIT = {"file_path": CS_CODE, "new_string": "x"}
