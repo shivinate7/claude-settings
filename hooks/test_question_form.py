@@ -993,7 +993,6 @@ def case_widens_words_in_the_reply_judge_prompt():
     check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
 
 
-<<<<<<< HEAD
 # ------------------------------------------------------------------ past rulings and option keys (units)
 #
 # question_form.past_rulings(text, root) -> (candidates, unknown), and question_form.key_overlap(reply, earlier) (spec
@@ -1111,7 +1110,8 @@ def case_past_rulings_skips_the_debt_notes_file():
     check("past rulings notes: a real debt record still reaches the candidates", tcj.DEBT_WHAT in text, text[:200])
     check("past rulings notes: docs/debts/notes.md is not a record and never reaches the candidates",
           notes_mark not in text, text[:200])
-=======
+
+
 # ------------------------------------------------------------------ item 51's field: a picture's focus at the top level
 
 def case_item_51_stray_field():
@@ -1119,7 +1119,6 @@ def case_item_51_stray_field():
     refused as item-field-rendered and names the field, on both surfaces."""
     page("a top-level focus the page does not list is refused, naming it", "set",
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
->>>>>>> origin/main
 
 
 def main():
