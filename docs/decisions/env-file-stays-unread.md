@@ -20,7 +20,7 @@ Read form. The guard does not judge Read. It returns early for Read and Grep. Th
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Known false alarms: note `env-file-rule-false-alarms`, a line in the debt notes. The guard refuses `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four are safe. None reads a file's contents.
+Known false alarms: debt `env-file-rule-false-alarms` (the env-file false-alarm debt). The guard refuses `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four are safe. None reads a file's contents.
 
 Why: the user's own secrets must not enter the session. `.envrc` is in the scope for the same reason. The guard stops Claude's mistakes, not an attacker's form (`guard-guards-mistakes-only`, a guard stops mistakes, not an attacker).
 
