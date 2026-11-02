@@ -49,8 +49,12 @@ from datetime import datetime, timedelta, timezone
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
-# The first word, then one punctuation mark (`,` `.` `!` `;` `:` or a dash) that is dropped, then the rest.
-PROMPT = re.compile(r"\s*override(?=[\s,.!;:\-\u2013\u2014]|$)\s*[,.!;:\-\u2013\u2014]?\s*(.*)", re.I | re.S)
+# The first word, then one mark (`,` `.` `!` `;` or a dash) that is dropped, then the rest. A mark counts
+# only with whitespace or the end after it, so `override.py` and `override-15m` grant nothing. A bare
+# `:` counts as on main (`override:reason`).
+PROMPT = re.compile(
+    r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
+    re.I | re.S)
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
