@@ -24,7 +24,7 @@
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # GH_TOKEN and GITHUB_TOKEN are unset unless the step's env: sets them, as on the runner (a session token would
-# turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
+# turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, SKIP (the step ran and skipped tests, exit 0), FAIL, unknown (tool missing, or an expression it
 # cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base).
 # A step's `if:` reads every needs.scope.outputs flag as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
@@ -346,7 +346,7 @@ def main(argv):
             unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
         finally:
             os.remove(script)
-        first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "FAIL "))),
+        first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
                      "(verdict printed no verdict line)")
         if known_action(step) == "code-check":
             first += " (code_check.py: %s)" % code_check(top, step)[0]
@@ -357,10 +357,10 @@ def main(argv):
             state = "unknown"
             first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
         else:
-            state = "PASS" if rc == 0 else "FAIL"
+            state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
             if unstarted:
                 first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
-        tally["FAIL" if state == "FAIL" else "unknown"] += state != "PASS"
+        tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
         print("%-15s %s: %s" % (state, name, first))
     if not dry:
         print("log=%s" % log)

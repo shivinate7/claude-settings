@@ -3,7 +3,8 @@
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
-# Exit 0 is FAIL if the output holds a runner marker.
+# Exit 0 is FAIL if the output holds a runner marker or no test ran, else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
+# N sums every runner summary in the run (`skipped=N`, `N skipped`, `N tests skipped`); with no summary it counts the lines that start `SKIP ` or `SKIPPED`. A summary of 0 skipped is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -16,6 +17,8 @@ KEEP = 7 * 86400
 HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
 ST_FAILED = re.compile(r"Test run with \d+ tests?\b.{0,100}?\bfailed after")  # `swift test` can exit 0 on it; its XCTest line says 0
+SKIPPED = re.compile(rb"\bskipped=(\d+)|\b(\d+) (?:tests? )?skipped\b")  # unittest, then pytest/jest/vitest/playwright/case_runner/XCTest summaries
+SKIP_LINE = re.compile(rb"^SKIP(?: |PED)", re.M)  # a runner with no summary prints one such line per skip
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:
@@ -75,6 +78,7 @@ def main(argv):
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
     fail = zero = ran = False; lines = []
+    summaries, marks = {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
             pos = start
@@ -84,7 +88,12 @@ def main(argv):
                 if len(b) != n: raise OSError("short read")
                 return b
             while pos < end:  # scan the whole run region; OVERLAP keeps a marker cut by a chunk edge whole
-                f.seek(pos); buf = rd(min(CHUNK, end - pos)).decode("utf-8", errors="replace")
+                f.seek(pos); raw = rd(min(CHUNK, end - pos)); buf = raw.decode("utf-8", errors="replace")
+                # A later chunk starts mid-line: a match at its index 0 is the tail of one the previous chunk holds whole, and may be cut ("2 skipped" of "12 skipped").
+                for m in SKIPPED.finditer(raw):
+                    if pos == start or m.start(): summaries[pos + m.start()] = int(m.group(1) or m.group(2))  # a later chunk overwrites a count cut at its edge
+                for m in SKIP_LINE.finditer(raw):
+                    if pos == start or m.start(): marks[pos + m.start()] = 1
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
@@ -97,7 +106,10 @@ def main(argv):
         if fail: rc, note = 1, " runner failure marker"
         elif zero and not ran: rc, note = 1, " no tests ran"
         else:
-            print(f"PASS {name} ({secs})"); return 0
+            skips = sum(summaries.values()) if summaries else len(marks)
+            if skips: print(f"SKIP {name}, {skips} skipped ({secs})")
+            else: print(f"PASS {name} ({secs})")
+            return 0
     print(f"FAIL {name} rc={rc}{note} ({secs}) log={log}")
     hot = [l for l in lines if HOT.search(l)]
     print("\n".join((hot or lines)[-CAP:]))
