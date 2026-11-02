@@ -1961,9 +1961,8 @@ def builder_third_round(brief) -> bool:
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet. A reviewer round 3 on Opus
-    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (owner ruling, item 127 pick a,
-    Nov 1 17:25 CST)."""
+    frontmatter model is haiku, so a reviewer on a later-round brief must name sonnet. A later-round reviewer that names Opus
+    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -2010,7 +2009,7 @@ ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
-# EXPLORE_AUDIT_MARKER (owner ruling, item 137 pick a, Nov 1 18:38 CST). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
+# EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -2155,7 +2154,7 @@ def role_model_check(tool: str, tool_input):
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
     opus_spawn_hit. An Explore on an audit brief
     (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too.
-    An above-row refusal is liftable by the general override (owner ruling, item 127 pick a, Nov 1 17:25 CST); the
+    An above-row refusal is liftable by the general override (decision agent-model-cap); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
     if tool not in SPAWN_TOOLS:
         return "", "", False
@@ -2372,9 +2371,8 @@ OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
     is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
-    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (owner ruling, item 137
-    pick a, Nov 1 18:38 CST). Any other spawn above its role's model is refused (owner ruling, item 127 pick a, Nov 1 17:25
-    CST), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
         return ""
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
@@ -3631,8 +3629,8 @@ def judge(payload) -> None:
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
-    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (owner ruling, item 127 pick a, Nov 1 17:25
-    # CST). An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
+    # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
