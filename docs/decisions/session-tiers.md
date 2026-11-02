@@ -92,6 +92,12 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - The guard allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag. It reads the tags as `merge-role-proof` does. No record, no transcript or no env id is a denial.
   - Steer: a `cs-build` session hands the act to the owner or to an untagged bridge session. A session with no record runs `get_session` alone in its own turn, then retries.
   - A `set_session_tags` call after the newest record read is a denial, until `get_session` runs again. Window that stays open: the read is judged by result order. A tag another session adds after the newest read is not seen. A `get_session` and a `set_session_tags` in the same message can leave the new tag unseen. Batch runners and lanes get their tags at `create_session`, so the window is unused today.
+- **Lane closes after records** (rule `lane-closes-after-records`, guard rule that denies the batch runner's close of a lane while the lane's records pull request is open). Risk kind: incident. The home repo's wheel lane was archived before its records pull request landed. Landed 2026-11-02.
+  - The guard reads the target's newest `get_session` record in the calling session's own transcript, with the reader `merge-role-proof` uses. A record with no `cs-build:lane` tag passes. A lane is denied while any open pull request of its `cs-repo` has a head ref that holds its `cs-step` slug. The open list is read through REST, every page, as the merge tool reads it. A lane record with no `cs-step` or no `cs-repo` tag, a failed read and a missing `gh` are denials.
+  - Steer: with no record of the target, run `get_session` on the target alone, then retry. With a pull request open, wait until it merges or is closed as replaced, then retry.
+  - False alarm that does not occur: a lane pull request that is merged or closed as replaced is not on the open list, so the close passes.
+  - Known gap: a held lane's open draft pull request blocks its close. The owner's override lifts the rule.
+  - Cost: one transcript read and one paginated `gh` REST read per `archive_session` call, inside the guard already running. No new process, file or timer. Test for the cost: none yet. No case counts `gh` calls, and the fake `gh` keeps no call count. A test-author adds one in a new file (one `gh` call per archive).
 
 ## How it works
 

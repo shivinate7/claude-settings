@@ -6,6 +6,7 @@ Other files reach these names through `guard`.
 import fnmatch
 import json
 import os
+import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
@@ -549,9 +550,10 @@ def _own_session_read(transcript: str, own_id: str):
     return newest, tagged_after
 
 
-def _own_get_session_tags(transcript: str, own_id: str):
-    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
-    return _own_session_read(transcript, own_id)[0]
+def _own_get_session_tags(transcript: str, session_id: str):
+    """The tags of the newest get_session result in this session's own transcript whose ccr.id is
+    session_id (the session's own id, or a target's id for lane-closes-after-records), else None."""
+    return _own_session_read(transcript, session_id)[0]
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -600,6 +602,68 @@ def trust_card_hit(tool: str, transcript: str) -> str:
     except Exception:
         pass
     return tool
+
+
+# ---- archive_session: a lane closes only after its records pull request has left the open list
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
+ARCHIVE_LANE_TAG = ROLE_TAG_PREFIX + "lane"
+ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
+ARCHIVE_NO_RECORD_REASON = (
+    "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
+    "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
+    "then retry."
+)
+ARCHIVE_OPEN_REASON = (
+    "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
+    "that pull request merges or is closed as replaced, then retry."
+)
+ARCHIVE_TAGS_REASON = (
+    "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
+    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry."
+)
+ARCHIVE_READ_REASON = (
+    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
+    "records have landed. Retry once gh answers."
+)
+_REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+
+
+def archive_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
+    get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
+    while any open pull request of its cs-repo has a head ref that holds its cs-step slug. Fails closed:
+    any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    if tool != ARCHIVE_TOOL:
+        return None
+    target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
+    try:  # cost: one transcript read per archive call
+        tags = _own_get_session_tags(transcript, target) if transcript and isinstance(target, str) and target else None
+    except Exception:
+        tags = None
+    if tags is None:
+        return "archive with no record of the target", ARCHIVE_NO_RECORD_REASON
+    if ARCHIVE_LANE_TAG not in tags:
+        return None
+    slugs = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
+    repos = [str(t)[len(ARCHIVE_REPO_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_REPO_PREFIX)]
+    slugs, repos = [x for x in slugs if x], [x for x in repos if x]
+    if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
+        return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
+    try:  # cost: one paginated gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        for repo in repos:
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+            for row in rows:
+                ref = str(row["head"]["ref"])
+                slug = next((s for s in slugs if s in ref), None)
+                if slug:
+                    return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
+    except (Exception, SystemExit):
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+    return None
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

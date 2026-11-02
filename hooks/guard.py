@@ -80,6 +80,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
+  lane-closes-after-records
+                       deny. An archive_session of a lane (newest get_session record of the target, read from the
+                       transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
+                       that holds its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
+                       and a read of the open list that fails (gh missing too) are refusals. A target with no lane
+                       tag passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -272,7 +278,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
+            TRUST_REASON, archive_hit, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3289,6 +3295,11 @@ def judge(payload) -> None:
     matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
     if matched:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
