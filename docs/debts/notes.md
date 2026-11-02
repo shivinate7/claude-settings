@@ -874,3 +874,4 @@
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
 - ps1-copy-skill-prune-no-backup: in copy mode, install.ps1 prunes files inside a copied skill in place, while install.sh backs the copy up first (install.ps1 Install-Dir). Decision: copy-mode-overwrites-no-backup
 - install-sh-unchecked-skill-mv: install.sh moves an old skill backup with an unchecked `mv` (install.sh move_old_skill_baks). Decision: install-manifest-prunes
+- install-tarball-no-prune: an install from a source with no .git counts every file in the extracted tree as shipped, so a file main removed stays in place (install.sh tarball fallback). Decision: install-manifest-prunes
