@@ -148,11 +148,13 @@ After each build the builder prints the upkeep list for the triage thread. It na
 
   A skipped session row does not blank this row. An empty `items` list reads zero;
 - dated claims to re-check before a lane starts: each `doing` or `active` step whose `note` holds a
-  stale claim. A claim is the whole word `Finding` or `Checked` in any case (`Findings` and
-  `Rechecked` do not count), then a date within 40 characters, with no `.` or newline between. The date
-  is `Mon D` or `Month D` with an optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A date with no
-  year takes the build year, or the year before if it would be in the future. When the newest claim in
-  the note is 5 or more days old, the entry reads `<id> (<date as written>)`. Triage asks for a
+  stale claim. A claim is the word `Finding` or `Checked` in any case. No letter, digit or hyphen may
+  touch it, so `Findings`, `Rechecked`, `Re-checked` and `c146-checked-map` do not count. A date follows
+  within 40 characters, with no `.` or newline between. The date is `Mon D` or `Month D` with an
+  optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A month name needs a capital first letter, so
+  `May 2` counts and `may 2` does not. A date with no year takes the build year, or the year before if
+  it would be in the future. When the newest claim in the note is 5 or more days old, the entry reads
+  `<id> (<date as written>)`. Triage asks for a
   re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
   `--live` file;
 - `Step:` trailers that name no step.

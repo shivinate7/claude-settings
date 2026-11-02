@@ -51,8 +51,10 @@ items list, or it holds an item row of the wrong shape. A skipped session row do
 
 The upkeep list also names each doing or active step whose note holds a stale dated claim, so triage asks
 for a re-check on main before a lane starts (step stale-note-recheck). A claim is the whole word Finding or
-Checked (any case; "Findings" and "Rechecked" do not count), then within 40 characters, with no "." or
-newline between, a date: `Mon D` or `Month D` with an optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A
+Checked (any case; no letter, digit or hyphen may touch it, so "Findings", "Rechecked", "Re-checked" and
+"c146-checked-map" do not count), then within 40 characters, with no "." or newline between, a date:
+`Mon D` or `Month D` with an optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A month name needs a
+capital first letter, so "May 2" counts and "may 2" does not. A
 date with no year takes the build year, or the year before if it would be in the future. A date that does
 not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
 `<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
@@ -767,11 +769,11 @@ def unlaned(open_, marks, work):
 
 
 CLAIM = re.compile(
-    r"\b(?:finding|checked)\b[^.\n]{0,40}?"
+    r"(?<![\w-])(?i:finding|checked)(?![\w-])[^.\n]{0,40}?"  # any case; no letter, digit or hyphen touches it
     r"(?:(?P<iso>\d{4}-\d{2}-\d{2})(?!\d)|"
-    r"(?P<md>(?P<mon>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
-    r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?P<day>\d{1,2})(?!\d)"
-    r"(?:(?:,\s*|\s+)(?P<year>\d{4})(?!\d))?))", re.IGNORECASE)
+    r"(?P<md>(?P<mon>(?=[A-Z])(?i:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"  # capital first letter
+    r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\s+(?P<day>\d{1,2})(?!\d)"
+    r"(?:(?:,\s*|\s+)(?P<year>\d{4})(?!\d))?))")
 MONTH_ABBR = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
 
