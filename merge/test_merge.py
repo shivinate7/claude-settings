@@ -18,6 +18,14 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint 
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 
+_RUN_FOLDER = []
+def run_folder():
+    """This run's one folder (test-temp-standard), made on the first request and removed when the process exits. Every helper below takes its temp folder from it."""
+    if not _RUN_FOLDER:
+        _RUN_FOLDER.append(_test_temp.run_folder())
+        atexit.register(shutil.rmtree, _RUN_FOLDER[0], True)
+    return _RUN_FOLDER[0]
+
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
@@ -208,7 +216,7 @@ def copy_repos(t):
     Setup was 14 git starts per test (a clone is the slow one on Windows); a copy is files only. False when the copy cannot be made or checked: the caller builds with git."""
     try:
         if not _TEMPLATE:
-            root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-template-"))
+            root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-template-", dir=run_folder()))
             atexit.register(shutil.rmtree, root, True)
             build_repos(root)
             _TEMPLATE.append(root)
@@ -237,7 +245,7 @@ def copy_repos(t):
 
 class Env(unittest.TestCase):
     def setUp(self):
-        self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-"))
+        self.t = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-", dir=run_folder()))
         self.addCleanup(shutil.rmtree, self.t, True)
         self.bare = os.path.join(self.t, "origin.git")
         self.co, self.other = (os.path.join(self.t, n) for n in ("co", "other"))
@@ -2621,7 +2629,7 @@ fail("unhandled " + p)
 
 class GhLockTest(unittest.TestCase):
     def setUp(self):
-        t = tempfile.mkdtemp(prefix="test-ghlock-")
+        t = tempfile.mkdtemp(prefix="test-ghlock-", dir=run_folder())
         self.addCleanup(shutil.rmtree, t, True)
         bindir = os.path.join(t, "bin"); os.makedirs(bindir)
         gh = os.path.join(bindir, "gh"); put_shim(gh, FAKE_GH)
@@ -2819,6 +2827,22 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/feat")
+RUN_FIELDS = ("databaseId", "name", "workflowName", "status", "conclusion", "headSha", "headBranch", "event", "url")
+def next_runs():
+    """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion) or (name, status, conclusion, databaseId); without an id a run gets 9000 plus its place."""
+    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+    return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i) for i, r in enumerate(cur)]
+def run_list_json(runs, sha, argv):
+    """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. No createdAt: a newer run is a larger databaseId."""
+    fields = argv[argv.index("--json") + 1].split(",") if "--json" in argv else list(RUN_FIELDS)
+    bad = [f for f in fields if f not in RUN_FIELDS]
+    if bad:
+        print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
+    def obj(name, status, conclusion, rid):
+        full = {"databaseId": rid, "name": name, "workflowName": name, "status": status, "conclusion": conclusion, "headSha": sha,
+                "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
+        return {f: full[f] for f in fields}
+    return json.dumps([obj(*r) for r in runs])
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
     h = S.get("hold")
     if h and h["on"] == kind and not os.path.exists(os.path.join(d, "held")):
@@ -2848,8 +2872,7 @@ if a[:1] != ["api"]:
         commit = a[a.index("--commit") + 1] if "--commit" in a else ""
         if commit and commit in {r[1] for r in S.get("open_prs", [])} and commit != feat_head():  # another open pull request's head, read by the batch brake: its own runs, and the head's script is not used
             print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in S.get("other_runs", {}).get(commit, [])])); sys.exit(0)
-        seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
-        print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
+        print(run_list_json(next_runs(), commit or feat_head(), a))
         sys.exit(0)
     if a[:2] == ["run", "watch"]:
         sys.exit(0)
@@ -2996,6 +3019,12 @@ try:
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
 
     elif method == "GET" and rel == "actions/runs":
+        if "head_sha" in params:  # a head's runs, the REST twin of `gh run list --commit`: the next runs_seq entry, in REST shape
+            if S.get("runs_fail"):
+                raise Refused(S["runs_fail"])
+            runs = [{"id": rid, "name": n, "status": st, "conclusion": c or None, "head_sha": params["head_sha"], "head_branch": "feat",
+                     "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid} for n, st, c, rid in next_runs()]
+            finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
         runs = S.get("base_runs", [])
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
 
@@ -3142,13 +3171,17 @@ def stamp_marker(env):
         p.start(); env.addCleanup(p.stop)
     return mark
 
+def gh_case_setup(test):
+    """What every fake-gh case starts with: the shim on PATH, the wait's clock at zero, and a head whose one check is green. GhHalf, RestRoutes and SupersededRuns share it."""
+    install_gh_shim(test)
+    test.ticks, test.paused, test.at_pause = 0, [], []
+    GhHalf.set(test, checks_seq=[[("checks", "pass", "")]])
+
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
     def setUp(self):
         super().setUp()
-        install_gh_shim(self)
-        self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("checks", "pass", "")]])
+        gh_case_setup(self)
 
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
@@ -4426,6 +4459,173 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_stops(rc, out, before)
 
+# The run ids of PR 1003 of q_max (Nov 1): the cancelled run and the newer run of one head, and a run of another workflow on that head.
+OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
+
+def job_link(run, job):
+    """A check run's details_url as GitHub writes it: the id of the run is in the link."""
+    return f"https://github.com/o/r/actions/runs/{run}/job/{job}"
+
+class SupersededRuns(Env):
+    """A cancelled run of a workflow is superseded when a newer run of that same workflow (a larger run id) is on the head. Host.checks
+    drops that run's check rows, so every caller judges the head by the newer run. Never dropped: a row with no run link, a commit status,
+    a failed run, a cancelled run with no newer run of its workflow, and every row when the runs read fails or lists no such run.
+    Fixtures run through checks() then classify, and through head_read, head_state and wait_checks, with the fake's runs_seq as the workflow runs.
+    Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def head_rows(self, rows, runs):
+        """The head's check rows, the same on every read, and its workflow runs. A row is (name, bucket, link) or (name, bucket, link, "status").
+        A run is (name, status, conclusion, run id). The newest run comes first, as gh lists it."""
+        self.set(checks_seq=[list(rows)], runs_seq=[list(runs)])
+
+    def pr_1003_head(self):
+        """The head of PR 1003. The old run's fan-in job ran (always()) and failed; the concurrency group then cancelled the rest of that run.
+        The newer run passed every job. The three forms: a failed fan-in job, a job cancelled in the old run beside a pass, and a job cancelled
+        in the old run beside a skip in the newer run."""
+        self.head_rows(
+            [("all-jobs-passed", "fail", job_link(OLD_RUN, 101)), ("lint", "cancel", job_link(OLD_RUN, 102)),
+             ("e2e", "cancel", job_link(OLD_RUN, 103)), ("lint", "pass", job_link(NEW_RUN, 201)),
+             ("e2e", "skipping", job_link(NEW_RUN, 202)), ("all-jobs-passed", "pass", job_link(NEW_RUN, 203)),
+             ("scope", "pass", job_link(NEW_RUN, 204))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+
+    def judged(self, names):
+        """checks() then classify, as the wait and the preview take them: (red, pending)."""
+        red, pending, _ = merge.Host.classify(self.gh_host().checks(7, warn=False), names)
+        return red, pending
+
+    def test_a_failed_fan_in_job_of_a_cancelled_older_run_under_a_green_newer_run_is_green(self):
+        self.pr_1003_head()
+        self.assertEqual(self.judged(["all-jobs-passed"]), ([], []))
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_cancel_in_the_older_run_beside_a_skip_in_the_newer_run_is_not_red(self):
+        self.head_rows(
+            [("e2e", "cancel", job_link(OLD_RUN, 103)), ("e2e", "skipping", job_link(NEW_RUN, 202)), ("all-jobs-passed", "pass", job_link(NEW_RUN, 203))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        self.assertEqual(self.judged(["all-jobs-passed"]), ([], []))
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_red_newest_run_beside_a_cancelled_older_run_is_refused(self):
+        self.head_rows(
+            [("lint", "fail", job_link(NEW_RUN, 201)), ("unit", "cancel", job_link(OLD_RUN, 101)), ("unit", "pass", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "failure", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint", "unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_cancelled_newest_run_beside_a_green_older_run_is_refused(self):
+        # No newer run of its workflow exists, so the newest run is never superseded. Its cancelled job is one the older run does not report.
+        self.head_rows(
+            [("lint", "cancel", job_link(NEW_RUN, 201)), ("unit", "pass", job_link(OLD_RUN, 101))],
+            [("checks", "completed", "cancelled", NEW_RUN), ("checks", "completed", "success", OLD_RUN)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: cancel") for r in red), red)
+        rc, out = self.go(required=["lint", "unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pending_newest_run_beside_a_cancelled_older_run_is_pending(self):
+        self.head_rows(
+            [("lint", "pending", job_link(NEW_RUN, 201)), ("unit", "cancel", job_link(OLD_RUN, 101))],
+            [("checks", "in_progress", "", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "pending", detail)
+        self.assertIn("lint", detail)
+        self.assertNotIn("unit", detail)
+        self.assertEqual(self.gh_host(required=["lint"]).head_state(7), "pending: lint")
+
+    def test_an_older_failed_run_beside_a_newer_green_run_is_refused(self):
+        # Only a cancelled run is superseded. A failed run's job stays red beside the newer run's pass.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        red, _ = self.judged(["lint"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_two_workflows_on_one_head_do_not_hide_each_other(self):
+        # checks: its cancelled run is superseded by its newer run. ci: its cancelled run has no newer ci run, though a newer checks run exists.
+        # The ci run stays red, and the checks run's cancel is dropped.
+        self.head_rows(
+            [("lint", "cancel", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201)), ("unit", "pass", job_link(NEW_RUN, 202)),
+             ("ci-audit", "cancel", job_link(CI_RUN, 301))],
+            [("checks", "completed", "success", NEW_RUN), ("ci", "completed", "cancelled", CI_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        red, _ = self.judged(["lint", "unit", "ci-audit"])
+        self.assertTrue(any(r.startswith("ci-audit: cancel") for r in red), red)
+        self.assertFalse(any(r.startswith("lint:") for r in red), red)
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn("workflow ci: cancelled", detail)
+
+    def test_a_check_run_with_no_run_link_and_a_status_beside_a_superseded_run_are_kept(self):
+        self.head_rows(
+            [("lint", "cancel", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201)),
+             ("deploy", "fail", ""), ("legacy", "fail", "https://x/s", "status")],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        got = self.gh_host().checks(7, warn=False)
+        self.assertEqual(got["deploy"], [("fail", "")])
+        self.assertEqual(got["legacy"], [("fail", "https://x/s")])
+        red, _ = self.judged(["lint", "deploy", "legacy"])
+        self.assertTrue(any(r.startswith("deploy: fail") for r in red), red)
+        self.assertTrue(any(r.startswith("legacy: fail") for r in red), red)
+        self.assertFalse(any(r.startswith("lint:") for r in red), red)
+
+    def test_head_read_and_head_state_show_the_newer_green_run_green(self):
+        # The guard reads the head with head_read, and the preview with head_state. Both judge PR 1003's head green.
+        self.pr_1003_head()
+        self.assertEqual(self.gh_host(required=["all-jobs-passed"]).head_read(7), ("green", ""))
+        self.assertEqual(self.gh_host(required=["all-jobs-passed"]).head_state(7), "green")
+
+    def test_a_failed_or_missing_runs_read_drops_nothing(self):
+        self.pr_1003_head()
+        for runs in ([], [("checks", "completed", "success", NEW_RUN)]):  # no run listed, then the old run not listed
+            with self.subTest(listed=[r[3] for r in runs]):
+                self.set(runs_seq=[list(runs)])
+                red, _ = self.judged(["all-jobs-passed"])
+                self.assertTrue(any(r.startswith("all-jobs-passed: fail") for r in red), red)
+                self.assertEqual(self.gh_host().head_read(7)[0], "red")
+        self.set(runs_seq=[[("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)]],
+                 runs_fail="failed to get runs: HTTP 500: Internal Server Error (https://api.github.com/repos/o/r/actions/runs)")
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertIn(verdict, ("red", "unknown"), detail)
+        self.assertNotEqual(verdict, "green")
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_the_fake_gives_a_heads_runs_the_same_on_both_routes(self):
+        # The fake answers `gh run list --commit` and the REST runs route with the same runs, so a builder may read either.
+        self.set(runs_seq=[[("checks", "completed", "success", NEW_RUN), ("ci", "completed", "cancelled", CI_RUN), ("checks", "in_progress", "", OLD_RUN)]])
+        sha, host = self.head(), self.gh_host()
+        c1, out1 = host.gh(["run", "list", "--commit", sha, "--limit", "100", "--json", "databaseId,name,status,conclusion"], self.co)
+        c2, out2 = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
+        self.assertEqual((c1, c2), (0, 0), out1 + out2)
+        listed = [(r["databaseId"], r["name"], r["status"], r["conclusion"] or None) for r in json.loads(out1)]
+        rest = [(r["id"], r["name"], r["status"], r["conclusion"]) for r in json.loads(out2)["workflow_runs"]]
+        self.assertEqual(rest, listed)
+        self.assertEqual(listed[0], (NEW_RUN, "checks", "completed", "success"))
+        c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "createdAt"], self.co)
+        self.assertNotEqual(c3, 0, out3)  # no createdAt: a newer run is a larger run id
+        self.set(runs_fail="failed to get runs: HTTP 500")
+        c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
+        self.assertNotEqual(c4, 0)
+
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
     (the fake gh answers it that way, and a GraphQL call that reaches it fails the test). Each case pins one way a REST read could count a pending or
@@ -4435,9 +4635,7 @@ class RestRoutes(Env):
 
     def setUp(self):
         super().setUp()
-        install_gh_shim(self)
-        self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("checks", "pass", "")]])
+        gh_case_setup(self)
 
     # ---- the checks of a head are the check runs AND the commit statuses
 
@@ -6120,7 +6318,7 @@ class ResolveProgram(unittest.TestCase):
     """resolve_program (merge.py): bash never resolves under System32; a bare name finds its .cmd shim."""
     @unittest.skipUnless(os.name == "nt", "the System32 WSL stub is a Windows case")
     def test_bash_skips_system32(self):
-        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        t = tempfile.mkdtemp(prefix="test-resolve-", dir=run_folder()); self.addCleanup(shutil.rmtree, t, True)
         sysroot = os.path.join(t, "Win"); good = os.path.join(t, "good")
         for d in (os.path.join(sysroot, "System32"), good):
             os.makedirs(d); put(os.path.join(d, "bash.exe"), "x")
@@ -6130,13 +6328,13 @@ class ResolveProgram(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "PATHEXT lookup of a .cmd shim is a Windows case")
     def test_a_bare_name_finds_its_cmd_shim(self):
-        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        t = tempfile.mkdtemp(prefix="test-resolve-", dir=run_folder()); self.addCleanup(shutil.rmtree, t, True)
         put_shim(os.path.join(t, "fakeprog"), "x")
         got = merge.resolve_program("fakeprog", {"PATH": t})
         self.assertEqual(os.path.normcase(got), os.path.normcase(os.path.join(t, "fakeprog.cmd")))
 
     def test_the_program_files_git_bash_wins_over_system32(self):
-        t = tempfile.mkdtemp(prefix="test-resolve-"); self.addCleanup(shutil.rmtree, t, True)
+        t = tempfile.mkdtemp(prefix="test-resolve-", dir=run_folder()); self.addCleanup(shutil.rmtree, t, True)
         sysroot = os.path.join(t, "Win"); pf = os.path.join(t, "PF")
         git_bash = os.path.join(pf, "Git", "bin", "bash.exe")
         for f in (os.path.join(sysroot, "System32", "bash.exe"), git_bash):
@@ -7530,7 +7728,7 @@ class MergeImport(unittest.TestCase):
     exits non-zero, with no traceback."""
     def tool_root(self):
         """A root with merge/merge.py copied in, and a gh shim that fails if the tool reaches it."""
-        root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-"))
+        root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-", dir=run_folder()))
         self.addCleanup(shutil.rmtree, root, True)
         tool = os.path.join(root, "merge", "merge.py")
         os.makedirs(os.path.dirname(tool))
@@ -9332,8 +9530,7 @@ class CloudSession(Env):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.run_dir = _test_temp.run_folder()  # test-temp-standard; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
-        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+        cls.run_dir = run_folder()  # test-temp-standard: the run's one folder, removed at exit; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
 
     def setUp(self):
         super().setUp()
