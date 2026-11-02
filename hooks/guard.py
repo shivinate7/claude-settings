@@ -404,7 +404,8 @@ while True:
                     "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
                     "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
                     "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts.")}}))
+                    "the acts that no override lifts. "
+                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
         sys.exit(0)
 
 
@@ -992,7 +993,8 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project."
+    "Approve it only when a model above Sonnet is wanted for this project. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
 
@@ -1208,7 +1210,8 @@ CITE_REASON = (
     "short gloss, like \"D12, short titles for records\". "
     "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
     "and leave the folder and the file extension out. Only a commit's last-paragraph trailer "
-    "`Drops-lines: <path> -- <reason>` may name a path."
+    "`Drops-lines: <path> -- <reason>` may name a path. "
+    "(rule git-cite-by-id, cite a record by its id, never by its path)"
 )
 
 
@@ -1284,7 +1287,8 @@ UNREAD_MARK = "\0unread:"
 UNREAD_REASON = (
     "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
     "record by its path. "
-    "Remedy: pass the message inline, or name a file this directory can read."
+    "Remedy: pass the message inline, or name a file this directory can read. "
+    "(decision cite-by-id-refuses-unread-file, an unread message file is refused, not passed)"
 )
 
 
@@ -1410,7 +1414,8 @@ LANE_REASON = (
     "Rule (Git): this message names a lane by a session number. That number is handed out in one "
     "chat and means nothing outside it. "
     "Remedy: name the lane by its branch slug, like \"lane-number-cite\". A number inside a "
-    "backtick code span or a fenced block is quoted text and stays allowed."
+    "backtick code span or a fenced block is quoted text and stays allowed. "
+    "(decision lane-by-slug, a lane is named by its branch slug, never by a session number)"
 )
 
 
@@ -1488,6 +1493,7 @@ BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
     " A merge conflict in a test file takes the same route."
+    " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
@@ -2516,10 +2522,12 @@ LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_BUSY_REASON = "the machine is busy (%s). %s"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
+LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2626,7 +2634,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk.
 RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop.")
+                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
 def running_lane_hit(payload, tool: str) -> tuple:
@@ -2705,7 +2713,8 @@ def opus_without_grant(tool_input) -> bool:
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
-                    "other commands. Run that command alone, in its own call, or drop it.")
+                    "other commands. Run that command alone, in its own call, or drop it. "
+                    "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
 def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
@@ -3205,12 +3214,14 @@ def data_tool_hit(tool_input, cwd=""):
 PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
-                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
 PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
                      "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
                      "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
                      "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Queue\" "
-                     "and publish it to the same url.")
+                     "and publish it to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
 
 
 def _waiting_page_folder(name):

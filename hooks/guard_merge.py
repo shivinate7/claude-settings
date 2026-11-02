@@ -247,7 +247,8 @@ def pinned_required(where: str):
 BARE_MERGE_REASON = (
     "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
     "leaves the local main behind origin. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call."
+    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
+    "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
 )
 
 
