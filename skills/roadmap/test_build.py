@@ -166,10 +166,11 @@ class Fixture(unittest.TestCase):
     def on_main(self):
         git(self.repo, "checkout", "-q", "main")
 
-    def build_from_main(self, *extra):
+    def build_from_main(self, *extra, expect=(0, None)):
+        """(page, output) of a build from main. expect lists the exit codes the case accepts."""
         self.on_main()
         code, out = run_build("--repo", str(self.repo), "--out", str(self.out), *extra)
-        self.assertIn(code, (0, None), out)
+        self.assertIn(code, expect, out)
         return self.out.read_text(encoding="utf-8"), out
 
     def write_live(self, value):
@@ -583,6 +584,32 @@ class UpkeepFixture(Fixture):
         detail = re.search(r"^  %s: (.*)$" % re.escape(label), out, re.M)
         return counts[label], (detail.group(1) if detail else "")
 
+    def entries(self, detail):
+        """The entries of a row's detail, sorted. The builder orders them by step id, which no case relies on."""
+        return sorted(detail.split(", ")) if detail else []
+
+    # The Nov 1 replay (spec "Red first"): a todo step, `Ready.` in its note, with a draft PR on its branch,
+    # created 12 h 16 m before the live read, and no live session for the step.
+    REPLAY = "feedback-repeat-detect"
+    REPLAY_TITLE = "Feedback guard flags a new item that repeats older feedback"
+
+    def commit_replay_step(self):
+        self.commit_step(self.REPLAY, title="Feedback repeat detect", note="Brief is written. Ready.")
+
+    def replay_pull(self):
+        return self.draft(999, self.REPLAY, self.created_before(736), self.REPLAY_TITLE)
+
+    def draft(self, number, branch, created=None, title=None):
+        """An open draft pull row. The createdAt key is left out when created is None."""
+        row = {"number": number, "title": title or "lane " + branch, "branch": branch, "draft": True}
+        if created is not None:
+            row["createdAt"] = created
+        return row
+
+    def created_before(self, minutes, read_ago=5):
+        """An ISO createdAt `minutes` before the live read, when that read was read_ago minutes before now."""
+        return iso_ago(read_ago + minutes)
+
 
 class StaleInProgress(UpkeepFixture):
     """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
@@ -841,10 +868,6 @@ class FeelRows(UpkeepFixture):
         self.publish(sessions=[])
         return self.build_from_main("--live", str(self.live))
 
-    def entries(self, detail):
-        """The entries of a row's detail, sorted. The builder orders them by step id, which no case relies on."""
-        return sorted(detail.split(", ")) if detail else []
-
     def test_landed_feel_fix_without_a_check_is_listed_in_the_device_row(self):
         self.land("c1", 12, feel=True)
         _, out = self.build_live()
@@ -920,6 +943,126 @@ class FeelRows(UpkeepFixture):
         self.commit_step("c1", status="doing", feel=True)
         _, out = self.build_live()
         self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to todo)"))
+
+
+class TodoWithOpenPull(UpkeepFixture):
+    """The pair line of the build (spec part A). A pull names a step when its branch is the step id, or its title
+    holds the id as a whole token. Each named todo step prints one line, and the build exits 1 after it writes the
+    page. With no live read, the build prints one unknown line and exits 0."""
+
+    PAIR = "todo step with an open PR"
+
+    def pair_lines(self, out):
+        return re.findall(r"^%s: (.*)$" % re.escape(self.PAIR), out, re.M)
+
+    def test_replay_build_goes_red_naming_the_step_and_its_pull(self):
+        self.commit_replay_step()
+        self.publish(sessions=[], pulls=[self.replay_pull()])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["feedback-repeat-detect (#999)"])
+
+    def test_red_build_writes_the_page_before_it_exits_1(self):
+        self.commit_replay_step()
+        self.publish(sessions=[], pulls=[self.replay_pull()])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertIn("Feedback repeat detect", page)
+
+    def test_title_token_names_the_step(self):
+        self.commit_step("r5")
+        self.publish(sessions=[], pulls=[{"number": 50, "title": "r5: fix x", "branch": "lane-q"}])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["r5 (#50)"])
+
+    def test_short_slug_inside_a_longer_word_does_not_name_the_step(self):
+        # r6 is the control: it is named, so an empty list of lines cannot pass.
+        self.commit_step("r5")
+        self.commit_step("r6", order=2)
+        self.publish(sessions=[], pulls=[{"number": 40, "title": "pr5 cleanup", "branch": "c91-r5x"},
+                                         {"number": 41, "title": "r6 lane", "branch": "r6"}])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["r6 (#41)"])
+
+    def test_no_live_file_reads_the_pair_line_unknown_and_exits_0(self):
+        _, out = self.build_from_main()
+        lines = self.pair_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue(lines[0].startswith("unknown (") and "--live" in lines[0], lines)
+
+    def test_stale_live_read_reads_the_pair_line_unknown_and_exits_0(self):
+        self.publish(sessions=[], read_at=iso_ago(120))
+        _, out = self.build_from_main("--live", str(self.live))
+        lines = self.pair_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertRegex(lines[0], r"^unknown \(the live file was read \d+ minutes ago")
+
+
+class ReadyAndDraftRows(UpkeepFixture):
+    """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
+    with no gate on live phases. `draft PRs over 12 h with no live lane` lists each draft pull created more than
+    12 h before the live read, when no live session names its step. An entry reads `#<number> (<branch or title>)`,
+    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone."""
+
+    READY = "ready todo steps"
+    DRAFT = "draft PRs over 12 h with no live lane"
+
+    def test_replay_lists_the_ready_step_and_the_stale_draft(self):
+        self.commit_replay_step()
+        self.publish(sessions=[], pulls=[self.replay_pull()])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.row(out, self.READY), (1, self.REPLAY))
+        self.assertEqual(self.row(out, self.DRAFT), (1, "#999 (%s)" % self.REPLAY))
+
+    def test_ready_sentence_must_stand_alone(self):
+        # r-start and r-mid hold the sentence. r-already has no break before Ready., and r-glued has none after it.
+        notes = {"r-start": "Ready.", "r-mid": "Brief is written. Ready. Go on.",
+                 "r-already": "Already Ready.", "r-glued": "Ready.x"}
+        for order, (sid, note) in enumerate(notes.items(), start=2):
+            self.commit_step(sid, note=note, order=order)
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.READY)
+        self.assertEqual((count, self.entries(detail)), (2, ["r-mid", "r-start"]))
+
+    def test_only_todo_steps_are_listed_as_ready(self):
+        self.commit_step("t-todo", note="Ready.", order=2)  # control: listed
+        self.commit_step("d-doing", status="doing", note="Ready.", order=3)
+        self.commit_step("d-done", status="done", note="Ready.", order=4)
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.READY)
+        self.assertEqual((count, self.entries(detail)), (1, ["t-todo"]))
+
+    def test_draft_under_twelve_hours_before_the_read_is_not_listed(self):
+        # The read is 45 min old. A draft 11 h 30 m before it is 12 h 15 m before now, so a check against the
+        # wall clock would list it. lone-draft is the control: 13 h before the read.
+        self.publish(sessions=[], read_at=iso_ago(45), pulls=[
+            self.draft(1000, "late-eleven", self.created_before(690, read_ago=45)),
+            self.draft(1001, "lone-draft", self.created_before(780, read_ago=45))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
+
+    def test_draft_with_a_live_lane_is_not_listed(self):
+        # c1 is doing, so the pair line stays quiet. Its live session carries this repo's tag and the step's tag.
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
+                     pulls=[self.draft(1001, "c1", self.created_before(780)),
+                            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
+
+    def test_draft_without_a_usable_created_at_reads_its_entry_unknown(self):
+        bad = {"missing": None, "no zone": "2026-11-02T01:14:22", "not a time": "yesterday"}
+        for name, created in bad.items():
+            with self.subTest(name):
+                self.publish(sessions=[], pulls=[self.draft(998, "no-date", created),
+                                                 self.draft(1000, "lone-draft", self.created_before(780))])
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual((count, self.entries(detail)),
+                                 (2, ["#1000 (lone-draft)", "unknown (#998 has no createdAt)"]))
+
+    def test_no_live_file_reads_the_draft_row_unknown(self):
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1)
+        self.assertTrue(detail.startswith("unknown (") and "--live" in detail, detail)
 
 
 def baked(text, key):
