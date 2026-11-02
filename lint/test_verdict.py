@@ -505,6 +505,131 @@ class MissingVerdictLine(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertTrue(any(l.startswith("FAIL ") for l in r.stdout.splitlines()), (r.stdout, r.stderr[-300:]))
 
+# Skip counting: a run that skipped tests reads SKIP with the count (debt verdict-skip-reads-pass).
+CHUNK, OVERLAP = 1 << 20, 256  # bin/verdict's chunk and overlap
+UT_ONE_SKIP = "Ran 1 test in 0.000s\n\nOK (skipped=1)\n"  # the tail of a real `python3 -m unittest`, one skipped test
+XCT_SKIPPED = ("Executed 12 tests, with 3 tests skipped and 0 failures (0 unexpected) in 1.2 (1.3) seconds\n"
+               "** TEST SUCCEEDED **\n")  # xcodebuild's summary form; no swift here, so it is not captured
+PYTEST_OUT = "=" * 25 + " 2 passed, 1 skipped in 0.01s " + "=" * 25 + "\n"  # pytest's summary, captured here
+HOOKS = os.path.join(HERE, "..", "hooks")
+
+
+def skipped_count(line):
+    """N from the first `N skipped` on a verdict line, or None."""
+    m = re.search(r"\b(\d+) skipped\b", line)
+    return int(m.group(1)) if m else None
+
+
+def printing(text, rc=0):
+    """Child code that writes `text` byte for byte, then exits `rc`."""
+    return "import sys\nsys.stdout.write(%r)\nsys.exit(%d)\n" % (text, rc)
+
+
+def unittest_run(skips, fails=0):
+    """Child code: a real unittest run of `skips` skipped tests and `fails` failing ones. Its output goes to stderr."""
+    body = ["import sys, unittest", "class T(unittest.TestCase):", "    def test_ok(self):", "        pass"]
+    for i in range(skips):
+        body += ["    def test_skip_%d(self):" % i, "        self.skipTest('shelved')"]
+    for i in range(fails):
+        body += ["    def test_fail_%d(self):" % i, "        self.fail('boom')"]
+    body += ["r = unittest.main(argv=['x'], exit=False)", "sys.exit(0 if r.result.wasSuccessful() else 1)"]
+    return "\n".join(body) + "\n"
+
+
+def two_suites_run():
+    """Child code: two unittest runs in one process, 3 skipped tests and then 1, so two summaries reach the log."""
+    body = ["import sys, unittest", "class A(unittest.TestCase):"]
+    body += ["    def test_a%d(self):\n        self.skipTest('shelved')" % i for i in range(3)]
+    body += ["class B(unittest.TestCase):", "    def test_b(self):", "        self.skipTest('shelved')"]
+    body += ["rs = [unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(c)) for c in (A, B)]",
+             "sys.exit(0 if all(r.wasSuccessful() for r in rs) else 1)"]
+    return "\n".join(body) + "\n"
+
+
+def case_runner_run(kinds):
+    """Child code: hooks/case_runner_test.run_cases over one case per kind, "ok" or "skip", so its own output reaches the log."""
+    body = ["import sys", "sys.path.insert(0, %r)" % HOOKS, "import case_runner_test as cr"]
+    for i, kind in enumerate(kinds):
+        body += ["def case_%d():" % i, '    """case %d"""' % i]
+        body += ["    raise cr.Skip('no display here')" if kind == "skip" else "    return []"]
+    body += ["sys.exit(cr.run_cases([%s]))" % ", ".join("case_%d" % i for i in range(len(kinds)))]
+    return "\n".join(body) + "\n"
+
+
+class Skips(unittest.TestCase):
+    """A skip is counted and shown, never read as a pass (debt verdict-skip-reads-pass)."""
+
+    def check(self, code):
+        """Run one fixture with its log in this run's folder, never the system temp dir."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            return run(code, os.path.join(d, "v.log"), timeout=120)
+
+    def assert_skip(self, r, count):
+        first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        self.assertEqual(r.returncode, 0, (r.stdout[:300], r.stderr[-300:]))
+        self.assertEqual(first.split()[:1], ["SKIP"], r.stdout[:300])
+        self.assertEqual(skipped_count(first), count, first)
+
+    def assert_fail(self, r, rc, reason):
+        first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        self.assertEqual(r.returncode, rc, (r.stdout[:300], r.stderr[-300:]))
+        self.assertEqual(first.split()[:1], ["FAIL"], r.stdout[:300])
+        self.assertIn(reason, first)
+
+    def assert_pass(self, r):
+        self.assertEqual(r.returncode, 0, (r.stdout[:300], r.stderr[-300:]))
+        self.assertEqual(r.stdout.split()[:1], ["PASS"], r.stdout[:300])
+
+    def test_every_test_skipped_reads_skip_with_its_count(self):
+        self.assert_skip(self.check(unittest_run(skips=3)), 3)
+
+    def test_summaries_sum_over_the_whole_run(self):
+        self.assert_skip(self.check(two_suites_run()), 4)
+
+    def test_xctest_skipped_tests_are_counted(self):
+        self.assert_skip(self.check(printing(XCT_SKIPPED)), 3)
+
+    def test_pytest_summary_skips_are_counted(self):
+        self.assert_skip(self.check(printing(PYTEST_OUT)), 1)
+
+    def test_case_runner_summary_skips_are_counted(self):
+        self.assert_skip(self.check(case_runner_run(["ok", "skip", "skip", "ok", "ok"])), 2)
+
+    def test_marker_lines_with_no_summary_are_counted(self):
+        self.assert_skip(self.check(printing("PASS first\nSKIP second: no keychain\nSKIPPED third\nPASS fourth\n")), 2)
+
+    def test_a_summary_in_the_chunk_overlap_counts_once(self):
+        """bin/verdict reads 1 MiB chunks that overlap by 256 bytes, so a summary in the overlap is read twice."""
+        ok_at = UT_ONE_SKIP.index("OK (skipped=1)")
+        for at in (CHUNK - OVERLAP - 10, CHUNK - OVERLAP - 1, CHUNK - OVERLAP, CHUNK - OVERLAP + 1,
+                   CHUNK - 128, CHUNK - 16, CHUNK - 10, CHUNK - 7, CHUNK - 1):  # the last three straddle CHUNK
+            with self.subTest(summary_starts_at=at):
+                code = ("import sys\n"
+                        "out = sys.stdout.buffer\n"
+                        "out.write(b'x' * %d + b'\\n')\n" % (at - ok_at - 1)
+                        + "out.write(%r.encode())\n" % UT_ONE_SKIP
+                        + "row = b'y' * 1023 + b'\\n'\n"
+                        + "for _ in range(1536):\n"
+                        + "    out.write(row)\n"
+                        + "out.flush()\n")
+                self.assert_skip(self.check(code), 1)
+
+    def test_a_summary_with_zero_skipped_stays_pass(self):
+        self.assert_pass(self.check(case_runner_run(["ok", "ok"])))
+
+    def test_a_skip_word_inside_a_line_is_no_marker(self):
+        self.assert_pass(self.check(printing("checking SKIP handling\nthe SKIPPED flag is set\nSKIPS the step\n")))
+
+    def test_a_nonzero_exit_with_skips_is_fail_not_skip(self):
+        self.assert_fail(self.check(unittest_run(skips=2, fails=1)), 1, " rc=1 ")
+
+    def test_a_runner_failure_marker_beats_skip(self):
+        self.assert_fail(self.check(printing(XCT_SKIPPED + "** TEST FAILED **\n")), 1, "runner failure marker")
+
+    def test_no_tests_ran_beats_skip(self):
+        self.assert_fail(self.check(printing(T.XCT0 + "\nRan 2 tests in 0.000s\n\nOK (skipped=2)\n")), 1, "no tests ran")
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 

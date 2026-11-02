@@ -124,6 +124,21 @@ class Steps(Job):
         self.assertFalse(os.path.exists(os.path.join(self.root, "planned.txt")))
 
 
+class Skips(Job):
+    """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (debt verdict-skip-reads-pass)."""
+
+    SKIPPED = step("unit", "printf 'Ran 1 test in 0.000s\\n\\nOK (skipped=1)\\n'")
+
+    def test_a_step_that_skips_reads_skip_and_the_job_exits_zero(self):
+        rc, lines, out = self.run_job(self.SKIPPED, step("ok", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["SKIP", "PASS"]), out)
+        self.assertRegex(lines[0], r": SKIP .*\b1 skipped\b", out)
+
+    def test_a_skip_does_not_hide_a_fail(self):
+        rc, lines, out = self.run_job(self.SKIPPED, step("bad", "false"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["SKIP", "FAIL"]), out)
+
+
 class Unknowns(Job):
     def test_a_missing_tool_is_unknown_never_pass(self):
         rc, lines, out = self.run_job(step("tool", "no-such-tool-c69 --check ."))
