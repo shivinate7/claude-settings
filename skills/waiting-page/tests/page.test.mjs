@@ -1897,6 +1897,52 @@ test("two open items with the same number get unique fold ids", async (t) => {
   }
 });
 
+// A push of an unrelated item re-renders the page; the note box the owner is typing in must keep its caret.
+test("typing in a note box keeps the caret when an unrelated item arrives", async (t) => {
+  const page = await open(t); if (!page) return;
+  const ta = page.locator(`#n-${DECISION.id}`), other = mk("caret-other", 9);
+  await ta.fill("hello world");
+  await ta.evaluate((el) => { el.focus(); el.setSelectionRange(5, 5); window.__ta = el; });
+  await page.evaluate((it) => window.__putItem(it), other);
+  await card(page, other).waitFor();
+  const after = await page.evaluate((id) => { const el = document.getElementById("n-" + id); return { same: el === window.__ta, value: el.value, start: el.selectionStart, focused: document.activeElement === el }; }, DECISION.id);
+  assert.equal(after.same, true, "the note box was rebuilt by an unrelated push");
+  assert.equal(after.value, "hello world", "the note text changed");
+  assert.equal(after.start, 5, `the caret moved to ${after.start}`);
+  assert.equal(after.focused, true, "the note box lost focus");
+});
+
+// The seen divider's words say what is true of every seen card: asked before the last Send. An answered seen card stays below it until reload.
+test("the seen divider reads Asked before, and never claims a card is not answered", async (t) => {
+  const seen = mk("seen-divider", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const words = (await page.locator("#seen-div").textContent()).replace(/\s+/g, " ").trim();
+  assert.match(words, /Asked before/, `the divider reads "${words}"`);
+  assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
+});
+
+test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
+  const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+});
+
+test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
+  const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+});
+
+test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
+  const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
+  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+});
+
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
   const seen = mk("seen-ranked", 1, { added: at(5), rank: 1 }), fresh = mk("fresh-ranked", 2, { added: at(20), rank: 2 });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
