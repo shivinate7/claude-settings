@@ -58,6 +58,13 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
 6. **A gatekeeper session is not a durable home.** It sleeps, dies and costs context. The queue order and the timeout must live in a record and a tool, not in one chat session.
 7. **Disk.** Each Duo adds about 14 GB. A 10 GB backup of the Duo from 11-01 sits at `~/Library/Developer/CoreSimulator/poster-backup-AC2E94F9-20261101/`.
 
+## Compile without a simulator (data from the Degen batch runner, 11-02)
+
+- Degen's `make native-check` runs `xcodebuild build-for-testing -destination 'generic/platform=iOS Simulator'`. That compiles the app and its UI-test bundle with no simulator. Logic tests (about 7,570 in the DegenKit package) run on the Mac with `swift test`. 371 UI tests are compiled but run only per lane, and only those a change touches.
+- This is already the standard: the `ios-apps` Makefile template's `app-build` does the same. Home's Makefile also builds against the generic target, but with `xcodebuild build`, so it does not compile its UI-test bundle.
+- Value of the UI run: on 11-02 at 13:21 CST, a Degen UI test on the simulator caught a bug (the Feed popover did not close on "Top") that the logic tests and the build missed. So the compile step does not replace the simulator run; it keeps the slot free for UI runs only.
+- The standard should say: prove the build with the generic target, never by booting the slot; use the slot only for UI tests a change touches, and for screenshots; batch a lane's runs into one visit. XCUITest taps do nothing on the folded Duo, so folded cases are untested.
+
 ## Work already done (do not redo blind)
 
 - Local branch `claude/sim-lease-592a4d` in claude-settings (head d1fda8f3), made by a lane I stopped at 13:26 CST (session local_7057455f-ae35-46ee-85a5-bb71a695b230). It is not pushed. Branch `test-ci-scope-sim-lease` (commit a326b9fc, the CI-scope test) is on origin. Its commits:
