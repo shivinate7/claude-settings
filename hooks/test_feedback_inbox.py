@@ -1250,13 +1250,12 @@ def case_page_queued_owner_record_anchors():
 
 # --------------------------------------------------------------------------- chat picks, grants, closed notes
 
-# Named incidents, cited by F-id from the owner-feedback audit (draft PR #1008,
-# docs/plans/owner-feedback-audit.md). Each red case expects a block or a silence that today's guard
-# does not give; each green case is a control that today's guard already gives.
+# Named incidents, cited by F-id (decision owner-feedback-inbox). Each red case expects a block or a
+# silence that today's guard does not give; each green case is a control that today's guard already gives.
 
 SHARED = {}  # one repo per run for each key, built the first time a case asks for it
 STEP_SLUG = "inbox-close"
-GRANT_WORDS = (  # one lone message per grant word, each with an act word: a grant needs one (rule 7)
+GRANT_WORDS = (  # one lone message per grant word, each with an act word: a grant needs one
     "I approve the merge.", "Approved to merge.", "The approval is in for the merge.",
     "This is my grant to merge.", "Granted to push the lane.", "Permission to merge.", "Permissions to merge.",
     "I authorize the merge.", "You are authorized to merge.", "Go ahead and merge.",
@@ -1476,7 +1475,7 @@ FENCED_LOG = ("The run failed, and this is the log, pasted:\n"
 
 def case_grant_fenced_text_is_not_scanned_passes():
     """Fenced text is a pasted log, not the owner's words, so its grant and act words are not scanned. The fence
-    holds "authorized: true" beside act words, which would refuse if read (rule 6). Red now."""
+    holds "authorized: true" beside act words, which would refuse if read. Red now."""
     cfg, sid = new_cfg(), "grant-log"
     write_file(inbox_of(cfg, sid), render_block(FENCED_LOG, items=("- fb-0958-2 [note] -> noted",)))
     write_file(handoff_of(cfg, sid), "# Handoff\n")
@@ -1484,7 +1483,7 @@ def case_grant_fenced_text_is_not_scanned_passes():
 
 
 def case_grant_needs_an_act_word_passes():
-    """A grant word alone is no grant: a grant needs an act or scope word in the same message (rule 7). Each
+    """A grant word alone is no grant: a grant needs an act or scope word in the same message. Each
     row holds a grant word and no act word. F47 still refuses, as its act words sit in its message. Red now."""
     for text in ("Go ahead and fix the typo.", "The grant check misses closed items.", "Authorized: true."):
         expect_silent("grant home: %r has a grant word and no act word, passes" % text,
@@ -1492,7 +1491,7 @@ def case_grant_needs_an_act_word_passes():
 
 
 def case_pick_letters_a_to_h_passes():
-    """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send (rule 8). Red now."""
+    """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
     p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
                  cwd=waiting_repo())
     expect_silent("pick answer: \"1 y, 2 n\" is no pick, passes", p)
