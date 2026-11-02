@@ -41,6 +41,12 @@ Interface the hook must match:
   str_replace on another field, and an update with none of these fields make no call and no refusal from call_judge
   (guard.py refuses a hit). A read, and a write of another collection, never import question_form in the hook.
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
+- A re-ask (ruled Nov 1 17:44 CST): a judged items set or update (question_form.judged_item_writes) whose data has
+  non-empty `options` and a `lastAnswer` dict with choice `none` (or no choice) whose `note` is a string, non-empty
+  after strip. A picked choice with a note is not a re-ask. The one model prompt
+  holds call_judge.NONE_DIRECTION_RULE exactly once when a write in the call is a re-ask (a batch too), and not at
+  all otherwise. The cases read the constant with load_file_module, never a copy of its text. A missing constant
+  fails those checks, with no crash.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
@@ -843,6 +849,165 @@ def case_page_reads_and_other_collections_skip_question_form():
           "question_form" in r.imports, detail(r))
 
 
+# ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
+#
+# An owner's "none of these" note that gives a direction closes the item and becomes a step, so a write that asks
+# the owner again with options gets the model review's rule question-judge. The rule's text reaches the model only
+# when a write in the call is a re-ask. The text is read from hooks/call_judge.py at test time, never copied here.
+REASK_NOTE = "Ship the plain page and drop the chart."
+SHOW_CHEAPER_NOTE = "None fit; show me cheaper options."
+PLAIN_NOTE = "Ship the plain page."
+REASK_FLAG = ('{"ok": false, "reason": "the note already gives the direction, so the item closes and is not asked '
+              'again."}')
+ANSWERED_AT = "2026-11-01T17:44:00-06:00"
+
+
+def none_direction_rule():
+    """The rule's text, read from call_judge.py. "" when the constant is missing, so each check fails with its own
+    detail and the other cases still run."""
+    value = getattr(load_file_module(HOOK, "call_judge_none_probe"), "NONE_DIRECTION_RULE", "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def last_answer(note, choice="none"):
+    """The lastAnswer the owner's answer leaves on an item (docs/design/last-answer-notes.md)."""
+    return {"choice": choice, "note": note, "at": ANSWERED_AT}
+
+
+def reask_item(mark, note=REASK_NOTE, choice="none"):
+    """Data for an update of an answered decision: its options and the owner's note, no context."""
+    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice)}
+
+
+def rule_detail(rule, r):
+    return "NONE_DIRECTION_RULE missing" if not rule else detail(r)
+
+
+def case_reask_update_holds_rule_once():
+    # Case 1: an update with options and a lastAnswer note is a re-ask, so the one prompt holds the rule once.
+    import question_form  # the one form check (hooks/question_form.py)
+    fixture = reask_item(PAGE_MARK)
+    got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": fixture})
+    check("re-ask fixture: the update passes question_form.item_hit, so a refusal below is the judge's", got == ("", ""),
+          got)
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", fixture), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("re-ask: an update with options and a lastAnswer note makes one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("re-ask: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
+          rule_detail(rule, r))
+    check("re-ask: the one prompt carries the owner's note", REASK_NOTE in prompt, prompt[:200])
+
+
+def case_reask_cheaper_note_holds_rule_once():
+    # Case 2: the note asks for other options. The model decides, so the rule still reaches it, and the fake's allow
+    # gives no deny.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", reask_item(PAGE_MARK, SHOW_CHEAPER_NOTE)), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("re-ask, cheaper-options note: one model call, and the model's allow is no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("re-ask, cheaper-options note: the one prompt holds NONE_DIRECTION_RULE exactly once",
+          bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
+
+
+def case_options_without_note_lacks_rule():
+    # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one model call, so an early exit
+    # cannot pass this check.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", {"options": good_page_item()["options"]}), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("no re-ask, options only: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    check("no re-ask, options only: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
+          rule_detail(rule, r))
+
+
+def case_blank_note_lacks_rule():
+    # Case 4: a note that is blank after strip is not a direction, so the write is not a re-ask.
+    rule = none_direction_rule()
+    data = {"options": good_page_item()["options"], "lastAnswer": last_answer("  ")}
+    r = run_hook(page_input("update", data), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("no re-ask, blank note: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    check("no re-ask, blank note: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
+          rule_detail(rule, r))
+
+
+def case_context_only_note_lacks_rule():
+    # Case 5: a context-only write has no options, so a note on it is not a re-ask.
+    rule = none_direction_rule()
+    data = {"context": good_page_item()["context"], "lastAnswer": last_answer(REASK_NOTE)}
+    r = run_hook(page_input("update", data), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("no re-ask, context only with a note: one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("no re-ask, context only with a note: the prompt lacks NONE_DIRECTION_RULE",
+          bool(rule) and prompt.count(rule) == 0, rule_detail(rule, r))
+
+
+def case_reask_batch_one_call_rule_once():
+    # Case 6: two re-asks in one batch make one model call, and the one prompt holds the rule once, not once per write.
+    rule = none_direction_rule()
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1",
+               "data": good_page_item(PAGE_MARK, lastAnswer=last_answer(REASK_NOTE))},
+              {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2", "data": reask_item(PAGE_MARK_B, SHOW_CHEAPER_NOTE)}]
+    r = run_hook(page_batch_input(writes), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("re-ask batch: two re-asks make one model call, claude-opus-5-5, and no deny",
+          len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    check("re-ask batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
+          prompt[:200])
+    check("re-ask batch: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
+          rule_detail(rule, r))
+
+
+def case_reask_refusal_denies():
+    # Case 7: case 1's write, and the fake refuses it. The deny is question-judge, and the prompt holds the rule
+    # once, so this case is red on main for the rule and not for the deny.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG)
+    d = r.deny() or {}
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("re-ask refusal: the judge's deny is rule question-judge, one deny line, one model call",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and "already gives the direction" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1
+          and len(r.calls) == 1, detail(r))
+    check("re-ask refusal: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
+          rule_detail(rule, r))
+
+
+def case_picked_choice_with_note_lacks_rule():
+    # A picked choice (a key) with a note is the owner choosing an option, not a "none of these" direction, so the
+    # write is no re-ask. The call still makes its one model call, so an early exit cannot pass this check.
+    import question_form  # the one form check (hooks/question_form.py)
+    fixture = reask_item(PAGE_MARK, PLAIN_NOTE, choice="a")
+    got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": fixture})
+    check("picked-choice fixture: the update passes question_form.item_hit, so a refusal below is the judge's",
+          got == ("", ""), got)
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", fixture), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("picked choice with a note: one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("picked choice with a note: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
+          rule_detail(rule, r))
+
+
+def case_none_choice_with_note_holds_rule_once():
+    # The same write with choice none is a "none of these" re-ask, so the one prompt holds the rule once.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", reask_item(PAGE_MARK, PLAIN_NOTE, choice="none")), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("none choice with a note: one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("none choice with a note: the one prompt holds NONE_DIRECTION_RULE exactly once",
+          bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1180,6 +1345,10 @@ def main():
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
                  case_page_task_item_judged, case_page_task_exempt_from_decision_items, case_page_steps_judged,
                  case_page_reads_and_other_collections_skip_question_form,
+                 case_reask_update_holds_rule_once, case_reask_cheaper_note_holds_rule_once,
+                 case_options_without_note_lacks_rule, case_blank_note_lacks_rule,
+                 case_context_only_note_lacks_rule, case_reask_batch_one_call_rule_once, case_reask_refusal_denies,
+                 case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,

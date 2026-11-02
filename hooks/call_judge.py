@@ -15,8 +15,9 @@ A call with no write on collection `items` exits before importing question_form.
 For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
-many writes a batch holds. The page and the chat box share the eight judge items, so both places get the
-same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
+many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
+to that one prompt, once, and no other write changes the prompt. The page and the chat box share the eight judge
+items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
 that passes item_hit is judged on its new_str alone, as a fragment: the prompt tells the model to judge
@@ -126,6 +127,16 @@ PAGE_PROMPT = (
     "the Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
+# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
+# the formatted PAGE_PROMPT, only for such a call (skill waiting-page, "Route and close"). It has no `%`, so it is
+# never formatted.
+NONE_DIRECTION_RULE = (
+    "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
+    "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
+    "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
+    "further pick from the owner, block it: the item should close and the note be filed as a step. "
+    "The reason names no target."
+)
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
@@ -147,6 +158,19 @@ def writes_an_item(args):
         writes = args.get("writes")
         return any(isinstance(w, dict) and w.get("collection") == "items" for w in writes or [])
     return args.get("collection") == "items"
+
+
+def is_reask(write):
+    """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
+    choice "none", and a note that is a string, non-empty after strip."""
+    data = write.get("data") if write.get("op") in ("set", "update") else None
+    if not isinstance(data, dict) or not data.get("options"):
+        return False
+    answer = data.get("lastAnswer")
+    if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
+        return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
+    note = answer.get("note")
+    return isinstance(note, str) and bool(note.strip())
 
 
 def invoke_model(*args, **kwargs):
@@ -220,6 +244,7 @@ def main():
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
+        reask = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -238,6 +263,7 @@ def main():
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)
             units = question_form.page_units(judged)
+            reask = any(is_reask(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
@@ -245,8 +271,10 @@ def main():
             tail, ids, unreadable = past_ruling_context(payload, units)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
-        verdict, error = invoke_model((prompt % shown) + tail, model=model, timeout=timeout, shape=OK_SHAPE,
-                                      effort=None)
+        full = prompt % shown
+        if reask:
+            full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
+        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
