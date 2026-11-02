@@ -12490,8 +12490,8 @@ pl("a step that taps Mark done after step #2 is allowed", "allow",
    pl_task(["Tap Mark done after step #2."]))
 pl("a step that takes my pick, then presses Send, is allowed", "allow",
    pl_task(["Take my pick, then press Send."]))
-# The rule covers a press the owner makes. An option whose how says the session makes the press, after his pick,
-# needs no link (coordinator ruling, 2026-11-01 21:14 CST, process-only). The owner's own press still needs one.
+# Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes the
+# press, after his pick, needs no link. The owner's own press still needs one.
 pl("a session merges PR #374 after the pick, with no link, is allowed", "allow",
    pl_item(options=[pl_opt("Merge PR #374", "The session merges PR #374 after your pick."), PL_KEEP_OPT]))
 pl("an owner press of Merge PR #374 in GitHub, with no link, is denied", "deny",

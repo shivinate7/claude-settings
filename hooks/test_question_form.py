@@ -451,9 +451,9 @@ def case_line_order_and_prose():
 # ------------------------------------------------------------------ a press the session makes needs no link
 
 def case_session_press_needs_no_link():
-    # Rule press-link covers a press the owner makes. An option whose how says the session makes the press, after
-    # the owner's pick, asks him for no press, so it needs no link (coordinator ruling, 2026-11-01 21:14 CST,
-    # process-only). An option that asks him to press, with no link, is still refused.
+    # Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes
+    # the press, after the owner's pick, asks him for no press, so it needs no link. An option that asks him to
+    # press, with no link, is still refused.
     session = {"key": "a", "label": "Merge PR #374", "how": "The session merges PR #374 after your pick.",
                "gain": "It lands at once.", "lose": "Nobody reads it first."}
     owner = dict(session, how="Press Merge in GitHub.")
