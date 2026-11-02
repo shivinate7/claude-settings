@@ -31,6 +31,10 @@ REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jo
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
 demand and refuses nothing: no timer, no CI job.
+
+REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
+[--suite-timeout S] [--jobs N]` scores the suites each recent merged pull request changed against mutants of the
+product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
 """
 
 import os
