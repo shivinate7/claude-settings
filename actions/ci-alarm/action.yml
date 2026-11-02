@@ -6,7 +6,7 @@ description: >
   newest completed run of another group of the same workflow is newer, succeeded, and ran every job
   the red run ran, each with conclusion success (clears.py; jobs are read only for a red run). Runs of
   other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
-  workflow with `permissions: {actions: read, issues: write}`; it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
+  workflow with `permissions: {actions: read, issues: write}`; it needs no checkout, and needs `python3` on the runner (GitHub-hosted runners have it). A merge-triggered failure shows on no PR, so main can sit red unnoticed.
 inputs:
   branch:
     description: Branch to watch.
