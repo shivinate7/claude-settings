@@ -9463,10 +9463,16 @@ class MergeRoleCheck(CloudSession):
                 self.assertEqual(os.path.normpath(os.fspath(merge.role_path())), want)
 
     def test_the_reader_gives_the_role_of_this_session(self):
-        for role in ("coordinator", "batch-runner"):
-            with self.subTest(role=role), self.cloud():
-                self.put_role(role)
-                self.assertEqual(merge.read_merge_role(), role)
+        # decision session-tiers: re-pointed from coordinator to batch-runner, the only merge role
+        with self.cloud():
+            self.put_role("batch-runner")
+            self.assertEqual(merge.read_merge_role(), "batch-runner")
+
+    def test_the_reader_gives_no_role_for_a_recorded_coordinator(self):
+        # decision session-tiers: a coordinator record is no merge role, so the reader gives None
+        with self.cloud():
+            self.put_role("coordinator")
+            self.assertIsNone(merge.read_merge_role())
 
     def test_the_reader_gives_none_for_a_missing_malformed_or_unreadable_file(self):
         with self.cloud():
@@ -9632,10 +9638,10 @@ class MergeRoleCheck(CloudSession):
                     self.assertNotIn(valid, err)
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
-        self.put_role("coordinator")
+        self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
         self.assert_writer_refused("--role", "lane")
         with self.cloud():
-            self.assertEqual(merge.read_merge_role(), "coordinator")
+            self.assertEqual(merge.read_merge_role(), "batch-runner")
 
     def test_role_refuses_outside_the_cloud_and_writes_nothing(self):
         for remote in (None, "", "false", "1", "TRUE"):
