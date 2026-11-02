@@ -944,3 +944,4 @@
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
 - other-checkout-touch-after-cd: `touch` after a cd into another checkout is not judged by other-checkout (found by the scratchpad lane test-author; note, no incident). Decision: an-agent-outside-its-home-tree-must-stop.
+- other-checkout-scratchpad-root: the scratchpad pass needs the scratchpad real path under tempfile.gettempdir() (under_session_scratchpad); a host whose scratchpad root is elsewhere gets no pass, so it fails closed (unmeasured). Decision: an-agent-outside-its-home-tree-must-stop.

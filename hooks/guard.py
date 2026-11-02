@@ -3216,9 +3216,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes, and
     so does a target under `session_id`'s own scratchpad, even where a linked worktree of the
     clone lives there. The caller passes '' for an agent call: an agent shares its session's id,
-    yet must not write into the session's scratchpad worktree. An
-    unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    yet must not write into the session's scratchpad worktree. An unreadable git state, or a
+    cwd in no checkout, is unknown and passes. One git read per call that can write. Liftable by an owner override, unlike `worktree_home_hit`
     (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)

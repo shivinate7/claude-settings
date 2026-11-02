@@ -15,7 +15,7 @@ Risk: incident (2026-09-06, and the three below). `other-checkout` landed 2026-1
 Scratchpad worktree incidents, each a refusal of a write into the session's own scratchpad worktree:
 
 - Lane `cc-update-behavior-diff`, 2026-11-01 22:00 CST, after a resume.
-- The coordinator, 2026-11-01 23:28 CST: a `cd` into `scratchpad/wt-notes` then a commit was refused, while the `git -C` form passed.
+- The coordinator, 2026-11-01 23:28 CST: a `cd` into `scratchpad/wt-notes` then a commit was refused, while the `git -C` form passed. The cause of this refusal is unmeasured: `cd <wt> && git add && git commit -m` passes at base (a commit is kind "message", and `git add` has no write word), so the refused command held some other write form, and its exact text is not recorded. The fix covers every write form the rule reads (redirect, heredoc, Write family) in the session's own scratchpad worktree.
 - Triage 5, 2026-11-01: a `cd` into its roadmap worktree, then a heredoc.
 
 ### `worktree-home`: an agent stays in its recorded home
