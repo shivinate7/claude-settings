@@ -8097,8 +8097,8 @@ Co-Authored-By: x" 2>&1|tail -1; git -C $W push origin roadmap 2>&1|tail -1; git
 # refused the same way. The escape closed the quote the reader had open, so the prose read as shell words.
 sh("env: heredoc-allow: the incident cat write, a body with bash <<EOF and an env read, is allowed",
    INCIDENT_CAT_WRITE, "allow", cwd=NOGIT)
-sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
-   INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT)
+# The incident python write ends in a push to roadmap, so it is judged in section 5e-2, where the triage record it
+# runs under is defined.
 for _runner in ("python3 -", "node -", "ruby -"):
     sh("env: heredoc-allow: a %s body with an escaped quote and an env word, is allowed" % _runner.split()[0],
        _runner + " <<'EOF'\nx = 'it\\'s " + ENV + " here'\nEOF", "allow", cwd=NOGIT)
@@ -9231,6 +9231,9 @@ record_allow("a triage session's bare push from the roadmap checkout is allowed"
              TRIAGE_TRANSCRIPT, cwd=RECROADMAP)
 record_allow("the newest own record wins: a lane record, then a triage record, is allowed",
              VCS + " push origin roadmap", role_path("lane-then-triage"))
+# The incident python write is a triage command that ends in a push to roadmap, so it runs under a triage record.
+sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
+   INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT, transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV)
 # A lane's pushes to other branches, and the fork's own name, are not the record branch.
 record_allow("a lane's push to lane/foo is allowed", VCS + " push origin lane/foo", LANE_TRANSCRIPT)
 record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS + " push origin roadmap-notes",
