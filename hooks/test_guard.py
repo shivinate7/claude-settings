@@ -20185,9 +20185,11 @@ ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
 
 
-def role_table(name, table=None):
+def role_table(name, table=None, agents=(), files=None):
     """A pointer checkout under this run's folder, and its decision file when `table` is given: text,
-    or bytes that are not text. Returns the checkout's folder."""
+    or bytes that are not text. Each name in `agents` gets an agents/ file whose frontmatter `name` is
+    that name, so the guard reads it as a real role. `files` maps each agents/ file name to its body:
+    text, or bytes that are not text, for a case that needs an exact file. Returns the checkout's folder."""
     pointer = os.path.join(ROOT, "rolepointer", name)
     os.makedirs(pointer, exist_ok=True)
     if table is not None:
@@ -20195,6 +20197,13 @@ def role_table(name, table=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as handle:
             handle.write(table if isinstance(table, bytes) else table.encode("utf-8"))
+    for role in agents:
+        write(os.path.join(pointer, "agents", role.lower() + ".md"), "---\nname: %s\n---\n# %s\n" % (role, role))
+    for file_name, body in (files or {}).items():
+        path = os.path.join(pointer, "agents", file_name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(body if isinstance(body, bytes) else body.encode("utf-8"))
     return pointer
 
 
@@ -20453,12 +20462,147 @@ def role_unread_bad_check():
                                  "unreadable")
 
 
+# ---- G: role_has_model_pin(pointer_root, role) reads the missing-model default (rule part 2). It reads the agents/
+# files in name order and stops at the first pin. An unreadable file ahead of the pin makes the answer None, which the
+# guard reads as fail open. A file after the pin is never read. The unreadable file holds bytes that are not UTF-8: the
+# suite runs as root, which reads any file whatever its mode.
+ROLE_PIN_HAIKU = "---\nname: reviewer\nmodel: haiku\n---\n# reviewer\n"
+ROLE_PIN_UNREADABLE = b"---\nname: scout\n\xff\xfe\x80 not text\n---\n"
+
+
+def role_pin_check(pointer, want, what):
+    """role_has_model_pin(pointer, "reviewer") gives `want` (True, False or None) for the agents/ folder there."""
+    reader = getattr(_load_guard_module(), "role_has_model_pin", None)
+    if reader is None:
+        return False, "the guard has no role_has_model_pin(root, role) to read the agents folder"
+    try:
+        got = reader(pointer, "reviewer")
+    except Exception as exc:
+        return False, "reading the agents folder raised %r" % (exc,)
+    if got is not want:
+        return False, "%s: role_has_model_pin reads %r, want %r" % (what, got, want)
+    return True, "%s: role_has_model_pin reads %r" % (what, want)
+
+
+def role_pin_first_check():
+    """A pinned file sorts first, so the reader stops there and never reads the unreadable file after it."""
+    pointer = role_table("pin-first", files={"a.md": ROLE_PIN_HAIKU, "b.md": ROLE_PIN_UNREADABLE})
+    return role_pin_check(pointer, True, "a pinned a.md sorts before an unreadable b.md")
+
+
+def role_pin_unreadable_first_check():
+    """An unreadable file sorts first, so the read fails there, before the pin after it is reached."""
+    pointer = role_table("pin-unreadable-first", files={"a.md": ROLE_PIN_UNREADABLE, "b.md": ROLE_PIN_HAIKU})
+    return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
+
+
+# ---- F: the three role lists agree with the role table (decision agent-model-cap). role_list_drift(pointer_root)
+# in hooks/guard.py returns one line per disagreement, and [] when all agree. The lists are constants, and the table
+# is read from the pointer at run time. A real role is an agents/ file's `name`, or a built-in name. The junk rows
+# below are the ones the reader yields on the real record (fallbackModel, advisorModel, and haiku and opus from the
+# measured-cost rows). None of them is a real role, so none may cause drift.
+ROLE_LIST_BUILTINS = ("general-purpose", "claude")
+ROLE_LIST_JUNK = ("| `fallbackModel` | sonnet | n/a |\n"
+                  "| `advisorModel` | opus | n/a |\n"
+                  "| `haiku`, `opus` | sonnet | not a role |\n")
+DRIFT_ABSENT = "the guard has no role_list_drift(pointer_root) to check the three role lists"
+
+
+def role_list_table(models=None, rows=""):
+    """A decision file with one row per real role at its ROLE_REAL_WANT model. `models` overrides a role's
+    model, and `rows` adds rows. The junk rows follow, as on the real record."""
+    models = models or {}
+    body = "".join("| %s | %s | high |\n" % (role, models.get(role, want)) for role, want in ROLE_REAL_WANT.items())
+    return ROLE_TABLE_HEAD + body + rows + ROLE_LIST_JUNK
+
+
+def role_list_pointer(name, table, extra=()):
+    """A pointer checkout for the drift cases: `table`, and an agents/ file for each real role that has no
+    built-in name. `extra` names more real roles, each with an agents/ file."""
+    agents = [role for role in ROLE_REAL_WANT if role not in ROLE_LIST_BUILTINS] + list(extra)
+    return role_table(name, table, agents=agents)
+
+
+def role_drift_lines(pointer):
+    """(lines, why). `lines` is what role_list_drift gives for `pointer`. It is None, with `why` saying
+    why, when the guard has no such function, the call raises, or it does not return a list of text."""
+    checker = getattr(_load_guard_module(), "role_list_drift", None)
+    if checker is None:
+        return None, DRIFT_ABSENT
+    try:
+        lines = checker(pointer)
+    except Exception as exc:
+        return None, "role_list_drift(pointer_root) raised %r" % (exc,)
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return None, "role_list_drift(pointer_root) did not return a list of text lines: %r" % (lines,)
+    return lines, ""
+
+
+def role_drift_clean_check(pointer, what):
+    """The three lists agree with the table at `pointer`, so there is no drift line."""
+    lines, why = role_drift_lines(pointer)
+    if lines is None:
+        return False, why
+    if lines:
+        return False, "%d drift lines for %s, want none: %r" % (len(lines), what, lines[:2])
+    return True, "%s: the three role lists agree with the table, no drift" % what
+
+
+def role_drift_names_check(pointer, names, what):
+    """The table at `pointer` drifts from the lists, and one drift line names every word in `names`."""
+    lines, why = role_drift_lines(pointer)
+    if lines is None:
+        return False, why
+    if not any(all(name in line for name in names) for line in lines):
+        return False, "no drift line names %s for %s; got %r" % (" and ".join(names), what, lines[:2])
+    return True, "%s: a drift line names %s" % (what, " and ".join(names))
+
+
+def role_list_real_check():
+    return role_drift_clean_check(REPO, "the real decision record")
+
+
+def role_list_junk_check():
+    """The clean table carries the junk rows, and the reader yields them, so the drift check meets them."""
+    reader = role_model_reader()
+    if reader is None:
+        return False, "the guard has no role_model_table(root) to read the decision file"
+    pointer = role_list_pointer("listdrift-clean", role_list_table())
+    table = reader(pointer) or {}
+    absent = [key for key in ("fallbackModel", "advisorModel") if key not in table]
+    if absent:
+        return False, "the reader does not yield %s, so this case proves nothing" % ", ".join(absent)
+    return role_drift_clean_check(pointer, "the junk keys fallbackModel and advisorModel")
+
+
+def role_list_haiku_check():
+    pointer = role_list_pointer("listdrift-test-author", role_list_table({"test-author": "sonnet"}))
+    return role_drift_names_check(pointer, ("test-author", "HAIKU_ROLES"), "test-author moved to a sonnet row")
+
+
+def role_list_opus_check():
+    pointer = role_list_pointer("listdrift-scout", role_list_table(rows="| scout | opus | high |\n"), extra=("scout",))
+    return role_drift_names_check(pointer, ("scout", "OPUS_STANDING_ROLES"), "a new opus row role")
+
+
+def role_list_builder_check():
+    pointer = role_list_pointer("listdrift-builder", role_list_table({"builder": "opus"}))
+    return role_drift_names_check(pointer, ("builder", "OPUS_ROLES"), "builder moved to an opus row")
+
+
 for _label, _check in (
     ("role-model: the owner's real decision file reads to the rows the guard enforces", role_real_table_check),
     ("role-model: qualifier rows name no role, and a plain row reads its first Model word", role_rules_check),
     ("role-model: the table is read at each spawn, so an edited row changes the next verdict", role_live_check),
     ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
+    ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
+    ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-list: the three role lists agree with the real decision record", role_list_real_check),
+    ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
+    ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
+    ("role-list: a new opus row role drifts OPUS_STANDING_ROLES", role_list_opus_check),
+    ("role-list: builder moved to an opus row drifts the override's OPUS_ROLES", role_list_builder_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
