@@ -562,6 +562,7 @@ GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login 
                    "Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
                    "Switch to %s instead only for a repo %s cannot reach."
                    % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
+GH_NO_SWITCH = "gh command with no gh auth switch before it"
 GH_WORD = re.compile(r"(?<![\w-])gh(?![\w-])")
 
 
@@ -608,7 +609,7 @@ def _gh_script_hit(guard_core, reading, command) -> str:
         if login not in GH_LOGINS:
             if login:
                 return "gh command after a switch to %s, a login outside the pair" % login
-            return "gh command with no gh auth switch before it"
+            return GH_NO_SWITCH
         if login == GH_FALLBACK_LOGIN and names_default_repo:
             return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
     return ""
@@ -644,18 +645,22 @@ def _gh_counts(text):
 
 def gh_edit_hit(old, new) -> str:
     """The matched text when a str_replace on `command` turns `old` into `new` and leaves a gh command
-    with no switch. The stored command is unseen, so `new` is judged alone, except for an edit that
-    only changes gh commands `old` already held: it adds no gh command, and it holds no switch in
-    `old` or `new` for the edit to remove or move, so the switch the stored command keeps still
-    stands."""
+    that gh_login_hit refuses. The stored command is unseen, so `new` is judged alone, except that the
+    one reason GH_NO_SWITCH is excused for an edit that only changes gh commands `old` already held: it
+    adds no gh command, and it holds no switch in `old` or `new` for the edit to remove or move, so the
+    switch the stored command keeps still stands. Every other reason stands. So does an edit that adds
+    a GH_DEFAULT_LOGIN repo name, since the stored login may be GH_FALLBACK_LOGIN."""
     hit = gh_login_hit({"command": new})
-    if not hit:
-        return ""
+    if hit != GH_NO_SWITCH:
+        return hit
     old_gh, old_switch = _gh_counts(old)
     new_gh, new_switch = _gh_counts(new)
-    if old_gh and new_gh <= old_gh and not old_switch and not new_switch:
-        return ""
-    return hit
+    if not old_gh or new_gh > old_gh or old_switch or new_switch:
+        return hit
+    repo = GH_DEFAULT_LOGIN + "/"
+    if new.lower().count(repo) > old.lower().count(repo):
+        return "gh edit that names a %s/ repo, and the stored login is unseen" % GH_DEFAULT_LOGIN
+    return ""
 
 
 def gh_login_hit(data) -> str:
