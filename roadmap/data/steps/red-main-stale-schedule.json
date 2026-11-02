@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 484,
  "why": "Incident, Nov 2 00:01 CST: the merge tool refused joyous #68 because an Oct 26 scheduled link-check run on an old main was red, though a newer run on today's main passed. Since PR #1013 the tool judges scheduled runs as their own group, so a stale scheduled red blocks until the next scheduled run.",
- "note": "Lane session_013NEJKzUPm3f5qh6E4tEpeq, started Nov 2 00:04 CST. Page item 161 waits on it or on the owner's override. Ready. Port: yes.",
- "updatedAt": "2026-11-02T06:08:00Z"
+ "note": "Lane session_013NEJKzUPm3f5qh6E4tEpeq, started Nov 2 00:04 CST. Page item 161 waits on it or on the owner's override. Ready. Port: yes. Owner, Queue item 161 b, Nov 2 00:56 CST: no override for joyous #68; it merges after this fix.",
+ "updatedAt": "2026-11-02T07:00:00Z"
 }
