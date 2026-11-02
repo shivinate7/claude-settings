@@ -73,10 +73,10 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   folder of this script's own checkout, never the child's. Before it compares, it drops headings, `Kind:`, `Plan:`
   and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read: a
   copy in quotes is a copy. A unit is refused when its runs of SHARED_RUN or more words that a record also holds
-  cover at least SHARED_MIN of its words and at least RESTATES_SHARE of them. A line that names a record and its
-  ruling time cites it, and passes. An item names the file, the line and the record, and the remedy; it never
-  prints record text. An unreadable records folder or no record makes the group unknown. A claude-settings
-  checkout is n/a.
+  cover at least SHARED_MIN of its words and at least RESTATES_SHARE of them. A unit with under SHARED_MIN
+  shared words passes, a record citation included. An item names the file, the line and the record, and the
+  remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
+  claude-settings checkout is n/a.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
