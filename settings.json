@@ -9,7 +9,9 @@
   "permissions": {
     "allow": [
       "Bash(gh pr merge:*)",
-      "mcp__Claude_Browser"
+      "mcp__Claude_Browser",
+      "mcp__claude-code-remote__add_repo",
+      "mcp__claude-code-remote__archive_session"
     ],
     "deny": [
       "Read(.env)",

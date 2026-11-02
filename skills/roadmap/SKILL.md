@@ -113,8 +113,18 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - open-step notes that are too long;
 - untouched steps and empty notes in a live phase;
 - new top steps with no "Placed ahead of" line;
-- landed steps that wait for triage to close them;
-- steps marked `doing` or `active` with no live lane or open PR. A step is live when a session that is
+- landed feel-fix steps with no valid device trial, in the row `landed, waiting for a device trial`. A
+  feel-fix is a step whose `feel` is set to anything but `false` or `null` (decision
+  `feel-fix-waits-device-check`, a feel-fix waits for a device trial). Each entry is `<id> (<marks>)`, where `<marks>` is the step's pull request (`#N`), or its
+  commit's short hash when no pull request is known. It reads `<id> (<marks>; device trial unreadable)` when
+  `deviceCheck` is present but not valid;
+- landed steps that wait for triage to close them. A feel-fix step with a valid device trial reads
+  `<id> (<marks>; open a try-it item)`. Triage then opens one try-it item (decision
+  `feel-fix-waits-device-check`, a waiting-page item of kind `task`) for it, with `ref` set to the step id,
+  so no step gets two. Its `Why yours:` line names the device trial and says a feel on a real device is the
+  owner's to judge;
+- steps marked `doing` or `active` with no live lane or open PR, except a landed feel-fix with no valid
+  device trial, which the row above lists. A step is live when a session that is
   not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
   id. Both match the id exactly. The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
