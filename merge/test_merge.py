@@ -8899,13 +8899,14 @@ def main_job(name, conclusion, minutes=1):
 
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_runs`: run id -> text, for the jobs read of that run alone."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_runs=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
+        self.jobs_fail_runs = jobs_fail_runs or {}
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
@@ -8921,6 +8922,8 @@ class MainRunsHost(FakeHost, merge.Host):
         assert m and key == "jobs", rel
         if self.jobs_fail:
             raise merge.Stop(f"reading {rel} from GitHub failed: {self.jobs_fail}")
+        if int(m.group(1)) in self.jobs_fail_runs:
+            raise merge.Stop(f"reading {rel} from GitHub failed: {self.jobs_fail_runs[int(m.group(1))]}")
         return self.jobs[int(m.group(1))]
 
 
@@ -8954,11 +8957,12 @@ class RedMainBrake(Env):
         for i in run_ids:
             self.assertIn(f"run {i} of", out, out)
 
-    def cross_group(self, red, red_jobs, cand, cand_jobs, cand_newer=True):
+    def cross_group(self, red, red_jobs, cand, cand_jobs, cand_newer=True, **kw):
         """A red run and its candidate from another event group; the candidate is newer unless `cand_newer` is false. Each run's jobs
-        are keyed by its id, as MainRunsHost.pages reads them. A run read with no fixture is UNKNOWN, and refused_red fails on that."""
+        are keyed by its id, as MainRunsHost.pages reads them. A run read with no fixture is UNKNOWN, and refused_red fails on that.
+        `**kw` goes to MainRunsHost, e.g. `jobs_fail_runs`."""
         runs = [cand, red] if cand_newer else [red, cand]
-        return self.go(runs, {red["id"]: red_jobs, cand["id"]: cand_jobs})
+        return self.go(runs, {red["id"]: red_jobs, cand["id"]: cand_jobs}, **kw)
 
     # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
     OCT14 = {901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
@@ -9116,6 +9120,31 @@ class RedMainBrake(Env):
         rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
                                            main_run(930, "success", event="schedule"), [main_job("checks", "success")], cand_newer=False)
         self.refused_red(rc, out, before, 931)
+
+    def test_a_red_run_with_no_red_job_is_never_cleared(self):
+        # the run failed, yet every job it ran passed: a newer same-job success does not clear a red pick with no red job
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "success")],
+                                           main_run(932, "success", event="schedule"), [main_job("checks", "success")])
+        self.refused_red(rc, out, before, 931)
+        self.assertIn("ended failure with no red job", out, out)
+
+    def test_an_unknown_run_is_never_cleared(self):
+        # a cancelled run with no red job is UNKNOWN; a newer same-job success does not turn it into a clear
+        rc, out, before = self.cross_group(main_run(931, "cancelled"), [main_job("checks", "success")],
+                                           main_run(932, "success", event="schedule"), [main_job("checks", "success")])
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, out)
+        self.assertIn("run 931 of", out, out)
+        self.assertIn("was cancelled with no red job", out, out)
+        self.assertNotIn("is red", out, out)
+
+    def test_a_failed_read_of_the_newer_run_leaves_the_red_run_red(self):
+        # the joyous form, but the newer run's jobs cannot be read: the red run's own read showed a red job, so it stays red
+        rc, out, before = self.cross_group(main_run(931, "failure", event="schedule"), [main_job("readme-links", "failure", 20)],
+                                           main_run(932, "success", event="workflow_dispatch"), [main_job("readme-links", "success")],
+                                           jobs_fail_runs={932: "HTTP 500"})
+        self.refused_red(rc, out, before, 931)
+        self.assertIn("actions/runs/932/jobs", self.host.reads, "the clear was tried, and its read failed")
 
     def test_a_dynamic_event_run_is_not_judged(self):
         # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
