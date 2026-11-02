@@ -1,0 +1,9 @@
+{
+ "title": "A newer run of the same jobs clears an old scheduled red",
+ "phase": "now",
+ "status": "doing",
+ "order": 484,
+ "why": "Incident, Nov 2 00:01 CST: the merge tool refused joyous #68 because an Oct 26 scheduled link-check run on an old main was red, though a newer run on today's main passed. Since PR #1013 the tool judges scheduled runs as their own group, so a stale scheduled red blocks until the next scheduled run.",
+ "note": "Lane session_013NEJKzUPm3f5qh6E4tEpeq, started Nov 2 00:04 CST. Page item 161 waits on it or on the owner's override. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T06:08:00Z"
+}
