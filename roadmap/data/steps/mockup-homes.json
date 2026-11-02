@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 484.100005,
  "why": "Owner ask in chat, Nov 2 11:49 CST (from the home coordinator run): design files and artifacts outlive sessions and accounts.",
- "note": "Lane mockup-homes (session_013NEJL3hSuVyEnDwKLnExuC), started by the coordinator 11:50 CST: the home for mockup files, and a roadmap check that each mockup id has a file. The artifact registry and the wind-down export are in step waiting-data-in-repo. Port: yes, every repo with screens. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state.",
+ "note": "Lane mockup-homes (session_013NEJL3hSuVyEnDwKLnExuC), started by the coordinator 11:50 CST: the home for mockup files, and a roadmap check that each mockup id has a file. The artifact registry and the wind-down export are in step waiting-data-in-repo. Port: yes, every repo with screens. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Check scope ruled by the coordinator, Nov 2 12:49 CST (process-only): the mockup check reads open steps only.",
  "updatedAt": "2026-11-02T19:10:00Z"
 }

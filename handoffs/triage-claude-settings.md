@@ -207,7 +207,7 @@ Ten lanes wound down at 12:31 CST went back to todo (13:10 CST); each lane's bra
 - roadmap/outbox/triage.md: seven debt notes still owed to docs/debts/notes.md on main (checked Nov 2 12:58 CST); the next lane that edits notes.md lands them.
 - Lane rotation-text-current owes child-repo hand-off briefs (home, degen, mailaudit) after its merge; none written yet (its handoff: branch rotation-text-current, handoffs/rotation-text-current.md, 092b733f).
 - Outbox read Nov 2 13:00 CST: 21 older lane-status notes removed; each named PR is on main (checked by commit ancestry).
-- Not filed as a page item: lane mockup-homes' question (roadmap mockup check reads open steps only, or every step). It is an undoable implementation pick, so rule questions-go-to-owner keeps it off the page; the coordinator decides. Its handoff: branch mockup-homes, handoffs/mockup-homes.md, f5b8d6a7.
+- Lane mockup-homes' question (mockup check scope): the coordinator ruled open steps only, Nov 2 12:49 CST; filed on step mockup-homes. No page item. Its handoff: branch mockup-homes, handoffs/mockup-homes.md, f5b8d6a7.
 
 ## Follow-ups owed
 
@@ -221,3 +221,4 @@ Ten lanes wound down at 12:31 CST went back to todo (13:10 CST); each lane's bra
 - trust-error-record: its owner question goes through the question check before any page item.
 - c121: mark per repo as each roll-out visit closes.
 - Roadmap build upkeep left at 13:10 CST (run `python3 ~/.claude/skills/roadmap/build.py --repo <roadmap checkout> --live live.json --block --out block.html`): 12 page rulings not on their step, 6 draft PRs over 12 h with no live lane, 17 notes over 250 words, 3 new top-5 steps with no placement line, 3 Step trailers naming no step (stale-note-recheck).
+- Archive order (coordinator, Nov 2 12:49 CST): triage stays live and is archived last, with batch runner 7.
