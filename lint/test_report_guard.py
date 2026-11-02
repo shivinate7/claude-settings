@@ -1077,6 +1077,19 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
 
+    def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
+        # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
+        # "answered" with no source is refused again. Without the marker the same line stays quiet
+        # (test_an_green_stop_hook_active_stays_quiet). A sourced line in the same rewrite passes.
+        self.missing_report_block()
+        reply = "Answered: no permission rule can lift it.\n\n" + self.GOOD
+        out = self.stop(reply, True)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Answered: no permission rule can lift it.", out["reason"])
+        self.missing_report_block()
+        self.assertIsNone(self.stop("Item 143 answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
+
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
         bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
         self.assertIsNone(self.stop(bad, True))
@@ -2879,6 +2892,19 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Ruling (lane orchestrator, process-only): "and/or" is not a repo path, so the slash in it cites nothing.
         self.assert_blocked("Answered: use a and/or b.", "Answered: use a and/or b.")
 
+    def test_an_red_double_quoted_phrase_is_no_source(self):
+        # Lane choice (process-only): a double-quoted phrase is no longer a source. This re-points the
+        # quoted-phrase row that the green list held.
+        rows = [
+            # Catches: an owner phrase in double quotes still cites the line.
+            'Answered "no, keep the apps" in chat.',
+            # Catches: a quoted label in a Q-line still cites the line.
+            'Q1 ("Departs from" line) was answered.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):
@@ -2901,8 +2927,6 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             "fb-1042 answered in chat.",
             # Catches: a session_ id is not read as a source.
             "Answered by session_0a1b2c3d4e5f.",
-            # Catches: a quoted owner phrase is not read as a source.
-            'Answered "no, keep the apps" in chat.',
             # Catches: a Central time HH:MM is not read as a source.
             "Answered at 17:25 CST.",
         ]
@@ -2965,6 +2989,31 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         for line in ("Answered in `report_guard.py`.", "Answered at `https://github.com/o/r/pull/1`."):
             with self.subTest(line=line):
                 self.assert_allowed(line)
+
+    def test_an_green_sources_match_in_any_case(self):
+        # Catches: item <n> and fb- ids match only in lower case, so a capitalised source reads as no source.
+        for line in ("Item 143 answered in chat.", "FB-1042 answered in chat."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_negated_forms_beyond_the_list_pass(self):
+        # Catches: a negated "answered" outside the exempt list (wasn't, has not been, could not be, haven't,
+        # has yet to be, No one) is read as a claim.
+        rows = [
+            "The ask wasn't answered.",
+            "The ask has not been answered.",
+            "No one answered.",
+            "The ask could not be answered.",
+            "We haven't answered.",
+            "The ask has yet to be answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_hyphen_joined_word_is_not_the_word(self):
+        # Catches: the word inside a hyphen-joined name (answered-needs-source) is read as the word.
+        self.assert_allowed("The rule answered-needs-source holds.")
 
     def test_an_green_word_forms_that_are_not_the_word_pass(self):
         # Catches: answers, answering, or answer is read as answered.
