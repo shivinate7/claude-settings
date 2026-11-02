@@ -32,8 +32,8 @@ The same pick must carry a valid "Departs from:" line in that Input Needed item 
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
-may say `none`) in the report blockquote, until one lands (`compaction-carry`, item 11 of the
-precompact-handoff record). A label counts only where it starts an item: at line start, after a
+may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
 report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as

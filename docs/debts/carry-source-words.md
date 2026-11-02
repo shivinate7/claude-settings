@@ -4,6 +4,6 @@
 
 **Where.** `lint/report_guard.py`: `SOURCE_RE`, used by `unsourced_recovered_item`.
 
-**Decision.** precompact-handoff (checkpoints keep the handoff current). Its item 11 names git, page and digest as the only sources.
+**Decision.** precompact-handoff (checkpoints keep the handoff current). Its item 'Recovered line after compaction' names git, page and digest as the only sources.
 
 **Retire.** Closed when a case in `lint/test_report_guard.py` passes a Recovered item that names a commit, a GitHub PR or a github.com URL. A second case still refuses an item with no source.
