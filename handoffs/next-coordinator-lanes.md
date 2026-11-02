@@ -17,7 +17,7 @@ Rules for every lane:
 - PR #1108 (owner questions reach the waiting page). Head `b0d8b100`. Round 1 review done, by Haiku. The head holds the scaffold fix `03e79cfc`.
 - Serves fb-2331-1, fb-2324-1, fb-2326-1 and fb-2334-1 (questions reach the page in the same turn), and item 158.
 - Replaces PR #1070, which closes as replaced. Batch #1109 closed earlier: #1108 broke the janitor mutation test. Confirm that test is green on `b0d8b100`.
-- Confirm the round-1 reviewer ran at the model `agent-model-cap` gives. The Opus review says a Haiku round 1 falls below the role's model. It flagged #1104 and #1105. Re-review on Sonnet if this one does not meet the rule.
+- Confirm the round-1 reviewer ran at the model `agent-model-cap` gives. The Opus review says a Haiku round 1 falls below the role's model. It flagged #1104 and #1105. If this one does not meet the rule, re-review on Sonnet.
 - Blocking owner item: none.
 
 ### page-filed-check-r
@@ -104,7 +104,7 @@ Rules for every lane:
 
 ### retired names
 
-- Goal: the retired names go. The rulings behind them: builder means an agent only; the page writer is triage, else the coordinator; a lane is the unit of work (fb-1402 range, the terms rulings).
+- Goal: the retired names go. The rulings behind them say that a builder is an agent only, that the page writer is triage (else the coordinator), and that a lane is the unit of work (fb-1402 range, the terms rulings).
 - Still in use:
   - "waiting-page writer": `skills/roadmap/SKILL.md` lines 7 and 39; `skills/project-ops/SKILL.md` line 65; `operating-model.md` line 25; `skills/waiting-page/SKILL.md` line 498.
   - "bridge session": `hooks/guard_merge.py` line 672.
@@ -214,12 +214,12 @@ Rules for every lane:
 
 ### close and clean on the owner's computer
 
-- Standing grant "Acts the cloud refuses" (owner, 2026-10-30 16:20 CDT): a session on the owner's computer may set branch protection to the shared form, delete merged branches, and close PRs the coordinator names as replaced or empty. Any other act needs the owner's word.
+- Standing grant "Acts the cloud refuses" (owner, 2026-10-30 16:20 CDT): a session on the owner's computer may set branch protection to the shared form, delete merged branches, and close PRs the coordinator names as replaced or empty. Any other act needs the owner's grant.
 - Close as replaced, once each has merged or been replaced: #1070, #1104, #1105, #1107, #1098 and #1100. PR #1061 is already closed (13:38 CST).
 - Then delete the item 170 branches, after archive pushes are checked. Item 170 is a paste for the owner's Mac.
 
 ### deep audit
 
 - Run 1 runs in the previous coordinator's session. Plan: `docs/plans/deep-audit.md` on branch `deep-audit-plan` (head `f0c1e4e6`).
-- Run 2 is not recorded as started. Run 1's findings and its one-home lanes land in the handoff when Run 2 ends.
+- Run 2 is not recorded as started. When Run 2 ends, Run 1's findings and its one-home lanes land in the handoff.
 - Owner asks: fb-1602-1, fb-1604-1, fb-1605-1, fb-1605-2 and fb-1702-1. `opus 24h` until 2026-11-03 16:05 CST.

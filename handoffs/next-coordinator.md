@@ -12,7 +12,7 @@ Say the session shape in one line before you start: coordinator, a standing buil
 2. Tag this session `cs-build:coordinator` and `cs-repo:shivinate7/claude-settings`, on its own id.
 3. Start triage first. Tag it `cs-build:triage` and `cs-repo:shivinate7/claude-settings`. Triage is standing. It writes the roadmap and the waiting page.
 4. Start the batch runner next. Tag it `cs-build:batch-runner`. Brief it to run `get_session` in its own turn, then `~/.claude/bin/merge --role batch-runner`.
-5. Start batch 1 (lane list, "Start now"). Start later lanes in the order the lane list gives. Start each one when its questions are answered.
+5. Start batch 1 (lane list, "Start now"). When a lane's questions are answered, start it. Start lanes in the order the lane list gives.
 
 Triage and the batch runner start together, before any lane session. A lane session runs Opus at medium effort. Start it with `/effort medium` alone, then send the brief.
 
@@ -52,7 +52,7 @@ Batch 1 is the first two lanes in the lane list: questions-reach-page-r (PR #110
 ## Deep audit
 
 - Run 1 runs in the previous coordinator's session. Plan: `docs/plans/deep-audit.md` on branch `deep-audit-plan` (head `f0c1e4e6`). The drift pilot script is the extractor base.
-- Run 1's findings and its one-home lanes land in this handoff when Run 2 ends. Run 2 is not recorded as started. This handoff does not name who runs it.
+- When Run 2 ends, Run 1's findings and its one-home lanes land in this handoff. Run 2 is not recorded as started. This handoff does not name who runs it.
 - Owner asks: fb-1602-1, fb-1604-1, fb-1605-1, fb-1605-2, fb-1702-1.
 - Do not take over Run 1. The succession rule above applies.
 
@@ -99,7 +99,12 @@ Settled, no longer blocking: 109 (no usage limit, pick b), 161 (joyous-68-base-r
 
 ## Homed earlier (ids kept for citation)
 
-fb-1449-2, fb-1517-1, fb-1531-1, fb-1532-1, fb-0409-1, fb-0429-1, fb-1716-2, fb-1719-2, fb-1726-1, fb-1737-1, fb-1737-2, fb-1737-3, fb-1754-1, fb-1824-1, fb-1843-1, fb-1844-1, fb-1845-1, fb-1846-1, fb-1848-1, fb-1848-2, fb-1850-1, fb-1850-2, fb-1852-1, fb-1927-1, fb-1927-2, fb-1927-3, fb-2049-1, fb-2050-1, fb-2051-1, fb-2051-2, fb-2054-1, fb-2057-1, fb-2102-1, fb-2105-1, fb-2106-1, fb-2107-1, fb-2108-1, fb-2132-1, fb-2134-1, fb-2134-2, fb-2222-1, fb-2222-2, fb-2223-1, fb-2237-1, fb-2237-2, fb-2243-1, fb-2252-1, fb-2254-1, fb-2255-1, fb-2257-1, fb-1041-2 (child repos cite records; landed in #1098), fb-1052-1, fb-1100-1, fb-1112-1, fb-1149-1, fb-1154-1.
+- fb-1449-2, fb-1517-1, fb-1531-1, fb-1532-1, fb-0409-1, fb-0429-1, fb-1716-2, fb-1719-2, fb-1726-1, fb-1737-1, fb-1737-2, fb-1737-3.
+- fb-1754-1, fb-1824-1, fb-1843-1, fb-1844-1, fb-1845-1, fb-1846-1, fb-1848-1, fb-1848-2, fb-1850-1, fb-1850-2, fb-1852-1.
+- fb-1927-1, fb-1927-2, fb-1927-3, fb-2049-1, fb-2050-1, fb-2051-1, fb-2051-2, fb-2054-1, fb-2057-1, fb-2102-1, fb-2105-1.
+- fb-2106-1, fb-2107-1, fb-2108-1, fb-2132-1, fb-2134-1, fb-2134-2, fb-2222-1, fb-2222-2, fb-2223-1, fb-2237-1, fb-2237-2.
+- fb-2243-1, fb-2252-1, fb-2254-1, fb-2255-1, fb-2257-1, fb-1052-1, fb-1100-1, fb-1112-1, fb-1149-1, fb-1154-1.
+- fb-1041-2 (child repos cite records; landed in #1098).
 
 ## Files and commands
 
