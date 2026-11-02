@@ -356,7 +356,7 @@ class LaneLint(tm.CloudSession):
         self.assertNotIn("may not merge", out)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
-        rc, out, err = self.run_main("7", "--confirm")  # control: the same cloud session may not merge, so the guard is live
+        rc, out, err = self.run_main("7", "--confirm")  # control: the same cloud session may not merge, so the role check is live
         self.assertEqual(rc, 1, out + err)
         self.assertIn("may not merge", out + err)
 
