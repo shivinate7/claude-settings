@@ -8,7 +8,8 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, dir_before_segment, norm, split_segments,
+    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
+    dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -218,7 +219,23 @@ MUTATING_COMMAND = (
 )
 
 
-def writes_to(path: str, cmd: str, written=()) -> bool:
+# A command that hands its arguments to another program, so a mutating word in them may run.
+_RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
+
+
+def _mutates_as_command(command: str, words) -> bool:
+    """True when the segment's own command (`command`, its resolved name) changes the files it names:
+    a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
+    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
+    if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+        return True
+    if command == "git":
+        rest = [word for word in words if not word.startswith("-")]
+        return any(word in ("mv", "rm") for word in rest[:2])
+    return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+def writes_to(path: str, cmd: str, written=(), command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -236,6 +253,10 @@ def writes_to(path: str, cmd: str, written=()) -> bool:
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
+    # `command` is the segment's resolved command name, given by a caller that reads a mutating
+    # word only in command position (`grep -n install tests/x.py` reads, never writes).
+    if command is not None and not _mutates_as_command(command, words):
+        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):   # a wrapped or nested sed
@@ -635,7 +656,8 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, writes_first=False) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, writes_first=False,
+                     command_position=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -690,17 +712,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                     written.add(_unquoted(word))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        command = _segment_command(words) if command_position else ()
         for place, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>") or place in stood_in:
                 continue   # a stand-in names no path: judged, it would resolve to the cwd
             if writes_first:
-                if writes_to(word, text, written) and predicate(word, at):
+                if writes_to(word, text, written, *command) and predicate(word, at):
                     return word
-            elif predicate(word, at) and writes_to(word, text, written):
+            elif predicate(word, at) and writes_to(word, text, written, *command):
                 return word
     return ""
+
+
+def _segment_command(words):
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+    index = resolve_command(tuple(words))
+    if index is None:
+        index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
+    command = _name(words[index]) if index < len(words) else ""
+    return command, [word for word in words[index + 1:] if word]
 
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
@@ -711,6 +743,249 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
     return _shell_write_hit(cmd, cwd, is_project_config)
+
+
+# ------------------------------------------------------------------ an interpreter's own writes
+#
+# A python or node script, run from a heredoc body or from `-c` / `-e`, writes a file the shell
+# never names, so `_shell_write_hit` cannot see it. `interpreter_write_hit` reads the script itself.
+# A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
+# in a printed string or a comment is text and a path held in a variable is still found. A body
+# `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
+_PY_HEADER = re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])")
+_NODE_HEADER = re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])")
+_PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
+_NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
+_PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
+_NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
+_INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
+_PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
+_PATH_PASS = ("resolve", "expanduser", "absolute")
+_COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
+_PY_WRITE_CALL = re.compile(
+    r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move)"""
+    r"""|os\s*\.\s*(?:replace|rename)""")
+_STRING_LITERAL = re.compile(r"""'([^'\n]+)'|"([^"\n]+)\"""")
+
+
+def _join_path(head: str, tail: str) -> str:
+    return head.rstrip("/") + "/" + tail if head else tail
+
+
+def _py_paths(node, env):
+    """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
+    name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
+    `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
+    reads `tests`. Empty when no piece is known."""
+    import ast
+    if isinstance(node, ast.Constant):
+        return [node.value] if isinstance(node.value, str) else []
+    if isinstance(node, ast.Name):
+        return list(env.get(node.id, ()))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = _py_paths(node.left, env), _py_paths(node.right, env)
+        if not right:
+            return left
+        return [_join_path(a, b) for a in (left or [""]) for b in right]
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        if name in _PATH_CTORS or name == "join":
+            out = [""]
+            for options in (_py_paths(arg, env) for arg in node.args):
+                if options:
+                    out = [_join_path(a, b) for a in out for b in options]
+            return out if out != [""] else []
+        if isinstance(func, ast.Attribute) and func.attr in _PATH_PASS:
+            return _py_paths(func.value, env)
+    return []
+
+
+def _py_env_at(tree):
+    """A function `env_at(node)`: the path each simple `name = <path>` assignment bound, as it stands
+    where `node` begins. One pass in source order; a later top-level assignment replaces the value, one
+    inside an `if`, loop, `try` or function adds to it, since either may not run."""
+    import ast
+    top = {id(statement) for statement in tree.body}
+    events = sorted(
+        (node for node in ast.walk(tree)
+         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)),
+        key=lambda node: (node.end_lineno, node.end_col_offset))
+
+    def env_at(call):
+        env = {}
+        for node in events:
+            if (node.end_lineno, node.end_col_offset) > (call.lineno, call.col_offset):
+                break
+            name, values = node.targets[0].id, _py_paths(node.value, env)
+            if id(node) in top:
+                env[name] = values
+            else:
+                env[name] = env.get(name, []) + [v for v in values if v not in env.get(name, [])]
+        return env
+    return env_at
+
+
+def _py_mode_writes(mode) -> bool:
+    import ast
+    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(c in mode.value for c in "wax+")
+
+
+def _py_arg(call, index, keyword):
+    if len(call.args) > index:
+        return call.args[index]
+    return next((kw.value for kw in call.keywords if kw.arg == keyword), None)
+
+
+def _py_written(tree, env_at):
+    """(call, path expression) of each write call of a script: `open` with a writing mode, `write_text`,
+    `write_bytes`, the destination of a copy, a move or a rename."""
+    import ast
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            if func.id == "open" and _py_mode_writes(_py_arg(node, 1, "mode")):
+                out.append((node, _py_arg(node, 0, "file")))
+            elif func.id in _COPY_NAMES and len(node.args) >= 2:
+                out.append((node, node.args[1]))
+        elif isinstance(func, ast.Attribute):
+            attr, owner = func.attr, func.value
+            module = isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "codecs", "gzip", "bz2")
+            if attr in ("write_text", "write_bytes"):
+                out.append((node, owner))
+            elif attr == "open" and module and _py_mode_writes(_py_arg(node, 1, "mode")):
+                out.append((node, _py_arg(node, 0, "file")))
+            elif attr == "open" and not module and _py_mode_writes(_py_arg(node, 0, "mode")):
+                out.append((node, owner))
+            elif attr in _COPY_NAMES and isinstance(owner, ast.Name) and owner.id == "shutil" and len(node.args) >= 2:
+                out.append((node, node.args[1]))
+            elif attr in ("replace", "rename") and isinstance(owner, ast.Name) and owner.id == "os" \
+                    and len(node.args) >= 2:
+                out.append((node, node.args[1]))
+            elif attr in ("replace", "rename") and not module and len(node.args) == 1 \
+                    and _py_paths(owner, env_at(node)):
+                out.append((node, node.args[0]))   # Path.rename(target) writes the target
+    return [(call, expression) for call, expression in out if expression is not None]
+
+
+def _py_hit(body: str, cwd: str, predicate) -> str:
+    import ast
+    import textwrap
+    try:
+        tree = ast.parse(textwrap.dedent(body))
+    except (SyntaxError, ValueError):
+        # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
+        # predicate accepts, beside a write call in the same body, counts.
+        if _PY_WRITE_CALL.search(body):
+            for match in _STRING_LITERAL.finditer(body):
+                text = match.group(1) or match.group(2)
+                if predicate(text, cwd):
+                    return text
+        return ""
+    env_at = _py_env_at(tree)
+    for call, expression in _py_written(tree, env_at):
+        for path in _py_paths(expression, env_at(call)):
+            if predicate(path, cwd):
+                return path
+    return ""
+
+
+_JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
+_JS_ONE = re.compile(
+    r"\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(\s*" + _JS_STR)
+_JS_TWO = re.compile(
+    r"(?:\b(?:copyFileSync|copyFile|renameSync|cpSync)|\bfs(?:\.promises)?\s*\.\s*(?:rename|cp))"
+    r"\s*\(\s*" + _JS_STR + r"\s*,\s*" + _JS_STR)
+_JS_ASSIGN = re.compile(
+    r"""\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`)""")
+
+
+def _js_values(groups, env):
+    """The path strings one `_JS_STR` match holds, from its five groups."""
+    quoted = next((g for g in groups[:3] if g is not None), None)
+    if quoted is not None:
+        return [quoted]
+    if groups[3]:
+        return list(env.get(groups[3], ()))
+    if groups[4] is not None:
+        pieces = re.findall(r"""['"]([^'"]*)['"]""", groups[4])
+        return ["/".join(piece.strip("/") for piece in pieces)] if pieces else []
+    return []
+
+
+def _js_hit(body: str, cwd: str, predicate) -> str:
+    env = {}
+    for match in _JS_ASSIGN.finditer(body):
+        env.setdefault(match.group(1), []).append(next(g for g in match.groups()[1:] if g is not None))
+    for match in _JS_ONE.finditer(body):
+        for path in _js_values(match.groups(), env):
+            if predicate(path, cwd):
+                return path
+    for match in _JS_TWO.finditer(body):
+        for path in _js_values(match.groups()[5:], env):   # the second operand is the one written
+            if predicate(path, cwd):
+                return path
+    return ""
+
+
+def _inline_scripts(command: str):
+    """Yield (kind, script, segment number, segments, ends) for each `python -c` and `node -e` script."""
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(command), ends)
+    for number, segment in enumerate(segments):
+        if not any(flag in segment for flag in _INLINE_FLAG_WORDS):
+            continue
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        name = basename(tokens[index])
+        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
+        flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
+        for at in range(index + 1, len(tokens) - 1):
+            if kind and flag.match(tokens[at]):
+                yield kind, str(tokens[at + 1]), number, segments, ends
+                break
+
+
+def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+    """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
+    Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
+    `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    A crash of the scan reads as no hit: it must never skip the rules after it."""
+    try:
+        return _interpreter_write_hit(raw, cwd, predicate)
+    except Exception:
+        return ""
+
+
+def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+    if "<<" in raw:
+        seen = set()
+        for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
+            for _quote, body, header in _split_heredocs(raw, reading)[1]:
+                if (header, body) in seen:
+                    continue
+                seen.add((header, body))
+                if _PY_HEADER.search(header):
+                    hit = _py_hit(body, cwd, predicate)
+                elif _NODE_HEADER.search(header):
+                    hit = _js_hit(body, cwd, predicate)
+                else:
+                    continue
+                if hit:
+                    return hit
+    if any(flag in raw for flag in _INLINE_FLAG_WORDS):
+        for kind, script, number, segments, ends in _inline_scripts(raw):
+            at = dir_before_segment(segments, number, cwd, ends) or cwd
+            hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
+            if hit:
+                return hit
+    return ""
+
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.

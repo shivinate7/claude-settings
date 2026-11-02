@@ -51,6 +51,7 @@ import uuid
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -2502,9 +2503,9 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 # A leading cd is no second command (ask-commands-run-alone): the reset asks, once.
 # The reset alone, by -C, is the line above.
-sh("worktree: a cd into the worktree, then the reset, asks, from the shared checkout",
-   "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN,
-   lacks=(CHAIN_ASK,))
+sh("worktree: a leading cd into the shared checkout's own root, then a -C reset of the worktree, asks",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -C " + slash(GITWT) + " reset --hard", "ask",
+   "shared-tree", cwd=GITMAIN, lacks=(CHAIN_ASK,))
 # DATA, NOT A DISCARD. A reset named inside a JSON payload piped to python runs nothing in the lane, so it allows.
 sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
@@ -2531,9 +2532,9 @@ sh("per-file allow: restore --staged --worktree of one modified file",
 # checkout behind the lane. Chained with the cd and the python, that ask command still denies (ask-alone):
 # the python is a second real command.
 # The ask reason is not pinned to the -C form: the deny sends the agent to the lone command, whose own ask names it.
-chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask command",
-            "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-            cwd=GITMAIN)
+chained_ask("per-file ask: the incident form, a leading cd into the shared checkout's own root, a -C checkout of one worktree file, then python, denies as a chained ask command",
+            "cd " + slash(GITMAIN) + " && " + VCS + " -C " + slash(GITWT)
+            + " checkout fixtures/media-players.json && python3 x.py", cwd=GITMAIN)
 
 # ASK, in a linked worktree (GITWT). Each names a whole tree, a folder, a glob, or a reset.
 sh("per-file ask: checkout . in a worktree still asks", VCS + " checkout .", "ask",
@@ -2556,9 +2557,9 @@ sh("per-file deny: restore of one file in the shared checkout", VCS + " restore 
    "shared-tree", cwd=GITMAIN)
 sh("per-file deny: restore --staged --worktree of one file in the shared checkout",
    VCS + " restore --staged --worktree f.txt", "deny", "shared-tree", cwd=GITMAIN)
-sh("per-file deny: the incident form, a cd into the shared checkout, from a worktree",
-   "cd " + slash(GITMAIN) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-   "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: the incident form, a leading cd into the worktree's own root, then a -C checkout in the shared checkout, from a worktree",
+   "cd " + slash(GITWT) + " && " + VCS + " -C " + slash(GITMAIN)
+   + " checkout fixtures/media-players.json && python3 x.py", "deny", "shared-tree", cwd=GITWT)
 sh("per-file deny: checkout . in the shared checkout", VCS + " checkout .", "deny",
    "shared-tree", cwd=GITMAIN)
 sh("per-file deny: restore . in the shared checkout", VCS + " restore .", "deny",
@@ -2723,11 +2724,12 @@ sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadabl
 sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
    VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT)
-# Limit: _run_dir reads the first -C against the shell cwd, so a shared checkout reached by `cd`
-# gets an ask here, not a deny. Main gives the same.
-sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree, asks",
-   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "ask", "shared-tree", cwd=GITWT,
-   lacks=(CHAIN_ASK,))
+# Once a cd into the shared checkout was an ask here (a limit of _run_dir reading the first -C against
+# the shell cwd). The cd act now refuses that cd, so the shared checkout is named by -C, and the
+# restore in it denies.
+sh("per-file deny: a leading cd into the worktree's own root, then git -C shared restore f.txt, from a worktree",
+   "cd " + slash(GITWT) + " && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt", "deny",
+   "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # IDENTICAL SEGMENTS (decision agent-worktree-discard-is-noted, section "Named files in a linked
@@ -2755,28 +2757,28 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
-# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
-# heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
-# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. A lone
-# quote inside a shell `#` comment does not desync, so the python body keeps its quote outside any comment.
+# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
+# body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
+# not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in
+# the shared checkout, so it must deny. A lone quote inside a shell `#` comment does not desync, so the
+# python body keeps its quote outside any comment.
 sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
    "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
-   "deny", "shared-tree", cwd=GITWT)
+   "deny", "shared-tree", cwd=NOGIT)
 sh("per-file deny: python heredoc, a lone double quote in the body, then cd shared and restore",
-   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
-   + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
+   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT)
 
-# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
-# segments, every later segment is judged as the shared checkout, so a later discard of a dirty
-# file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
-# checkout. Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask command, not a
-# deny command. Each is chained, so each denies as a chained ask command (ask-alone).
-chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask command",
-            "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
-            + VCS + " restore f.txt\ncd " + slash(GITWT), cwd=GITWT)
-chained_ask("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore, denies as a chained ask command",
-            "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
-            + slash(GITWT), cwd=GITWT)
+# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the segments,
+# every later segment is judged as the shared checkout, so a later discard of a dirty file is denied.
+# A cd into the shared checkout is now refused by other-checkout, so each restore names the shared
+# checkout with -C and denies as shared-tree, chained or not.
+sh("per-file deny: two heredocs with lone apostrophes, then -C shared restore f.txt, cd lane last, from a worktree",
+   "node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n" + VCS + " -C " + slash(GITMAIN)
+   + " restore f.txt\ncd " + slash(GITWT), "deny", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
+sh("per-file deny: the node lone-apostrophe case with -C shared restore, then && cd lane, from a worktree",
+   "node <<'EOF'\n// don't\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt && cd "
+   + slash(GITWT), "deny", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
 # CONTROL. No heredoc, so the walk stays in sync, and the cd keeps the ask command. A leading cd is no
 # second command (ask-commands-run-alone), so this asks. The case name keeps the first words that
 # hooks/mutate_guard.py names for this case.
@@ -2815,14 +2817,14 @@ chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the s
             VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
 chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
             VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
-# 4. A PowerShell Set-Location into the shared checkout. Set-Location is a move, read as a cd
-# (ask-commands-run-alone, guard_core _segment_cd_target), so the restore is judged in the shared checkout
-# and denies. The bash cd form pins the same deny: the nearest rows are the incident form (cd shared
-# && checkout, from a worktree) and the heredoc cd shared && restore, both shared-tree deny. The
+# 4. A PowerShell Set-Location into the shared checkout, from a cwd in no checkout. The cd act does not
+# judge it there, so the shared-tree rule reads the folder it moved to and denies the restore. The
 # aliases and Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
-sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a worktree",
-   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "deny", "shared-tree",
-   tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
+# Set-Location into another checkout from a lane is refused by other-checkout instead
+# (worktree_home_cd_parse_forms_case).
+sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a folder in no checkout",
+   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
+   "deny", "shared-tree", tool="PowerShell", cwd=NOGIT, lacks=(CHAIN_ASK,))
 for _cd in ("sl", "chdir", "Push-Location"):
     chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask command"
                 % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
@@ -9014,7 +9016,9 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 
 # A record's own tier is allowed. Any other tier is refused, both ways round.
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
-role_allow("a coordinator records coordinator", MERGE_SHIM + " --role coordinator", role_path("coordinator"))
+# decision session-tiers: the coordinator never merges, so its own record does not allow the coordinator role.
+role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
+          role_path("coordinator"))
 role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
           role_path("runner"))
 role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
@@ -9039,10 +9043,12 @@ role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE
 # The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
 for _role_prefix in ("", "cd somewhere && "):
     for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
-        for _role_tier, _role_own in (("batch-runner", "runner"), ("coordinator", "coordinator")):
-            _role_cmd = _role_prefix + _role_form + " --role " + _role_tier
-            role_allow(_role_cmd + " allows its own record", _role_cmd, role_path(_role_own))
-            role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+        _role_cmd = _role_prefix + _role_form + " --role batch-runner"
+        role_allow(_role_cmd + " allows its own record", _role_cmd, role_path("runner"))
+        role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+        # decision session-tiers: the coordinator never merges, in any form, even on its own record
+        _coord_cmd = _role_prefix + _role_form + " --role coordinator"
+        role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
@@ -11865,6 +11871,104 @@ add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny
 add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allow", tool="Edit",
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
+
+# ---- a builder's shell write to a test file: a redirect, tee, sed -i, or a python or node script that
+# opens it for write. A read, a write to product code and a recovery are allowed. BR is a builder in a checkout.
+BR = dict(B, cwd=GITMAIN)
+RULE_AUDIT_EDIT = ("python3 - <<'EOF'\np='lint/test_rule_audit.py'\ns=open(p).read()\n"
+                   "s = s.replace('a', 'b')\nopen(p,'w').write(s)\nEOF")
+PATHLIB_EDIT = ("python3 - <<'EOF'\nfrom pathlib import Path\np = Path('lint/test_rule_audit.py')\n"
+                "p.write_text(p.read_text().replace('a', 'b'))\nEOF")
+PY_C_WRITE = "python3 -c \"open('tests/x.py','w').write('x')\""
+SCAN_TAIL = "cat > /tmp/scan.py <<'EOF'\nprint(1)\nEOF\npython3 /tmp/scan.py"
+TEST_REDIRECTS = (
+    "echo x > src/test_app.py", "echo x >> tests/helper.py", "printf x | tee src/test_app.py",
+    "sed -i 's/a/b/' src/test_app.py", "cat > tests/x.py <<'EOF'\nx = 1\nEOF",
+)
+SHELL_TEST_WRITES = (
+    ("incident heredoc, quoted EOF, rewrites lint/test_rule_audit.py", RULE_AUDIT_EDIT),
+    ("incident heredoc, then a scan tail after EOF", RULE_AUDIT_EDIT + "\n" + SCAN_TAIL),
+    ("incident git show redirected onto lint/test_rule_audit.py",
+     "git show HEAD:lint/test_rule_audit.py > lint/test_rule_audit.py"),
+    ("pathlib heredoc, quoted EOF, write_text on lint/test_rule_audit.py", PATHLIB_EDIT),
+    ("heredoc, unquoted EOF, open-write of tests/x.py",
+     "python3 - <<EOF\nopen('tests/x.py', 'w').write('x')\nEOF"),
+    ("python -c open-write of tests/x.py", PY_C_WRITE),
+    ("node -e writeFileSync of web/a.test.js",
+     "node -e \"require('fs').writeFileSync('web/a.test.js','x')\""),
+    ("echo redirect onto src/test_app.py", TEST_REDIRECTS[0]),
+    ("echo append onto tests/helper.py", TEST_REDIRECTS[1]),
+    ("printf piped to tee on src/test_app.py", TEST_REDIRECTS[2]),
+    ("sed -i on src/test_app.py", TEST_REDIRECTS[3]),
+    ("cat heredoc onto tests/x.py", TEST_REDIRECTS[4]),
+    ("redirect after cd lint, onto test_rule_audit.py", "cd lint && echo x > test_rule_audit.py"),
+    # A lone quote in a heredoc body must not hide the write after it (the scanner respects strings).
+    ("heredoc with a lone quote line, then a write to tests/x.py",
+     "python3 - <<'EOF'\n'\nopen('tests/x.py', 'w').write('x')\nEOF"),
+    # A multi-line template literal must not hide the write after it.
+    ("node heredoc with a multi-line template literal, then a write to web/a.test.js",
+     "node - <<'EOF'\nconst s = `\nline one\nline two\n`;\nrequire('fs').writeFileSync('web/a.test.js', s)\nEOF"),
+    # A comment opener inside quotes is text, so the redirect after it still writes the test.
+    ("echo of a hash in quotes, redirected onto tests/x.py", "echo \"#\" > tests/x.py"),
+)
+for _name, _command in SHELL_TEST_WRITES:
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **BR)
+
+# The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
+SHELL_TEST_ALLOWS = (
+    ("cat of tests/x.py", "cat tests/x.py"),
+    ("grep of src/test_app.py", "grep -n foo src/test_app.py"),
+    ("python heredoc that prints tests/x.py", "python3 - <<'EOF'\nprint(open('tests/x.py').read())\nEOF"),
+    ("python heredoc that reads tests/x.py and writes src/app.py",
+     "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('tests/x.py')\n"
+     "Path('src/app.py').write_text(p.read_text())\nEOF"),
+    ("echo redirect onto src/app.py", "echo x > src/app.py"),
+    ("python heredoc writing src/app.py", "python3 - <<'EOF'\nopen('src/app.py', 'w').write('x')\nEOF"),
+    ("echo of a string that names tests/x.py", "echo \"edit tests/x.py > later\""),
+    ("printf of a string that holds open(tests/x.py)", "printf '%s\\n' 'open(\"tests/x.py\",\"w\")'"),
+    ("heredoc with a comment and a quote inside a string, naming tests/x.py",
+     "python3 - <<'EOF'\n# don't touch tests/x.py\nprint(\"it's # fine\")\nEOF"),
+    ("heredoc with a lone quote line, then a write to src/app.py",
+     "python3 - <<'EOF'\n'\nopen('src/app.py', 'w').write('x')\nEOF"),
+    ("product write with a comment naming a test path", "echo x > src/app.py # tests/x.py"),
+    ("recovery by git checkout of tests/x.py", "git checkout -- tests/x.py"),
+    ("recovery by git restore of tests/x.py", "git restore tests/x.py"),
+    ("scan tail alone: a heredoc to /tmp, then python3 runs it", SCAN_TAIL),
+)
+for _name, _command in SHELL_TEST_ALLOWS:
+    sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
+# The test-author writes tests, so the same shell writes stay allowed to it. A main session, and a
+# session run with --agent builder and no agent_id, is not judged.
+for _name, _command in (
+    ("incident heredoc", RULE_AUDIT_EDIT), ("pathlib heredoc", PATHLIB_EDIT),
+    ("python -c open-write", PY_C_WRITE), ("echo redirect", TEST_REDIRECTS[0]),
+    ("echo append", TEST_REDIRECTS[1]), ("printf piped to tee", TEST_REDIRECTS[2]),
+    ("sed -i", TEST_REDIRECTS[3]), ("cat heredoc", TEST_REDIRECTS[4]),
+):
+    sh("builder-test: test-author shell write, %s, is allowed" % _name, _command, "allow", **A)
+sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDIT, "allow",
+   cwd=GITMAIN)
+sh("builder-test: --agent builder with no agent_id shell write of a test is allowed",
+   RULE_AUDIT_EDIT, "allow", agent_type="builder", cwd=GITMAIN)
+
+# Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
+# heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
+sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allowed",
+   "grep -n install tests/test_guard.py", "allow", **BR)
+sh("builder-test: shell pytest -k with a mutating word is allowed",
+   "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
+   "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
+   "allow", **BR)
+# A write to a test path through the working folder is refused, however the path is built.
+sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
+   "python3 - <<'EOF'\nfrom pathlib import Path\nROOT = Path.cwd()\n"
+   "(ROOT / 'tests' / 'test_x.py').write_text('x')\nEOF", "deny", rule=BT,
+   carries=("test-author",), **BR)
+sh("builder-test: shell open-write to a test under os.getcwd() is refused",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -14870,6 +14974,44 @@ for label, how in (("Approve on GitHub", "The session records your pick and reru
        pl_item(options=[pl_opt(label, how), PL_KEEP_OPT]))
 pl("a session press after the pick, with no link, is allowed when the pick comes first", "allow",
    pl_item(options=[pl_opt("Merge PR #374", "After the pick, the session merges PR #374."), PL_KEEP_OPT]))
+# Decision act-in-place: a session clause that names the owner, or a press set off by a colon, dash,
+# parenthesis, `but` or `so`, is no session act. The press in it is the owner's and needs a link.
+for how in ("The session merges PR #374 after the owner clicks Approve.",
+            "The session merges PR #374 but click Merge first.",
+            "The session merges PR #374, so click Merge.",
+            "The session merges PR #374: press Merge.",
+            "The session merges PR #374 - press Merge on GitHub.",
+            "The session merges PR #374 (press Merge).",
+            "The session merges PR #374 after Shivam approves it on GitHub.",
+            "The session merges PR #374 so you hit Merge on GitHub.",
+            "The session merges PR #374 but you approve it on GitHub.",
+            "The session merges PR #374: you approve it on GitHub."):
+    pl("a session clause that hides an owner press, %r, with no link, is refused" % how, "deny",
+       pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
+for how in ("The session merges PR #374.",
+            "The session merges PR #374 as the owner asked.",
+            "The session merges PR #374 once the owner's approval is in.",
+            "The session merges PR #374 as he asked.",
+            "The session merges PR #374 after Shivam's OK.",
+            "The session merges PR #374 so CI reruns."):
+    pl("a session clause with no press, %r, with no link, is allowed" % how, "allow",
+       pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
+# A split cuts a mark-ready press under the label "Go": refused. A page-button press or a past act under the
+# label "Merge the PR" asks the owner for no web press: allowed.
+for how in ("The session merges it after your pick. Mark the PR (#12) ready for review.",
+            "The session merges it after your pick. Mark PR #12: ready for review.",
+            "The session merges it after your pick. Mark PR #12 - ready for review.",
+            "The session merges it after your pick. Mark PR #12, ready for review.",
+            "The session merges it after your pick. Mark the draft PR and ready on GitHub."):
+    pl("a split that cuts a mark-ready press, %r, with no link, is refused" % how, "deny",
+       pl_item(options=[pl_opt("Go", how), PL_KEEP_OPT]))
+for how in ("The session merges it after Shivam hits Take my pick.",
+            "The session merges it after he hits Send.",
+            "The session merges it after Shivam approves this item.",
+            "The session merges it after he has merged the base PR.",
+            "The session merges it after the owner approved the plan."):
+    pl("a page-button press or a past act, %r, with no link, is allowed" % how, "allow",
+       pl_item(options=[pl_opt("Merge the PR", how), PL_KEEP_OPT]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
@@ -18120,17 +18262,18 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
-def _cross_checkout_fixture(name):
+def _cross_checkout_fixture(name, lanes=("lane-a", "lane-b")):
     """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
-    shape the harness makes, and a scratch folder outside the clone. Returns the four paths."""
+    shape the harness makes, and a scratch folder outside the clone. Returns the four paths. `lanes`
+    names the two worktrees; an agent case passes `agent-<id>` names, the shape its home takes."""
     primary = os.path.join(ROOT, name + "_primary")
-    lane_a = os.path.join(primary, ".claude", "worktrees", "lane-a")
-    lane_b = os.path.join(primary, ".claude", "worktrees", "lane-b")
+    lane_a = os.path.join(primary, ".claude", "worktrees", lanes[0])
+    lane_b = os.path.join(primary, ".claude", "worktrees", lanes[1])
     scratch = os.path.join(ROOT, name + "_scratch")
     if not os.path.isdir(lane_b):
         make_repo(primary, {"src/app.py": "print(1)\n"})
-        run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-lane-a")
-        run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-lane-b")
+        run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-" + lanes[0])
+        run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-" + lanes[1])
         os.makedirs(scratch, exist_ok=True)
     return primary, lane_a, lane_b, scratch
 
@@ -18351,9 +18494,10 @@ def worktree_home_scratchpad_case():
 
 
 def worktree_home_cross_checkout_cost_case():
-    """other-checkout's stated cost: one `git worktree list` per write call, none for a Read, a
-    Grep, a shell call that writes no file (a `2>&1` or `/dev/null` redirect included), or a write
-    from a cwd with no `.git` at or above it. A stand-in git on PATH logs each spawn."""
+    """other-checkout's stated cost: one `git worktree list` per write call and per `cd` into another
+    checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
+    redirect included), a `cd` within its own checkout, or a write from a cwd with no `.git` at or
+    above it. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     real = shutil.which(VCS)
@@ -18373,6 +18517,12 @@ def worktree_home_cross_checkout_cost_case():
         ("shell ls", "Bash", lane_a, {"command": "ls " + slash(lane_b)}, None, 0),
         ("shell quiet redirects", "Bash", lane_a,
          {"command": "ls " + slash(lane_b) + " 2>&1 >/dev/null"}, None, 0),
+        ("shell cd into its own root, then ls", "Bash", lane_a,
+         {"command": "cd " + slash(lane_a) + " && ls"}, None, 0),
+        ("shell cd into a sibling checkout", "Bash", lane_a,
+         {"command": "cd " + slash(lane_b)}, None, 1),
+        ("shell cd out of the clone, then ls", "Bash", lane_a,
+         {"command": "cd " + slash(scratch) + " && ls"}, None, 0),
         ("Write into its own checkout", "Write", lane_a,
          {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
         ("Write from a cwd in no repository", "Write", NOGIT,
@@ -18406,6 +18556,293 @@ def worktree_home_cross_checkout_override_case():
     note = ov_type(config, session, "override 15m", 30)
     ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
     return ok, why or "refused before the override, lifted under it"
+
+
+# other-checkout's `cd` act. A `cd` into another checkout would let a build or a write run past the
+# write scan, so the act refuses the `cd` before that scan reads the command.
+CD_AGENT_HOME = "xcoagenta1"     # an agent id, whose worktree is the recorded home
+CD_AGENT_SIBLING = "xcoagentb2"  # a second agent id, whose worktree sits beside that home
+CD_REFUSE_FORMS = (
+    "cd TARGET",
+    "cd TARGET && npm run build",
+    "cd TARGET && make up",
+    "cd TARGET && npm install",
+    "cd TARGET && touch x",
+    "cd TARGET && mkdir d",
+)
+
+
+def _other_checkout_problems(label, got, reason, paths):
+    """An other-checkout refusal names the rule and none of `paths`. Any other verdict is a problem."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if "other-checkout" not in reason:
+        problems.append("%s: the refusal does not name other-checkout: %s" % (label, reason[:160]))
+    for text in paths:
+        if text in reason:
+            problems.append("%s: the refusal names %r" % (label, text))
+    return problems
+
+
+def worktree_home_cd_into_other_checkout_case():
+    """Rule 0, other-checkout, the `cd` act: a Bash `cd` into another checkout of the clone is
+    refused, bare or chained to a build, a write or a folder made. It is judged from the primary and
+    from a lane, into a lane or into the primary, and the refusal names no path.
+    Decision: an-agent-outside-its-home-tree-must-stop."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
+    problems = []
+    for cwd, target in ((primary, lane_b), (lane_a, lane_b), (lane_a, primary)):
+        for form in CD_REFUSE_FORMS:
+            command = form.replace("TARGET", slash(target))
+            label = "%s from %s" % (command, os.path.relpath(cwd, ROOT))
+            got, reason = _decide_full("Bash", cwd, command=command)
+            problems += _other_checkout_problems(label, got, reason,
+                                                 (ROOT, slash(ROOT), target, slash(target)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "every cd into another checkout is refused, bare or chained, and names no path"
+
+
+def worktree_home_cd_parse_forms_case():
+    """Rule 0, other-checkout, the `cd` act's parse: a relative climb, a subshell and a PowerShell
+    `Set-Location` each move into another checkout, and each is refused."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocdparse")
+    rows = (
+        ("Bash", lane_a, "cd ../lane-b && ls", lane_b),
+        ("Bash", lane_a, "(cd %s && make)" % slash(lane_b), lane_b),
+        ("Bash", primary, "(cd %s && make)" % slash(lane_b), lane_b),
+        ("PowerShell", lane_a, "Set-Location %s" % slash(lane_b), lane_b),
+        ("PowerShell", primary, "Set-Location %s" % slash(lane_b), lane_b),
+        ("PowerShell", lane_b, "Set-Location %s" % slash(primary), primary),
+    )
+    problems = []
+    for tool, cwd, command, target in rows:
+        got, reason = _decide_full(tool, cwd, command=command)
+        label = "%s %r from %s" % (tool, command, os.path.relpath(cwd, ROOT))
+        problems += _other_checkout_problems(label, got, reason,
+                                             (ROOT, slash(ROOT), target, slash(target)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a relative climb, a subshell and a PowerShell Set-Location into another checkout are refused"
+
+
+def worktree_home_cd_agent_sibling_case():
+    """Rule 0, other-checkout, the `cd` act for an agent in its own worktree: a `cd` into a sibling
+    agent's tree, bare or chained, is refused, and so is a folder whose name only starts with the
+    agent's own id. The agent's own red-run folder is the one exemption (worktree_home_cd_exempt_case)."""
+    primary, home, sibling, _ = _cross_checkout_fixture(
+        "xcoagent", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the recording call wrote no home record")
+    for target in (sibling, prefix_trap):
+        for form in ("cd TARGET", "cd TARGET && make"):
+            command = form.replace("TARGET", slash(target))
+            got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command=command)
+            problems += _other_checkout_problems(command, got, reason,
+                                                 (ROOT, slash(ROOT), target, slash(target)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's cd into a sibling agent tree, or a prefix-named folder, is refused"
+
+
+def worktree_home_cd_allowed_case():
+    """Rule 0, other-checkout, the `cd` act passes a cd that is not into another checkout: the cwd's
+    own root or subfolder, a folder outside the clone, and the clone's own `.git`, which no one
+    checkout owns."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocdok")
+    rows = (
+        (lane_a, "cd %s && ls" % slash(lane_a)),
+        (lane_a, "cd %s && make" % slash(os.path.join(lane_a, "src"))),
+        (primary, "cd %s && ls" % slash(primary)),
+        (lane_a, "cd %s && touch x" % slash(scratch)),
+        (lane_a, "cd %s && ls" % slash(os.path.join(primary, ".git"))),
+    )
+    problems = []
+    for cwd, command in rows:
+        _expect_call(problems, "%s from %s" % (command, os.path.relpath(cwd, ROOT)), "allow",
+                     "Bash", cwd, None, command)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "own root, own subfolder, a scratch folder and the clone's .git pass"
+
+
+def worktree_home_cd_exempt_case():
+    """Rule 0, other-checkout, its exemptions, each a cd and nothing else: an agent's `cd` into its
+    recorded home from outside it (the recovery step); an agent's `cd` into its own red-run folder,
+    `agent-<its id>-red`, chained to a test run; and a top-level session's `cd` into its own recorded
+    worktree from the primary checkout."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoexempt", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    session_lane = sh_add_lane(primary, "lane-session")[0]
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the agent's recording call wrote no home record")
+    got, reason = _decide_full("Bash", session_lane, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the session's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, session_lane):
+        problems.append("the session's recording call wrote no session record naming the lane")
+    _expect_call(problems, "agent cd into its recorded home from primary", "allow", "Bash",
+                 primary, CD_AGENT_HOME, "cd " + slash(home))
+    _expect_call(problems, "agent cd into its red-run folder, chained to a test run", "allow",
+                 "Bash", home, CD_AGENT_HOME, "cd %s && python3 x.py" % slash(red))
+    got, reason = _decide_full("Bash", primary, session=session, command="cd " + slash(session_lane))
+    if got != "allow":
+        problems.append("session cd into its recorded home from primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the recorded home, the own red-run folder and the session's recorded home pass"
+
+
+# Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
+# after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
+CD_TEXT_ALLOW = (
+    'echo "cd TARGET && npm run build"',
+    "# cd TARGET\nls",
+    "ls # cd TARGET",
+    "cat <<EOF\ncd TARGET && make\nEOF\nls",
+    'echo "line one\ncd TARGET && make\nend"',
+    'echo "Don\'t" ; ls',
+)
+CD_TEXT_REFUSE = (
+    'echo "# note" && cd TARGET && make',
+    'echo "a // b" ; cd TARGET && make',
+    'echo "/*" ; cd TARGET && make',
+    'echo "Don\'t" ; cd TARGET && make',
+    "# note\ncd TARGET && make",
+    "cat <<EOF\ncd TARGET\nEOF\ncd TARGET && make",
+    'echo "line one\n"\ncd TARGET && make',
+)
+
+
+def worktree_home_cd_text_case():
+    """Rule 0, other-checkout, the `cd` act reads a cd as text when it sits in a comment, in quotes or
+    in a heredoc body, and reads a real cd after any of those as a move."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcotext")
+    problems = []
+    for template in CD_TEXT_ALLOW:
+        command = template.replace("TARGET", slash(lane_b))
+        _expect_call(problems, repr(command), "allow", "Bash", lane_a, None, command)
+    for template in CD_TEXT_REFUSE:
+        command = template.replace("TARGET", slash(lane_b))
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(repr(command), got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a cd in a comment, a quote or a heredoc body passes; a real cd after one is refused"
+
+
+def worktree_home_cd_override_case():
+    """Rule 0, other-checkout, the `cd` act is liftable, like the write act: under a timed owner
+    override a bare cd into another checkout passes, because the owner may mean the cd."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocdov")
+    config = ov_config("cross-checkout-cd")
+    session = "ov-cross-checkout-cd"
+    call = lambda s: ov_call("Bash", {"command": "cd " + slash(lane_b)}, lane_a, config, session, s)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def worktree_home_cd_then_write_case():
+    """Rule 0, other-checkout, the write scan follows a leading cd. A cd that the cd act passes (into
+    the cwd's own root, here its `src` folder) moves the folder a later relative write resolves
+    against, so the write lands in another checkout only from there, and the guard refuses it. The
+    control writes the same text with no cd from the primary, which lands outside the clone.
+    Kills the mutant "other-checkout: a shell target ignores a leading cd"."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcowrite")
+    own_src = os.path.join(primary, "src")
+    # From `src` this names lane-b's file. From the primary checkout it names a folder outside the clone.
+    relative = slash(os.path.relpath(os.path.join(lane_b, "a.txt"), own_src))
+    problems = []
+    got, reason = _decide_full("Bash", primary, command="cd " + slash(own_src) + " && echo x > " + relative)
+    problems += _other_checkout_problems("cd into its own src, then a relative write into lane-b", got,
+                                         reason, (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    _expect_call(problems, "the same relative write with no cd, from the primary", "allow", "Bash",
+                 primary, None, "echo x > " + relative)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a relative write into another checkout, resolved from the cd's folder, is refused"
+
+
+def worktree_home_cd_after_untracked_case():
+    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move the guard
+    cannot read (`"$HOME"`, `-`), or after a cd to a folder that is missing, an absolute cd into another
+    checkout is still refused. A cd whose target is missing makes the folder unknown again, so a
+    relative cd after it is not judged. That is a declared limit, and it keeps ordinary work from a
+    worktree root (a folder made, entered and left) allowed. From a lane."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
+    ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
+    deny = (
+        'cd "$HOME" && cd TARGET && make',
+        "cd - ; cd TARGET",
+        "cd GHOST ; cd TARGET",
+    )
+    allow = (
+        # Declared limit: after a missing-target cd the folder is unknown, so this relative cd is not judged.
+        "cd GHOST ; cd ../lane-b && make",
+        # Ordinary work from the worktree root, with each folder missing when its cd is checked.
+        "mkdir -p newdir && cd newdir && touch a && cd ..",
+        "mkdir -p x; cd x; cd ..",
+        "cd newdir; cd ..",
+    )
+    problems = []
+    for template in deny:
+        command = template.replace("TARGET", slash(lane_b)).replace("GHOST", slash(ghost))
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(command, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    for template in allow:
+        command = template.replace("GHOST", slash(ghost))
+        _expect_call(problems, command, "allow", "Bash", lane_a, None, command)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an absolute cd after an untracked move or a missing folder is refused; ordinary work allows"
+
+
+def worktree_home_pushd_case():
+    """Rule 0, other-checkout, `pushd` is a move, as `cd` is. From a lane, a `pushd` into another checkout
+    is refused, bare or chained, and a `pushd` within the cwd's own checkout or into a folder outside the
+    clone passes."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcopush")
+    deny = (
+        "pushd " + slash(lane_b),
+        "pushd " + slash(lane_b) + " && make",
+        "pushd ../lane-b >/dev/null && make",
+    )
+    allow = (
+        "pushd " + slash(os.path.join(lane_a, "src")) + " && make",
+        "pushd " + slash(scratch),
+        # `-n` suppresses the change of directory: the stack only, so it moves nothing.
+        "pushd -n " + slash(lane_b),
+        "pushd -n ../lane-b",
+    )
+    problems = []
+    for command in deny:
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(command, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    for command in allow:
+        _expect_call(problems, command, "allow", "Bash", lane_a, None, command)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "pushd into another checkout is refused; pushd within the own checkout or outside the clone passes"
 
 
 def worktree_home_later_field_case():
@@ -18872,6 +19309,28 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
+    ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
+     "a write or a mkdir, from a lane or the primary, and names no path",
+     worktree_home_cd_into_other_checkout_case),
+    ("worktree-home: a cd into another checkout is refused when it is a relative climb, a subshell or "
+     "a PowerShell Set-Location", worktree_home_cd_parse_forms_case),
+    ("worktree-home: an agent's cd into a sibling agent tree, or into a folder that only starts with "
+     "its id, is refused", worktree_home_cd_agent_sibling_case),
+    ("worktree-home: a cd to a checkout's own root or subfolder, a folder outside the clone, or the "
+     "clone's .git passes", worktree_home_cd_allowed_case),
+    ("worktree-home: the cd exemptions pass: an agent's recorded home from outside it, its own red-run "
+     "folder, a session's recorded home", worktree_home_cd_exempt_case),
+    ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
+     "is refused", worktree_home_cd_text_case),
+    ("worktree-home: an owner override lifts a bare cd into another checkout",
+     worktree_home_cd_override_case),
+    ("worktree-home: any session's write into another checkout is refused after a cd the cd act "
+     "passes, when the write resolves against that cd's folder", worktree_home_cd_then_write_case),
+    ("worktree-home: an absolute cd into another checkout is refused after an untracked move, a cd - "
+     "or a missing folder; a relative cd after a missing folder is a declared limit, and ordinary work "
+     "from a worktree root allows", worktree_home_cd_after_untracked_case),
+    ("worktree-home: pushd into another checkout is refused, bare or chained; a pushd within the "
+     "cwd's own checkout, or outside the clone, passes", worktree_home_pushd_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -23450,6 +23909,9 @@ for _label, _check in (
 
 
 # =========================================================================== the machine-load brake
+# The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
+# suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
+os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
@@ -23832,7 +24294,7 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
                 len(side["children"]), side["children"][:3])
         if got != want:
             return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
-        if called != reads:
+        if reads is not None and called != reads:
             return False, "%s as wanted, but the reader ran %s times, want %d" % (got, called, reads)
         if got == "allow" and side["files"]:
             return False, "an allowed lane call wrote %d file(s)" % len(side["files"])
@@ -24274,6 +24736,84 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
        lb_no_read_check("mcp__ccd_session__list_start_targets", {}, agent=LB_AGENT))
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
+
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a lane-start call is
+# allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
+# guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
+# so those are not repeated here.
+LB_CLOUD = "true"
+CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
+                ("false", False), (" true", False))
+for _tool, _bg, _say in (("Agent", False, "run_in_background false"),
+                         ("Agent", None, "run_in_background left out"),
+                         ("Task", True, "run_in_background true"),
+                         ("Task", False, "run_in_background false"),
+                         ("Task", None, "run_in_background left out")):
+    lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
+           lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None, remote=LB_CLOUD))
+lb_add("cloud: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
+       lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=None, remote=LB_CLOUD))
+for _tool in ("Agent", "Task"):
+    lb_add("cloud: %s, memory 91.7%%, run_in_background true: busy, allowed" % _tool,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=True, reads=None,
+                             remote=LB_CLOUD))
+lb_add("cloud: an agent's Bash, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
+       lb_decision_check("Bash", LB_ALL_HIGH, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT,
+                         reads=None, remote=LB_CLOUD))
+lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None,
+                         remote=LB_CLOUD))
+lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
+       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
+                         remote=LB_CLOUD))
+lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None,
+                         remote=LB_CLOUD))
+# Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
+for _remote in ("1", "TRUE", ""):
+    lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
+           lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=False,
+                             remote=_remote))
+
+
+def cloud_name_check():
+    """guard_core.is_cloud exists and returns True only for exactly "true", read from the environment at each call."""
+    import importlib
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    core = importlib.import_module("guard_core")
+    helper = getattr(core, "is_cloud", None)
+    if not callable(helper):
+        return False, "guard_core has no is_cloud: the cloud check has no one home yet"
+    for value, want in CLOUD_VALUES:
+        with mock.patch.dict(os.environ):
+            if value is None:
+                os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            else:
+                os.environ["CLAUDE_CODE_REMOTE"] = value
+            got = helper()
+        if got is not want:
+            return False, "is_cloud() with CLAUDE_CODE_REMOTE=%r gave %r, want %r" % (value, got, want)
+    return True, 'True for exactly "true", False for the other values and when unset'
+
+
+def cloud_one_home_check():
+    """guard.py's brake gate holds guard_core's is_cloud: the cloud check has one home."""
+    import importlib
+    guard = _load_guard_module()
+    core = importlib.import_module("guard_core")
+    helper = getattr(core, "is_cloud", None)
+    if not callable(helper):
+        return False, "guard_core has no is_cloud: the cloud check has no one home yet"
+    got = getattr(guard, "is_cloud", None)
+    if got is not helper:
+        return False, "guard.py's brake gate does not hold guard_core.is_cloud (it holds %r)" % (got,)
+    return True, "guard.py holds guard_core.is_cloud"
+
+
+lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
+lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
+
 
 # A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
 # start and every running-lane call, and reads no load, so the reader is never called. Only the exact value
@@ -25851,10 +26391,20 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CDT)", "branch-worktree"),
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CST)", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
-    ("worktree-home: any session's write into another checkout", "worktree-home"),
+    ("worktree-home: any session's write into another checkout of its clone", "worktree-home"),
+    ("worktree-home: any session's write into another checkout is refused after a cd", "worktree-home"),
+    ("worktree-home: an absolute cd into another checkout is refused after an untracked move", "worktree-home"),
+    ("worktree-home: pushd into another checkout", "worktree-home"),
     ("worktree-home: a write into a worktree in the session's own scratchpad", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
+    ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
+    ("worktree-home: a cd into another checkout is refused when it is a relative climb", "worktree-home"),
+    ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
+    ("worktree-home: a cd to a checkout's own root", "worktree-home"),
+    ("worktree-home: the cd exemptions pass", "worktree-home"),
+    ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
+    ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
     ("worktree-home: a lone cd or Set-Location", "worktree-home"),
     ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),

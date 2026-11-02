@@ -74,9 +74,13 @@ def config_dir() -> str:
     )
 
 
-# The tiers that may run `merge <pr> --confirm` in a cloud session. The guard's coordinator-scope
-# rule reads the same file for the same session, so the reader lives here once.
+# The roles the merge-role file may record. The guard's coordinator-scope rule reads the same file for
+# the same session, so the reader lives here once.
 MERGE_ROLES = {"coordinator", "batch-runner"}
+# The one role that may run `merge <pr> --confirm` in a cloud session, and the one `merge --role` may
+# record: the coordinator never merges (decision session-tiers). The merge tool and the merge-role
+# guard read this; the coordinator-scope rule reads the file for the coordinator.
+MERGING_ROLES = {"batch-runner"}
 
 
 def role_path() -> pathlib.Path:

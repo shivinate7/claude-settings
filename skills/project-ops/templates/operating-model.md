@@ -9,8 +9,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. The load brake, not a
-  number, decides how many lanes run at once. It does not rotate (see below).
+  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
@@ -96,6 +96,8 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
+  The lane first runs `merge --lane-lint <pr>`. The batch runner runs it again on each lane head
+  before the join, and refuses a red lane (claude-settings record `lanes-run-no-full-ci-job`).
   A lane never rebases onto main and never merges.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
