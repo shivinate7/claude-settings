@@ -3181,6 +3181,17 @@ sh("kill: lsof -ti piped into xargs kill is the pid list of a kill", "lsof -ti :
    "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: a pid list from lsof -ti substituted into kill is refused", "kill $(lsof -ti :3000)",
    "deny", "machine-wide-kill", cwd=NOGIT)
+# THE CALL KILLS, NOT ONLY THE SEGMENT. A pid list from `lsof -t` reaches a kill across a filter, a
+# loop, a file, or a loop header. `lsof -t` passes only when nothing in the call kills (rule
+# shared-trees-no-machine-wide-kill).
+sh("kill: lsof -t through head into xargs kill is refused", "lsof -ti:3000 | head -1 | xargs kill -9",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t read by a while loop that kills is refused",
+   "lsof -ti:3000 | while read p; do kill $p; done", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t written to a file, then killed from it, is refused",
+   "lsof -ti:3000 > f; kill $(cat f)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t in a for header, killed in the loop body, is refused",
+   "for p in $(lsof -ti:3000); do kill $p; done", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: taskkill by image name", "taskkill /IM node.exe /F", "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: taskkill by image name, dash spelling", "taskkill -im node.exe", "deny",
