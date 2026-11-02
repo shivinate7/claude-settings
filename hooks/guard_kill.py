@@ -409,7 +409,9 @@ def kill_fed_by_pipe(tokens, previous) -> str:
     if not any(basename(word) == "xargs" for word in tokens[:index]):
         return ""
     before = resolve_command(previous)
-    if (before is not None and basename(previous[before]) in PID_LISTERS) or lsof_lists_pids(previous):
+    if before is not None and basename(previous[before]) in PID_LISTERS:
+        return "xargs kill"
+    if lsof_lists_pids(previous):
         return "xargs kill"
     return ""
 
