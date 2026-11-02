@@ -993,6 +993,73 @@ def case_widens_words_in_the_reply_judge_prompt():
     check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
 
 
+# ------------------------------------------------------------------ past rulings and option keys (units)
+#
+# question_form.past_rulings(text, root) -> (candidates, unknown), and question_form.key_overlap(reply, earlier) (spec
+# past-rulings, and the option-keys section). The spec does not fix the return shapes, so a check reads a marker in
+# str(...) and a refusal by truthiness. A missing function fails its check by name.
+def _cap_word(i):
+    return "word" + chr(97 + i // 26) + chr(97 + i % 26)
+
+
+CAP_WORDS = [_cap_word(i) for i in range(40)]
+CAP_QUESTION = "Goal: " + " ".join(CAP_WORDS)
+KEY_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
+KEY_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
+                "> 2a) about 2x\n> 2b) under 80%")
+KEY_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
+KEY_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+
+
+def case_past_rulings_caps_and_ranks():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    steps = {"s%02d" % i: "Ruling (owner): STEP%02d %s" % (i, " ".join(CAP_WORDS[:i])) for i in range(40)}
+    steps["noise"] = "STEPNOISE %s" % " ".join(CAP_WORDS)  # no Ruling, owner or shiv, so never a candidate
+    repo = tcj.make_repo("past-cap", steps=steps)
+    candidates, unknown = fn(CAP_QUESTION, repo)
+    text = str(candidates)
+    kept = [i for i in range(40) if ("STEP%02d" % i) in text]
+    check("past rulings: at most 30 step sentences, the 30 with the most overlap (ids 10 to 39)",
+          kept == list(range(10, 40)) and "STEPNOISE" not in text, "kept %s" % kept[:5])
+    check("past rulings: a repo with no decision folder names closed page items as unknown",
+          "closed page items" in str(unknown), str(unknown)[:200])
+
+
+def case_past_rulings_reads_debts():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings debts: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("past-debts", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
+                         steps={tcj.CI_STEP_ID: tcj.CI_STEP_SENTENCE},
+                         debts={tcj.DEBT_SLUG: tcj.DEBT_WHAT})
+    candidates, _ = fn(tcj.APPS_GOAL, repo)
+    text = str(candidates)
+    check("past rulings debts: a docs/debts record's slug and What line reach the candidates",
+          tcj.DEBT_SLUG in text and tcj.DEBT_WHAT in text, text[:200])
+
+
+def case_key_overlap():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "key_overlap", None)
+    check("key overlap: question_form.key_overlap exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    check("key overlap: the keys a and b of two questions in one reply refuse", bool(fn(KEY_SAME, [])),
+          "a reply with two questions on a and b passed")
+    check("key overlap: distinct keys 1a, 1b, 2a and 2b pass", not fn(KEY_DISTINCT, []),
+          "distinct keys refused")
+    check("key overlap: keys that overlap a question in an earlier assistant reply since the last human refuse",
+          bool(fn(KEY_NOW, [KEY_EARLIER])), "an earlier overlap passed")
+    check("key overlap: the same keys with no earlier reply since the last human pass", not fn(KEY_NOW, []),
+          "a lone question refused")
+
+
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -1005,7 +1072,8 @@ def main():
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
                  case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
-                 case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
+                 case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
+                 case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap):
         try:
             case()
         except Exception as exc:
