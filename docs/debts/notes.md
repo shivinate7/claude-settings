@@ -16,7 +16,7 @@
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
 - ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
-- bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges bare in a merge-tool repo with no bare-merge ask; merge-checks still guards it (hooks/guard.py)
+- bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges with no bare-merge ask and no merge-checks, because the guard matcher in settings.json lacks the tool name (hooks/guard.py). Debt: mcp-merge-matcher-missing.
 - bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
@@ -924,3 +924,4 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- coordinator-merge-wrapped-passes: `(cd x && merge 4 --confirm)` and `bash ~/.claude/bin/merge 4 --confirm` pass for a coordinator (hooks/guard.py coordinator_scope_hit). Decision: session-tiers.
