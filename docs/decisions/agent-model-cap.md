@@ -113,6 +113,27 @@ Other tiers keep the model default. Ruled out: `effortLevel` in user settings do
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
 SessionStart hook reaches only Bash.
 
+**The lane repo tag.** Guard rule `lane-repo-tag` refuses a `create_session` call tagged `cs-build:lane` that
+carries no tag equal to `cs-repo:` plus the calling checkout's GitHub `owner/name`. The tag is read as the
+roadmap reads it (`repo_tag_names` in `hooks/shared_names.py`, which both import): the exact prefix, no strip,
+the owner/name compared without case. A tag the roadmap cannot read does not pass the guard. The repo is read
+as the roadmap build reads it (`github_repo` in `hooks/git_reads.py`, which both call). The `github` key of the
+`roadmap` object in the layout extras file comes first. Else the repo is the last two segments of the origin's
+path, with `.git` stripped. The host is never read, since the cloud proxy serves another host. An https, scp, or ssh origin with
+a port counts, and a local path with no scheme counts by its path. With no readable repo, any
+`cs-repo:<owner>/<name>` tag passes. The deny reason names the tag to add. A roll-out lane carries this repo's
+tag beside its target's. The rule runs after `lane-effort-pin`, so a call that breaks both reads the pin
+first. An owner override lifts it.
+The roadmap build shares this read (`github_slug` and `blob_url` in `skills/roadmap/build.py`). For an ssh origin with a port, a non-GitHub https origin or a POSIX local path, the build links its last two path segments on github.com.
+Cost, per lane `create_session` only: one extras file read, and one `git remote get-url origin` process start
+when the extras name no repo. A deny writes one guard.log line. No other file, and no timer.
+Known gaps: a Windows drive path with backslashes reads as no origin. A `cwd` below the repo root reads no
+extras file. Tags set by `set_session_tags` after the start are not judged.
+Kind of risk: incident. Landed 2026-11-01.
+
+Incident: 2026-11-01 18:08 CST, lanes tagged with the short repo name made 18 false in-progress flags on
+the roadmap page, because the live check matches the full tag.
+
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
