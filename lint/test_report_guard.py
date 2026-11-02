@@ -1931,7 +1931,7 @@ class PromotedRuleTests(unittest.TestCase):
 
 # rewrite-cite-predates-ruling (the rewrite-stamp check in report_guard.py, Stop, landed turns): a reply
 # that says decision D was rewritten for a ruling blocks when D's record was last committed before that
-# ruling, on the default branch AND on HEAD. Each case builds its own git repo. Every commit takes its
+# ruling, on any branch or on HEAD. Each case builds its own git repo. Every commit takes its
 # date from GIT_COMMITTER_DATE, so the check reads real history. Each case states the result the check
 # must give; a case that fails names a gap in the check, not in the fixture.
 RULING = "2026-11-01 18:44 CST"
@@ -2123,7 +2123,8 @@ class RewriteStampTests(unittest.TestCase):
 
     def test_bare_clock_stamp_reads_on_the_turn_date(self):
         """The `HH:MM <zone>` form, read on the turn's local date. The turn's human record and LOCAL_TIME_NOW
-        name the same Central day, the ruling's own, so either source of that date gives the same answer."""
+        name the same Central day. A clock time later than the turn time reads as the day before. The record
+        predates both readings, so the block holds either way."""
         repo = self.red_repo()
         reply = done_reply("RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling at 18:44 CST (PR #1001)")
         self.assertBlocks(self.run_stop(repo, reply, human_at="2026-11-01T20:00:00Z"),
@@ -2139,8 +2140,9 @@ class RewriteStampTests(unittest.TestCase):
         self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
 
     def test_record_committed_after_ruling_on_main_passes_when_head_predates_it(self):
-        """Case 4, green. Main's last commit to D is after the ruling. HEAD is a lane forked before that
-        commit. A block needs both to predate the ruling, so the check stays quiet on either HEAD."""
+        """Case 4, green. The record's last commit on main is after the ruling. HEAD is a lane forked before
+        that commit. A block needs the record's last commit, on any branch or on HEAD, to predate the ruling,
+        so the check stays quiet on either HEAD."""
         repo = self.repo()
         repo.commit(D_LAST_COMMIT, "ci-job-caps")
         repo.branch("lane")
@@ -2339,6 +2341,20 @@ class RewriteStampTests(unittest.TestCase):
             "The rewrite of `ci-job-caps` for the 2026-11-01 18:44 CST ruling is on main (PR #1001)."),
             env_extra={"GIT_TRACE": trace})
         self.assertEqual(git_process_count(trace), 1)
+
+    def test_ids_with_no_or_queued_before_a_hyphen_do_not_skip_the_sentence(self):
+        """Green. "no" and "queued" are skip words in the check. Inside a hyphenated id they are part of the id,
+        so the sentence is still checked, and a stale record still blocks."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "no-x", "queued-x")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        replies = (
+            ("no-x", "RECORDED: Rewrote `no-x` for the 2026-11-01 18:44 CST ruling (PR #1001)."),
+            ("queued-x", "RECORDED: `queued-x` was rewritten for the ruling at 2026-11-01 18:44 CST (PR #1001)."),
+        )
+        for name, done in replies:
+            with self.subTest(variant=name):
+                self.assertBlocks(self.run_stop(repo, done_reply(done)), name, "2026-10-28", "18:44")
 
 
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
