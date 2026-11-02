@@ -21141,8 +21141,9 @@ def marker_none_check():
 
 
 def brief_markers_order_check():
-    """brief_markers(brief) keeps the brief's line order, and a reviewer on haiku gets the Round 3 refusal for it
-    through step_up_reason."""
+    """brief_markers(brief) keeps the markers in the order the brief lists them. step_up_reason acts on the first
+    one it meets, so that order picks the refusal text a reviewer on haiku gets. The brief lists the later-numbered
+    marker first; a reversed scan would give the reviewer the other refusal."""
     guard = _load_guard_module()
     brief_markers = getattr(guard, "brief_markers", None)
     step_up_reason = getattr(guard, "step_up_reason", None)
