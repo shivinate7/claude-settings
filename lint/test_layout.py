@@ -387,8 +387,9 @@ class WaitingCopy(Tree):
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
-        for kind in self.layout.layout()["kinds"].values():
-            if kind.get("set") == "core":  # the probe flags a missing core kind, so each one holds a file
+        for name, kind in self.layout.layout()["kinds"].items():
+            # The probe flags a missing core kind, so each one holds a file. The copy is not on main, so its kind is skipped.
+            if kind.get("set") == "core" and name != "waiting-data":
                 path = kind["path"]
                 self.put(path if "." in os.path.basename(path) else path + "/a.md")
         self.git("add", "-A", "-f")
@@ -416,6 +417,9 @@ class WaitingCopy(Tree):
         commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
         self.git("update-ref", "refs/heads/" + branch, commit)
 
+    def ref_exists(self, ref):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
+
     def origin_only(self, branch):
         """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
         bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
@@ -424,6 +428,8 @@ class WaitingCopy(Tree):
         self.git("remote", "add", "origin", bare)
         self.git("push", "-q", "origin", branch)
         self.git("update-ref", "-d", "refs/heads/" + branch)
+        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
 
     def probe(self):
         return run([os.path.join(LINT, "compliance_probes.py"), "layout", self.tree], self.tree)
@@ -473,6 +479,8 @@ class WaitingCopy(Tree):
 
     def test_a_record_branch_that_cannot_be_read_is_unknown_not_a_pass(self):
         self.extras({"waiting-page": self.URL})
+        self.assertFalse(self.ref_exists("refs/heads/roadmap"), "the fixture has a local roadmap")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/remotes/origin/roadmap"), "the fixture has an origin roadmap")
         code, out = self.probe()
         self.assertEqual(code, 2, out)
         self.assertIn("unknown", out)

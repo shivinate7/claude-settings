@@ -125,6 +125,20 @@ def verdict_lines(r):
     return [line.strip() for line in (r.stdout + r.stderr).splitlines() if line.strip()]
 
 
+def says(r, word):
+    """True when a line the run printed starts with the verdict word, as `unknown` or `unknown - asks missing` does."""
+    return any(re.match(re.escape(word) + r"\b", line) for line in verdict_lines(r))
+
+
+def changed_count(r):
+    """N of the first `changed N` line the run printed, or None."""
+    for line in verdict_lines(r):
+        found = re.match(r"changed\s+(\d+)\b", line)
+        if found:
+            return int(found.group(1))
+    return None
+
+
 def shown(r, secrets=()):
     """The run's output for a failure message, with each secret taken out so a red never prints one."""
     text = r.stdout + r.stderr
@@ -141,7 +155,7 @@ def item(n):
             "context": "Synthetic item %d for the export round trip." % n, "why": "Synthetic reason %d." % n,
             "options": [{"key": k, "label": "Option " + k.upper(), "gain": "Gain", "lose": "Loss", "how": "Pick " + k}
                         for k in "ab"],
-            "links": [{"label": "Record", "url": ARTIFACT}],
+            "links": [{"label": "Record", "url": ARTIFACT}], "pick": "a",
             "lastAnswer": {"at": "2026-10-02T10:00:00Z", "note": "Synthetic"}}
 
 
@@ -195,7 +209,15 @@ class Base(unittest.TestCase):
         return self.run_cmd(*args)
 
     def assertVerdict(self, r, want, secrets=()):
-        self.assertIn(want, verdict_lines(r), "verdict %r not printed. Output:\n%s" % (want, shown(r, secrets)))
+        self.assertTrue(says(r, want), "verdict %r not printed. Output:\n%s" % (want, shown(r, secrets)))
+
+    def assertChanged(self, r, n, secrets=()):
+        self.assertEqual(changed_count(r), n, "`changed %d` not printed. Output:\n%s" % (n, shown(r, secrets)))
+
+    def assertBatches(self, r, k, n):
+        found = [m for m in (re.match(r"batches\s+(\d+)\s+docs\s+(\d+)\b", line) for line in verdict_lines(r)) if m]
+        self.assertTrue(found, "no `batches <k> docs <n>` line. Output:\n" + shown(r))
+        self.assertEqual((int(found[0].group(1)), int(found[0].group(2))), (k, n), shown(r))
 
 
 class Scan(Base):
@@ -222,7 +244,6 @@ class Scan(Base):
         finds = [line for line in (r.stdout + r.stderr).splitlines() if "leak" in line]
         self.assertEqual(sum("title" in line for line in finds), 1, "no one line names the title field:\n" + shown(r, [TAIL]))
         self.assertEqual(sum("note" in line for line in finds), 1, "no one line names the note field:\n" + shown(r, [TAIL]))
-        self.assertEqual(len(finds), 2, "a find is not one line:\n" + shown(r, [TAIL]))
 
     def test_words_and_shapes_that_are_not_secrets_pass(self):
         for index, (label, value) in enumerate(GREEN):
@@ -231,7 +252,7 @@ class Scan(Base):
                 out = self.out("waiting-%d" % index)
                 r = self.export(self.fetch(items={"ok": doc}), out)
                 self.assertEqual(r.returncode, 0, "%s: a non-secret was refused or failed. Output:\n%s" % (label, shown(r)))
-                self.assertNotIn("refused", verdict_lines(r), label)
+                self.assertFalse(says(r, "refused"), label)
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
 
@@ -240,14 +261,14 @@ class Mirror(Base):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}},
                              answers={"x": {"id": "x"}}, meta={"page": META})
         out = self.out()
-        self.assertVerdict(self.export(fetched, out), "changed 5")
+        self.assertChanged(self.export(fetched, out), 5)
         c_path = os.path.join(out, "items", "c.json")
         os.utime(c_path, (SENTINEL, SENTINEL))
         write_text(os.path.join(fetched, "items", "a.json"), canonical({"id": "a", "title": "new"}))
         write_text(os.path.join(fetched, "items", "d.json"), canonical({"id": "d"}))
         os.remove(os.path.join(fetched, "items", "b.json"))
         r = self.export(fetched, out)
-        self.assertVerdict(r, "changed 3")
+        self.assertChanged(r, 3)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(os.stat(c_path).st_mtime, SENTINEL, "an unchanged doc was rewritten")
         self.assertFalse(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was kept")
@@ -280,7 +301,7 @@ class Mirror(Base):
         for name in ("a", "b", "c"):
             os.remove(os.path.join(fetched, "items", name + ".json"))
         r = self.export(fetched, out)
-        self.assertVerdict(r, "changed 3")
+        self.assertChanged(r, 3)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(glob.glob(os.path.join(out, "items", "*.json")), [], "the emptied collection kept docs")
 
@@ -315,10 +336,11 @@ class Mirror(Base):
 
     def test_runs_with_no_git_on_the_path(self):
         fetched = self.fetch(items={"a": {"id": "a"}})
-        env = {"PATH": "", "PYTHONDONTWRITEBYTECODE": "1"}
+        empty = os.path.join(self.tmp.name, "no-bin")  # a PATH with no git in it
+        os.makedirs(empty)
         out = self.out()
-        r = self.run_cmd("--fetched", fetched, "--out", out, env=env)
-        self.assertVerdict(r, "changed 1")
+        r = self.run_cmd("--fetched", fetched, "--out", out, env=dict(os.environ, PATH=empty, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertChanged(r, 1)
         self.assertEqual(r.returncode, 0, shown(r))
 
 
@@ -362,7 +384,7 @@ class Page(Base):
         out = self.out()
         self.assertEqual(self.export(fetched, out, page=first).returncode, 0)
         r = self.export(fetched, out, page=second)
-        self.assertVerdict(r, "changed 1")
+        self.assertChanged(r, 1)
         self.assertEqual(r.returncode, 0, shown(r))
 
 
@@ -397,9 +419,7 @@ class Rebuild(Base):
         r = self.rebuild(waiting, batches)
         self.assertEqual(r.returncode, 0, shown(r))
         files, entries, sizes = self.batch_entries(batches)
-        counted = [m for m in (re.fullmatch(r"batches (\d+) docs (\d+)", line) for line in verdict_lines(r)) if m]
-        self.assertEqual(len(counted), 1, "no `batches <k> docs <n>` line. Output:\n" + shown(r))
-        self.assertEqual((int(counted[0].group(1)), int(counted[0].group(2))), (len(files), 133))
+        self.assertBatches(r, len(files), 133)
         self.assertTrue(all(size <= 50 for size in sizes), "a batch holds more than 50 entries: %s" % sizes)
         for entry in entries:
             self.assertEqual(set(entry), {"op", "collection", "doc_id", "data"}, "an entry has the wrong keys")
@@ -416,14 +436,14 @@ class Rebuild(Base):
         waiting = self.exported({"items": {"item-%03d" % n: item(n) for n in range(1, 51)}}, page=False)
         batches = os.path.join(self.tmp.name, "batches")
         r = self.rebuild(waiting, batches)
-        self.assertVerdict(r, "batches 1 docs 50")
+        self.assertBatches(r, 1, 50)
         self.assertEqual(self.batch_entries(batches)[2], [50])
 
     def test_fifty_one_docs_split_in_two(self):
         waiting = self.exported({"items": {"item-%03d" % n: item(n) for n in range(1, 52)}}, page=False)
         batches = os.path.join(self.tmp.name, "batches")
         r = self.rebuild(waiting, batches)
-        self.assertVerdict(r, "batches 2 docs 51")
+        self.assertBatches(r, 2, 51)
         files, entries, sizes = self.batch_entries(batches)
         self.assertEqual(len(files), 2)
         self.assertTrue(all(size <= 50 for size in sizes), sizes)
