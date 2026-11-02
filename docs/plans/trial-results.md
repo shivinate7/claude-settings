@@ -102,13 +102,14 @@ The real lane's diff for each case, graded the same way, blind.
 | option-letters-match | #967 | yes | yes |
 | windows-live-lock-flake | #941 | yes | yes |
 | questions-reach-page | #1070 | unknown | yes |
-| env-heredoc-false-alarm | #1076 | pending | yes |
-| other-checkout-scratch-false-alarm | #1066 | pending | yes |
-| red-main-stale-schedule | #1067 | pending | yes |
-| builder-test-edit-heredoc | #1073 | pending | yes |
+| env-heredoc-false-alarm | #1076 | yes | yes |
+| other-checkout-scratch-false-alarm | #1066 | yes | yes |
+| red-main-stale-schedule | #1067 | yes | yes |
+| builder-test-edit-heredoc | #1073 | yes | yes |
 
 - #1070 is unknown: its branch carries other lanes' merges, so its own diff cannot be cut out.
 - The shadow-case PRs were drafts, so each grade uses that PR's head at grading time.
+- Graders of the five newest calibration diffs also guessed a setup: 3 said extra text, 2 said none. Neither setup made these diffs. The guesses are logged apart from the hit rate.
 
 ## Blinding check
 
