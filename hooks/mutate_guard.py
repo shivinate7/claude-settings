@@ -39,6 +39,7 @@ product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_sha
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1843,7 +1844,10 @@ from harness.tests.home import isolated_home
 name = sys.argv[1][:-3].replace('/', '.')
 with isolated_home():
     result = importlib.import_module(name).run()
-if not result.passed:
+passed = getattr(result, 'passed', None)
+if passed is not True and passed is not False:
+    raise TypeError('run() returned no Result with a bool passed: %r' % (result,))
+if not passed:
     print('FAIL: ' + name)
     print(result.detail)
     sys.exit(1)
@@ -1862,7 +1866,7 @@ REPLAY_PROFILES = {
             "argv": ["node", "node_modules/@playwright/test/cli.js", "test", "-c", "playwright.unit.config.ts",
                      "{suite}"],
             "classify": "playwright", "cwd": "app",
-            "install": ["npm", "ci", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
             "sparse_skip": ["demo-assets", "vendor"],
         },
         "py": {
@@ -1899,6 +1903,19 @@ def replay_main(argv) -> int:
     print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
     deps = tempfile.mkdtemp(prefix="mutate_deps_")
     rows = []
+
+    def stop(signum, _frame):
+        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
+        # then each checkout is removed and the deps folder with it.
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
     try:
         for sha, _number, _title in prs:
             for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
@@ -1907,6 +1924,9 @@ def replay_main(argv) -> int:
                 print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
     finally:
         shutil.rmtree(deps, ignore_errors=True)
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
     print()
     print(mutate_shared.format_replay(rows))
     return 0

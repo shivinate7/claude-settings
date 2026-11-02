@@ -4,7 +4,7 @@
 // that one edit. The kinds are the kinds of `_sites` in hooks/mutate_shared.py, so a report reads the
 // same on both languages. A parse error exits 1 with the message on stderr.
 //
-// The sites come from the TypeScript parse tree, never from a text scan: a string, a template literal,
+// The sites come from the TypeScript parse tree, never from a text scan: a string, template text,
 // a comment or a JSX text that holds `a === b` is no node, so it gets no mutant. Each edit replaces a
 // span of the original text and leaves every other byte, so a mutant differs from the source by that
 // one edit and nothing else. typescript loads through the one loader of the plain-english-map skill.
@@ -75,7 +75,8 @@ const findSites = (source, text) => {
       }
     } else if (ts.isPrefixUnaryExpression(node) && node.operator === K.ExclamationToken) {
       add(node, 'not dropped', node.getStart(source), node.operand.getStart(source), '');
-    } else if (node.kind === K.TrueKeyword || node.kind === K.FalseKeyword) {
+    } else if ((node.kind === K.TrueKeyword || node.kind === K.FalseKeyword) && !ts.isLiteralTypeNode(node.parent)) {
+      // `true` in a type position is a literal type, not a value: no test can kill a mutant there.
       const was = node.kind === K.TrueKeyword;
       add(node, `${was} -> ${!was}`, node.getStart(source), node.getEnd(), String(!was));
     } else if (ts.isIfStatement(node) || ts.isWhileStatement(node)) {

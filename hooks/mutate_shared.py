@@ -41,6 +41,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -456,32 +457,70 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
     (code, output, timed_out)) and `cwd` (a folder inside `folder`). The child gets its own process
     group, killed whole at the timeout. Output goes to a file: a grandchild that holds a pipe open
     would make a pipe read wait for it."""
-    import _nowindow  # lazy: this module defines names only at import (see the docstring)
     env = {k: v for k, v in os.environ.items() if not k.endswith("_UNDER_TEST") and k != "MUTATE_ONLY"}
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     command = argv or [sys.executable, os.path.join(folder, rel)]
     started = time.time()
+    code, output, timed_out = run_in_group(command, cwd or folder, timeout, env)
+    return (classify or classify_run)(code, output, timed_out), time.time() - started
+
+
+_LIVE_GROUPS = set()  # process group ids of the children running now, so a signal can kill them
+_LIVE_LOCK = threading.Lock()
+_STOP = threading.Event()  # set by `request_stop`: no child starts after it
+
+
+def run_in_group(command, cwd: str, timeout: float, env=None):
+    """Run `command` in its own process group, killed whole at the timeout. Return (exit code, output,
+    timed_out). Output goes to a file: a grandchild that holds a pipe open would make a pipe read wait
+    for it. Raises RuntimeError once `request_stop` has been called."""
+    import _nowindow  # lazy: this module defines names only at import (see the docstring)
     timed_out = False
     with tempfile.TemporaryFile() as log:
         extra = {"start_new_session": True} if os.name == "posix" else {}
-        proc = _nowindow.Popen(command, cwd=cwd or folder, stdout=log,
-                               stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, **extra)
+        with _LIVE_LOCK:
+            if _STOP.is_set():
+                raise RuntimeError("the replay was stopped")
+            proc = _nowindow.Popen(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL, env=env, **extra)
+            _LIVE_GROUPS.add(proc.pid)
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                if os.name == "posix":
-                    os.killpg(proc.pid, signal.SIGKILL)
-                else:
-                    proc.kill()
-            except OSError:
-                proc.kill()
+            _kill_group(proc.pid, proc)
             proc.wait()
+        finally:
+            with _LIVE_LOCK:
+                _LIVE_GROUPS.discard(proc.pid)
         log.seek(0)
         output = log.read().decode("utf-8", "replace")
-    return (classify or classify_run)(proc.returncode, output, timed_out), time.time() - started
+    return proc.returncode, output, timed_out
+
+
+def _kill_group(pid: int, proc=None) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(pid, signal.SIGKILL)
+        elif proc is not None:
+            proc.kill()
+    except OSError:
+        if proc is not None:
+            proc.kill()
+
+
+def request_stop() -> None:
+    """Stop every child now and start no other: the handler of SIGTERM and SIGINT calls this, so the
+    `finally` blocks of a replay can remove its checkouts."""
+    with _LIVE_LOCK:
+        _STOP.set()
+        for pid in list(_LIVE_GROUPS):
+            _kill_group(pid)
+
+
+def clear_stop() -> None:
+    _STOP.clear()
 
 
 def _copy_scaffold(root: str, dest: str, repo_init: bool) -> None:
@@ -628,12 +667,13 @@ INSTALL_TIMEOUT = 900
 _MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PW_FAILURE = re.compile(r"^\s*\d+\) .* ─{3,}\s*$", re.M)
+_PW_FRAME = re.compile(r"^\s*(?:>\s*)?\d+ \|", re.M)
 _PW_ASSERT = re.compile(r"\bexpect\((?:received|locator|page|response)\)|AssertionError|ERR_ASSERTION")
 
 
 def classify_playwright(code, output: str, timed_out: bool) -> str:
-    """One `playwright test` run: "pass", "assert" (a failure block holds an `expect(received)` matcher
-    line or an AssertionError), "crash" (any other red: a load error, a throw, no test found) or
+    """One `playwright test` run: "pass", "assert" (the error text of a failure block, before its source
+    frame, holds an `expect(received)` matcher line or an AssertionError), "crash" (any other red: a load error, a throw, no test found) or
     "timeout". Only "assert" is evidence a mutant was caught."""
     if timed_out:
         return "timeout"
@@ -642,7 +682,11 @@ def classify_playwright(code, output: str, timed_out: bool) -> str:
     text = _ANSI.sub("", output)
     starts = [m.start() for m in _PW_FAILURE.finditer(text)] + [len(text)]
     for begin, end in zip(starts, starts[1:]):
-        if _PW_ASSERT.search(text[begin:end]):
+        block = text[begin:end]
+        frame = _PW_FRAME.search(block)
+        # The error text ends where the source frame starts. The frame quotes the line that stood when
+        # the error was thrown, so an `expect(page)` in it is no evidence of an assertion.
+        if _PW_ASSERT.search(block[:frame.start()] if frame else block):
             return "assert"
     return "crash"
 
@@ -715,7 +759,6 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
     install = profile.get("install")
     if not install:
         return None, ""
-    import _nowindow
     lock = profile.get("lockfile", "package-lock.json")
     try:
         data = _file_at(repo, sha, lock)
@@ -739,11 +782,12 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
     for step in steps:
         argv = [part.replace("{deps}", folder) for part in step]
         try:
-            run = _nowindow.run(argv, cwd=folder, capture_output=True, text=True, encoding="utf-8",
-                                stdin=subprocess.DEVNULL, timeout=INSTALL_TIMEOUT)
-            why = "" if run.returncode == 0 else "install exited %d: %s" % (
-                run.returncode, (run.stderr or run.stdout).strip()[-300:])
-        except (OSError, subprocess.TimeoutExpired) as error:
+            code, output, timed_out = run_in_group(argv, folder, INSTALL_TIMEOUT)
+            if timed_out:
+                why = "install passed %d s and was killed" % INSTALL_TIMEOUT
+            else:
+                why = "" if code == 0 else "install exited %d: %s" % (code, output.strip()[-300:])
+        except OSError as error:
             why = "install did not run: %s" % error
         if why:
             _write(failed, why)
@@ -827,8 +871,8 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
     found, parse_errors = [], {}
     for path in code:
-        text = _file_at(repo, sha, path).decode("utf-8")
         try:
+            text = _file_at(repo, sha, path).decode("utf-8")
             lines = changed_lines(repo, base, sha, path)
             if path.endswith(".py"):
                 clean[path] = normalize(text)
@@ -840,8 +884,11 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                     handle.write(text)
                 clean[path] = text
                 made = js_mutants(scratch, lines=lines)
+        except UnicodeDecodeError as error:
+            parse_errors[path] = "not UTF-8: %s" % error
+            continue
         except (SyntaxError, ValueError) as error:
-            parse_errors[path] = "parse error: %s" % str(error).strip().splitlines()[0]
+            parse_errors[path] = "parse error: %s" % ((str(error).strip().splitlines() or [type(error).__name__])[0])
             continue
         found.extend((path, label, mutated) for label, mutated in made)
     row["skipped"] = parse_errors
@@ -940,11 +987,28 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
 def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
     """The rows of one pull request under `profile`: one row, or for a profile of parts the rows of the parts
     that hold something (a part that sees no product file is left out, unless every part sees none)."""
+    def safely(part):
+        """The row of `replay_pr`, or an UNKNOWN row when it raises, so the pull requests after this one
+        still get rows. A stop (`request_stop`) is not caught."""
+        try:
+            return replay_pr(repo, sha, part, **options)
+        except Exception as error:
+            if _STOP.is_set():
+                raise
+            row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
+                   "survived": 0, "survivors": [], "unusable": {}, "skipped": {},
+                   "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
+            try:
+                row["pr"], row["title"] = _pr_of(repo, sha)
+            except ValueError:
+                pass
+            return row
+
     if "parts" not in profile:
-        return [replay_pr(repo, sha, profile, **options)]
+        return [safely(profile)]
     rows = []
     for name, part in profile["parts"].items():
-        row = replay_pr(repo, sha, part, **options)
+        row = safely(part)
         row["part"] = name
         rows.append(row)
     live = [row for row in rows if row["status"] != "NO_PRODUCT"]
