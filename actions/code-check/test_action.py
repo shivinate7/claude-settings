@@ -8,7 +8,7 @@ lines; with no base it is skipped with a reason, and with a base outside the clo
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
-import json, os, shutil, subprocess, sys, tempfile, unittest
+import functools, json, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -25,6 +25,10 @@ ASTRO_CONFIG = "export default {};\n"
 # CI must not go green by skipping: there a missing astro-check fails the test instead.
 NEEDS_ASTRO = unittest.skipUnless(shutil.which("astro-check") or os.environ.get("CI"),
                                   "astro-check not on PATH; npm ci in actions/code-check/tools (CI does)")
+NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
+                                "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
+with open(STANDARD, encoding="utf-8") as f:
+    TS_PIN = json.load(f)["tools"]["typescript"]
 
 
 def git(cwd, *a):
@@ -51,7 +55,7 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
@@ -70,7 +74,11 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
         args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
-        p = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, CODE_CHECK_TOOLS="path", **env))
+        run_env = dict(os.environ, **env)
+        run_env.pop("CODE_CHECK_TOOLS", None)
+        if path_tools:
+            run_env["CODE_CHECK_TOOLS"] = "path"
+        p = subprocess.run(args, capture_output=True, text=True, env=run_env)
         return p.returncode, p.stdout + p.stderr
 
 
@@ -323,6 +331,29 @@ def one_line_with(out, *needles):
     return any(all(n in row for n in needles) for row in out.splitlines())
 
 
+def npx_reaches_registry():
+    if not shutil.which("npx"):
+        return False
+    try:
+        p = subprocess.run(["npx", "--yes", "-p", "typescript@" + TS_PIN, "tsc", "--version"],
+                           capture_output=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0
+
+
+def needs_npx(test):
+    """Runs the test where npx reaches the registry; skips it elsewhere, and fails it under CI."""
+    @functools.wraps(test)
+    def run(self):
+        if npx_reaches_registry():
+            return test(self)
+        if os.environ.get("CI"):
+            self.fail("npx cannot reach the npm registry; CI must reach it")
+        self.skipTest("npx cannot reach the npm registry")
+    return run
+
+
 class CommentCheck(unittest.TestCase):
     def assertSkipped(self, out):
         rows = [r for r in out.splitlines() if "comment check: skipped" in r]
@@ -387,6 +418,42 @@ class CommentCheck(unittest.TestCase):
         rc, out = check(head, base_files=base)
         self.assertNotEqual(rc, 0, out)
         self.assertTrue(one_line_with(out, "bin/tool:2", "round 2"), out)
+
+
+JS_BASE = "const a = 1;\n"
+JS_HIT = "const a = 1;\n// fixed in round 2\n"
+SWIFT_BASE = "let a = 1\n"
+SWIFT_HIT = "let a = 1\n// fixed on 2026-10-28\n"
+ASTRO_HIT = ("---\n// fixed in round 2\ninterface Props { title: string }\n"
+             "const { title } = Astro.props;\nconst n: number = 2;\n---\n<h2>{title} {n}</h2>\n")
+
+
+class CommentCheckLanguages(unittest.TestCase):
+    @NEEDS_TSC
+    def test_js_hit_is_red_and_names_the_line(self):
+        rc, out = check({"app.js": JS_HIT}, base_files={".code-check.json": config([]), "app.js": JS_BASE})
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "app.js:2", "round 2"), out)
+
+    def test_swift_hit_is_red_and_names_the_line(self):
+        rc, out = check({"Thing.swift": SWIFT_HIT},
+                        base_files={".code-check.json": config([]), "Thing.swift": SWIFT_BASE})
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "Thing.swift:2", "2026-10-28"), out)
+
+    @NEEDS_ASTRO
+    def test_astro_frontmatter_hit_is_red_and_names_the_line(self):
+        base = {".code-check.json": config([]), "astro.config.mjs": ASTRO_CONFIG, "src/pages/index.astro": GOOD_ASTRO}
+        rc, out = check({"src/pages/index.astro": ASTRO_HIT}, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "index.astro:2", "round 2"), out)
+
+    @needs_npx
+    def test_js_hit_is_red_through_npx_without_tools_on_path(self):
+        rc, out = check({"app.js": JS_HIT}, base_files={".code-check.json": config([]), "app.js": JS_BASE},
+                        path_tools=False)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "app.js:2", "round 2"), out)
 
 
 def tearDownModule():
