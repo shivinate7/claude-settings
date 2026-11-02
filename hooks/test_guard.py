@@ -10925,6 +10925,11 @@ add("builder-test: reviewer may edit a test", "allow", tool="Edit", file_path="s
     agent_id="rev1", agent_type="reviewer", cwd=NOGIT)
 add("builder-test: a session run with --agent builder (no agent_id) is not judged", "allow",
     tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
+# A builder call in no repository has no diff to read, so the path's shape alone decides it: a test file
+# is refused, as it is in a checkout.
+add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
+    rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
+    agent_id="bld1", agent_type="builder", cwd=NOGIT)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
