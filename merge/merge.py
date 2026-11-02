@@ -40,6 +40,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
+class Liftable(Stop):
+    """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
+
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
@@ -1758,7 +1761,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
         if unknown_ok.strip():
             say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). Owner override, reason: {unknown_ok.strip()}")
             return
-        raise Stop(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
+        raise Liftable(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
                    "If the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
     if dropped:
         raise Dropped("the batch drops a lane by a revert of its merge (lane tip " + ", ".join(sorted(t[:9] for t in dropped))
@@ -2102,7 +2105,7 @@ def red_base(root, host, base, red_ok=""):
     if red_ok.strip():
         say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
         return
-    raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
+    raise Liftable(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
 def batch_refusal(host, n, base):
     """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending,
@@ -2153,7 +2156,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  batch:  " + batch,
-        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it." if verdict != "green" else ""),
+        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ("--confirm on the draft refuses this head, so mark it ready by hand" if info["draft"] else "a run resumes at the wait")
                         if resumed else trailer or "nothing to claim"),
@@ -2485,7 +2488,7 @@ def main(argv, host=None, lock=None):
                 return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
-        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard.", file=sys.stderr)
+        print(f"merge: {e}" + ("" if isinstance(e, Liftable) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
         return 1
 
 if __name__ == "__main__":
