@@ -1405,6 +1405,97 @@ class CompactionCarryTests(unittest.TestCase):
         self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
                                 "Handoff gave")
 
+    def test_cc_green_none_forms_pass_the_source_check(self):
+        # Catches: a none with a trailing mark, a backtick, or a word after it is read as a sourceless item.
+        rows = [
+            "Recovered: none needed",
+            "Recovered: none - summary complete",
+            "Recovered: none (the summary held all)",
+            "Recovered: none;",
+            "Recovered: _none_",
+            "Recovered: nothing was lost",
+            "`Recovered: none`",
+            "Recovered: X (page); nothing else.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assertIsNone(self.stop(self.compacted_turn(report_lines(line, "Handoff gave: none"))), line)
+
+    def test_cc_green_semicolon_inside_parentheses_does_not_split(self):
+        # Catches: a ";" inside parentheses splits one sourced item into an unsourced item.
+        reply = report_lines("Recovered: X from page (commit abc; merged 3 days ago)", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_recovered_line_starts_after_a_mark_or_a_separator(self):
+        # Catches: a line after a report label, a quote mark, or ". " is not read as a Recovered line.
+        rows = [
+            "> **Done** BUILT abc123\n> **Deviations:** Recovered: none\n> Handoff gave: none\n> **Next** ship it",
+            '> **Done** BUILT abc123\n> **Deviations**\n> "Recovered: none"\n> Handoff gave: none\n> **Next** ship it',
+            "> **Done** BUILT abc123\n> **Deviations** Handoff gave: none\n> **Next** ship it. Recovered: none",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_green_mid_sentence_recovered_after_demand_met_passes(self):
+        # Catches: a mid-sentence or backticked "recovered:" is read as a Recovered line, and its item is
+        # judged for a source, after the demand is already met.
+        earlier = report_lines("Recovered: none", "Handoff gave: none")
+        later = [
+            "> **Done** BUILT the `Recovered:` guard, PR #5\n> **Deviations** none\n> **Next** ship it",
+            "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** the janitor recovered: 3 files",
+        ]
+        for reply in later:
+            with self.subTest(reply=reply):
+                records = [human("do the task"), compact_boundary(), compact_summary(),
+                           assistant_text(earlier),
+                           human("next task"),
+                           tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                           assistant_text(reply)]
+                self.assertIsNone(self.stop(records), reply)
+
+    def test_cc_red_mid_sentence_recovered_does_not_satisfy_the_pending_demand(self):
+        # Catches: a mid-sentence or backticked "recovered:" satisfies the demand for the Recovered line.
+        rows = [
+            "> **Done** BUILT abc123\n> **Deviations** the janitor recovered: 3 files from git\n"
+            "> Handoff gave: none\n> **Next** ship it",
+            "> **Done** BUILT the `Recovered:` guard, PR #5\n> **Deviations** none\n"
+            "> Handoff gave: none\n> **Next** ship it",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                out = self.stop(self.compacted_turn(reply))
+                self.assertBlocksNaming(out)
+                self.assertIn("Recovered line", out["reason"])
+
+    def test_cc_green_unsourced_recovered_line_after_demand_met_passes(self):
+        # Catches: the source check judges a Recovered item after an earlier report already met the demand.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(report_lines("Recovered: ruling X", "Handoff gave: none"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_bare_recovered_line_with_a_sourced_bullet_passes(self):
+        # Catches: a bare "Recovered:" with its items below is read as having no items.
+        reply = ("> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n"
+                 "> Recovered:\n> - ruling X (git)\n> **Next** ship it")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_red_bare_recovered_line_with_an_unsourced_bullet_blocks(self):
+        # Catches: a bullet under a bare "Recovered:" passes with no source.
+        reply = ("> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n"
+                 "> Recovered:\n> - ruling X\n> **Next** ship it")
+        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "ruling X")
+
+    def test_cc_red_bare_recovered_line_with_nothing_below_blocks(self):
+        # Catches: a bare "Recovered:" with nothing below it passes as a present line.
+        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n> Recovered:\n> **Next** ship it"
+        out = self.stop(self.compacted_turn(reply))
+        self.assertBlocksNaming(out)
+        self.assertIn("Recovered line", out["reason"])
+
 
 class CompactionCarryCostTests(unittest.TestCase):
     """The compaction-carry check reads the transcript it already opens: no process, and no file
