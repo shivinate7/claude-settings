@@ -1844,7 +1844,7 @@ def floor_hit(tool: str, tool_input) -> str:
         model = tool_input.get("model")
         if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
             return str(model)
-    elif tool == SESSION_TOOL:
+    elif tool in (SESSION_TOOL, CREATE_SESSION_TOOL):
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
