@@ -5,8 +5,8 @@ Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
   order and refuses or asks on the first match. Bad input allows the call.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
-  against its role, for example a builder that changed a test path. Logs an offence for
-  the reviewer and never refuses the stop.
+  against its role, for example a builder that changed a test path. A builder's offence
+  blocks its first stop; any other role's offence is logged for the reviewer.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -1752,12 +1752,10 @@ def diff_rule(role: str) -> str:
 def builder_diff_reason(base: str) -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
-        "Your change holds a test change, and a builder does not change tests or test config. Put the "
-        "test files back to the commit you started from: run `git restore --source=%s --staged "
-        "--worktree` on them, and delete a test file that commit does not hold. Then report the test "
-        "change you need in your report. The orchestrator assigns it to a test-author. A merge "
-        "conflict in a test file takes the same route. This refusal is final: never write the "
-        "files another way." % (base[:12] or "<base>")
+        BUILDER_TEST_REASON + " Your diff holds a test change. Put the test files back to the commit "
+        "you started from: run `git restore --source=%s --staged --worktree` on them, and delete a "
+        "test file that commit does not hold. This refusal is final: never write the files another "
+        "way." % (base[:12] or "<base>")
     )
 
 

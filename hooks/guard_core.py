@@ -1522,9 +1522,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 # THE RULE JUDGES THE RESULT, NOT THE COMMANDS (docs/decisions/predicate-is-the-act.md). The act is a
 # test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
-# `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
-# the agent's branch was created from, plus untracked files, with every path normalised for
-# backslashes and resolved through symlinks.
+# `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commits
+# the agent received (`diff_bases` in guard.py: the cut point, each reset, checkout, pull, merge or
+# rebase target, and the merge base with the default branch), plus untracked files, with every path
+# normalised for backslashes and resolved through symlinks.
 #
 # THE ROLE is read from the payload: it carries an `agent_id` (an agent) and an `agent_type`.
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
