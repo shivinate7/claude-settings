@@ -15,6 +15,7 @@ from guard_core import (
 from guard_pointer import (
     pointer_checkout,
 )
+from shared_names import MERGE_ROLES
 
 
 # ------------------------------------------------------------------ three git acts
@@ -49,17 +50,20 @@ def git_call_of(segment: str):
     return tokens[cursor].lower(), tokens[cursor + 1:]
 
 
+def _unparen(tokens):
+    """The tokens of a subshell segment, `( ... )`, without its parentheses; other tokens come back as they are."""
+    if not tokens or not tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
+        return tokens
+    tokens = [tokens[0].lstrip("(")] + tokens[1:]
+    tokens[-1] = tokens[-1].rstrip(")")
+    return [t for t in tokens if t]
+
+
 def gh_call_of(segment: str):
     """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
-    tokens = segment_tokens(segment)
+    tokens = _unparen(segment_tokens(segment))
     if not tokens:
         return None
-    if tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
-        tokens = [tokens[0].lstrip("(")] + tokens[1:]
-        tokens[-1] = tokens[-1].rstrip(")")
-        tokens = [t for t in tokens if t]
-        if not tokens:
-            return None
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
@@ -89,9 +93,16 @@ def merge_call_of(segment: str):
     merges at once.
     """
     rest = gh_call_of(segment)
-    if rest is None or rest[:2] != ["pr", "merge"]:
+    if rest is None:
         return None
     selector, repo = "", ""
+    while rest and (rest[0] in ("-R", "--repo") or rest[0].startswith("--repo=")):   # a repo flag before `pr`
+        if rest[0].startswith("--repo="):
+            repo, rest = rest[0][len("--repo="):], rest[1:]
+        else:
+            repo, rest = (rest[1] if len(rest) > 1 else ""), rest[2:]
+    if rest[:2] != ["pr", "merge"]:
+        return None
     args = rest[2:]
     if "-h" in args or "--help" in args:
         return None   # help merges nothing
@@ -478,7 +489,6 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("coordinator", "batch-runner")
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -488,13 +498,13 @@ ROLE_REASON = (
 )
 
 
-def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+def _merge_tool_args(segment: str, wide: bool = False):
+    """The argument words after the command word when the segment runs the merge tool, else None.
 
-    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on `merge/merge.py` or
+    `merge/launch.py`. `wide` also takes `merge.cmd` and python on the shim file, `python3 bin/merge`.
     """
-    tokens = segment_tokens(segment)
+    tokens = _unparen(segment_tokens(segment))
     if not tokens:
         return None
     index = resolve_command(tokens)
@@ -504,11 +514,25 @@ def role_call_of(segment: str):
     rest = tokens[index + 1:]
     if word.startswith("python"):
         script = next((t for t in rest if not t.startswith("-")), None)
-        if script is None or basename(script) not in ("merge.py", "launch.py") \
-                or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
+        if script is None:
+            return None
+        shim = wide and basename(script) in ("merge", "merge.cmd")
+        if not shim and (basename(script) not in ("merge.py", "launch.py")
+                         or basename(os.path.dirname(script.replace("\\", "/"))) != "merge"):
             return None
         rest = rest[rest.index(script) + 1:]
-    elif word != "merge":
+    elif word != "merge" and not (wide and word == "merge.cmd"):
+        return None
+    return rest
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+
+    A role flag with no value gives ''.
+    """
+    rest = _merge_tool_args(segment)
+    if rest is None:
         return None
     for at, arg in enumerate(rest):
         if arg == "--role":
@@ -516,6 +540,13 @@ def role_call_of(segment: str):
         if arg.startswith("--role="):
             return arg[len("--role="):]
     return None
+
+
+def merge_confirm_of(segment: str) -> bool:
+    """True when the segment runs the merge tool with `--confirm`, the form that merges. A bare `merge <pr>` is a
+    preview and passes."""
+    rest = _merge_tool_args(segment, wide=True)
+    return rest is not None and any(arg == "--confirm" or arg.startswith("--confirm=") for arg in rest)
 
 
 def _own_session_read(transcript: str, own_id: str):
@@ -569,7 +600,7 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             own_id = remote_session_id()
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if tier in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + tier in tags:
                     continue
         except Exception:
             pass
