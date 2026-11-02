@@ -8,7 +8,11 @@ An item write whose picture the page would refuse, or would draw as a thin strip
 - It runs `skills/waiting-page/check_designs.mjs --page <file> --item <json>` once per judged item, through `_run_check_designs`, the one seam that starts node.
   - The checker loads the published page in headless Chromium at 390 px wide, with a stub database that holds only the item. It then asks the page's own code. `pictureProblem(item)` gives the sentence. The page's `MIN_PIC` gives the floor.
   - It measures every option card picture, ranked cards too: the `.opic .dfitwrap` of the card that holds the option's input, read with `getBoundingClientRect`.
-  - The floor: a picture is a miss when the page drew it under `MIN_PIC` high and scaled it below 1. `MIN_PIC` in `page.html` is the page's width floor for a picture it shrinks. The checker reuses it as a height floor for shrunk pictures only. A small focus at natural size passes, because the page never shrank it. This is the item 43 shape.
+  - The stub item gets `kind` "decision" when the write has none. The page draws option cards only for a decision, so an `update` with no `kind` is still measured.
+  - The floor: a picture is a miss when the page drew it under `MIN_PIC` high and scaled it below 0.5 (`SHRUNK` in `check_designs.mjs`).
+    - The height comes from `MIN_PIC` in `page.html`, the page's width floor for a picture it shrinks. The checker reuses it as a height floor.
+    - Why 0.5: the incident strips sit near 0.1 (a 2400x300 design draws at 0.12). A good 390x56 full-width focus draws at 0.75, and a 300x40 bar at 0.97. Both are under `MIN_PIC` high, and both pass. Measured here, 1 sample each.
+    - A strip scaled below 0.5 is the item 43 shape.
   - A design the page does not hold passes: the page warns in its frame, so the floor does not read it.
   - An option with a design but no card on the page, or no picture box in its card, is unknown, never a pass.
   - It prints `{"problem": string|null}` and exits 0 pass, 1 miss, 3 unknown. It caps itself at 20 s.

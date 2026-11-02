@@ -14,6 +14,8 @@ import { createRequire } from "node:module";
 const CAP_MS = 20_000; // under the 60 s timeout of the guard hook that runs this
 const ORIGIN = "http://waiting.test/";
 const WIDTH = 390; // a phone: the width where a wide design scales to a strip
+// The floor reads only a picture the page scaled below this. Incident strips sat near 0.1; a good full-width focus sits near 0.75.
+const SHRUNK = 0.5;
 const unknown = (why) => { process.stderr.write("check_designs: unknown: " + why + "\n"); process.exit(3); };
 
 const argOf = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -94,6 +96,8 @@ timer.unref?.();
 
 try {
   if (!item.id) item.id = "item";
+  // An update may carry options and designs but no kind. The page draws option cards only for a decision, so default it.
+  if (item.kind == null) item.kind = "decision";
   browser = await playwright.chromium.launch();
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 } });
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
@@ -114,9 +118,9 @@ try {
     for (let i = 0; i < got.pics.length; i++) {
       const m = drawn[i];
       if (!m) await unknownAfter("option " + got.pics[i].letter + " has a design but the card holds no picture box");
-      // MIN_PIC is the page's width floor for a picture it shrinks. It is read here as a height floor, for a shrunk picture only:
-      // a picture drawn at its natural size (scale 1) is as its design made it, however small.
-      if (m.scale < 0.999 && m.h < got.min) {
+      // MIN_PIC is the page's width floor for a picture it shrinks. It is read here as a height floor, for a picture scaled
+      // below SHRUNK only: a picture drawn near its natural size is as its design made it, however small.
+      if (m.scale < SHRUNK && m.h < got.min) {
         await finish(1, { problem: "The picture of option " + got.pics[i].letter + " is drawn " + Math.round(m.h) + " px tall at phone width, below the " + got.min
           + " px a shrunk picture needs, so it shows almost nothing. Its design is too wide for its height: set `drawn` to a narrower width, or draw the focus as a phone-shaped box." });
       }
