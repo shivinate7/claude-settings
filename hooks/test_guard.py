@@ -9301,6 +9301,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+sh("frozen: sed --in-place on the config settings", "sed --in-place 's/a/b/' " + CFG_SETTINGS,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: perl -pi on the config settings", "perl -pi -e 's/a/b/' " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -11134,6 +11138,19 @@ SHELL_SHAPE_WRITES = (
      "python3 - <<'EOF'\nfrom pathlib import Path\nPath(f'lint/test_x.py').write_text(x)\nEOF"),
     ("sed --in-place edits a test file", "sed --in-place 's/a/b/' lint/test_x.py"),
     ("perl -pi edits a test file", "perl -pi -e 's/a/b/' lint/test_x.py"),
+    ("sed -ri edits a test file", "sed -ri s/a/b/ lint/test_x.py"),
+    ("sed -Ei edits a test file", "sed -Ei 's/a/b/' lint/test_x.py"),
+    ("perl -0pi edits a test file", "perl -0pi -e 's/a/b/' lint/test_x.py"),
+    ("git rm deletes a test file", VCS + " rm lint/test_x.py"),
+    ("git mv moves a test file", VCS + " mv lint/test_x.py lint/old.py"),
+    ("sudo rm deletes a test file", "sudo rm lint/test_x.py"),
+    ("timeout wrapper rm deletes a test file", "timeout 5 rm lint/test_x.py"),
+    ("rm under an if deletes a test file", "if true; then rm lint/test_x.py; fi"),
+    ("/bin/rm deletes a test file", "/bin/rm lint/test_x.py"),
+    ("rm deletes a test file", "rm lint/test_x.py"),
+    ("mv moves a test file out of the repo", "mv lint/test_x.py /tmp/x"),
+    ("cp writes over a test file", "cp /tmp/x lint/test_x.py"),
+    ("tee -a appends to a test file", "echo x | tee -a lint/test_x.py"),
     ("sed -i over a glob that expands to a test file", GLOB_WRITE),
 )
 for _what, _command in SHELL_SHAPE_WRITES:
@@ -11153,6 +11170,19 @@ SHELL_SHAPE_ALLOWS = (
     ("test run with its output redirected to a non-test file", "python3 hooks/test_guard.py > out.txt"),
     ("git diff of a test file", VCS + " diff lint/test_x.py"),
     ("sed -i over a glob that holds no test file", "sed -i 's/old/new/g' hooks/*.py"),
+    ("rg of a test file that names sed -i", 'rg -n "sed -i" lint/test_x.py'),
+    ("grep of a test file that names sed -i, piped to head", 'grep -n "sed -i" lint/test_x.py | head'),
+    ("awk pattern over a test file that names sed -i", 'awk "/sed -i/" lint/test_x.py'),
+    ("sed -n print of a test file that names sed -i", 'sed -n "/sed -i/p" lint/test_x.py'),
+    ("gh comment whose body names sed -i on a test file",
+     'gh pr comment 12 --body "sed -i lint/test_x.py"'),
+    ("cp out of a test file under an if", "if true; then cp lint/test_x.py /tmp/x; fi"),
+    ("cp out of a test file in a for loop", "for f in a; do cp lint/test_x.py /tmp/x; done"),
+    ("time-wrapped cp out of a test file", "time cp lint/test_x.py /tmp/x"),
+    ("git commit whose message names sed -i on a test file",
+     VCS + ' commit -m "fix sed -i in lint/test_x.py"'),
+    ("git commit with a heredoc message that names a test-file redirect",
+     VCS + ' commit -m "$(cat <<\'EOF\'\nfix echo x > lint/test_x.py\nEOF\n)"'),
 )
 for _what, _command in SHELL_SHAPE_ALLOWS:
     sh("builder-test shell: Bash %s is allowed" % _what, _command, "allow", **dict(B, cwd=LINTREPO))
@@ -11165,6 +11195,8 @@ sh("builder-test shell: Bash heredoc body sed -i on a test file is allowed for t
    BASH_BODY_WRITE, "allow", **dict(A, cwd=LINTREPO))
 sh("builder-test shell: Bash glob sed -i over test files is allowed for the test-author",
    GLOB_WRITE, "allow", **dict(A, cwd=LINTREPO))
+sh("builder-test shell: Bash git rm of a test file is allowed for the test-author",
+   VCS + " rm lint/test_x.py", "allow", **dict(A, cwd=LINTREPO))
 sh("builder-test shell: Bash heredoc body sed -i on a test file is allowed in the main session",
    BASH_BODY_WRITE, "allow", cwd=LINTREPO)
 
