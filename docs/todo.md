@@ -16,7 +16,7 @@ Tasks a session caught and did not do. One line each.
 - fb-1417-2: c95 part 2, robust timing asserts (branch c95-robust-timing-asserts, draft PR #896), queued for batch 39; remove this line when it lands.
 - Build the owner-cite check. An owner cite must be found in a record on any origin branch, because rulings push at once to the sitting's ruling branch (owner, 2026-11-02 14:29 CST).
 - Build A6, which refuses a lane PR whose diff touches the handoffs folder (owner, 2026-11-02 14:26 CST).
-- Add the retired names to the retired-names lint. The names are in the Not column of GLOSSARY (term recheck, 2026-11-02 14:22 CST).
+- Add the retired names to the retired-names lint. The names are in the Not column of GLOSSARY (coordinator, term recheck, 2026-11-02 14:22 CST).
 - Lane 6 builds to two shapes (owner, 2026-11-02 14:19 CST).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. Each child repo needs the owner's yes first (owner, 2026-11-02 14:11 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).

@@ -11,7 +11,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - Each build has one holder. In a build with a coordinator, the coordinator holds the grant and a batch runner uses it.
 - A session with no coordinator (solo or one lane) holds the 2026-10-10 grant in claude-settings only. The 19:23 ruling does not widen it.
 - In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the batch-runner role.
-- A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool still refuses its cloud confirm, because the role is missing. The scope stays as the solo-or-one-lane line above says: claude-settings only. The owner has not ruled on a wider scope.
+- A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool still refuses its cloud confirm, because the role is missing. The scope stays as the solo-or-one-lane line above says: claude-settings only. The owner has not ruled on a wider scope. Decision `session-tiers` holds the solo line.
 - A one-lane cloud session with no batch runner cannot merge. The owner has not ruled on one-lane sessions.
 - A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.

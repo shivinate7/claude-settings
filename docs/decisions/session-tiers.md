@@ -4,7 +4,7 @@
 
 Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how they talk.
 
-- **Child repos.** claude-settings is the law in each child repo (owner, 2026-11-02 14:02 CST). A child repo points to this repo. It adds only extras that do not contradict it. It may differ from a line here only by citing that line as a discrepancy, with the owner's approval per child repo (owner, 2026-11-02 14:11 CST).
+- **Child repos.** claude-settings is the law in each child repo (owner, 2026-11-02 14:02 CST). A child repo points to claude-settings. It differs only where it cites the parent line as a discrepancy, and only with the owner's grant for that child repo (owner, 2026-11-02 14:02 and 14:11 CST).
 - **Session shape** (owner, 15:18). A new session in a repo reads what the owner asks, and picks one shape.
   - Solo. It builds the change itself.
   - One lane. It runs one line of work, and it orchestrates its own agents.
@@ -74,8 +74,9 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
 - **Merge grant** (owner, 2026-10-29 16:47 CDT). The coordinator holds a standing merge grant in claude-settings and in the owner's other repos, until the owner withdraws it. The coordinator never runs a merge: a batch runner runs each one under this grant (owner, 2026-11-01 21:34 CST). The switch `merge.standingGrant` in each repo's `.github/stamp.json` turns it off there (owner, 2026-10-30 15:06 CDT). It never asks the owner to merge. The grant covers the merge act only and lifts no check: green CI, no merge during a batch CI run, fresh review and the net-value hold still apply. Record `standing-merge-grant` (the coordinator's standing merge grant) holds the words, the repos and the limits.
 - **Solo session.** A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool does not yet allow it (record `standing-merge-grant`).
-  - Scope (coordinator, 2026-11-02 14:55 CST, process reading of owner rulings): a solo session merges its own PR in any repo, under that repo's merge grant or the owner's named act. Owner, 14:02 CST: "if sessions take on the solo status then they'd not need a batch runner".
-- **A coordinator starts lane sessions** (coordinator, 2026-11-02 14:55 CST, process reading of owner ruling 1a, 14:02 CST). Starting lane sessions is part of a coordinator's standing build. It needs no extra owner words.
+  - A solo session needs no batch runner. It merges only under that repo's own merge grant or the owner's named act (coordinator, 2026-11-02 14:55 CST, reading the owner's 14:02 CST words). It widens no grant. Record `standing-merge-grant` holds the scope.
+  - A one-lane session merges its own lone lane, as a solo session does, only under that repo's merge grant or the owner's named act (owner, 2026-11-02 15:14 CST).
+- **A coordinator starts lane sessions** (owner, 2026-11-02 15:14 CST). Inside a standing build the owner started, a coordinator starts lane sessions with no further owner word. Outside one, each start needs the owner's word.
 - **A lane's handoff** lives on a `handoff/<slug>` branch, never in the lane PR (owner, 2026-11-02 14:26 CST).
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."

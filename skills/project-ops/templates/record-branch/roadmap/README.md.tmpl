@@ -10,7 +10,7 @@ The roadmap build script is `skills/roadmap` in claude-settings. Build the roadm
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out FILE
 
-The roadmap build script publishes nothing. The waiting-page writer splices the block into the repo's one page
+The roadmap build script publishes nothing. The page writer splices the block into the repo's one page
 and alone publishes it (skill `waiting-page`). The roadmap build script runs without live work. Triage adds
-`--live live.json` at each publish, after the waiting-page writer writes `live.json`. The skill says
+`--live live.json` at each publish, after the page writer writes `live.json`. The skill says
 what that file holds, and what the block shows without it. Build again after each edit to `data/`.

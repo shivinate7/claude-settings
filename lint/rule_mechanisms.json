@@ -730,7 +730,7 @@
     "building-guard-needs-incident": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a named incident, measured risk or likely risk justifies a rule is a human read of the rule's record. Grow while things change, then cull what never fired (owner, 2026-10-21)."
+        "reason": "Whether a record names a mistake Claude has made or is likely to make in normal work, and the harm the guard stops, is a human read of the record. Whether a guard's false alarms cost more than that harm at a cull is a human read too (owner, 2026-10-21)."
       }
     },
     "roles-review-cap-three": {
