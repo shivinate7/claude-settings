@@ -1,9 +1,0 @@
-{
- "title": "Drop the coordinator's merge role from the tools",
- "phase": "now",
- "status": "todo",
- "order": 471,
- "why": "Owner 21:34 CST: the coordinator never merges; a batch runner runs every merge (decision session-tiers, PR #1038). The tools still let a coordinator merge.",
- "note": "Drop coordinator from merge/merge.py MERGE_ROLES, hooks/guard_merge.py ROLE_TIERS, the cloud allow rule `merge --role coordinator`, and the hooks/session_start.sh tier line. Starts after PR #1038 merges. Found by lane pace-brake-cloud. Ready. Port: yes.",
- "updatedAt": "2026-11-02T03:56:00Z"
-}
