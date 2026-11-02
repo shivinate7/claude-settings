@@ -1,9 +1,9 @@
 {
  "title": "The merge tool reads a standing_grant switch",
- "status": "doing",
+ "status": "done",
  "order": 103.33744,
  "why": "shiv, Oct 30 15:06 CDT (item 85 c): a true/false switch in the merge tool's settings instead of a CLAUDE.md line.",
- "note": "Lane merge-grant-switch adds standing_grant: true to the merge tool's settings on main; the tool refuses a coordinator merge when it is false. It rewrites decision standing-merge-grant to name the switch. Done check: false refuses a coordinator merge, true allows it.\nSet back to todo, Nov 1 18:03 CST: no live lane (live check, confirmed by the coordinator). Lane session_013NEJL3ipGPRLo1C7h6QVua, started Nov 1 19:30 CST.",
+ "note": "Lane merge-grant-switch adds standing_grant: true to the merge tool's settings on main; the tool refuses a coordinator merge when it is false. It rewrites decision standing-merge-grant to name the switch. Done check: false refuses a coordinator merge, true allows it.\nSet back to todo, Nov 1 18:03 CST: no live lane (live check, confirmed by the coordinator). Lane session_013NEJL3ipGPRLo1C7h6QVua, started Nov 1 19:30 CST. Done: already built on main by commit 12760618 (Oct 30; the merge tool refuses a cloud merge when merge.standingGrant is false). Tests StandingGrantSwitch and merge/test_merge pass on 17492e58 (lane check, Nov 1 19:36 CST); decision standing-merge-grant names the switch. The owner's Nov 1 17:37 CST all-repos grant is cited by the lane classifier-refusals-allowed, not here.",
  "phase": "cleanup",
- "updatedAt": "2026-11-02T01:32:00Z"
+ "updatedAt": "2026-11-02T01:41:00Z"
 }
