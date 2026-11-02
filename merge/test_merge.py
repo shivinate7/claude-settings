@@ -9195,21 +9195,48 @@ def batch_run(name, status="in_progress", conclusion=None):
 
 class PullsHost(merge.Host):
     """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, the check runs and statuses of each head, and the
-    repo-wide issue comments. `list_calls` keeps (path, fields) of every list read, in order. Any other read is a failed case."""
-    def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, comments=(), comments_error=None):
+    repo-wide issue comments. `list_calls` keeps (path, fields) of every list read, in order. Any other read is a failed case.
+    `count_gh` runs the real Host.pages and Host.api over a scripted `gh` instead, which answers each REST route with the shape `gh api` gives
+    and keeps the route of every call in `gh_calls`: the cost of one read, counted at the one seam every call goes through."""
+    def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, comments=(), comments_error=None,
+                 count_gh=False):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.reads = []
         self.list_calls = []
+        self.count_gh, self.gh_calls = count_gh, []
+        if count_gh:  # the branch protection names the required checks, as a real repo does
+            self.required, self.protection = "protection", list(required)
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
+        if self.count_gh and args[0] == "api":
+            rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+            self.gh_calls.append(rel)
+            return 0, self.answer(rel)
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
+    def answer(self, rel):
+        """The reply of one REST route, in the shape `gh api --paginate --slurp` gives it (one page), or the --jq value of the protection."""
+        m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
+        if rel == "pulls":
+            return json.dumps([self.pulls])
+        if rel == "issues/comments":
+            return json.dumps([self.comments])
+        if rel == f"branches/{self.base}/protection/required_status_checks":
+            return json.dumps(self.protection)
+        if m and m.group(2) == "check-runs":
+            return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
+        if m:
+            return json.dumps([{"statuses": []}])
+        raise AssertionError("unexpected route: " + rel)
+
     def pages(self, rel, key=None, fields=None):
+        if self.count_gh:
+            return merge.Host.pages(self, rel, key, fields)
         self.reads.append(rel)
         self.list_calls.append((rel, dict(fields or {})))
         if rel == "pulls":
@@ -10057,6 +10084,10 @@ class ReviewRecordForm(unittest.TestCase):
     def test_the_parser_refuses_an_unknown_role(self):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: qa-reviewer, sonnet, PASS",))))
 
+    def test_the_parser_refuses_docs_only_with_guard_yes(self):
+        # a docs-only change has no guard or check (decision docs-only-prs-skip-review)
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(), kind="docs-only", guard="yes")))
+
     def test_the_parser_refuses_a_short_head(self):
         for head in (REVIEW_HEAD[:39], REVIEW_HEAD[:7]):
             with self.subTest(head=head):
@@ -10098,11 +10129,42 @@ class ReviewRecordRules(unittest.TestCase):
     def test_round_one_fail_on_a_normal_change_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), "open")
 
-    def test_a_design_reviewer_fail_in_the_last_round_is_open(self):
+    def test_a_design_reviewer_fail_in_round_one_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
+
+    def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
+        # Ruled 2026-11-01 23:14 (Q2 a, process only): rule roles-review-cap-three outranks the decision record. Round 3 ends the review when Guard or check is no.
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
 
     def test_a_delete_only_change_passed_in_round_one_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
+
+    def test_a_delete_only_change_with_guard_no_is_done_after_round_one_whatever_its_verdict(self):
+        for verdict in ("PASS", "FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
+                self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
+        # A guard or check change owes rounds 2 and 3 when round 1 fails, even if it only deletes.
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="yes")
+                self.assertEqual(record_state(self, rec), "open")
+
+    def test_a_delete_only_change_with_guard_yes_and_a_round_one_pass_is_done(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only", guard="yes")), "done")
+
+    def test_a_pass_in_round_three_with_guard_yes_owes_the_net_value_test(self):
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
+            with self.subTest(net=net):
+                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), want)
+
+    def test_a_pass_in_round_two_with_guard_yes_owes_no_net_value(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="not owed")), "done")
 
     def test_a_docs_only_change_with_no_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=(), kind="docs-only")), "done")
@@ -10113,6 +10175,10 @@ class ReviewRecordRules(unittest.TestCase):
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+
+    def flags(self, *extra):
+        """The review flags, with --head set to the live head of the feature branch, then `extra`."""
+        return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
     def run_args(self, *argv, host=None):
         out, err = io.StringIO(), io.StringIO()
@@ -10132,8 +10198,8 @@ class ReviewEnv(Env):
         return out, err
 
 class ReviewArgs(ReviewEnv):
-    """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and takes no --confirm
-    or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
+    """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
+    --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
 
     def test_reviewed_stands_alone(self):
         for argv in (("--reviewed", "--confirm"), ("--reviewed", "7"), ("--role", "coordinator", "--reviewed")):
@@ -10143,15 +10209,42 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
     def test_review_record_needs_a_pr_number(self):
-        self.assert_usage_error("--review-record", *REVIEW_FLAGS)
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS)
+        self.assert_usage_error("--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertEqual(rc, 0, out + err)
 
     def test_review_record_takes_no_confirm_or_unlock(self):
         for extra in (("--confirm",), ("--unlock",)):
             with self.subTest(extra=extra):
-                self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS, *extra)
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS)
+                self.assert_usage_error("7", "--review-record", *self.flags(), *extra)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_review_record_needs_a_head(self):
+        _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS)
+        self.assertIn("needs --head", err)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_head_must_be_a_full_lowercase_sha(self):
+        for head in (REVIEW_HEAD[:39], REVIEW_HEAD.upper(), REVIEW_HEAD + "0"):
+            with self.subTest(head=head):
+                _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS, "--head", head)
+                self.assertIn("40-hex", err)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_head_needs_review_record(self):
+        _out, err = self.assert_usage_error("7", "--head", REVIEW_HEAD)
+        self.assertIn("go with --review-record", err)
+        rc, out, err = self.run_args("7")
+        self.assertEqual(rc, 0, out + err)
+
+    def test_docs_only_takes_no_guard_or_check(self):
+        # a docs-only change has no guard or check, so --guard yes is a usage error; --guard no is the control
+        _out, err = self.assert_usage_error("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "yes")
+        self.assertIn("so --guard must be no", err)
+        rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "no")
         self.assertEqual(rc, 0, out + err)
 
     def test_preview_and_confirm_take_no_review_record(self):
@@ -10168,7 +10261,7 @@ class ReviewRecordWrite(ReviewEnv):
 
     def test_the_record_is_printed_and_nothing_is_pushed(self):
         before, locked = self.refs(), self.lock_ref()
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertEqual(rc, 0, out + err)
         body = posted_body(self, out)
         rec = parse_text(self, body)
@@ -10177,21 +10270,31 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(self.refs(), before, "the write pushed")
         self.assertEqual(self.lock_ref(), locked, "the write took the lock")
 
-    def test_the_head_comes_from_the_pull_request_not_the_arguments(self):
+    def test_the_printed_head_is_the_reviewed_head_when_the_live_head_matches(self):
         self.host.head_override = "f" * 40
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS)
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
 
+    def test_a_push_after_the_review_stops_with_exit_one(self):
+        # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
+        old = self.head()
+        self.host.head_override = "f" * 40
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", old)
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn(REVIEW_MARKER, out)
+        self.assertIn("f" * 9, err)
+        self.assertIn(old[:9], err)
+
     def test_the_net_value_is_the_one_given(self):
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--net-value", "negative")
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--net-value", "negative")
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["net"], "negative")
 
     def test_a_bad_round_exits_two_and_prints_no_record(self):
         for rnd in ("1:reviewer:sonnet:MAYBE", "4:reviewer:sonnet:PASS", "1:reviewer:PASS", "x:reviewer:sonnet:PASS", "1:qa:sonnet:PASS"):
             with self.subTest(round=rnd):
-                out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--round", rnd)
+                out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
 
 class ReviewedList(ReviewEnv):
@@ -10286,6 +10389,27 @@ class ReviewedList(ReviewEnv):
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
+
+    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"CI green$")
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         "branches/main/protection/required_status_checks"])
+
+    def test_a_draft_with_a_record_reads_no_head_checks(self):
+        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+
+    def test_a_ready_pr_with_no_record_reads_no_head_checks(self):
+        host, rc, out, err = self.listing([batch_pull(8, REVIEW_HEAD)], [], count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
