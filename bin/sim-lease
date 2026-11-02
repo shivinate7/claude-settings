@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+# sim-lease want|take|renew|release|rank|show: one holder at a time, plus a queue, for the shared
+# iPhone Duo simulator AC2E94F9-0E44-4D9C-B27A-54DA45BC4698. Usage:
+#   want WHO [NOTE...]   join the queue (a second want keeps the place)
+#   take WHO             exit 0 if WHO now holds the lease (or renews it), else exit 1 with the reason
+#   renew WHO [--pid N]  holder only, while live; a live pid keeps the lease past the TTL
+#   release WHO          holder only; prints the next in line
+#   rank WHO...          put these queue entries first, in this order
+#   show                 holder, time left, queue
+# Exit 0 ok, 1 refused, 2 bad usage, 3 unreadable state. State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease.json.
+# Every call holds an flock on the sibling sim-lease.lock for its whole read-modify-write; the JSON is
+# replaced by rename, so it can never be the lock. No timer: each call judges expiry itself.
+# Expired = TTL minutes (SIM_LEASE_TTL_MIN, default 20) since renewed_at and the recorded pid not alive.
+import fcntl, json, os, sys, time
+
+DEFAULT_TTL_MIN = 20.0
+USAGE = "usage: sim-lease want WHO [NOTE...] | take WHO | renew WHO [--pid N] | release WHO | rank WHO... | show"
+
+
+def pid_alive(pid):
+    # ponytail: a reused pid keeps a dead holder's lease alive; a start-time check like bin/wait-pid is the upgrade.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def usage():
+    print(USAGE, file=sys.stderr)
+    sys.exit(2)
+
+
+def expired(holder, ttl_s):
+    return time.time() - holder["renewed_at"] > ttl_s and not (holder.get("pid") and pid_alive(holder["pid"]))
+
+
+def left(holder, ttl_s):
+    secs = max(0.0, holder["renewed_at"] + ttl_s - time.time())
+    alive = " (pid %d alive)" % holder["pid"] if holder.get("pid") and pid_alive(holder["pid"]) else ""
+    return "%.1f min left%s" % (secs / 60, alive)
+
+
+def place(queue, who):
+    return next((i + 1 for i, e in enumerate(queue) if e["who"] == who), None)
+
+
+def line(queue, who):
+    n = place(queue, who)
+    return "you are %d in line" % n if n else "you are not in line (run want)"
+
+
+def main(argv):
+    if not argv:
+        usage()
+    cmd, args = argv[0], argv[1:]
+    pid = None
+    if cmd == "renew" and len(args) == 3 and args[1] == "--pid":
+        try:
+            pid = int(args[2])
+        except ValueError:
+            usage()
+        args = args[:1]
+    arity = {"want": len(args) >= 1, "take": len(args) == 1, "renew": len(args) == 1,
+             "release": len(args) == 1, "rank": len(args) >= 1, "show": not args}
+    if not arity.get(cmd):
+        usage()
+    try:
+        ttl_s = float(os.environ.get("SIM_LEASE_TTL_MIN") or DEFAULT_TTL_MIN) * 60
+    except ValueError:
+        usage()
+
+    folder = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), "state")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "sim-lease.json")
+    with open(os.path.join(folder, "sim-lease.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            state = json.loads(text) if text.strip() else {}
+        except FileNotFoundError:
+            state = {}
+        except ValueError as e:
+            print("sim-lease: unreadable state %s: %s" % (path, e), file=sys.stderr)
+            return 3
+        holder, queue = state.get("holder"), state.get("queue") or []
+        who = args[0] if args else None
+        now = time.time()
+        dirty = True
+
+        def refuse(msg):
+            print(msg)
+            return 1
+
+        if cmd == "show":
+            dirty = False
+            if holder:
+                print("holder: %s, %s" % (holder["who"], "expired" if expired(holder, ttl_s) else left(holder, ttl_s)))
+            else:
+                print("holder: none (free)")
+            for i, e in enumerate(queue, 1):
+                print("%d. %s %s" % (i, e["who"], e.get("note", "")))
+        elif cmd == "want":
+            if place(queue, who):
+                dirty = False
+            else:
+                queue.append({"who": who, "note": " ".join(args[1:]), "asked_at": now})
+        elif cmd == "take":
+            live = holder and not expired(holder, ttl_s)
+            if live and holder["who"] == who:
+                holder["renewed_at"] = now
+            elif live:
+                return refuse("held by %s, %s; %s" % (holder["who"], left(holder, ttl_s), line(queue, who)))
+            elif queue and queue[0]["who"] != who:
+                return refuse("lease is free or expired; %s is first in line; %s" % (queue[0]["who"], line(queue, who)))
+            else:
+                queue = [e for e in queue if e["who"] != who]
+                holder = {"who": who, "note": "", "renewed_at": now}
+        elif cmd == "renew":
+            if not holder or holder["who"] != who or expired(holder, ttl_s):
+                return refuse("%s does not hold a live lease" % who)
+            holder["renewed_at"] = now
+            if pid is not None:
+                holder["pid"] = pid
+        elif cmd == "release":
+            if not holder or holder["who"] != who:
+                return refuse("%s does not hold the lease" % who)
+            holder = None
+            print("released; next in line: %s" % (queue[0]["who"] if queue else "nobody"))
+        elif cmd == "rank":
+            missing = [w for w in args if place(queue, w) is None]
+            if missing:
+                return refuse("not in the queue: %s" % ", ".join(missing))
+            first = [next(e for e in queue if e["who"] == w) for w in dict.fromkeys(args)]
+            queue = first + [e for e in queue if e["who"] not in args]
+        if dirty:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"holder": holder, "queue": queue}, f)
+            os.replace(tmp, path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
