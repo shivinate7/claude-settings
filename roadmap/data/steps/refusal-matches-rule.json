@@ -1,0 +1,9 @@
+{
+ "title": "Each guard and merge refusal matches its rule's outcome, no stricter or looser",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21034,
+ "why": "Owner, Nov 1 20:57 CST: \"so that sounds more like the merge tool being more restrictive than the prose said for it, and that's where the gap was ... a lot of what this repo is is just self improvement best practices so that my next project comes in faster, better than the last\".",
+ "note": "Sweep every guard rule and merge-tool refusal against the rule text it claims to hold. For each, say whether the refusal is exactly the rule's outcome, stricter, or looser; a stricter or looser one becomes a fix lane, or a rule rewrite on the owner's word. Incident: merge.py refused any merge while another ready PR ran CI, stricter than git-no-merge-during-batch-ci (fix in step overlapping-batches). Source: coordinator Nov 1 21:15 CST. Port: yes, the guards are shared. Ready.",
+ "updatedAt": "2026-11-02T03:16:00Z"
+}
