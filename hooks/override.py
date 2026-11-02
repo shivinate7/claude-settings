@@ -18,13 +18,13 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null or one role}. It lives beside the override, so the two never
-replace each other. It lifts only the Opus spawn ask of guard rule agent-model-cap, never that
+replace each other. It lifts only the Opus spawn denial of guard rule agent-model-cap, never that
 rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
-roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn ask that no Opus override
+roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn denial that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
 one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
 payload's session id. Exactly one step must bind the lane, with status not done and a grant whose role
@@ -53,9 +53,11 @@ PROMPT = re.compile(r"\s*override(?=[\s:]|$)\s*:?\s*(.*)", re.I | re.S)  # the f
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
-OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn ask
-# The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan and Explore,
-# which run Opus by standing grant (OPUS_STANDING_ROLES in hooks/guard.py).
+OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn denial
+# The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
+# grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
+# refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (owner, 2026-11-01 18:38 CST,
+# item 137 pick a; option b was not picked).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
               "general-purpose", "claude")
 LOG_REASON_MAX = 300
