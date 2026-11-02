@@ -117,7 +117,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
     the ruling to the page writer. A home that is not page:<digits> blocks as a malformed page home.
     A block with no owner record for its text stands down: stdout carries a systemMessage that starts
-    "Feedback guard: page sends not checked" and names the reason, as the homes check does. An absent,
+    "Feedback guard: page sends not checked" for a page item, or "Feedback guard: repo sends not
+    checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
@@ -202,7 +203,7 @@ PAGE_FAIL_OPEN = "Feedback guard: page sends not checked"
 SEND = "mcp__claude-code-remote__send_message"
 REPO_ITEM = "- fb-0958-21 [repo] -> repo:acme/widgets"
 REPO_SLUG = "acme/widgets"
-STAND_DOWN_PREFIX = "Feedback guard:"  # the start of every systemMessage a stand-down gives
+REPO_FAIL_OPEN = "Feedback guard: repo sends not checked"
 
 
 
@@ -1359,7 +1360,7 @@ def case_repo_closed_item_is_never_checked():
 
 
 def case_repo_transcript_missing_passes_with_system_message():
-    transcript_missing_checks("repo", "rename", REPO_ITEM, STAND_DOWN_PREFIX)
+    transcript_missing_checks("repo", "rename", REPO_ITEM, REPO_FAIL_OPEN)
 
 
 def case_repo_owner_record_missing_stands_down():
@@ -1370,7 +1371,7 @@ def case_repo_owner_record_missing_stands_down():
             ("the only record with the text is a peer's",
              [peer_rec("rename"), send_rec("acme/widgets rename")])):
         p = page_run(new_cfg(), "repo-no-owner", [("rename", (REPO_ITEM,))], records)
-        expect_stand_down("repo: %s" % label, p, "owner", STAND_DOWN_PREFIX)
+        expect_stand_down("repo: %s" % label, p, "owner", REPO_FAIL_OPEN)
 
 
 def case_repo_queued_owner_record_anchors():
@@ -1438,6 +1439,52 @@ def case_closed_repo_item_reads_no_transcript():
     check("repo cost: a closed repo item reads no transcript, so it gives no systemMessage",
           "systemMessage" not in obj, obj)
     check("repo cost: a closed repo item blocks nothing", not is_block(obj), obj)
+
+
+def case_repo_home_with_a_trailing_period_passes():
+    """A home that ends in a period names the same repo: a send naming acme/widgets proves it."""
+    item = "- fb-0958-21 [repo] -> repo:acme/widgets."
+    p = page_run(new_cfg(), "repo-home-period", [("rename", (item,))],
+                 [owner_rec("rename"), send_rec("rename filed in acme/widgets")])
+    expect_silent("repo: a home with a trailing period, a send naming acme/widgets passes", p)
+
+
+def case_repo_home_in_backticks_or_with_a_comma_is_not_malformed():
+    for label, home in (("in backticks", "`repo:acme/widgets`"),
+                        ("with a trailing comma", "repo:acme/widgets,")):
+        item = "- fb-0958-21 [repo] -> %s" % home
+        p = page_run(new_cfg(), "repo-home-form", [("rename", (item,))],
+                     [owner_rec("rename"), send_rec("rename filed in acme/widgets")])
+        expect_silent("repo: a home %s is not malformed, a send naming acme/widgets passes" % label,
+                      p)
+
+
+def case_repo_only_stand_down_names_repo_sends_not_page():
+    """A repo-only stand-down says repo sends, and never page sends."""
+    cfg, sid = new_cfg(), "repo-only-standdown"
+    write_file(inbox_of(cfg, sid), render_block("rename", items=(REPO_ITEM,)))
+    p = guard(cfg, sid, transcript=transcript_of(cfg, sid))
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    check("repo only stand-down: exit 0, no block", p.code == 0 and not is_block(guard_json(p)),
+          p.desc())
+    check("repo only stand-down: the systemMessage starts with the repo prefix",
+          msg.startswith(REPO_FAIL_OPEN), msg)
+    check("repo only stand-down: the systemMessage does not say page sends", "page sends" not in msg,
+          msg)
+
+
+def case_page_and_repo_stand_downs_both_give_a_note():
+    """A missing transcript with an open page item and an open repo item gives both notes."""
+    cfg, sid = new_cfg(), "page-and-repo-standdown"
+    write_file(inbox_of(cfg, sid), render_block("98: rename", items=(PAGE_ITEM, REPO_ITEM)))
+    p = guard(cfg, sid, transcript=transcript_of(cfg, sid))
+    obj = guard_json(p) or {}
+    msg = obj.get("systemMessage") or ""
+    check("page and repo stand-downs: exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
+    check("page and repo stand-downs: the systemMessage gives the page note",
+          PAGE_FAIL_OPEN in msg, msg)
+    check("page and repo stand-downs: the systemMessage gives the repo note",
+          REPO_FAIL_OPEN in msg, msg)
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -2130,6 +2177,10 @@ CASES = (
     case_repo_kind_is_in_the_kind_lists,
     case_no_open_page_or_repo_item_reads_no_transcript,
     case_closed_repo_item_reads_no_transcript,
+    case_repo_home_with_a_trailing_period_passes,
+    case_repo_home_in_backticks_or_with_a_comma_is_not_malformed,
+    case_repo_only_stand_down_names_repo_sends_not_page,
+    case_page_and_repo_stand_downs_both_give_a_note,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
