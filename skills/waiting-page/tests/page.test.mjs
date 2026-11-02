@@ -35,6 +35,8 @@ const TASK = {
 };
 const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, ...over });
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
+// Later than the sends these cases use (the latest is LA_AT, 2026-10-29T19:05Z). An item added then is new, not seen, so its parts stay unfolded.
+const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
@@ -53,6 +55,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  // Pushes one item through the items listener, as a session adding an item after the page loaded would.
+  window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
   const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
@@ -1212,7 +1216,7 @@ test("when the store refuses a write, the answer line can be copied", async (t) 
 const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count();
 
 test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
   assert.equal(await clearCount(page), 0);
   await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
   assert.equal(await clearCount(page), 0);
@@ -1289,10 +1293,10 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
 });
 
-// The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
-test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
-  const FRESH = mk("fresh-decision", 29);
-  const page = await open(t, { items: [DECISION, FRESH, TASK], answers: SAVED_A }); if (!page) return;
+// The note box is open on every unseen open card, with no Add a note button. A sent card has no box; a card under Change is open.
+test("the note box is open on every unseen open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
+  const FRESH = mk("fresh-decision", 29, { added: ASKED_AFTER_SEND });
+  const page = await open(t, { items: [DECISION, FRESH, { ...TASK, added: ASKED_AFTER_SEND }], answers: SAVED_A }); if (!page) return;
   assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
   for (const it of [FRESH, TASK]) {
     assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
@@ -1395,7 +1399,7 @@ test("the Copy line names a note-only task as note, not done", async (t) => {
 });
 
 test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
   await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
   await addNote(page, TASK, "   ");
@@ -1811,6 +1815,178 @@ test("SKILL.md answers a comment by rewriting the item, never in a comment threa
   assert.match(skill, /rewrite that item/i);
 });
 
+// ---------------------------------------------------------------- seen items sink
+
+// A seen item is open, has no answer, and was added before the last send. Inside its tier it sinks
+// below the new items and folds until the owner unfolds it. lastSend here is a closed item's last answer.
+const SENT_AT = at(10);
+const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { choice: "a", at: SENT_AT, note: "" } });
+const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
+const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
+const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
+
+test("a seen decision sinks under a new one in Whenever, and its options fold until the owner unfolds it", async (t) => {
+  const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
+  assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
+  const unfold = card(page, seen).locator("button.unfold");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
+  assert.equal(await optsShown(page, seen), false, "a seen item's options show before the owner unfolds it");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
+  assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+});
+
+test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+  const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
+  const unfold = card(page, seen).locator("button.unfold");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+});
+
+test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+  const seen = mk("seen-answered", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const c = card(page, seen), unfold = c.locator("button.unfold");
+  assert.equal(await seenOf(page, seen), "true", "the card is not seen");
+  await unfold.click();
+  await choose(page, seen, "a");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
+  await unfold.click({ force: true }); // a press on the locked control must not close it
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+});
+
+test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
+  const a = mk("grp-a", 1, { group: "pair", added: at(5) }), b = mk("grp-b", 2, { group: "pair", added: at(5) });
+  const page = await open(t, { items: [a, b, mk("solo-seen", 3, { added: at(5) }), sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, a), "true", "the group is not seen at load");
+  const late = mk("grp-c", 4, { group: "pair", added: at(20) });
+  await page.evaluate((it) => window.__putItem(it), late);
+  await card(page, late).waitFor();
+  for (const it of [a, b, late]) assert.notEqual(await seenOf(page, it), "true", `${it.id} is still seen after its group gained a new member`);
+  const ids = await page.evaluate(() => [...document.querySelectorAll("article.card, #seen-div")].map((e) => e.id));
+  const divider = ids.indexOf("seen-div");
+  assert.ok(divider >= 0, "no seen divider on the page");
+  for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
+});
+
+// Fold ids come from the number, so two open items that share a number must still get their own.
+test("two open items with the same number get unique fold ids", async (t) => {
+  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
+  for (const it of items) {
+    const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
+    const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
+    assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
+  }
+});
+
+// A push of an unrelated item re-renders the page; the note box the owner is typing in must keep its caret.
+test("typing in a note box keeps the caret when an unrelated item arrives", async (t) => {
+  const page = await open(t); if (!page) return;
+  const ta = page.locator(`#n-${DECISION.id}`), other = mk("caret-other", 9);
+  await ta.fill("hello world");
+  await ta.evaluate((el) => { el.focus(); el.setSelectionRange(5, 5); window.__ta = el; });
+  await page.evaluate((it) => window.__putItem(it), other);
+  await card(page, other).waitFor();
+  const after = await page.evaluate((id) => { const el = document.getElementById("n-" + id); return { same: el === window.__ta, value: el.value, start: el.selectionStart, focused: document.activeElement === el }; }, DECISION.id);
+  assert.equal(after.same, true, "the note box was rebuilt by an unrelated push");
+  assert.equal(after.value, "hello world", "the note text changed");
+  assert.equal(after.start, 5, `the caret moved to ${after.start}`);
+  assert.equal(after.focused, true, "the note box lost focus");
+});
+
+// The seen divider's words say what is true of every seen card: asked before the last Send. An answered seen card stays below it until reload.
+test("the seen divider reads Asked before, and never claims a card is not answered", async (t) => {
+  const seen = mk("seen-divider", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const words = (await page.locator("#seen-div").textContent()).replace(/\s+/g, " ").trim();
+  assert.match(words, /Asked before/, `the divider reads "${words}"`);
+  assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
+});
+
+test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
+  const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+});
+
+test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
+  const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+});
+
+test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
+  const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
+  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+});
+
+test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
+  const seen = mk("seen-ranked", 1, { added: at(5), rank: 1 }), fresh = mk("fresh-ranked", 2, { added: at(20), rank: 2 });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["fresh-ranked", "seen-ranked"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+});
+
+test("a seen item with a draft keeps its options open and still sinks", async (t) => {
+  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = mk("draft-fresh", 2, { added: at(20) });
+  const storage = { "waiting.draft": JSON.stringify({ [seen.id]: { choice: "b" } }) };
+  const page = await open(t, { items: [seen, fresh, sentItem()], storage }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["draft-fresh", "draft-seen"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.equal(await optsShown(page, seen), true, "a seen item with a draft is folded");
+});
+
+test("a seen stood pick sinks under a new one in Pick stands, and its options stay open", async (t) => {
+  const seen = mk("stand-seen", 1, { added: at(5), stands: true }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "stands"), ["stand-fresh", "stand-seen"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen stood pick is not marked seen");
+  assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
+});
+
+test("with no answer anywhere, nothing is seen and Whenever stays oldest first", async (t) => {
+  const older = mk("no-send-old", 1, { added: at(5) }), newer = mk("no-send-new", 2, { added: at(20) });
+  const page = await open(t, { items: [older, newer] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["no-send-old", "no-send-new"]);
+  for (const it of [older, newer]) {
+    assert.notEqual(await seenOf(page, it), "true", `${it.id} is marked seen with no lastSend`);
+    assert.equal(await optsShown(page, it), true, `${it.id} folds with no lastSend`);
+  }
+});
+
+test("a group with one new member is new as a whole, so a seen item in its tier sinks under it", async (t) => {
+  const solo = mk("g-solo", 1, { added: at(3) });
+  const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
+  const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["g-old", "g-new", "g-solo"]);
+  assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
+  assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
+  assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
+});
+
 // ---------------------------------------------------------------- round 2 looks
 
 const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
@@ -1888,6 +2064,253 @@ const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l,
   designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
 const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
   return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+// ---------------------------------------------------------------- the Ask box (step page-ask-box)
+// Contract: docs/design/page-ask-box-notes.md on design/page-ask-box, sections 3, 5, 6 and 8.
+// The notes name no ids, so the selectors take the mockup's: #askText (the box), #askSend, #askUndo.
+const ASK_TEXT = "Can the waiting page take a question from me?";
+const ASK_ANSWERED = { id: "ask-an1", text: "Can I see the lane queue?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes. It is on the Status tab." };
+// A missing control fails by name, not by a wait that times out.
+async function mustHave(page, sel, what) {
+  const n = await page.locator(sel).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: ${sel} is missing`);
+}
+// A text the page shows, as its box. A text the page does not show fails with the text named.
+async function shownBox(page, text) {
+  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+  const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+  assert.ok(shown, `the page does not show: ${text}`);
+  return loc.boundingBox();
+}
+
+test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const log = await page.evaluate(() => window.__log);
+  const asks = log.filter((l) => l[0] === "set" && l[1] === "asks");
+  assert.equal(asks.length, 1, "Send wrote " + asks.length + " asks records");
+  const [, , key, body] = asks[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, ASK_TEXT, "the text is not the owner's words");
+  assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "at is not an ISO time: " + body.at);
+  assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
+});
+
+test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const key = await page.evaluate(() => window.__log.find((l) => l[0] === "set" && l[1] === "asks")[2]);
+  await mustHave(page, "#askUndo", "Undo control");
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
+  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+});
+
+test("the asks list is newest first by at, whatever order the records came in", async (t) => {
+  // Insertion order and id order both differ from newest first, so only a sort by at passes.
+  const asks = {
+    "ask-zz1": { id: "ask-zz1", text: "Middle ask text", at: "2026-10-30T09:00:00Z" },
+    "ask-aa1": { id: "ask-aa1", text: "Newest ask text", at: "2026-10-31T09:00:00Z" },
+    "ask-mm1": { id: "ask-mm1", text: "Oldest ask text", at: "2026-10-29T09:00:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  const top = {};
+  for (const text of ["Newest ask text", "Middle ask text", "Oldest ask text"]) top[text] = (await shownBox(page, text)).y;
+  assert.ok(top["Newest ask text"] < top["Middle ask text"] && top["Middle ask text"] < top["Oldest ask text"], "the asks are not newest first: " + JSON.stringify(top));
+});
+
+test("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.text);
+  assert.equal(await page.getByText(ASK_ANSWERED.reply, { exact: true }).isVisible(), false, "a seen answer is open");
+  const show = page.getByRole("button", { name: "Show answer" });
+  assert.equal(await show.count(), 1, "no Show answer control on the folded ask");
+  await show.click();
+  await shownBox(page, ASK_ANSWERED.reply);
+});
+
+test("an answer the viewer has not seen stays open, with the New answer mark", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-29T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.reply);
+  await shownBox(page, "New answer");
+});
+
+test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
+  const asks = {
+    "ask-w01": { id: "ask-w01", text: "Nobody has read this yet", at: "2026-10-31T08:00:00Z" },
+    "ask-w02": { id: "ask-w02", text: "The writer has read this", at: "2026-10-31T07:00:00Z", owner: "triage", read: "2026-10-31T07:30:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  await shownBox(page, "Waiting for triage to read it.");
+  await shownBox(page, /^Read by triage/);
+  await shownBox(page, /Waiting for its answer\./);
+  assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
+});
+
+// Red cases for the Ask box: no stray null, the cap on new answers, the 4000-character limit, Ctrl+Enter, paste and Copy ask.
+test("the Ask section never shows the text null, in the waiting, answered and sent states", async (t) => {
+  const asks = {
+    "ask-n-wait": { id: "ask-n-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" },
+    "ask-n-fresh": { id: "ask-n-fresh", text: "A fresh answer", at: "2026-10-30T08:00:00Z", owner: "triage", answered: "2026-10-31T10:00:00Z", reply: "Yes, it does." },
+    "ask-n-seen": { id: "ask-n-seen", text: "A seen answer", at: "2026-10-29T08:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes, it did." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-30T11:00:00Z" } }); if (!page) return;
+  await shownBox(page, "A question still waiting");
+  const stray = () => page.evaluate(() => { const s = document.getElementById("asks").textContent, i = s.indexOf("null"); return i < 0 ? "" : s.slice(Math.max(0, i - 60), i + 10); });
+  const waiting = await stray();
+  assert.equal(waiting, "", "the waiting and answered states show the text null: " + JSON.stringify(waiting));
+  await page.fill("#askText", "A new ask for the list");
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  const sent = await stray();
+  assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
+});
+
+test("a new answer to an ask older than the newest 3 answered asks stays open in view, not behind Show older asks", async (t) => {
+  // Three answers seen at the last visit fill the cap. The new answer is older by at, so it sits fourth in the list.
+  const seen = (n, at) => ({ id: "ask-s" + n, text: "Seen answer " + n, at, owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Seen reply " + n + "." });
+  const asks = {
+    "ask-s1": seen(1, "2026-10-30T08:00:00Z"),
+    "ask-s2": seen(2, "2026-10-30T07:00:00Z"),
+    "ask-s3": seen(3, "2026-10-30T06:00:00Z"),
+    "ask-new": { id: "ask-new", text: "Old ask, new answer", at: "2026-10-01T09:00:00Z", owner: "triage", answered: "2026-10-31T08:00:00Z", reply: "The answer that came after the last visit." },
+    "ask-old": { id: "ask-old", text: "Oldest seen answer", at: "2026-09-15T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Seen long ago." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, "The answer that came after the last visit.");
+  // Only the seen answer past the cap stays behind the button.
+  assert.equal(await page.getByRole("button", { name: "Show 1 older ask", exact: true }).count(), 1, "the button does not say Show 1 older ask");
+});
+
+test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = await page.textContent("#askHint");
+  const long = "0123456789".repeat(420); // 4200 characters
+  // A value set in script is not held to the box's maxlength, as a draft or an Undo can leave it.
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, long);
+  await mustHave(page, "#askSend", "Send ask button");
+  if (await page.locator("#askSend").isDisabled()) {
+    // Over the limit Send ask is off, so nothing is written, the words stay in the box, and the hint gives the limit.
+    const off = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+    assert.equal(off, 0, "Send ask wrote " + off + " asks records while it was off");
+    assert.equal(await page.inputValue("#askText"), long, "the words in the box changed while Send ask was off");
+    const notice = (await page.textContent("#askHint")).trim();
+    assert.ok(notice && notice !== short.trim() && /4000|limit/i.test(notice) && await page.locator("#askHint").isVisible(), "no limit notice in the hint: " + JSON.stringify(notice));
+    return;
+  }
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"), null, { timeout: 1500 }).catch(() => {});
+  const sets = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+  if (sets.length) {
+    assert.equal(sets.length, 1, "Send wrote " + sets.length + " asks records");
+    assert.equal(sets[0].text.length, long.length, `Send ask stored ${sets[0].text.length} of ${long.length} characters, with no notice`);
+    assert.equal(sets[0].text, long, "the stored text is not the owner's words");
+    return;
+  }
+  // No write: the words stay in the box, and the hint row says why.
+  assert.equal(await page.inputValue("#askText"), long, "Send ask wrote nothing and dropped the typed words");
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
+});
+
+test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
+  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+  const page = await open(t); if (!page) return;
+  const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", sent);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await mustHave(page, "#askUndo", "Undo control");
+  const typed = "Typed after the send. ".repeat(6); // 126 characters, typed inside the window
+  await page.fill("#askText", typed);
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const value = await page.inputValue("#askText");
+  const hint = (await page.textContent("#askHint")).trim();
+  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
+  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+});
+
+test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await card(page, DECISION).locator(".title").click();
+  await page.keyboard.press("b");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  assert.equal(await page.locator("#send").isDisabled(), false, "no answer is staged, so the case proves nothing");
+  await page.focus("#askSend");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "answers"), null, { timeout: 1500 }).catch(() => {});
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "answers").length);
+  assert.equal(writes, 0, "Ctrl+Enter on Send ask wrote " + writes + " answers record(s)");
+});
+
+test("pasting 4200 characters into the ask box keeps all of them and shows the over-limit notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = (await page.textContent("#askHint")).trim();
+  const long = "0123456789".repeat(420); // 4200 characters
+  // insertText takes the same route as a paste, so the box's maxlength applies to it as it does to a paste.
+  await page.fill("#askText", "");
+  await page.click("#askText");
+  await page.keyboard.insertText(long);
+  const value = await page.inputValue("#askText");
+  assert.equal(value.length, long.length, `the box holds ${value.length} of ${long.length} pasted characters`);
+  const hint = (await page.textContent("#askHint")).trim();
+  const shown = await page.locator("#askHint").isVisible();
+  assert.ok(shown && hint !== short && /4000|limit/i.test(hint), "no over-limit notice in the hint: " + JSON.stringify(hint));
+});
+
+test("over the limit, Send ask is disabled, or a press changes the hint to the notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await mustHave(page, "#askSend", "Send ask button");
+  const over = "0123456789".repeat(420); // 4200 characters, set as a draft or an Undo can leave it
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, over);
+  if (!(await page.locator("#askSend").isDisabled())) {
+    const before = (await page.textContent("#askHint")).trim();
+    await page.click("#askSend");
+    await page.waitForFunction((b) => document.getElementById("askHint").textContent.trim() !== b || window.__log.some((l) => l[0] === "set" && l[1] === "asks"), before, { timeout: 1500 }).catch(() => {});
+    const after = (await page.textContent("#askHint")).trim();
+    assert.notEqual(after, before, "Send ask is enabled over the limit, and a press leaves the hint as it was");
+  }
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+  assert.equal(writes, 0, "Send ask wrote an ask over the limit");
+});
+
+test("Copy ask after a failed write changes the hint to the copy result", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await mustHave(page, "#askCopy", "Copy ask button");
+  await page.click("#askCopy");
+  await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
+});
+
 async function openCap(t, labels, width, design) {
   const it = capItem(labels);
   const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
@@ -4065,7 +4488,7 @@ test("a lane shows 'waits on lane <slug>' as one text run in the top row, after 
 });
 
 test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
-  const it = mk("pl-1a", 1, { holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const it = mk("pl-1a", 1, { added: ASKED_AFTER_SEND, holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const page = await open(t, { items: [it] }); if (!page) return;
   const c = card(page, it);
   await laText(page, it);

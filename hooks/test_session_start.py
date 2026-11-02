@@ -28,6 +28,7 @@ LIMIT = 50  # the notice starts above this many agent worktrees
 NOTICE = re.compile(r"agent[ -]worktree", re.IGNORECASE)
 # The one printed line whose text starts "session tier: ", quoted in the hook's printf call.
 TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
+UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook's line when the caution level is unread
 
 
 def hook_tier_line():
@@ -153,20 +154,52 @@ class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
         with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
+    def write_extras(self, keys):
+        """The repo's extras file holds `keys` as JSON, beside the kinds key every extras file has."""
+        os.makedirs(os.path.join(self.primary, ".claude"), exist_ok=True)
+        with open(os.path.join(self.primary, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+            json.dump(dict({"kinds": {}}, **keys), handle)
+
+    def assert_unknown_caution(self, lines):
+        """The unknown line prints once, never a public line. Layout.py's facts and acts come with it, which
+        shows the line came from the layout's own read and not from the hook's fallback."""
+        self.assertIn(UNKNOWN_LINE, lines)
+        self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1, lines)
+        self.assertFalse(any(line.startswith("repo caution: public") for line in lines), lines)
+        self.assertTrue(any(line.startswith("repo fact: ") for line in lines), lines)
+        self.assertTrue(any(line.startswith("repo act: ") for line in lines), lines)
+
     def test_private_visibility_prints_the_private_solo_level(self):
         self.point_at()
-        os.makedirs(os.path.join(self.primary, ".claude"))
-        with open(os.path.join(self.primary, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
-            json.dump({"kinds": {}, "visibility": "private"}, handle)
+        self.write_extras({"visibility": "private"})
         lines = self.run_hook()
         self.assertIn("repo caution: private-solo", lines)
         self.assertTrue(any(line.startswith("repo fact: ") for line in lines))
         self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1)
 
+    def test_public_visibility_prints_the_public_level(self):
+        self.point_at()
+        self.write_extras({"visibility": "public"})
+        lines = self.run_hook()
+        self.assertIn("repo caution: public", lines)
+        self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1)
+
+    def test_no_extras_file_prints_unknown_never_public(self):
+        self.point_at()
+        self.assert_unknown_caution(self.run_hook())
+
+    def test_an_extras_file_with_no_readable_visibility_prints_unknown_never_public(self):
+        self.point_at()
+        for keys in ({}, {"visibility": None}, {"visibility": 3}, {"visibility": "default"},
+                     {"visibility": "secret-ish"}):
+            with self.subTest(keys=keys):
+                self.write_extras(keys)
+                self.assert_unknown_caution(self.run_hook())
+
     def test_a_read_that_cannot_run_prints_unknown_never_a_level(self):
         self.point_at(layout_json="{broken")
         lines = self.run_hook()
-        self.assertIn("repo caution: unknown, the level could not be read", lines)
+        self.assertIn(UNKNOWN_LINE, lines)
         self.assertFalse(any(line.startswith("repo caution: public") for line in lines))
 
 
@@ -451,6 +484,98 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         unscripted, pin = self.pin_beside_a_clone_without_the_script()
         link = self.link_to(pin, unscripted + "-live")
         self.assert_no_live_pin_line(session_cwd=link)
+
+
+# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line
+# when the stamp an allowed publish wrote, <git common dir>/waiting-page-built, holds a blob sha other than
+# main's page.html. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
+# hook compares blob shas and never reads the text.
+WAITING_URL = "https://claude.ai/artifact/sspage"
+WAITING_PAGE_REL = "skills/waiting-page/page.html"
+WAITING_STAMP = "waiting-page-built"
+MAIN_PAGE = "<!doctype html>\n<title>Queue</title>\n"
+OLDER_PAGE = "<!doctype html>\n<title>Queue, older</title>\n"
+
+
+class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
+    """The session-start line for a waiting page built from a page other than main's (rule page-stale)."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        # The claude-settings clone stands in: a checkout whose origin/main holds the skill's page.
+        self.pointer = os.path.join(self.root, "claude-settings")
+        self.put(os.path.join(self.pointer, WAITING_PAGE_REL), MAIN_PAGE)
+        vcs(self.pointer, "init", "-q", "-b", "main", ".")
+        vcs(self.pointer, "add", "-A")
+        vcs(self.pointer, "commit", "-q", "-m", "main")
+        vcs(self.pointer, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.main_sha = vcs(self.pointer, "rev-parse", "origin/main:" + WAITING_PAGE_REL).stdout.strip()
+        older = os.path.join(self.root, "older.html")
+        self.put(older, OLDER_PAGE)
+        self.older_sha = vcs(self.pointer, "hash-object", older).stdout.strip()
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.pointer.replace("\\", "/"))
+        self.waiting_extras(self.primary)
+
+    def put(self, path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def waiting_extras(self, checkout):
+        """The checkout's extras file names the waiting page, as lint/layout.py reads it."""
+        self.put(os.path.join(checkout, ".claude", "layout-extras.json"),
+                 json.dumps({"kinds": {}, "waiting-page": WAITING_URL}))
+
+    def stamp(self, sha):
+        """Write the stamp into the common git dir of the primary checkout, where an allowed publish puts it."""
+        self.put(os.path.join(self.primary, ".git", WAITING_STAMP), sha + "\n")
+
+    def waiting_lines(self, lines):
+        return [line for line in lines if re.search("waiting page", line, re.IGNORECASE)]
+
+    def run_checked(self, session_cwd=None):
+        """The hook's lines. A control first: the hook ran and printed its checkout line, so an empty
+        waiting-page answer is not an empty run."""
+        lines = self.run_hook(session_cwd=session_cwd)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        return lines
+
+    def test_a_stamp_that_is_not_main_blob_prints_one_behind_line(self):
+        self.stamp(self.older_sha)
+        hits = self.waiting_lines(self.run_checked())
+        self.assertEqual(len(hits), 1, "expected one waiting page line, got %r" % hits)
+        self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
+
+    def test_a_stamp_equal_to_main_blob_prints_no_line(self):
+        self.stamp(self.main_sha)
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_no_stamp_prints_no_line(self):
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
+        self.stamp(self.older_sha)
+        vcs(self.pointer, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_a_repo_whose_extras_name_no_waiting_page_prints_no_line(self):
+        self.stamp(self.older_sha)
+        os.remove(os.path.join(self.primary, ".claude", "layout-extras.json"))
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_a_linked_worktree_reads_the_stamp_of_the_common_dir(self):
+        linked = os.path.join(self.root, "linked")
+        vcs(self.primary, "worktree", "add", "-q", "--detach", linked, "HEAD")
+        self.waiting_extras(linked)
+        self.stamp(self.older_sha)
+        hits = self.waiting_lines(self.run_checked(session_cwd=linked))
+        self.assertEqual(len(hits), 1, "expected one waiting page line from the linked worktree, got %r" % hits)
+        self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
 
 
 if __name__ == "__main__":

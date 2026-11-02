@@ -58,6 +58,12 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
                         "no guard matcher covers ExitWorktree: %r" % matchers)
 
+    def test_guard_matcher_covers_artifact(self):
+        # Rule page-stale refuses a waiting-page publish made by the Artifact tool, so the guard must see that call.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "Artifact") for m in matchers),
+                        "no guard matcher covers Artifact: %r" % matchers)
+
     def test_guard_matcher_covers_trust_card_tools(self):
         # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
         # matcher must fire on both full tool names.
