@@ -373,25 +373,32 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A sentence whose subject is the session ("The session merges it after your pick.") and that
-# names no `you`: the session makes that press, so the owner presses nothing. "you" in the sentence
-# (the session opens it and you press Merge) keeps the press.
-SESSION_PRESS = re.compile(r"^\s*(?:(?:then|and|after\s+your\s+pick),?\s+)?(?:the|a|this)\s+session\b", re.I)
-_SENTENCE_BREAK = re.compile(r"(?<=[.;!?])\s+|\n")
+# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# no `you`: the session makes that press, so the owner presses nothing. Only that clause is excused. A
+# press in another clause stays ("..., then press Merge"), and so does a clause that names `you`.
+SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|(?<=[.!?])\s+|\n|\b(?:then|and)\b", re.I)
 OWNER_YOU = re.compile(r"\byou\b", re.I)
+_PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
 def _owner_press_text(label, how) -> tuple:
     """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
-    text. When the how holds a sentence that the session presses (SESSION_PRESS), `press_text` leaves
-    that sentence out, and the label too, since the label names the act the session makes. Otherwise
-    the two are the same."""
+    text. `press_text` is the label and the how without each clause of the how that the session
+    presses (SESSION_PRESS). The label stays a press when it asks for one, unless every press verb in
+    it is a verb that such a clause also holds: "Merge PR #374" beside "The session merges PR #374
+    after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
     text = label + ". " + how
-    sentences = [x for x in _SENTENCE_BREAK.split(how) if x.strip()]
-    session = [x for x in sentences if SESSION_PRESS.search(x) and not OWNER_YOU.search(x)]
+    clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
+    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)]
     if not session:
         return text, text
-    return text, " ".join(x for x in sentences if x not in session)
+    done = " ".join(session).lower()
+    verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
+             for m in PRESS_VERB.finditer(label)]
+    label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
+    rest = [c for c in clauses if c not in session]
+    return text, " ".join(([] if label_ok else [label]) + rest)
 
 
 def _press_field_ok(text, links, context="", press_text=None) -> bool:
