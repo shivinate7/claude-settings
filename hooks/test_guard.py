@@ -20501,8 +20501,9 @@ WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_c
 # --------------------------------------------------------------------------- the simulator boot rules
 FAMILY = "simulator"
 #
-# Owner rulings 2026-10-10. A boot is `xcrun simctl boot`, an `xcodebuild -destination` that names a
-# shut-down simulator, or the simulator MCP control tool's `launch` naming a shut-down device.
+# Owner rulings. A boot is an `xcodebuild -destination` that names a shut-down simulator, or the
+# simulator MCP control tool's `launch` naming a shut-down device. The cap and twin rules judge only
+# those. A raw `xcrun simctl boot` is refused by simulator-boot-bypass before either is read.
 #   simulator-boot-cap   refuses a boot while two simulators are already booted, naming both.
 #   simulator-boot-twin  refuses a boot while an IDLE booted device of the same deviceTypeIdentifier
 #                        and runtime exists, naming its UDID. "Idle" is the shutdown tier's own
@@ -20877,6 +20878,13 @@ def register_simulator_bypass_cases():
         ("a cd before the boot", "cd x && " + raw),
         ("a comment opener in a string before the boot", 'echo "# note" && ' + raw),
         ("a lone quote in text before a bare boot", 'echo "it\'s up" && simctl boot ' + SIM_UC),
+        ("xargs of a list into a boot", "xcrun simctl list | grep X | xargs xcrun simctl boot"),
+        ("xargs of an echo into a boot", "echo " + SIM_UC + " | xargs xcrun simctl boot"),
+        ("open -ga Simulator", "open -ga Simulator"),
+        ("open -na Simulator", "open -na Simulator"),
+        ("open -an Simulator", "open -an Simulator"),
+        # A regression guard: a boot in a command substitution, refused now.
+        ("a boot in a command substitution", "echo $(xcrun simctl boot " + SIM_UC + ")"),
     )
     for name, command in denied:
         sh("simulator-boot-bypass: " + name, command, "deny", rule="simulator-boot-bypass",
@@ -20889,6 +20897,8 @@ def register_simulator_bypass_cases():
         ("echo of the boot text", 'echo "simctl boot"'),
         ("open -a Safari", "open -a Safari"),
         ("open a README", "open README.md"),
+        ("open -n a README", "open -n README.md"),
+        ("open -g a URL", "open -g https://x"),
         ("simctl bootstatus", "xcrun simctl bootstatus " + SIM_UC),
         ("a heredoc body that holds the boot", "cat > notes.md <<'EOF'\n" + raw + "\nEOF"),
         ("a multi-line quoted string whose middle line is the boot",
