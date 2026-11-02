@@ -21,9 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
-import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -294,23 +292,6 @@ class CheckCase(Fixture):
         rc, out = self.lint([], {"BASE_SHA": self.base_sha})
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", rel)
-
-
-class RunFolder(unittest.TestCase):
-    """The run-folder sweep (test-temp-standard). It runs on main: lint/_test_temp.py is the existing home."""
-
-    def test_sweep_removes_old_siblings_and_keeps_new_ones(self):
-        root = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="root_")
-        old = os.path.join(root, "1-%s" % uuid.uuid4().hex)
-        new = os.path.join(root, "2-%s" % uuid.uuid4().hex)
-        os.makedirs(old)
-        os.makedirs(new)
-        day_old = time.time() - 2 * 24 * 60 * 60
-        os.utime(old, (day_old, day_old))
-        own = _test_temp.run_folder(root)
-        self.assertFalse(os.path.exists(old), "an old sibling run folder stayed")
-        self.assertTrue(os.path.isdir(new), "a new sibling run folder was removed")
-        self.assertTrue(os.path.isdir(own), "the run's own folder was not made")
 
 
 if __name__ == "__main__":
