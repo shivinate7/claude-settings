@@ -2243,9 +2243,9 @@ sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
 # A leading cd is no second command (ask-commands-run-alone): the reset asks, once.
 # The reset alone, by -C, is the line above.
-sh("worktree: a cd into the worktree, then the reset, asks, from the shared checkout",
-   "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN,
-   lacks=(CHAIN_ASK,))
+sh("worktree: a leading cd into the shared checkout's own root, then a -C reset of the worktree, asks",
+   "cd " + slash(GITMAIN) + " && " + VCS + " -C " + slash(GITWT) + " reset --hard", "ask",
+   "shared-tree", cwd=GITMAIN, lacks=(CHAIN_ASK,))
 # DATA, NOT A DISCARD. A reset named inside a JSON payload piped to python runs nothing in the lane, so it allows.
 sh("worktree data: a reset named in a JSON payload piped to python, inside a worktree, allows",
    "printf '%s' '" + json.dumps({"tool_input": {"command": VCS + " reset --hard"}})
@@ -2272,9 +2272,9 @@ sh("per-file allow: restore --staged --worktree of one modified file",
 # checkout behind the lane. Chained with the cd and the python, that ask command still denies (ask-alone):
 # the python is a second real command.
 # The ask reason is not pinned to the -C form: the deny sends the agent to the lone command, whose own ask names it.
-chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask command",
-            "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-            cwd=GITMAIN)
+chained_ask("per-file ask: the incident form, a leading cd into the shared checkout's own root, a -C checkout of one worktree file, then python, denies as a chained ask command",
+            "cd " + slash(GITMAIN) + " && " + VCS + " -C " + slash(GITWT)
+            + " checkout fixtures/media-players.json && python3 x.py", cwd=GITMAIN)
 
 # ASK, in a linked worktree (GITWT). Each names a whole tree, a folder, a glob, or a reset.
 sh("per-file ask: checkout . in a worktree still asks", VCS + " checkout .", "ask",
@@ -2297,9 +2297,9 @@ sh("per-file deny: restore of one file in the shared checkout", VCS + " restore 
    "shared-tree", cwd=GITMAIN)
 sh("per-file deny: restore --staged --worktree of one file in the shared checkout",
    VCS + " restore --staged --worktree f.txt", "deny", "shared-tree", cwd=GITMAIN)
-sh("per-file deny: the incident form, a cd into the shared checkout, from a worktree",
-   "cd " + slash(GITMAIN) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
-   "deny", "shared-tree", cwd=GITWT)
+sh("per-file deny: the incident form, a leading cd into the worktree's own root, then a -C checkout in the shared checkout, from a worktree",
+   "cd " + slash(GITWT) + " && " + VCS + " -C " + slash(GITMAIN)
+   + " checkout fixtures/media-players.json && python3 x.py", "deny", "shared-tree", cwd=GITWT)
 sh("per-file deny: checkout . in the shared checkout", VCS + " checkout .", "deny",
    "shared-tree", cwd=GITMAIN)
 sh("per-file deny: restore . in the shared checkout", VCS + " restore .", "deny",
@@ -2449,11 +2449,12 @@ sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadabl
 sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
    VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT)
-# Limit: _run_dir reads the first -C against the shell cwd, so a shared checkout reached by `cd`
-# gets an ask here, not a deny. Main gives the same.
-sh("per-file ask: cd into the shared checkout, then git -C . restore f.txt, from a worktree, asks",
-   "cd " + slash(GITMAIN) + " && " + VCS + " -C . restore f.txt", "ask", "shared-tree", cwd=GITWT,
-   lacks=(CHAIN_ASK,))
+# Once a cd into the shared checkout was an ask here (a limit of _run_dir reading the first -C against
+# the shell cwd). The cd act now refuses that cd, so the shared checkout is named by -C, and the
+# restore in it denies.
+sh("per-file deny: a leading cd into the worktree's own root, then git -C shared restore f.txt, from a worktree",
+   "cd " + slash(GITWT) + " && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt", "deny",
+   "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
 sh("per-file deny: -C parent then a relative -C repo, from a plain folder",
    VCS + " -C " + slash(ROOT) + " -C repo restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # IDENTICAL SEGMENTS (decision agent-worktree-discard-is-noted, section "Named files in a linked
@@ -2481,28 +2482,27 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
-# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a
-# heredoc body holds a lone quote, and drops every later `cd`. The shell stays in the lane (cwd),
-# the body is data, and the restore after `cd` runs in the shared checkout, so it must deny. A lone
-# quote inside a shell `#` comment does not desync, so the python body keeps its quote outside any comment.
+# HEREDOC BODY WITH A LONE QUOTE, THEN A SHARED RESTORE. segment_roots (guard.py ~1228) loses sync
+# when a heredoc body holds a lone quote. The shell stays in the lane (cwd), the body is data, and the
+# restore names the shared checkout with -C, so it must deny. A lone quote inside a shell `#` comment
+# does not desync, so the python body keeps its quote outside any comment.
 sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
-   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "node <<'EOF'\n// don't\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=GITWT)
 sh("per-file deny: python heredoc, a lone double quote in the body, then cd shared and restore",
-   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS
-   + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
+   "python3 <<'EOF'\ntotal = \"\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", cwd=GITWT)
 
-# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
-# segments, every later segment is judged as the shared checkout, so a later discard of a dirty
-# file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
-# checkout. Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask command, not a
-# deny command. Each is chained, so each denies as a chained ask command (ask-alone).
-chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask command",
-            "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
-            + VCS + " restore f.txt\ncd " + slash(GITWT), cwd=GITWT)
-chained_ask("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore, denies as a chained ask command",
-            "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
-            + slash(GITWT), cwd=GITWT)
+# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the segments,
+# every later segment is judged as the shared checkout, so a later discard of a dirty file is denied.
+# A cd into the shared checkout is now refused by other-checkout, so each restore names the shared
+# checkout with -C and denies as shared-tree, chained or not.
+sh("per-file deny: two heredocs with lone apostrophes, then -C shared restore f.txt, cd lane last, from a worktree",
+   "node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n" + VCS + " -C " + slash(GITMAIN)
+   + " restore f.txt\ncd " + slash(GITWT), "deny", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
+sh("per-file deny: the node lone-apostrophe case with -C shared restore, then && cd lane, from a worktree",
+   "node <<'EOF'\n// don't\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt && cd "
+   + slash(GITWT), "deny", "shared-tree", cwd=GITWT, lacks=(CHAIN_ASK,))
 # CONTROL. No heredoc, so the walk stays in sync, and the cd keeps the ask command. A leading cd is no
 # second command (ask-commands-run-alone), so this asks. The case name keeps the first words that
 # hooks/mutate_guard.py names for this case.
@@ -2541,14 +2541,13 @@ chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the s
             VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
 chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
             VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
-# 4. A PowerShell Set-Location into the shared checkout. Set-Location is a move, read as a cd
-# (ask-commands-run-alone, guard_core _segment_cd_target), so the restore is judged in the shared checkout
-# and denies. The bash cd form pins the same deny: the nearest rows are the incident form (cd shared
-# && checkout, from a worktree) and the heredoc cd shared && restore, both shared-tree deny. The
-# aliases and Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
-sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a worktree",
-   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "deny", "shared-tree",
-   tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
+# 4. A PowerShell Set-Location into another checkout is refused by other-checkout
+# (worktree_home_cd_parse_forms_case). Here the Set-Location stays in the lane's own root, and the
+# restore names the shared checkout with -C, so it denies as shared-tree. The aliases and
+# Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
+sh("per-file deny: PowerShell Set-Location within the worktree, then -C shared restore f.txt, from a worktree",
+   "Set-Location " + slash(GITWT) + "; " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
+   "deny", "shared-tree", tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
 for _cd in ("sl", "chdir", "Push-Location"):
     chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask command"
                 % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
@@ -15808,8 +15807,8 @@ CD_DENY_FORMS = (
 )
 
 
-def _cd_problems(label, got, reason, paths):
-    """A cd refusal names other-checkout and none of `paths`. Any other verdict is a problem."""
+def _other_checkout_problems(label, got, reason, paths):
+    """An other-checkout refusal names the rule and none of `paths`. Any other verdict is a problem."""
     if got != "deny":
         return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
     problems = []
@@ -15833,7 +15832,8 @@ def worktree_home_cd_into_other_checkout_case():
             command = form.replace("TARGET", slash(target))
             label = "%s from %s" % (command, os.path.relpath(cwd, ROOT))
             got, reason = _decide_full("Bash", cwd, command=command)
-            problems += _cd_problems(label, got, reason, (ROOT, slash(ROOT), target, slash(target)))
+            problems += _other_checkout_problems(label, got, reason,
+                                                 (ROOT, slash(ROOT), target, slash(target)))
     if problems:
         return False, "; ".join(problems)
     return True, "every cd into another checkout is refused, bare or chained, and names no path"
@@ -15855,7 +15855,8 @@ def worktree_home_cd_parse_forms_case():
     for tool, cwd, command, target in rows:
         got, reason = _decide_full(tool, cwd, command=command)
         label = "%s %r from %s" % (tool, command, os.path.relpath(cwd, ROOT))
-        problems += _cd_problems(label, got, reason, (ROOT, slash(ROOT), target, slash(target)))
+        problems += _other_checkout_problems(label, got, reason,
+                                             (ROOT, slash(ROOT), target, slash(target)))
     if problems:
         return False, "; ".join(problems)
     return True, "a relative climb, a subshell and a PowerShell Set-Location into another checkout are refused"
@@ -15878,7 +15879,8 @@ def worktree_home_cd_agent_sibling_case():
         for form in ("cd TARGET", "cd TARGET && make"):
             command = form.replace("TARGET", slash(target))
             got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command=command)
-            problems += _cd_problems(command, got, reason, (ROOT, slash(ROOT), target, slash(target)))
+            problems += _other_checkout_problems(command, got, reason,
+                                                 (ROOT, slash(ROOT), target, slash(target)))
     if problems:
         return False, "; ".join(problems)
     return True, "an agent's cd into a sibling agent tree, or a prefix-named folder, is refused"
@@ -15971,8 +15973,8 @@ def worktree_home_cd_text_case():
     for template in CD_TEXT_DENY:
         command = template.replace("TARGET", slash(lane_b))
         got, reason = _decide_full("Bash", lane_a, command=command)
-        problems += _cd_problems(repr(command), got, reason,
-                                 (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+        problems += _other_checkout_problems(repr(command), got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
     if problems:
         return False, "; ".join(problems)
     return True, "a cd in a comment, a quote or a heredoc body passes; a real cd after one is refused"
@@ -15991,6 +15993,27 @@ def worktree_home_cd_override_case():
     note = ov_type(config, session, "override 15m", 30)
     ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
     return ok, why or "refused before the override, lifted under it"
+
+
+def worktree_home_cd_then_write_case():
+    """Rule 0, other-checkout, the write scan follows a leading cd. A cd that the cd act passes (into
+    the cwd's own root, here its `src` folder) moves the folder a later relative write resolves
+    against, so the write lands in another checkout only from there, and the guard refuses it. The
+    control writes the same text with no cd from the primary, which lands outside the clone.
+    Kills the mutant "other-checkout: a shell target ignores a leading cd"."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcowrite")
+    own_src = os.path.join(primary, "src")
+    # From `src` this names lane-b's file. From the primary checkout it names a folder outside the clone.
+    relative = slash(os.path.relpath(os.path.join(lane_b, "a.txt"), own_src))
+    problems = []
+    got, reason = _decide_full("Bash", primary, command="cd " + slash(own_src) + " && echo x > " + relative)
+    problems += _other_checkout_problems("cd into its own src, then a relative write into lane-b", got,
+                                         reason, (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    _expect_call(problems, "the same relative write with no cd, from the primary", "allow", "Bash",
+                 primary, None, "echo x > " + relative)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a relative write into another checkout, resolved from the cd's folder, is refused"
 
 
 def worktree_home_later_field_case():
@@ -16392,6 +16415,8 @@ LOG_CHECKS = (
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
      worktree_home_cd_override_case),
+    ("worktree-home: any session's write into another checkout is refused after a cd the cd act "
+     "passes, when the write resolves against that cd's folder", worktree_home_cd_then_write_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -21140,7 +21165,8 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CDT)", "branch-worktree"),
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CST)", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
-    ("worktree-home: any session's write into another checkout", "worktree-home"),
+    ("worktree-home: any session's write into another checkout of its clone", "worktree-home"),
+    ("worktree-home: any session's write into another checkout is refused after a cd", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
