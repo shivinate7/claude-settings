@@ -1026,5 +1026,103 @@ class Identity(Tree):
         self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
 
 
+# The mockup homes of a repo (rule building-allow-list-is-the-constant). The repo is "fixture", from its origin, so
+# its machine home is <home>/Developer/fixture-imports: the name segment of owner/name, never the owner.
+MACHINE = "fixture-imports"
+ORIGIN = "git@github.com:owner/fixture.git"
+WIN_HOME = "C:\\Users\\x"  # a Windows owner's home, given as the judge's home
+APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+
+
+class MockupHomes(Tree):
+    """The mockup homes of a repo: the machine home ~/Developer/<repo name>-imports, with one item folder below it,
+    and the repo's design folder. Two readers: mockup_homes(root, home=None) gives the two folders, and
+    mockup_home_problem(root, file, home=None) gives None for a file in a home and a sentence for any other file.
+    The home is passed in, so no case reads or writes the real home. A missing name fails by name (not built yet)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.put(".git/config", '[remote "origin"]\n\turl = %s\n' % ORIGIN)
+        self.home = os.path.join(self.tree, "home")
+        os.makedirs(self.home)
+
+    def fn(self, name):
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
+    def judge(self, file, home=None):
+        return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
+
+    def passes(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsNone(problem, "the judge refused %r: %s" % (file, problem))
+
+    def refuses(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsInstance(problem, str, "the judge passed %r, want a refusal" % (file,))
+        self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
+
+    def test_homes_name_the_machine_home_and_the_design_folder(self):
+        homes = self.fn("mockup_homes")(self.tree, home=self.home)
+        want = (os.path.join(self.home, "Developer", MACHINE),
+                os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/")))
+        self.assertEqual(tuple(str(h) for h in homes), want, "mockup_homes names the wrong two folders")
+
+    def test_item_file_under_the_machine_home_passes(self):
+        self.passes(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
+
+    def test_tilde_form_expands_to_the_machine_home(self):
+        self.passes("~/Developer/%s/item48/a.html" % MACHINE)
+
+    def test_design_folder_file_passes_when_repo_relative(self):
+        self.passes("docs/design/item48/a.html")
+
+    def test_design_folder_file_passes_when_absolute_in_the_checkout(self):
+        self.passes(os.path.join(self.tree, "docs", "design", "item48", "a.html"))
+
+    def test_windows_owner_machine_home_file_passes(self):
+        self.passes("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
+
+    def test_windows_owner_path_passes_in_any_case_on_drive_and_folders(self):
+        self.passes("c:\\USERS\\X\\developer\\Fixture-Imports\\ITEM48\\A.HTML", home=WIN_HOME)
+
+    def test_windows_owner_path_passes_with_slash_separators(self):
+        self.passes("C:/Users/x/Developer/%s/item48/a.html" % MACHINE, home=WIN_HOME)
+
+    def test_application_support_path_with_spaces_fails(self):
+        self.refuses(APP_SUPPORT)
+
+    def test_windows_appdata_mockup_fails(self):
+        self.refuses("C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html", home=WIN_HOME)
+
+    def test_dotdot_escape_out_of_the_home_fails(self):
+        self.refuses("~/Developer/%s/item48/../../../escape/a.html" % MACHINE)
+
+    def test_http_url_fails(self):
+        self.refuses("https://example.com/shot.png")
+
+    def test_claude_artifact_asset_url_fails(self):
+        self.refuses(SHOT_URL)
+
+    def test_missing_file_fails(self):
+        self.refuses(None)
+
+    def test_empty_file_fails(self):
+        self.refuses("")
+
+    def test_file_directly_in_the_imports_folder_fails(self):
+        self.refuses("~/Developer/%s/a.html" % MACHINE)
+
+    def test_checkout_file_outside_the_design_folder_fails(self):
+        self.refuses(os.path.join(self.tree, "scratch", "a.html"))
+
+    def test_relative_file_outside_the_design_folder_fails(self):
+        self.refuses("scratch/a.html")
+
+
 if __name__ == "__main__":
     unittest.main()
