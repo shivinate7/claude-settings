@@ -786,13 +786,13 @@ def upkeep(steps, added, marks, strays, work=None):
         if not is_feel(d):
             closing.append("%s (%s)" % (k, got))
         elif device_check(d) == "valid":
-            closing.append("%s (%s; open a try-it task)" % (k, got))
+            closing.append("%s (%s; open a try-it item)" % (k, got))
         else:
-            waiting.append("%s (%s%s)" % (k, got, "; device check unreadable" if device_check(d) == "bad" else ""))
+            waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
-            ("landed, waiting for a simulator or device check", waiting),
+            ("landed, waiting for a device trial", waiting),
             ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),

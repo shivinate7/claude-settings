@@ -4,15 +4,18 @@
 Records live in the folders lint/layout.json marks as records. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
-Also fails when a debt file DELETED against origin/main was a feel-fix (a line starting `**Feel.**`) and had no
-device check (a line starting `**Device check.**`): a fix CI passes can still feel wrong on a device.
+Also fails when a debt file deleted, renamed out of the debt folder, or edited to drop its Feel line against
+origin/main was a feel-fix (a line starting `**Feel.**`) with no valid device-trial line (`**Device check.**`, then
+simulator or device, then an ISO time with a zone): a fix CI passes can still feel wrong on a device.
 
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
+import datetime
 import os
+import re
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
@@ -40,21 +43,20 @@ def git_names(root, *args):
 
 
 def changes(root):
-    """(added, deleted) files of `root` against its origin/main, from one process. Raises Unknown when git cannot say."""
+    """(added, moved) files of `root` against its origin/main, from one process. `moved` holds (status, old, new) for
+    each delete, modify and rename; a rename names two paths. Raises Unknown when git cannot say."""
     names = git_names(root, "diff", "--name-status", "-z", "origin/main...HEAD")
-    added, deleted, i = [], [], 0
+    added, moved, i = [], [], 0
     while i < len(names):
         status = names[i]
-        i += 1
-        if status[0] in "RC":  # a rename or copy names two paths and is neither an add nor a delete
-            i += 2
-            continue
+        n = 2 if status[0] in "RC" else 1
+        paths = names[i + 1:i + 1 + n]
+        i += 1 + n
         if status == "A":
-            added.append(names[i])
-        elif status == "D":
-            deleted.append(names[i])
-        i += 1
-    return added, deleted
+            added.append(paths[0])
+        elif status[0] in "DMR":
+            moved.append((status[0], paths[0], paths[-1]))
+    return added, moved
 
 
 def added(root):
@@ -62,21 +64,50 @@ def added(root):
     return changes(root)[0]
 
 
-def unchecked_feel_debts(root, deleted):
-    """The deleted debt files whose origin/main text has a line starting `**Feel.**` and none starting
-    `**Device check.**`. Raises Unknown when git cannot show a file."""
+FEEL = re.compile(r"^(?:- )?\*\*Feel\.\*\*")
+TRIAL = re.compile(r"^(?:- )?\*\*Device check\.\*\*\s*(simulator|device)[,\s]+(\S+)\s*$")
+
+
+def has_trial(line):
+    """True for a device-trial line: the marker, simulator or device, then an ISO time with a zone."""
+    m = TRIAL.match(line)
+    if not m:
+        return False
+    try:
+        return datetime.datetime.fromisoformat(m.group(2).replace("Z", "+00:00")).tzinfo is not None
+    except ValueError:
+        return False
+
+
+def show(root, ref, path):
+    r = _nowindow.run(["git", "show", ref + ":" + path], cwd=root, capture_output=True, encoding="utf-8",
+                      errors="replace")
+    if r.returncode:
+        raise Unknown("git show failed: %s" % r.stderr.strip())
+    return r.stdout.splitlines()
+
+
+def unchecked_feel_debts(root, moved):
+    """[(path, how)] for each debt whose origin/main text has a Feel line and no valid device-trial line, and that
+    the branch deletes or renames out of the debt folder ("deleted"), or edits or renames inside it so the Feel
+    line is gone ("dropped"). Markers count at line start, with an optional "- ". Raises Unknown when git cannot
+    show a file."""
     dirs = tuple(p + "/" for p in layout.candidates(root, "debts"))
+
+    def debt(f):
+        return f.startswith(dirs) and f.endswith(".md")
+
     out = []
-    for f in deleted:
-        if not (f.startswith(dirs) and f.endswith(".md")):
+    for status, old, new in moved:
+        if not debt(old):
             continue
-        r = _nowindow.run(["git", "show", "origin/main:" + f], cwd=root, capture_output=True, encoding="utf-8",
-                          errors="replace")
-        if r.returncode:
-            raise Unknown("git show failed: %s" % r.stderr.strip())
-        lines = r.stdout.splitlines()
-        if any(l.startswith("**Feel.**") for l in lines) and not any(l.startswith("**Device check.**") for l in lines):
-            out.append(f)
+        lines = show(root, "origin/main", old)
+        if not any(FEEL.match(l) for l in lines) or any(has_trial(l) for l in lines):
+            continue
+        if status == "D" or not debt(new):
+            out.append((old, "deleted"))
+        elif not any(FEEL.match(l) for l in show(root, "HEAD", new)):
+            out.append((new, "dropped"))
     return out
 
 
@@ -105,8 +136,8 @@ def main(args):
         if args:  # files given: git is not read, so the feel-fix check does not run
             files, feel = args, []
         else:
-            files, deleted = changes(ROOT)
-            feel = unchecked_feel_debts(ROOT, deleted)
+            files, moved = changes(ROOT)
+            feel = unchecked_feel_debts(ROOT, moved)
     except layout.LayoutError as err:
         print("check_record_slugs: FAIL: " + str(err))
         return 1
@@ -116,8 +147,9 @@ def main(args):
     bad = too_long(files, dirs)
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
-    for f in feel:
-        print("check_record_slugs: FAIL: feel-fix debt deleted with no device check: " + f)
+    for f, how in feel:
+        print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
+              % ("deleted" if how == "deleted" else "lost its Feel line", f))
     return 1 if bad or feel else 0
 
 
