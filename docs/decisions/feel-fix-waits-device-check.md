@@ -35,15 +35,14 @@ names the device trial and says a feel on a real device is the owner's to judge.
   `**Feel.**` line. It fails unless origin/main's text holds a valid device-trial line. Its fix PR keeps the
   file.
 
-Upkeep list (`skills/roadmap/build.py`). The printed row label and entry text keep the words `check` and
-`task`, as the code prints them:
+Upkeep list (`skills/roadmap/build.py`):
 
-- Row `landed, waiting for a simulator or device check`: each landed step that is a feel-fix with no valid
-  device trial. Entry `<id> (<marks>)`, where `<marks>` is the step's pull request (`#N`), or its commit's
-  short hash when no pull request is known, joined with `, `. When `deviceCheck` is present but not valid,
-  the entry reads `<id> (<marks>; device check unreadable)`.
+- Row `landed, waiting for a device trial`: each landed step that is a feel-fix with no valid device trial.
+  Entry `<id> (<marks>)`, where `<marks>` is the step's pull request (`#N`), or its commit's short hash when
+  no pull request is known, joined with `, `. When `deviceCheck` is present but not valid, the entry reads
+  `<id> (<marks>; device trial unreadable)`.
 - Row `landed, waiting for triage to close` drops those steps. A feel-fix step with a valid device trial
-  reads `<id> (<marks>; open a try-it task)`.
+  reads `<id> (<marks>; open a try-it item)`.
 - Row `doing` or `active` with no live lane: a landed feel-fix with no valid device trial is not listed. It
   never reads "set to done".
 - The new row sits just before `landed, waiting for triage to close`. It adds no status.
