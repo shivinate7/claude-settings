@@ -943,3 +943,4 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- lane-agent-stray-interrupt: a record-writer in lane worktree-base-copies-remove called `mcp__claude-code-remote__interrupt_session` with no target, 2026-11-01 23:47 CST; the auto-mode classifier refused it and no session was touched. Refusing stays as on main. The refusal guard then asked an "allow?" question the owner did not need (lint/report_guard.py). Decision: owner-override
