@@ -945,3 +945,7 @@
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
 - frozen-sed-in-place-long: `sed --in-place` on a frozen path is allowed; the frozen rule reads only `-i` (hooks/guard_frozen.py writes_to)
 - builder-shell-bulk-writes: a builder's bulk write that names no test path (find -exec sed -i, xargs, a formatter on tests/) is only logged at commit, push and stop (hooks/guard.py builder_shell_hit)
+- builder-sed-quoted-dash-i: a quoted sed script holding a spaced `-i` (`sed -n '/ -i /p' tests/x.py`) is refused; `_sed_in_place_on` splits text that `_words_of` already split (hooks/guard_frozen.py)
+- builder-cache-exempt-narrow: `rm -f tests/*.pyc` and `rm -rf tests/.hypothesis` are refused; only `__pycache__` and `.pytest_cache` are exempt (hooks/guard.py BUILD_CACHE_DIRS)
+- builder-shell-wrapped-writes: a builder's test write inside `bash -c`, `timeout`, `xargs` or a loop is only logged at commit, push and stop (hooks/guard.py builder_shell_hit)
+- builder-crash-wrap-untested: no case pins the crash wrapper of rule 0b2 or the Edit-tool build-cache exemption; both were checked by hand (hooks/test_guard.py)
