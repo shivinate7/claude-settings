@@ -33,6 +33,13 @@ A reply that holds Input Needed or a prose line ending in `?` also gets the past
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
+The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
+that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
+unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
+`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
+refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
+kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -336,6 +343,67 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# answered-needs-source: a reply line that says "answered" names where the answer came from. The source
+# patterns reuse DONE_REF_RE (`#<n>`, PR refs, commit hashes, /pull/ and /commit/ URLs) and CODE_SPAN. Fence lines
+# are found as in prose_questions. A quote pairs only inside one line. A repo path is a token with `/` that has a
+# file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
+# The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
+# same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
+ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
+ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
+ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
+ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
+ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
+ANSWERED_FILE_RE = re.compile(
+    r"\b[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log|cfg|ini)\b")
+ANSWERED_SOURCE_RE = re.compile(
+    r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
+ANSWERED_REASON = (
+    "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
+    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
+    "inbox id, or the time), or say what is meant in other words. Lines: ")
+
+
+def _has_path(line):
+    for token in line.split():
+        if "/" in token and (re.search(r"\w\.\w", token) or ANSWERED_TOP_DIRS & set(re.split(r"[/\s]+", token))):
+            return True
+    return bool(ANSWERED_FILE_RE.search(line))
+
+
+def _claims_answered(plain):
+    """True when `plain` holds the word with no negator in its clause before it."""
+    for m in ANSWERED_RE.finditer(plain):
+        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
+        if not ANSWERED_NEGATOR_RE.search(clause):
+            return True
+    return False
+
+
+def answered_problem(text):
+    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
+    if not ANSWERED_RE.search(text):
+        return ""
+    bad, fence = [], ""
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence or body.rstrip("*_)\"' ").endswith("?"):
+            continue
+        plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        if not _claims_answered(plain):
+            continue
+        kept = CODE_SPAN.sub(lambda m: m.group(2), body)
+        if DONE_REF_RE.search(kept) or ANSWERED_SOURCE_RE.search(kept) or _has_path(kept):
+            continue
+        bad.append(body)
+    return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -785,6 +853,9 @@ def rewrite_problems(hook):
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
+        answered = answered_problem(text)
+        if answered:
+            reasons.append(answered)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -1059,6 +1130,10 @@ def main():
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
     relay = relay_reasons(after, text, hook.get("cwd"))
+    try:
+        relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+    except Exception:
+        pass
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
@@ -1112,7 +1187,7 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
-    reasons += relay
+    reasons += [r for r in relay if r]
     try:
         recovered = recovered_problem(records, text) if shape_ok else ""
         if recovered:

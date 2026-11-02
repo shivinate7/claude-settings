@@ -6,10 +6,13 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_report_guard.py -v
 """
+import contextlib
 import errno
 import importlib.util
+import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -41,7 +44,7 @@ _ISOLATION = {}
 
 
 def setUpModule():
-    _ISOLATION["dir"] = _test_temp.run_folder()
+    _ISOLATION["dir"] = RUN_FOLDER  # the run's one folder, made at import (test-temp-standard); teardown removes it
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
     stub = os.path.join(_ISOLATION["dir"], "stub")  # the stub lives in this run's folder
@@ -1100,6 +1103,19 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
+        # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
+        # "answered" with no source is refused again. Without the marker the same line stays quiet
+        # (test_an_green_stop_hook_active_stays_quiet). A sourced line in the same rewrite passes.
+        self.missing_report_block()
+        reply = "Answered: no permission rule can lift it.\n\n" + self.GOOD
+        out = self.stop(reply, True)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Answered: no permission rule can lift it.", out["reason"])
+        self.missing_report_block()
+        self.assertIsNone(self.stop("Item 143 answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
 
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
         bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
@@ -3250,6 +3266,296 @@ class PastRulingRelay(unittest.TestCase):
         records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
         out, _ = self.stop(self.decided, records=records)
         self.assertNotIn("question-keys", self.reason(out), out)
+
+
+
+class AnsweredNeedsSourceTests(unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
+
+    def hook(self, reply, landed=False, stop_hook_active=False):
+        records = [human("ask the owner")]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+
+    def verdict(self, reply, **kw):
+        run = run_guard(REPORT_GUARD, self.hook(reply, **kw))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, *needles, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block", reply)
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+        return out
+
+    def assert_allowed(self, reply, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    # Red: each case below fails until the verdict exists.
+
+    def test_an_red_synthetic_f188_replay_blocks(self):
+        # Synthetic replay, not a copy. The real F188 line (docs/plans/owner-feedback-audit.md, decision
+        # answered-needs-source) never used the word. This line stands in for a reply that did.
+        # Catches: a line that says "Answered" with no source passes.
+        self.assert_blocked("Answered: no permission rule can lift it.", "Answered: no permission rule can lift it.")
+
+    def test_an_red_any_case_and_any_position_blocks(self):
+        rows = [
+            # Catches: an upper-case ANSWERED passes, so the match is case-sensitive.
+            "The owner ANSWERED it.",
+            # Catches: the word at the end of a line passes.
+            "The owner said yes and answered",
+            # Catches: a word for a number is read as item <n>.
+            "Item one answered in chat.",
+            # Catches: a lane number is read as a source.
+            "Lane 4 answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_each_offending_line_is_listed_in_one_block(self):
+        # Catches: only the first offending line is listed, or a cited line is listed with the red ones.
+        cited = "Item 143 answered in chat at 17:25 CST."
+        reply = "\n".join(["Answered: no permission rule can lift it.", cited, "The owner answered it."])
+        out = self.assert_blocked(reply, "Answered: no permission rule can lift it.", "The owner answered it.")
+        self.assertNotIn(cited, out["reason"])
+
+    def test_an_red_lone_quote_opens_no_quoted_phrase(self):
+        # Catches: a lone double quote counts as a quoted owner phrase, so a line with no pair passes.
+        self.assert_blocked('Answered 9" after the call.', 'Answered 9" after the call.')
+
+    def test_an_red_quotes_do_not_pair_across_lines(self):
+        # Catches: a quote on one line pairs with a quote on the next line, so the first line passes.
+        first = 'Answered, the owner wrote "no.'
+        self.assert_blocked(first + '\nHe then said "yes" later.', first)
+
+    def test_an_red_fence_marker_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
+        self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
+                            "Typed ``` in the middle, then answered.", "The next line answered too.")
+
+    def test_an_red_text_after_a_closed_fence_is_judged(self):
+        # Catches: a fence that never closes in the scan hides the lines after it.
+        self.assert_blocked("```\nkeep the apps\n```\nAnswered: no permission rule can lift it.",
+                            "Answered: no permission rule can lift it.")
+
+    def test_an_red_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        reply = "Answered: no permission rule can lift it.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_blocked(reply, "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_joins_a_missing_report_in_one_block(self):
+        # Catches: the answered line is dropped when the report is missing, or sent as a second block.
+        reply = "Answered: no permission rule can lift it.\n\nAll done."
+        self.assert_blocked(reply, "Report-shape guard", "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_and_or_is_not_a_repo_path_blocks(self):
+        # Ruling (lane orchestrator, process-only): "and/or" is not a repo path, so the slash in it cites nothing.
+        self.assert_blocked("Answered: use a and/or b.", "Answered: use a and/or b.")
+
+    def test_an_red_double_quoted_phrase_is_no_source(self):
+        # Lane choice (process-only): a double-quoted phrase is no longer a source. This re-points the
+        # quoted-phrase row that the green list held.
+        rows = [
+            # Catches: an owner phrase in double quotes still cites the line.
+            'Answered "no, keep the apps" in chat.',
+            # Catches: a quoted label in a Q-line still cites the line.
+            'Q1 ("Departs from" line) was answered.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_each_source_cites_the_word(self):
+        rows = [
+            # Catches: a URL is not read as a source.
+            "Answered at https://github.com/shivinate7/claude-settings/pull/1008 today.",
+            # Catches: a PR ref #<n> is not read as a source.
+            "Answered on PR #1008.",
+            # Catches: a commit hash is not read as a source.
+            "Answered in commit 1a2b3c4d.",
+            # Catches: a repo path with a slash is not read as a source.
+            "Answered in lint/report_guard today.",
+            # Catches: a repo path ending in a file extension is not read as a source.
+            "Answered in report_guard.py and its tests.",
+            # Catches: item <n> is not read as a source.
+            "Answered in item 143.",
+            # Catches: page:<n> is not read as a source.
+            "Answered on page:12.",
+            # Catches: an fb- inbox id is not read as a source.
+            "fb-1042 answered in chat.",
+            # Catches: a session_ id is not read as a source.
+            "Answered by session_0a1b2c3d4e5f.",
+            # Catches: a Central time HH:MM is not read as a source.
+            "Answered at 17:25 CST.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_docs_path_after_the_word_passes(self):
+        # Brief (b): the synthetic F188 line with a docs path.
+        self.assert_allowed("Answered: no permission rule can lift it. (docs: code.claude.com/docs/en/permissions)")
+
+    def test_an_green_item_and_central_time_pass(self):
+        # Brief (c): the item number and the Central time both cite.
+        self.assert_allowed("Item 143 answered in chat at 17:25 CST.")
+
+    def test_an_green_negations_and_inbox_home_word_pass(self):
+        rows = [
+            # Catches: unanswered is read as the word.
+            "Q2 is unanswered.",
+            # Catches: not answered is read as the word.
+            "The owner has not answered.",
+            # Catches: a line that opens with Not answered is read as the word.
+            "Not answered.",
+            # Catches: never answered is read as the word.
+            "The owner never answered.",
+            # Catches: hasn't answered is read as the word.
+            "The lane hasn't answered yet.",
+            # Catches: the upper-case form of a negation is read as the word.
+            "The owner has NOT ANSWERED.",
+            # Catches: the inbox home word in [question] -> answered is read as a claim.
+            "[question] -> answered",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_code_span_and_fence_pass(self):
+        rows = [
+            # Catches: the word inside a one-tick code span is read as a claim.
+            "Use `answered` as the probe.",
+            # Catches: the word inside a two-tick code span is read as a claim.
+            "Use ``answered`` as the probe.",
+            # Catches: the words inside a multi-line fence are read as claims.
+            "```\nAnswered: no permission rule can lift it.\nThe owner answered it.\n```",
+            # Catches: a fence with an info string is read as text.
+            "```text\nanswered\n```",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_not_yet_answered_passes(self):
+        # Ruling (lane orchestrator, process-only): "not yet answered" is exempt, like "not answered".
+        for line in ("The owner has not yet answered.", "Not yet answered."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_source_inside_a_code_span_counts(self):
+        # Ruling (lane orchestrator, process-only): a source in an inline code span counts.
+        for line in ("Answered in `report_guard.py`.", "Answered at `https://github.com/o/r/pull/1`."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_sources_match_in_any_case(self):
+        # Catches: item <n> and fb- ids match only in lower case, so a capitalised source reads as no source.
+        for line in ("Item 143 answered in chat.", "FB-1042 answered in chat."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_negated_forms_beyond_the_list_pass(self):
+        # Catches: a negated "answered" outside the exempt list (wasn't, has not been, could not be, haven't,
+        # has yet to be, No one) is read as a claim.
+        rows = [
+            "The ask wasn't answered.",
+            "The ask has not been answered.",
+            "No one answered.",
+            "The ask could not be answered.",
+            "We haven't answered.",
+            "The ask has yet to be answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_hyphen_joined_word_is_not_the_word(self):
+        # Catches: the word inside a hyphen-joined name (answered-needs-source) is read as the word.
+        self.assert_allowed("The rule answered-needs-source holds.")
+
+    def test_an_green_no_and_nothing_forms_pass(self):
+        # Catches: "No question", "None", "Nothing", and "Cannot tell whether" with "answered" are read as a claim.
+        rows = [
+            "No question was answered.",
+            "None were answered.",
+            "Nothing was answered.",
+            "Cannot tell whether it was answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_tilde_fence_passes(self):
+        # Catches: a line inside a ~~~ fence is read as text, since only ``` fences are skipped.
+        rows = [
+            "~~~\nThe owner answered it.\n~~~",
+            "~~~text\nanswered\n~~~",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_question_line_passes(self):
+        # Catches: a question that asks whether the word happened is read as a claim.
+        self.assert_allowed("Has the owner answered?")
+
+    def test_an_green_word_forms_that_are_not_the_word_pass(self):
+        # Catches: answers, answering, or answer is read as answered.
+        self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
+
+    def test_an_green_landed_turn_with_a_cited_line_passes(self):
+        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_allowed(reply, landed=True)
+
+    def test_an_green_stop_hook_active_stays_quiet(self):
+        # Catches: the check blocks a rewrite, which this guard leaves quiet today.
+        self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
+
+    # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
+    # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
+
+    def guard_opens(self, reply):
+        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
+        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
+        import layout  # noqa: F401
+        import local_time  # noqa: F401
+        hook = self.hook(reply)
+        opened, real_open = [], open
+
+        def watch(path, mode="r", *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, mode, *args, **kwargs)
+        out = io.StringIO()
+        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
+                contextlib.redirect_stdout(out):
+            runpy.run_path(REPORT_GUARD, run_name="__main__")
+        return out.getvalue().strip(), opened, hook["transcript_path"]
+
+    def test_an_cost_no_word_opens_only_the_transcript(self):
+        # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
+        for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
+            with self.subTest(reply=reply):
+                out, opened, transcript = self.guard_opens(reply)
+                self.assertEqual(out, "")
+                self.assertEqual(set(opened), {transcript})
+
+    def test_an_cost_offending_line_still_opens_only_the_transcript(self):
+        # The block is the red part. The read is the cost: the verdict reads the reply, and nothing else opens.
+        out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
+        self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
+        self.assertEqual(set(opened), {transcript})
 
 
 class PendingRefusalTests(unittest.TestCase):
