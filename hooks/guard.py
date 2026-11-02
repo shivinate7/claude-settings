@@ -2123,8 +2123,11 @@ def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A call whose prompt, model or agentType the scan cannot read, or that names no
-    model, is skipped, as step_up_hit skips it: a static read never guesses. Other tools yield nothing."""
+    (decision agent-model-cap). A brief the scan cannot read, or a spread in the options, carries no marker and
+    grants nothing, so the spawn is judged with an empty brief (owner ruling, item 127 pick a, Nov 1 17:25 CST). A
+    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
+    guesses a model. step_up_hit still skips an unread brief, as a marker it cannot read has no round to check.
+    Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
         yield tool_input
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -2133,9 +2136,9 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if prompt is None or unseen & {"model", "agentType", "..."} or not keys.get("model"):
+            if unseen & {"model", "agentType"} or not keys.get("model"):
                 continue
-            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt}
+            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or ""}
 
 
 def role_model_check(tool: str, tool_input):
