@@ -11096,6 +11096,76 @@ sh("builder-test: Bash python heredoc write to a test file is allowed for the te
 sh("builder-test: Bash python heredoc write to a test file is allowed in the main session",
    PY_VAR_WRITE, "allow", cwd=NOGIT)
 
+# ---- the shell write shapes the cases above do not reach. A bash or sh body is a script the guard
+# does not read. A path built by os.path.join, a string concatenation or an f-string is a value the
+# guard does not resolve. A long option, perl -pi and a glob write a test file the guard does not
+# name. The FALSE ALARM rows are reads, prints, comments and non-test writes that name a test path,
+# and a write into a test folder outside every repo. LINTREPO holds lint/test_x.py on disk, so a
+# glob in lint/ expands to a test file.
+LINTREPO = os.path.join(ROOT, "lintrepo")  # a checkout holding a test file and a glob target
+
+
+def _build_lintrepo():
+    make_repo(LINTREPO, {"lint/test_x.py": "x = 1\n", "lint/app.py": "x = 1\n",
+                         "hooks/guard.py": "x = 1\n"})
+
+
+lazy_fixture([LINTREPO], _build_lintrepo)
+
+BASH_BODY_WRITE = "bash <<'EOF'\nsed -i 's/a/b/' lint/test_x.py\nEOF"
+GLOB_WRITE = "sed -i 's/old/new/g' lint/*.py"
+SHELL_SHAPE_WRITES = (
+    ("bash heredoc body runs sed -i on a test file", BASH_BODY_WRITE),
+    ("sh heredoc body runs sed -i on a test file",
+     "sh <<'EOF'\nsed -i 's/a/b/' lint/test_x.py\nEOF"),
+    ("bash heredoc body with a # inside a string before a test-file write",
+     "bash <<'EOF'\necho \"# note\"\nsed -i 's/a/b/' lint/test_x.py\nEOF"),
+    ("bash heredoc body with a lone quote before a test-file write",
+     "bash <<'EOF'\necho \"don't\"\nsed -i 's/a/b/' lint/test_x.py\nEOF"),
+    ("bash heredoc body with a string over two lines before a test-file write",
+     "bash <<'EOF'\necho \"line one\n# two\"\nsed -i 's/a/b/' lint/test_x.py\nEOF"),
+    ("python heredoc writes a test file through os.path.join",
+     "python3 - <<'EOF'\nimport os\nopen(os.path.join('lint', 'test_x.py'), 'w').write(x)\nEOF"),
+    ("python heredoc writes a test file through a string concatenation",
+     "python3 - <<'EOF'\nopen('lint/' + 'test_x.py', 'w').write(x)\nEOF"),
+    ("python heredoc writes a test file through a pathlib f-string",
+     "python3 - <<'EOF'\nfrom pathlib import Path\nPath(f'lint/test_x.py').write_text(x)\nEOF"),
+    ("sed --in-place edits a test file", "sed --in-place 's/a/b/' lint/test_x.py"),
+    ("perl -pi edits a test file", "perl -pi -e 's/a/b/' lint/test_x.py"),
+    ("sed -i over a glob that expands to a test file", GLOB_WRITE),
+)
+for _what, _command in SHELL_SHAPE_WRITES:
+    sh("builder-test shell: Bash %s is refused" % _what, _command, "deny", rule=BT,
+       carries=("test-author", "Report"), **dict(B, cwd=LINTREPO))
+SHELL_SHAPE_ALLOWS = (
+    ("bash heredoc body with a commented-out test-file write",
+     "bash <<'EOF'\n# sed -i 's/a/b/' lint/test_x.py\necho done\nEOF"),
+    ("bash heredoc body that writes a non-test file",
+     "bash <<'EOF'\nsed -i 's/a/b/' hooks/guard_new.py\nEOF"),
+    ("python heredoc writes a non-test file through os.path.join",
+     "python3 - <<'EOF'\nimport os\nopen(os.path.join('lint', 'rule.py'), 'w').write(x)\nEOF"),
+    ("grep of a test file that names copy", "grep -n copy hooks/test_guard.py"),
+    ("sed -n print of a test file that names move", "sed -n '/move/p' lint/test_x.py"),
+    ("gh comment whose body names a test file", 'gh pr comment 12 --body "copy of lint/test_x.py was read"'),
+    ("pytest run of a test file", "pytest lint/test_x.py"),
+    ("test run with its output redirected to a non-test file", "python3 hooks/test_guard.py > out.txt"),
+    ("git diff of a test file", VCS + " diff lint/test_x.py"),
+    ("sed -i over a glob that holds no test file", "sed -i 's/old/new/g' hooks/*.py"),
+)
+for _what, _command in SHELL_SHAPE_ALLOWS:
+    sh("builder-test shell: Bash %s is allowed" % _what, _command, "allow", **dict(B, cwd=LINTREPO))
+sh("builder-test shell: Bash echo into a test folder outside every repo is allowed",
+   "echo x > " + os.path.join(ROOT, "test", "out.txt"), "allow", **B)
+sh("builder-test shell: PowerShell Select-String of a test file is allowed",
+   "Select-String -Pattern copy lint/test_x.py", "allow", tool="PowerShell",
+   **dict(B, cwd=LINTREPO))
+sh("builder-test shell: Bash heredoc body sed -i on a test file is allowed for the test-author",
+   BASH_BODY_WRITE, "allow", **dict(A, cwd=LINTREPO))
+sh("builder-test shell: Bash glob sed -i over test files is allowed for the test-author",
+   GLOB_WRITE, "allow", **dict(A, cwd=LINTREPO))
+sh("builder-test shell: Bash heredoc body sed -i on a test file is allowed in the main session",
+   BASH_BODY_WRITE, "allow", cwd=LINTREPO)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
