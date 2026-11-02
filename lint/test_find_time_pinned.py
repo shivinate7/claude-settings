@@ -994,6 +994,120 @@ class UnlistableFolderTest(FinderCase):
             os.chmod(locked, 0o755)
 
 
+# ---- review round 2: a duration through a call, a function that returns one, and typed helpers ----------
+
+def elapsed_lines(out):
+    return {line for path, line, cat in out_rows(out) if cat == "elapsed-assert"}
+
+
+def out_rows(out):
+    return {(f["path"], f["line"], f["category"]) for f in out["findings"]}
+
+
+class DurationThroughCallTest(FinderCase):
+    def test_swift_duration_operand_inside_a_helper_call_is_flagged(self):
+        text = src(
+            "import XCTest",
+            "final class TraceTests: XCTestCase {",
+            "    func testLaunch() {",
+            "        let start = Date()",
+            "        let end = Date()",
+            '        XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start), 140, "x")',
+            "    }",
+            "}",
+        )
+        self.put("Tests/TraceTests.swift", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "Tests/TraceTests.swift", text,
+            ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")))
+
+    def test_swift_interval_and_duration_inside_a_call_are_flagged(self):
+        text = src(
+            "import XCTest",
+            "final class SpanTests: XCTestCase {",
+            "    func testSpans() {",
+            "        let start = ContinuousClock.now",
+            "        let end = ContinuousClock.now",
+            "        XCTAssertLessThan(LaunchTrace.ms(end.timeIntervalSince(start)), 9)",
+            "        XCTAssertLessThan(LaunchTrace.ms(start.duration(to: end)), 9)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SpanTests.swift", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "Tests/SpanTests.swift", text,
+            ("XCTAssertLessThan(LaunchTrace.ms(end.timeIntervalSince", "elapsed-assert"),
+            ("XCTAssertLessThan(LaunchTrace.ms(start.duration(to: end))", "elapsed-assert")))
+
+    def test_js_duration_inside_a_helper_call_is_flagged(self):
+        text = src(
+            "const t0 = Date.now();",
+            "expect(toMs(Date.now() - t0)).toBeLessThan(100);",
+        )
+        self.put("tests/span.test.js", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/span.test.js", text,
+            ("expect(toMs(Date.now() - t0))", "elapsed-assert")))
+
+    def test_python_duration_inside_a_helper_call_is_flagged(self):
+        text = src(
+            "import time",
+            "",
+            "def test_latency():",
+            "    t0 = time.time()",
+            "    assert to_ms(time.time() - t0) < 100",
+        )
+        self.put("tests/test_latency.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_latency.py", text,
+            ("assert to_ms(time.time() - t0) < 100", "elapsed-assert")))
+
+    def test_js_function_whose_return_reads_a_clock_taints_its_call(self):
+        text = src(
+            "const time = async (q) => { const from = performance.now(); await run(q); return performance.now() - from; };",
+            "assert.ok(await time(sql) >= 250);",
+        )
+        self.put("tests/time.test.js", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/time.test.js", text,
+            ("assert.ok(await time(sql) >= 250);", "elapsed-assert")))
+
+    def test_js_clock_alias_is_flagged(self):
+        text = src(
+            "const now = () => performance.now();",
+            "const t0 = now();",
+            "expect(now() - t0).toBeLessThan(100);",
+        )
+        self.put("tests/alias.test.js", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/alias.test.js", text,
+            ("expect(now() - t0)", "elapsed-assert")))
+
+
+class TypedHelperCleanTest(FinderCase):
+    def test_typed_wait_helpers_taint_neither_name_nor_result(self):
+        text = src(
+            "const until = async (fn: () => boolean): Promise<boolean> => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < 1000) {} return fn(); };",
+            "expect(await until(f)).toBe(true);",
+            "const untilT = async <T>(fn: () => T) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < 1000) {} return fn(); };",
+            "expect(await untilT(f)).toBe(true);",
+            "const ms0 = () => 1000;",
+            "const untilMs = async (fn, ms = ms0()) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) {} return fn(); };",
+            "expect(await untilMs(f)).toBe(true);",
+        )
+        self.put("tests/until.test.ts", text)
+        code, out = self.report()
+        hit = elapsed_lines(out)
+        for needle in ("expect(await until(f))", "expect(await untilT(f))", "expect(await untilMs(f))"):
+            self.assertNotIn(lineno(text, needle), hit, needle)
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
