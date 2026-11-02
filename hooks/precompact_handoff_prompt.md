@@ -60,7 +60,7 @@ weak or stale premise, check it. Then rewrite its line with the new source and d
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each
-kind, and which kinds are weak: docs/decisions/premise-format.md.
+kind, and which kinds are weak: docs/decisions/premise-format.md. After a compaction, the first report carries a `Recovered:` line under Deviations: each ruling or fact you recovered from git or the page, or `Recovered: none`. The report guard (`lint/report_guard.py`) checks it.
 
 ## 6. Update the plan, only when it changed
 
