@@ -22,7 +22,7 @@
 
 - Fix: lane env-heredoc-false-alarm (env layer only). A body stays under the shell scan only when its own header feeds it to a shell or an interpreter. A quoted body fed to a non-shell interpreter opens no substitutions.
 - Closed when the lane's red cases for both incidents go green. Each case is red before the fix and green after it.
-- Still open. The fix does not cover these. No fix lane is named yet. Each one closes when a red case for it goes green.
+- Still open. The fix does not cover these. Each one closes when a red case for it goes green.
   - `ag -f` and `ack -f`, and `grep -r --exclude=.env` and `rg -t py .env`: the guard refuses all four. `-f` is a boolean flag in `ag` and `ack`. All four are safe. None reads a file's contents.
   - A folder whose name starts with .env, such as `.envs`: the guard refuses mkdir, git add, cat and cd on it. The shell guard allows files inside it. The Read and Edit deny list refuses files inside it too.
   - A word that starts with .env and names no file: `jq .environment f.json`, `jq .envFrom f.json` and `yq .envs f.yaml` are refused. Main allowed these. `jq .env` was already refused.
