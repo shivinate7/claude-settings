@@ -11768,6 +11768,80 @@ def _two_bases_test_edit(w):
     write(os.path.join(w, TEST_A), "pass\n")
 
 
+def _origin(w):
+    """A bare remote for the worktree's main checkout, so the builder can push and pull."""
+    main = w + "-main"
+    bare = w + "-origin"
+    _must(main, "init", "-q", "--bare", bare)
+    _must(main, "remote", "add", "origin", bare)
+
+
+def _f1_pull(w):
+    """Cut at main. The builder commits product work P and pushes it. The test-author adds test cases T1 on
+    top of P and pushes. The builder pulls T1 fast-forward and commits product work again. The pull is a
+    base the builder received, and it holds the builder's own P."""
+    main = w + "-main"
+    _origin(w)
+    _product_commit(w)
+    _must(w, "push", "-q", "origin", "HEAD:refs/heads/feat")
+    _must(main, "fetch", "-q", "origin")
+    _must(main, "checkout", "-q", "-b", "lane", "origin/feat")
+    write(os.path.join(main, TEST_A), LANE_TEXT)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, "push", "-q", "origin", "lane:refs/heads/feat")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "pull", "-q", "--ff-only", "origin", "feat")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work again")
+
+
+def _f1b_push_reset(w):
+    """Cut at main. The builder commits a test edit C1 and pushes it. It resets to the cut point, then to its
+    pushed C1, which holds its own commit, and commits product work on top."""
+    _origin(w)
+    write(os.path.join(w, TEST_A), "pass\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, "push", "-q", "origin", "HEAD:refs/heads/feat")
+    _must(w, "reset", "-q", "--hard", "HEAD~1")
+    _must(w, "reset", "-q", "--hard", "origin/feat")
+    write(os.path.join(w, "src/app.py"), "x = 5\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work")
+
+
+def _f2_conflict_merge(w):
+    """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
+    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
+    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _f2b_clean_merge(w):
+    """Cut at main. Reset to a lane tip that adds test cases to one test file. Main adds a different test file.
+    The builder merges main cleanly (`Merge made by`), and each test file equals one received base."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, "tests/test_main_new.py"), "def test_m():\n    assert 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds a file")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "main")
+
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
@@ -11837,6 +11911,21 @@ sh("builder-refuse: a test edit that matches neither of two received bases is de
    COMMIT, "deny", rule=BDIFF, cwd=_bd_two, agent_id="bld1", agent_type="builder",
    lacks=("tests/", "test_a"), carries=(("restore", "Restore", "put back"), "orchestrator"))
 
+# Launder, kept: a test edit the builder pushed, then reset back to, is still its own test edit.
+_bd_f1b = diff_repo("bd-f1b-push-reset", _f1b_push_reset)
+sh("builder-refuse: a builder's pushed test edit, then a reset back to that push, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_f1b, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's pushed test edit, then a reset back to that push, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_f1b, agent_id="bld1", agent_type="builder")
+
+# A merge that conflicts in a test file and is resolved to the builder's own side is a test-author's to
+# resolve, so it is denied.
+_bd_f2 = diff_repo("bd-f2-conflict", _f2_conflict_merge)
+sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+
 # Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
 # diff_refusal_case (the a-product-edit row: author-diff at commit, push and stop).
 sh("builder-refuse: a test-author's commit with a product file is allowed",
@@ -11883,8 +11972,8 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that rebases onto a lane tip
 
 
 def two_bases_reason_case():
-    """A deny on two received bases names the newest base the builder received, the lane tip, and neither
-    older base: main's tip and the cut point."""
+    """A deny on two received bases names every remaining base: the lane tip and main's tip. The cut point
+    is no remaining base, since the ancestor filter drops it, so the reason names it not."""
     out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-two"), _bd_two, "builder", "bld1")
     answers = _guard_answers(out)
     if not answers:
@@ -11897,16 +11986,25 @@ def two_bases_reason_case():
     problems = []
     if decision != "deny":
         problems.append("expected deny at commit, got %r" % decision)
-    if lane[:12] not in reason:
-        problems.append("the reason does not name the newest base %s" % lane[:12])
-    for sha, name in ((tip, "main's tip"), (cut, "the cut point")):
-        if sha[:12] in reason:
-            problems.append("the reason names %s, not the newest base" % name)
-    return (not problems), ("; ".join(problems) or "the reason names the newest base, the lane tip, and no older base")
+    for sha, name in ((lane, "the lane tip"), (tip, "main's tip")):
+        if sha[:12] not in reason:
+            problems.append("the reason does not name %s, a remaining base: %s" % (name, sha[:12]))
+    if cut[:12] in reason:
+        problems.append("the reason names the cut point, which is no remaining base")
+    return (not problems), ("; ".join(problems) or "the reason names every remaining base, the lane tip and main's tip")
 
 
-LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on two received bases names the newest base and no older one",
+LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on two received bases names every remaining base and no older one",
                          two_bases_reason_case))
+# A pull of a test-author's fast-forward onto the builder's own product commit is a received base.
+diff_repo("bd-f1-pull", _f1_pull)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that pulls a test-author's fast-forward over its own product "
+                         "commit, then commits product work, is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-f1-pull")))
+# A clean merge where each side changed a different test file: each file equals one received base.
+diff_repo("bd-f2b-clean-merge", _f2b_clean_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's clean merge of main, where each side changed a different "
+                         "test file, is allowed and logs no builder-diff line", clean_builder_case("bd-f2b-clean-merge")))
 
 
 def stop_pair_case():
