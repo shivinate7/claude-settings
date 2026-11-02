@@ -9,7 +9,7 @@ Make claude-settings the one home of iPhone simulator use on this Mac. Today eac
 - 2026-11-02 13:05 CST: the shared simulator is the iPhone Duo, not an iPhone 17.
 - 2026-11-02 13:17 CST: `sim-test` must point at a Duo, not an iPhone 18 Pro. Tests on both are best, but the Duo is the priority.
 - 2026-11-02 13:17 CST: erase the shared Duo (done 13:18; it did not help, see below).
-- 2026-11-02 13:26 CST: reinstall the iOS 27.1 runtime (in progress, see below).
+- 2026-11-02 13:26 CST: reinstall the iOS 27.1 runtime (done 13:31; it fixed the Duo, see below).
 
 ## Repos and who uses a simulator
 
@@ -28,7 +28,7 @@ Home and Apartment share the home repo, so they compete for the same devices.
 - Shared iPhone Duo `AC2E94F9-0E44-4D9C-B27A-54DA45BC4698`, on iOS 27.1. Apple's own device type `iPhone-Duo`. Its profile requires iOS 27.1 or later, so a Duo on 27.0 is refused as "Incompatible device". Two screens: `LCD` (outer) and `LCD-1` (inner).
 - Shared iPhone 18 Pro `8787FE1C-48CC-4213-9B5C-8605AFE7F9B3`, on iOS 27.0. `sim-test` boots it.
 - Throwaway devices that lanes make: Degen's "h3pill iPhone 17" `2FCDF62B` (booted 11-02 13:01 for one run); a deleted "Degen Duo" `0828624E`.
-- Runtimes: two iOS 27.0 images (24A5408d and 24A434), plus iOS 27.1 (24A94232), which is being reinstalled. Xcode 27.2 (27B52), installed 2026-10-31 12:09 CDT.
+- Runtimes: two iOS 27.0 images (24A5408d and 24A434), plus iOS 27.1 (24A94232), which was reinstalled on 11-02. Xcode 27.2 (27B52), installed 2026-10-31 12:09 CDT.
 
 ## Each repo runs the Duo differently
 
@@ -62,7 +62,7 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
   - commit b25cc1d0 adds `bin/sim-lease`: an exclusive lease on the shared Duo, which expires 20 min after the last renew unless a recorded job pid is alive; a queue the gatekeeper ranks; state in `~/.claude/state/sim-lease.json`; checked on each call, with no timer.
   - commit 165dfede holds decision record `sim-lease`, ruling 2: `sim-test` runs on the Duo first, with an optional 18 Pro run.
   - It has no PR and no finished review. Read it, then reuse it or replace it.
-- iOS 27.1 runtime: deleted and being downloaded again with `xcodebuild -downloadPlatform iOS -buildVersion 27.1`. Check `xcrun simctl runtime list` and boot the Duo once before you trust it.
+- iOS 27.1 runtime: deleted, then downloaded again with `xcodebuild -downloadPlatform iOS -buildVersion 27.1` (7.85 GB, new image C77A48A3). The erased AC2E94F9 then booted to its home screen, with no "Data Migration Failed" and no new crash. So the fault was a damaged runtime image, not the device and not Xcode. The standard should say: when a fresh device of a type fails too, reinstall that runtime; do not erase devices.
 
 ## What I want
 
