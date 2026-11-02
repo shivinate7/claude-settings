@@ -988,3 +988,6 @@
 - merge-cancelled-newest-twin: a cancelled newest run beside an older pass of the same name reads green, by main's twin rule (Host.classify, Host.judge_runs). Unchanged by merge-ignores-superseded-runs.
 - silent-write-git-only: guard rule silent-write refuses a silenced git write only; a silenced non-git command such as a test run passes. Partial mechanization; widen only after an incident (rule building-guard-needs-incident). Plan: refusal-vs-rule.
 - load-brake-skips-create-session: guard rule load-brake does not read `create_session`. A cloud session runs in its own container and adds no load here. Test that claim if a local environment id is ever used. Decision: machine-load-brake.
+- pwd-delete-trailing-quote: `rm -rf "$(pwd)"/*` followed by a comment that holds a lone quote passes, though the same delete of `./*` is refused; RM_PARENT_RAW has no `$(pwd)` form (hooks/guard_push_delete.py).
+- checkout-f-cluster: `git checkout -fb x` passes while `git switch -fc x` is read as a force; checkout reads -f exactly and switch reads clusters (hooks/guard_shared_tree.py).
+- switch-clean-cluster-false-alarm: `git switch -Cf x` asks or denies, and `git clean -fdn` or `-nfd` in a lost primary is refused, though a dry run deletes nothing (hooks/guard_shared_tree.py).

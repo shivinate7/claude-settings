@@ -74,7 +74,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
-                       the working folder or a folder above it, in either shell.
+                       the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
@@ -123,7 +123,8 @@ Other tools, in `judge` order:
                        files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
                        call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
-                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       `.git`, a target outside the clone, reads and non-writing shell pass. A git
+                       `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -276,7 +277,7 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
@@ -3334,9 +3335,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
-# is left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -3446,6 +3447,8 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
             continue
         for verb, args in verbs:
             if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if verb == "clean" and not clean_deletes_files(args):
                 continue
             if in_primary(folder, folder):
                 return verb

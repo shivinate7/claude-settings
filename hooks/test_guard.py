@@ -2409,6 +2409,21 @@ sh("per-file deny: checkout --force main in the shared checkout", VCS + " checko
 sh("per-file ask: checkout --force main in a worktree still asks",
    VCS + " checkout --force main", "ask", "shared-tree", cwd=GITWT)
 
+# THE SWITCH FORMS OF A FORCED BRANCH SWITCH. `git switch -f`, `--force`
+# and `--discard-changes` throw the local changes away as `checkout -f` does, so each takes the same
+# verdict: deny in the shared checkout, ask in a worktree. A plain switch and a new branch discard
+# nothing, so they pass in both checkouts.
+for _flag in ("-f", "--force", "--discard-changes"):
+    sh("looser-git-acts: switch %s main is denied in the shared checkout" % _flag,
+       VCS + " switch %s main" % _flag, "deny", "shared-tree", cwd=GITMAIN)
+    sh("looser-git-acts: switch %s main still asks in a worktree" % _flag,
+       VCS + " switch %s main" % _flag, "ask", "shared-tree", cwd=GITWT)
+for _command in ("switch main", "switch -c newbranch"):
+    sh("looser-git-acts: %s is allowed in the shared checkout" % _command, VCS + " " + _command,
+       "allow", cwd=GITMAIN)
+    sh("looser-git-acts: %s is allowed in a worktree" % _command, VCS + " " + _command,
+       "allow", cwd=GITWT)
+
 # A FOLDER WITH NO `--`. Git reads a bare name as a path, so a folder is a whole-folder discard.
 sh("per-file deny: checkout of a folder with no -- in the shared checkout",
    VCS + " checkout hooks", "deny", "shared-tree", cwd=GITMAIN)
@@ -6379,6 +6394,22 @@ for _name, _command in (
     ("everything in the working directory as ./*", "rm -rf ./*"),
 ):
     sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# THE SHELL SPELLINGS OF THE WORKING FOLDER. `$(pwd)` names the working folder, so a recursive
+# delete of everything in it is the `./*` delete and gets its verdict. A named folder through
+# `$(pwd)` or `$PWD` is the `./build` delete and passes. `$PWD` belongs to the variable rule
+# (rm-var-unguarded), which refuses `$PWD/*` today and keeps it, so that row expects its rule.
+# `"$PWD"/*` is pinned by the rm-var cases above, so it is not repeated here.
+for _name, _command in (
+    ("quoted $(pwd) before a glob", 'rm -rf "$(pwd)"/*'),
+    ("unquoted $(pwd) before a glob", "rm -rf $(pwd)/*"),
+):
+    sh("looser-git-acts: delete: everything in the working folder, " + _name + ", is denied",
+       _command, "deny", "destructive-delete", cwd=NOGIT)
+sh("looser-git-acts: delete: everything in the working folder, unquoted $PWD before a glob, is denied",
+   "rm -rf $PWD/*", "deny", "rm-var-unguarded", cwd=NOGIT)
+for _command in ('rm -rf "$(pwd)"/build', "rm -rf $(pwd)/build", 'rm -rf "$PWD"/dist', "rm -rf $PWD/dist"):
+    sh("looser-git-acts: delete: a named folder as " + _command + " is allowed", _command,
+       "allow", cwd=NOGIT)
 # FALSE ALARMS: the text of the command sits inside a quoted argument of another command
 # (a note, a commit message, a grep pattern). The cmd.exe forms above are already read by token.
 for _name, _command in (
@@ -17405,6 +17436,53 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+def session_home_clean_refuses_case():
+    """Rule session-home: while the record is lost, `git clean -fd` in the primary checkout is
+    refused, as `git reset --hard` is. The primary tree is clean, so the refusal is
+    session-home's alone, not the shared-tree rule's."""
+    primary = sh_new_primary("cleanrefuse")
+    lane, branch = sh_add_lane(primary, "lane-cleanrefuse")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    command = VCS + " clean -fd"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -fd in the primary is refused, naming session-home and EnterWorktree"
+
+
+def session_home_clean_reads_case():
+    """Rule session-home: while the record is lost, `git clean -n` (a dry run that writes nothing)
+    and `git status` in the primary checkout pass. The rule refuses a clean
+    that deletes, so a list entry for clean must not refuse the dry run."""
+    primary = sh_new_primary("cleanreads")
+    lane, branch = sh_add_lane(primary, "lane-cleanreads")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in (VCS + " clean -n", VCS + " status"):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -n and git status in the primary pass while the record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -fd in the primary is refused, "
+                         "naming session-home and EnterWorktree", session_home_clean_refuses_case))
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -n and git status in the primary "
+                         "pass", session_home_clean_reads_case))
 
 
 def session_home_agent_tree_inspect_case():
