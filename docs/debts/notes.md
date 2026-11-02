@@ -885,6 +885,10 @@
 - page-design-band-comment: test comments call the 390x56 band "near 1" in scale, but it measures 0.75 (skills/waiting-page/tests/test_check_designs.mjs). Decision: page-item-design
 - page-design-stamp-path: the published stamp holds a path, not a copy, so an edit to that file after the publish changes what the next item write is checked against (hooks/guard.py, skills/waiting-page/stale_pages.py). Decision: page-item-design
 - page-design-closed-update: an update with no status to a closed item is still checked, though the page never draws closed items (hooks/question_form.py). Decision: page-item-design
+- ps1-copy-skill-prune-no-backup: in copy mode, install.ps1 prunes files inside a copied skill in place, while install.sh backs the copy up first (install.ps1 Install-Dir). Decision: copy-mode-overwrites-no-backup
+- install-sh-unchecked-skill-mv: install.sh moves an old skill backup with an unchecked `mv` (install.sh move_old_skill_baks). Decision: install-manifest-prunes
+- install-tarball-no-prune: an install from a source with no .git counts every file in the extracted tree as shipped, so a file main removed stays in place (install.sh tarball fallback). Decision: install-manifest-prunes
+- install-first-run-rm-no-retry: on the first run with no manifest, a failed delete of a listed link into the clone is not held back. The manifest is then written, and the link is never retried (install.sh retire_listed). Decision: install-manifest-prunes
 - option-letter-keys-label-word-tag: a label that opens with a word tag other than Option, such as "Approach B:" or "Plan B:", passes LABEL_TAG. It is kept out because "Plan B" is plain English (hooks/question_form.py LABEL_TAG; decision option-keys-are-letters)
 - report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
 - report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
