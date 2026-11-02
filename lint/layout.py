@@ -352,8 +352,8 @@ def devices(root):
 
 def caution(root):
     """{level, facts, acts} for the repo at `root`: its "caution" key, else the level its "visibility"
-    key maps to, else the layout's default (public). The visibility source is a key in the extras file,
-    so it reads offline."""
+    key maps to. A missing, non-string, "default" or unmapped visibility resolves to the layout's default,
+    "unknown", never to "public". The visibility source is a key in the extras file, so it reads offline."""
     level = _named(root, "caution", "cautions")
     if level is None:
         by, seen = layout().get("visibility-caution", {}), _repo_keys(root).get("visibility")
@@ -378,10 +378,14 @@ def _size(size):
     return "%s (%s)" % (size.get("text", ""), size["source"])
 
 
+UNKNOWN_CAUTION_LINE = "caution: unknown, the level could not be read"  # hooks/session_start.sh prints the same line when the read fails
+
+
 def describe_caution(root):
     """The text `layout.py caution` prints, and session start prints: the level, its facts, its acts."""
     found = caution(root)
-    return "\n".join(["caution: " + found["level"]] + ["fact: " + f for f in found["facts"]]
+    first = UNKNOWN_CAUTION_LINE if found["level"] == "unknown" else "caution: " + found["level"]
+    return "\n".join([first] + ["fact: " + f for f in found["facts"]]
                       + ["act: " + a for a in found["acts"]])
 
 
