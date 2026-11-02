@@ -33,8 +33,16 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
+Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
+
+It prints one line when the stamp an allowed publish wrote (<git common dir>/waiting-page-built, main's
+page.html blob sha) differs from main's blob sha, and nothing else: no stamp, or an unreadable main, prints
+nothing. It always exits 0. One python process and one read-only git process.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
-file written without --write, no timer, thread or child left running. It never imports `layout`.
+file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 """
 import argparse
 import os
@@ -109,6 +117,7 @@ def matches(template, live):
 
 
 def page_id(url):
+    # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
     return url.rstrip("/").rsplit("/", 1)[-1]
 
 
@@ -164,7 +173,9 @@ def pointer_checkout():
 
 
 def read_origin_main(checkout):
-    """(page text, short sha) of page.html at origin/main in `checkout`, or None. One git process, read only."""
+    """(page text, short commit sha, blob sha) of page.html at origin/main in `checkout`, or None. The blob
+    sha is the full 40-hex id of main's page.html, the one name of "main's page version" (the guard's stamp
+    and the session-start line compare it). One git process, read only."""
     want = ("origin/main\norigin/main:%s\n" % TEMPLATE_IN_GIT).encode()
     try:
         import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py); never a raw spawn
@@ -181,22 +192,93 @@ def read_origin_main(checkout):
         size = int(parts[2])
         objects.append((parts[0].decode(), rest[:size]))
         out = rest[size + 1:]
-    return objects[1][1].decode("utf-8", errors="replace"), objects[0][0][:8]
+    return objects[1][1].decode("utf-8", errors="replace"), objects[0][0][:8], objects[1][0]
 
 
 def find_template(main_path):
-    """(text, source name) of main's page.html for single-page mode, or None when main cannot be read.
-    Raises OSError when --main names a file that cannot be read."""
+    """(text, source name, blob sha) of main's page.html for single-page mode, or None when main cannot be
+    read. The blob sha is None for a --main file. Raises OSError when --main names a file that cannot be read."""
     if main_path:
         with open(main_path, encoding="utf-8", errors="replace", newline="") as f:
-            return f.read(), main_path
+            return f.read(), main_path, None
     checkout = checkout_of(HERE) or pointer_checkout()
     if checkout:
         got = read_origin_main(checkout)
         if got:
-            return got[0], "origin/main %s" % got[1]
+            return got[0], "origin/main %s" % got[1], got[2]
         print("stale_pages: origin/main is not readable in %s" % checkout, file=sys.stderr)
     return None
+
+
+def main_blob(checkout=None):
+    """The full blob sha of page.html at origin/main, or None when main cannot be read. `checkout` is the
+    clone to read; none reads the clone that holds this script, else the one the `@<path>` line names."""
+    checkout = checkout or checkout_of(HERE) or pointer_checkout()
+    got = read_origin_main(checkout) if checkout else None
+    return got[2] if got else None
+
+
+# The stamp: an allowed publish of main's page writes main's blob sha here, in the common git dir of the
+# repo (file reads only, no child process). The session-start line reads it back (rule page-stale).
+STAMP = "waiting-page-built"
+
+
+def common_git_dir(root):
+    """The common git dir of the checkout at `root`, read from files, or None. A primary checkout has a
+    .git folder. A linked worktree has a .git file naming its own gitdir, whose `commondir` file names the
+    common one."""
+    dot = os.path.join(root, ".git")
+    if os.path.isdir(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as f:
+            line = f.read().strip()
+        if not line.startswith("gitdir:"):
+            return None
+        own = os.path.normpath(os.path.join(root, line[len("gitdir:"):].strip()))
+        with open(os.path.join(own, "commondir"), encoding="utf-8") as f:
+            return os.path.normpath(os.path.join(own, f.read().strip()))
+    except OSError:
+        return None
+
+
+def read_stamp(root):
+    """The blob sha the last allowed publish stamped for the repo at `root`, or None."""
+    common = common_git_dir(root)
+    try:
+        with open(os.path.join(common, STAMP), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except (OSError, TypeError):
+        return None
+
+
+def write_stamp(root, blob):
+    """Write `blob` to the repo's stamp. True when it wrote; a failure is False and never raises."""
+    common = common_git_dir(root)
+    try:
+        with open(os.path.join(common, STAMP), "w", encoding="utf-8") as f:
+            f.write(blob + "\n")
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def session_line(root, main_checkout=None):
+    """One line naming the repo's waiting page as behind when the stamp differs from main's blob, else "".
+    No stamp, or an unreadable main, gives "": an unread state is never reported as behind."""
+    stamp = read_stamp(root)
+    if not stamp:
+        return ""
+    blob = main_blob(main_checkout)
+    if not blob or blob == stamp:
+        return ""
+    import layout  # only for a repo that has a stamp
+    url = layout.waiting_page(root)
+    if url == "unknown":
+        return ""
+    return ("waiting page %s is behind main's page.html: it was last published from another version. "
+            "The writer runs stale_pages.py --page <file> --write <out> and publishes <out> "
+            "(skill waiting-page, \"Keep the page on main's code\")." % url)
 
 
 def single_page(argv):
@@ -227,7 +309,7 @@ def single_page(argv):
     if not found:
         print("unknown: main unreadable: no origin/main page.html reached, and the installed copy is not used")
         return 2
-    template, source = found
+    template, source, _blob = found
     spot = DESIGN_BODY.search(template)
     if not spot or len(DESIGN_BODY.findall(template)) != 1:
         print("unknown: the template has no single designData block (%s)" % source)
@@ -253,7 +335,24 @@ def single_page(argv):
     return 1
 
 
+def session_mode(argv):
+    """`--session-line <toplevel> [--main-checkout <dir>]`: print the behind line, or nothing. Always exit 0."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--session-line", required=True)
+    ap.add_argument("--main-checkout")
+    args = ap.parse_args(argv)
+    try:
+        line = session_line(args.session_line, args.main_checkout)
+    except Exception:  # a line at session start never fails the start
+        line = ""
+    if line:
+        print(line)
+    return 0
+
+
 def main(argv):
+    if "--session-line" in argv:
+        return session_mode(argv)
     if "--page" in argv:
         return single_page(argv)
     if not argv:

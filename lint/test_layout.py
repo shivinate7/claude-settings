@@ -276,6 +276,66 @@ class WaitingPage(Tree):
         code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", REPO], REPO)
         self.assertEqual((code, out.strip()), (0, "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"))
 
+    def set_page(self, value):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": value}))
+
+    def test_artifact_id_is_the_id_in_either_form(self):
+        self.assertEqual(self.layout.artifact_id(self.URL), "abc123")
+        self.assertEqual(self.layout.artifact_id("https://claude.ai/code/artifact/abc123"), "abc123")
+
+    def test_artifact_id_ignores_a_trailing_slash_a_query_and_a_fragment(self):
+        for url in ("https://claude.ai/artifact/abc123/", "https://claude.ai/artifact/abc123?x=1",
+                    "https://claude.ai/artifact/abc123#frag", "https://claude.ai/code/artifact/abc123/?x=1#frag"):
+            with self.subTest(url=url):
+                self.assertEqual(self.layout.artifact_id(url), "abc123")
+
+    def test_artifact_id_of_a_non_string_or_an_empty_value_is_empty(self):
+        for value in (None, 5, ["https://claude.ai/artifact/abc123"], b"https://claude.ai/artifact/abc123", ""):
+            with self.subTest(value=value):
+                self.assertEqual(self.layout.artifact_id(value), "")
+
+    def test_the_page_url_names_its_page(self):
+        self.set_page(self.URL)
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL))
+
+    def test_the_code_form_of_the_page_names_it(self):
+        self.set_page(self.URL)
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, "https://claude.ai/code/artifact/abc123"))
+
+    def test_a_stored_code_form_names_the_same_page_in_the_plain_form(self):
+        self.set_page("https://claude.ai/code/artifact/abc123/")
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL))
+
+    def test_a_trailing_slash_query_or_fragment_does_not_change_the_page(self):
+        self.set_page(self.URL)
+        for url in ("https://claude.ai/artifact/abc123/", "https://claude.ai/code/artifact/abc123/",
+                    "https://claude.ai/artifact/abc123?x=1", "https://claude.ai/artifact/abc123#frag"):
+            with self.subTest(url=url):
+                self.assertTrue(self.layout.is_waiting_page_url(self.tree, url))
+
+    def test_another_artifact_is_not_the_page(self):
+        self.set_page(self.URL)
+        for url in ("https://claude.ai/artifact/zzz999", "https://claude.ai/code/artifact/zzz999/?x=1"):
+            with self.subTest(url=url):
+                self.assertFalse(self.layout.is_waiting_page_url(self.tree, url))
+
+    def test_a_non_string_or_an_empty_url_is_not_the_page(self):
+        self.set_page(self.URL)
+        for url in (None, 5, [self.URL], b"https://claude.ai/artifact/abc123", ""):
+            with self.subTest(url=url):
+                self.assertFalse(self.layout.is_waiting_page_url(self.tree, url))
+
+    def test_a_bare_prefix_is_not_the_page(self):
+        self.set_page(self.URL)
+        for url in ("https://claude.ai/artifact/", "https://claude.ai/code/artifact/"):
+            with self.subTest(url=url):
+                self.assertFalse(self.layout.is_waiting_page_url(self.tree, url))
+
+    def test_a_repo_with_no_page_has_no_page_url(self):
+        self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
+        self.roll_out()
+        self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
+
 
 class RecordBranch(Tree):
     """A fork worktree names its own record branch in its extras file (decision session-tiers).
