@@ -756,41 +756,28 @@ PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call 
 # refusal-vs-rule record gives the uncited rule rewrites to refusal-uncited-rewrites, agent-model-cap
 # to refusal-looser-fixes, and the rest to the sweep step refusal-matches-rule.
 REFUSAL_UNCITED_EXEMPT = {
-    "agent-model-cap": "refusal-looser-fixes",
     "gh-login-switch": "refusal-uncited-rewrites",
     "handoff-unread": "refusal-uncited-rewrites",
-    "item-field-rendered": "refusal-uncited-rewrites",
     "merge-role-proof": "refusal-uncited-rewrites",
     "option-letter-keys": "refusal-uncited-rewrites",
-    "page-stale": "refusal-uncited-rewrites",
     "question-departs": "refusal-uncited-rewrites",
     "rework-off-page": "refusal-uncited-rewrites",
     "trust-card-in-build": "refusal-uncited-rewrites",
     "agent-model-floor": "refusal-matches-rule",
-    "ask-alone": "refusal-matches-rule",
     "background-end": "refusal-matches-rule",
-    "bare-merge": "refusal-matches-rule",
-    "builder-test-edit": "refusal-matches-rule",
-    "cite-by-id": "refusal-matches-rule",
     "command-in-item": "refusal-matches-rule",
     "designer-scope": "refusal-matches-rule",
     "destructive-delete": "refusal-matches-rule",
-    "detached-launch": "refusal-matches-rule",
     "draft-pr": "refusal-matches-rule",
     "force-push": "refusal-matches-rule",
     "frozen-path": "refusal-matches-rule",
-    "git-env-set": "refusal-matches-rule",
     "hand-made-worktree": "refusal-matches-rule",
     "impeccable-review-only": "refusal-matches-rule",
-    "lane-by-slug": "refusal-matches-rule",
-    "linked-node-modules": "refusal-matches-rule",
     "live-stream": "refusal-matches-rule",
     "ln-over-directory": "refusal-uncited-rewrites",
-    "load-brake": "refusal-matches-rule",
     "machine-wide-kill": "refusal-matches-rule",
     "merge-checks": "refusal-matches-rule",
     "other-checkout": "refusal-matches-rule",
-    "owner-judge": "refusal-matches-rule",
     "playwright-browsers-path": "refusal-matches-rule",
     "playwright-install": "refusal-matches-rule",
     "port-question": "refusal-matches-rule",
@@ -812,6 +799,30 @@ REFUSAL_UNCITED_EXEMPT = {
     "waiter": "refusal-matches-rule",
     "worktree-home": "refusal-matches-rule",
     "wsl-allow-list": "refusal-matches-rule",
+    # merge/merge.py stops, keyed `merge:<function>` for the function that raises them. Each stop reports
+    # a failed git or gh step or a config fault, and its message names no decision or rule.
+    "merge:Host.base_state": "refusal-matches-rule",  # the base state is unreadable; the stop carries gh's output
+    "merge:Host.gh": "refusal-matches-rule",  # gh failed on a network error, after its retries
+    "merge:Host.merge": "refusal-matches-rule",  # the merge call's outcome is unknown, not this run's, or still OPEN
+    "merge:Host.pages": "refusal-matches-rule",  # a repo file could not be read from GitHub
+    "merge:Host.pr": "refusal-matches-rule",  # the pull request could not be read
+    "merge:Host.pr_number": "refusal-matches-rule",  # no pull request is named, or the head matches several
+    "merge:Host.runs": "refusal-matches-rule",  # gh run list failed
+    "merge:base_job_caps": "refusal-matches-rule",  # a workflow file could not be read on the base
+    "merge:base_stamp_config": "refusal-matches-rule",  # the stamp config could not be read on the base
+    "merge:base_workflows": "refusal-matches-rule",  # the workflow folder could not be listed on the base
+    "merge:fail": "refusal-matches-rule",  # a failed run's stop; its text is the caller's `why`
+    "merge:ff_main": "refusal-matches-rule",  # local main cannot move: fetch failed, or the commit is off origin
+    "merge:host_default_branch": "refusal-matches-rule",  # the default branch cannot be read from gh
+    "merge:ignore_checks": "refusal-matches-rule",  # a merge.ignoreChecks entry has no name or no reason
+    "merge:keep": "refusal-matches-rule",  # a merge commit landed and stays on the branch
+    "merge:lint_steps": "refusal-matches-rule",  # the lint steps cannot be listed
+    "merge:load_config": "refusal-matches-rule",  # the merge config on the base is unreadable or invalid
+    "merge:main": "refusal-matches-rule",  # the run is not in a git checkout
+    "merge:open_worktree": "refusal-matches-rule",  # the worktree cannot open: fetch failed, branch moved, or add failed
+    "merge:prove": "refusal-matches-rule",  # the fetch of the base failed after its retries
+    "merge:push_branch": "refusal-matches-rule",  # the push of the branch was refused
+    "merge:refuse_bad_pr": "refusal-matches-rule",  # the pull request is closed or conflicting
 }
 
 
@@ -942,8 +953,18 @@ class _Reasons:
                 return []
             return [expr.value] if isinstance(expr.value, str) else None
         if isinstance(expr, ast.JoinedStr):
-            text = "".join(v.value for v in expr.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
-            return [text] if text else None
+            # An f-string keeps its static pieces; a `{name}` that holds static text adds that text, and
+            # a run-time piece adds none, as in a join.
+            texts, piece_static = [""], False
+            for v in expr.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    options = [v.value]
+                else:
+                    options = self.alts(v.value, mod, locs, d) if isinstance(v, ast.FormattedValue) else None
+                    options = options or [""]
+                piece_static = piece_static or any(options)
+                texts = [a + b for a in texts for b in options]
+            return texts if piece_static and any(texts) else None
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Mod):  # the arguments of `%` carry no text
             return self.alts(expr.left, mod, locs, d)
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
@@ -953,8 +974,15 @@ class _Reasons:
                 return []
             if left is None and right is None:
                 return None
+            # A name bound at run time in one branch and to static text in another: the run-time branch
+            # joins as above, and each static branch stands alone, since it replaces the run-time piece
+            # and must cite by itself (a judge hook's fallback reason).
+            apart = []
+            for piece, text in ((expr.left, left), (expr.right, right)):
+                if text is None and isinstance(piece, ast.Name):
+                    apart += self._static_branches(piece.id, mod, locs, d)
             left, right = left or [""], right or [""]
-            return [a + b for a in left for b in right]
+            return [a + b for a in left for b in right] + apart
         if isinstance(expr, ast.IfExp):
             return _union([self.alts(expr.body, mod, locs, d), self.alts(expr.orelse, mod, locs, d)])
         if isinstance(expr, ast.Name):
@@ -971,6 +999,21 @@ class _Reasons:
                 return _union([self.alts(o, mod, locs, d) for o in options])
             return self._call(expr, mod, locs, d, None)
         return None
+
+    def _static_branches(self, name, mod, locs, depth):
+        """The static text of a local name's branches, skipping the run-time ones. `x = x or "text"` adds
+        "text": its `x` is the run-time branch that another binding holds."""
+        found = []
+        for value, slot in locs.get(name, []):
+            if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or) \
+                    and isinstance(value.values[0], ast.Name) and value.values[0].id == name:
+                parts = [self.alts(v, mod, locs, depth) for v in value.values[1:]]
+            elif value is not None and slot is None:
+                parts = [self.alts(value, mod, locs, depth)]
+            else:
+                parts = []
+            found += [t for part in parts for t in (part or [])]
+        return found
 
     def _value(self, value, slot, index, mod, locs, depth):
         if slot is not None:
@@ -1084,8 +1127,24 @@ def _tuple_options(expr):
     return options if all(isinstance(o, ast.Tuple) for o in options) else None
 
 
+# Parameter names of refuse() and ask_command(), used when a scanned source holds no def of them. The
+# scan reads the real names from the def it finds (rule building-allow-list-is-the-constant).
 REFUSE_PARAMS = ("tool", "decision", "rule", "reason")  # guard_core.refuse()
 ASK_PARAMS = ("rule", "reason")  # guard.ask_command()
+
+
+def _callee(call, mod, reasons):
+    """The def a refuse() or ask_command() call runs: `name(...)`, or `alias.name(...)` of an imported
+    module. None when no module in the world defines it."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        found = reasons._function(func.id, mod)
+    elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in mod.module_alias:
+        owner = reasons.world.get(mod.module_alias[func.value.id])
+        found = reasons._function(func.attr, owner) if owner is not None else None
+    else:
+        found = None
+    return found[1] if found else None
 
 
 def _args_by_name(call, params):
@@ -1098,13 +1157,19 @@ def _args_by_name(call, params):
     return named
 
 
-def _refusals_of(call, locs, where, unattributed):
+def _refusals_of(call, locs, where, unattributed, mod, reasons):
     """-> [(refusal id, reason expression)] for one call that prints a refusal; [] for other calls.
-    A call whose rule or reason the scan cannot name goes to `unattributed`."""
+    A call whose rule or reason the scan cannot name goes to `unattributed`. The positions of rule and
+    reason come from the def the call runs."""
     name = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
     if name not in ("refuse", "ask_command"):
         return []
-    named = _args_by_name(call, REFUSE_PARAMS if name == "refuse" else ASK_PARAMS)
+    fdef = _callee(call, mod, reasons)
+    if fdef is not None:
+        params = tuple(a.arg for a in fdef.args.posonlyargs + fdef.args.args)
+    else:
+        params = REFUSE_PARAMS if name == "refuse" else ASK_PARAMS
+    named = _args_by_name(call, params)
     if named is None or "rule" not in named or "reason" not in named:
         unattributed.append(where)
         return []
@@ -1124,23 +1189,89 @@ def _refusals_of(call, locs, where, unattributed):
     return []
 
 
-def refusal_status(sources, homes, scope):
+def _raw_refuse_reason(node):
+    """The `permissionDecisionReason` expression of a dict literal that prints a deny or an ask, else None.
+    A dict whose decision is a variable is guard_core.refuse() itself, which the calls to it cover."""
+    if not isinstance(node, ast.Dict):
+        return None
+    keys = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant)}
+    decision = keys.get("permissionDecision")
+    if isinstance(decision, ast.Constant) and decision.value in ("deny", "ask"):
+        return keys.get("permissionDecisionReason")
+    return None
+
+
+def _stop_classes(mod):
+    """The names of the exception classes of a module that stops its run: `Stop` and each class that
+    derives from one. Empty when the module defines no `Stop`."""
+    classes = [n for n in mod.tree.body if isinstance(n, ast.ClassDef)]
+    names = {"Stop"} if any(c.name == "Stop" for c in classes) else set()
+    grown = True
+    while grown:
+        grown = False
+        for c in classes:
+            if c.name not in names and any(isinstance(b, ast.Name) and b.id in names for b in c.bases):
+                names.add(c.name)
+                grown = True
+    return names
+
+
+def _stop_reason(node, stops):
+    """The message expression of `raise Stop(...)`, also as `raise (A if c else B)(...)`, else None."""
+    if not (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and node.exc.args):
+        return None
+    func = node.exc.func
+    named = [n.id for n in ast.walk(func) if isinstance(n, ast.Name)] if isinstance(func, (ast.Name, ast.IfExp)) else []
+    return node.exc.args[0] if named and all(n in stops for n in named) else None
+
+
+def _qualified_names(tree):
+    """id(def) -> `Class.method` or `function`, for the site id of a refusal that names no rule."""
+    names = {}
+
+    def visit(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, child.name + ".")
+            elif isinstance(child, ast.FunctionDef):
+                names[id(child)] = prefix + child.name
+                visit(child, "")
+            else:
+                visit(child, prefix)
+    visit(tree, "")
+    return names
+
+
+def refusal_status(sources, homes, scope, guards=None):
     """-> (statuses, unattributed). statuses: refusal id -> [(where, status)], where a `file:line`
     and status `cited`, `no cite` or `not resolved`. `sources` maps each module name to its text;
-    `scope` names the guard modules whose refusals count. unattributed: the refuse() or ask_command()
+    `scope` names the modules whose refusals count, and `guards` the guard modules among them (all of
+    `scope` when None). A guard module's refuse() and ask_command() calls name their id. Any module in
+    scope also counts a raw deny dict and a `raise Stop(...)` of its own; their id is `module:function`,
+    as they name none. A hook that is no guard module (a judge hook) prints its deny in its own
+    refuse(), so only that print counts there, not its call of guard_core.refuse(). unattributed: the
     calls whose id the scan cannot read."""
     world = {name: _Module(name, text) for name, text in sources.items()}
     reasons = _Reasons(world)
     statuses, unattributed = {}, []
+    guards = scope if guards is None else guards
     for mod in world.values():
         if mod.name not in scope:
             continue
-        scopes = [(mod.tree, {})] + [(n, reasons.locals_of(n)) for n in ast.walk(mod.tree)
-                                     if isinstance(n, ast.FunctionDef)]
-        for node, locs in scopes:
-            for call in (n for n in _own(node) if isinstance(n, ast.Call)):
-                where = "%s.py:%d" % (mod.name, call.lineno)
-                for rid, expr in _refusals_of(call, locs, where, unattributed):
+        stops, qualified = _stop_classes(mod), _qualified_names(mod.tree)
+        scopes = [(mod.tree, {}, "<module>")] + [(n, reasons.locals_of(n), qualified.get(id(n), n.name))
+                                                 for n in ast.walk(mod.tree) if isinstance(n, ast.FunctionDef)]
+        for node, locs, func in scopes:
+            for site in _own(node):
+                where = "%s.py:%d" % (mod.name, site.lineno) if hasattr(site, "lineno") else ""
+                found = []
+                if isinstance(site, ast.Call) and mod.name in guards:
+                    found = _refusals_of(site, locs, where, unattributed, mod, reasons)
+                else:
+                    expr = _raw_refuse_reason(site) or _stop_reason(site, stops)
+                    if expr is not None:
+                        found = [("%s:%s" % (mod.name, func), expr)]
+                for rid, expr in found:
                     text = reasons.alts(expr, mod, locs)
                     if not text:
                         status = "not resolved"
@@ -1154,14 +1285,14 @@ def refusal_status(sources, homes, scope):
     return statuses, unattributed
 
 
-def refusal_problems(sources, homes, exempt, scope, emitted=None):
+def refusal_problems(sources, homes, exempt, scope, emitted=None, guards=None):
     """The ratchet's problems, one line each. Empty when every refusal id cites or is exempt."""
-    statuses, unattributed = refusal_status(sources, homes, scope)
+    statuses, unattributed = refusal_status(sources, homes, scope, guards)
     problems = ["%s: refuse() or ask_command() id is not a string literal the scan can read" % w
                 for w in unattributed]
     if emitted is not None:
         problems += ["%s: refusal id is not in rule_audit.emitted_rule_ids" % rid
-                     for rid in sorted(set(statuses) - emitted)]
+                     for rid in sorted(r for r in set(statuses) - emitted if ":" not in r)]  # `module:function` ids are no guard.log ids
     failing = {rid: [(w, s) for w, s in rows if s != "cited"] for rid, rows in statuses.items()}
     failing = {rid: rows for rid, rows in failing.items() if rows}
     for rid in sorted(failing):
@@ -1178,14 +1309,16 @@ def refusal_problems(sources, homes, exempt, scope, emitted=None):
 
 
 def _hooks_world():
-    """The text of every hooks module but the tests: the guard modules and the modules they import."""
-    paths = glob.glob(os.path.join(rule_audit.ROOT, "hooks", "*.py"))
+    """The text of every hooks module but the tests, and the merge tool. The scan reads all of them, so a
+    judge hook or a new module that prints a refusal is in scope with no list of its own."""
+    paths = glob.glob(os.path.join(rule_audit.ROOT, "hooks", "*.py")) + [os.path.join(rule_audit.ROOT, "merge", "merge.py")]
     return {os.path.splitext(os.path.basename(p))[0]: rule_audit.read(p)
             for p in paths if not os.path.basename(p).startswith("test_")}
 
 
-def _guard_scope():
-    """The guard modules, by the same glob as rule_audit.guard_paths."""
+def _guard_names():
+    """The guard modules, by the same glob as rule_audit.guard_paths: their refuse() and ask_command()
+    calls are sites. Other modules count only their own raw deny dicts and `raise Stop(...)`."""
     return {os.path.splitext(os.path.basename(p))[0] for p in rule_audit.guard_paths(rule_audit.ROOT)}
 
 
@@ -1193,9 +1326,14 @@ class RefusalCiteRepoTests(unittest.TestCase):
     """The ratchet, run on this repo as it is now."""
 
     def test_every_guard_refusal_prints_a_cite_or_is_exempt(self):
-        problems = refusal_problems(_hooks_world(), cite_homes(), REFUSAL_UNCITED_EXEMPT, _guard_scope(),
-                                    rule_audit.emitted_rule_ids(rule_audit.ROOT))
+        world = _hooks_world()
+        problems = refusal_problems(world, cite_homes(), REFUSAL_UNCITED_EXEMPT, set(world),
+                                    rule_audit.emitted_rule_ids(rule_audit.ROOT), guards=_guard_names())
         self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_repo_scope_reads_the_judge_hooks_and_the_merge_tool(self):
+        self.assertLessEqual({"blind_brief", "call_judge", "prose_judge", "sendmessage_state", "merge"},
+                             set(_hooks_world()))
 
     def test_cite_homes_reads_the_style_file_anchors(self):
         decisions, anchors = cite_homes()
@@ -1208,15 +1346,13 @@ class RefusalCiteRepoTests(unittest.TestCase):
                     "bare-merge", "cite-by-id", "ask-alone", "linked-node-modules", "owner-judge",
                     "item-field-rendered", "page-stale", "agent-model-cap"}
     # Ids that stay exempt, each with its home.
-    STAY_EXEMPT = {"gh-login-switch", "handoff-unread", "item-field-rendered", "merge-role-proof",
-                   "option-letter-keys", "page-stale", "question-departs", "rework-off-page", "trust-card-in-build"}
-    # Named in both lists. Both checks skip them until the owner rules which list holds them.
-    OPEN_OVERLAP = {"item-field-rendered", "page-stale"}
+    STAY_EXEMPT = {"gh-login-switch", "handoff-unread", "merge-role-proof", "option-letter-keys",
+                   "question-departs", "rework-off-page", "trust-card-in-build"}
 
     def test_the_rewritten_ids_leave_the_exempt_list_and_the_kept_ids_keep_a_home(self):
-        still = sorted((self.LEAVE_EXEMPT - self.OPEN_OVERLAP) & set(REFUSAL_UNCITED_EXEMPT))
+        still = sorted(self.LEAVE_EXEMPT & set(REFUSAL_UNCITED_EXEMPT))
         self.assertEqual(still, [], "still exempt: " + ", ".join(still))
-        for rid in sorted(self.STAY_EXEMPT - self.OPEN_OVERLAP):
+        for rid in sorted(self.STAY_EXEMPT):
             with self.subTest(rid=rid):
                 self.assertIn(rid, REFUSAL_UNCITED_EXEMPT)
                 self.assertTrue(HOME_RE.fullmatch(REFUSAL_UNCITED_EXEMPT[rid]))
@@ -1250,7 +1386,7 @@ CRASH_REASON = ("guard-crash: the guard is missing a part and cannot judge this 
                 "Remedy: reinstall, don't retry # or /* or // here.")
 
 
-def raw_deny_src(reason):
+def raw_refuse_src(reason):
     """A JSON deny printed straight to stdout: the shape of the guard-crash deny in hooks/guard.py."""
     return ('def crash():\n'
             '    print(json.dumps({"hookSpecificOutput": {\n'
@@ -1443,13 +1579,20 @@ class RefusalCiteFixtureTests(unittest.TestCase):
             with self.subTest(call=call):
                 self.assertEqual(unattributed_of("def go():\n    %s\n" % call), ["guard.py:2"])
 
-    def test_a_raw_deny_printed_outside_refuse_needs_a_cite(self):
-        problems = site_problems("guard", raw_deny_src(CRASH_REASON))
+    def test_a_raw_refuse_printed_outside_refuse_needs_a_cite(self):
+        problems = site_problems("guard", raw_refuse_src(CRASH_REASON))
         self.assertTrue(uncited_site(problems, "guard"), problems)
-        cited = raw_deny_src(CRASH_REASON + " See decision alpha.")
+        cited = raw_refuse_src(CRASH_REASON + " See decision alpha.")
         self.assertEqual(site_problems("guard", cited), [])
 
-    def test_a_judge_deny_reads_its_fallback_and_its_cite_prefix(self):
+    def test_a_refuse_call_outside_a_guard_module_is_no_site(self):
+        call = 'refuse(t, "deny", "call-id", "no cite", m)\n'
+        statuses, _ = refusal_status({"judge": call}, HOMES, {"judge"}, guards=set())
+        self.assertEqual(statuses, {})
+        statuses, _ = refusal_status({"judge": call}, HOMES, {"judge"}, guards={"judge"})
+        self.assertEqual([s for _, s in statuses["call-id"]], ["no cite"])
+
+    def test_a_judge_refuse_reads_its_fallback_and_its_cite_prefix(self):
         fallback = "the receiver must hear only what changes its work, don't # or /* or //."
         for module, exit_line in JUDGE_SHAPES:
             with self.subTest(module=module):
