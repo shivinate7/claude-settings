@@ -30,7 +30,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 MODULE = os.environ.get("RULING_KIND_UNDER_TEST") or os.path.join(HERE, "check_ruling_kind.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
-import ruling_kind_fixture as fx  # noqa: E402  the record text of pull request 1028 (testing/ruling_kind_fixture.py)
+import test_ruling_kind_fixture as fx  # noqa: E402  the record text of PR #1028 at the time of this lane (lint/test_ruling_kind_fixture.py)
 
 PLAN = "plans/build-plan.md"
 L1 = PLAN + "#phase-1-the-sweep"
