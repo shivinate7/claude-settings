@@ -89,8 +89,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   agent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
-                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
-                       designer, design-reviewer or a builder's third-round marker covers it. An override lifts the spawn ask only.
+                       deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
+                       design-reviewer, a builder's third-round marker or an Explore's `Audit:` marker
+                       covers it. The general override, `opus [role] <time>` or a step grant lifts the
+                       spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -117,7 +119,8 @@ Other tools, in `judge` order:
                        pin and no default model is set. An Explore whose brief's first line
                        carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
                        spawn pass it. An unread record
-                       passes and is noted as `agent-role-model-unread`. No override lifts it.
+                       passes and is noted as `agent-role-model-unread`. The general override lifts an
+                       above-row refusal; no override lifts the no-model refusal.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
@@ -150,7 +153,7 @@ are not frozen. They are allowed, and the guard logs one `config-edit` line, so 
 Stop hook can show the edit at turn end. `subject-unread` is logged the same way: an allow that a
 person still gets to see.
 
-`agent-model-cap` asks and never refuses, because that same write is how an Opus agent is
+`agent-model-cap` asks on a settings write and never refuses it, because that same write is how an Opus agent is
 enabled on purpose. It stands after `frozen-path`, so only a project-scoped write reaches it. Its
 ask names the requested value and the file, which is not an exception to the remedy rule below:
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
@@ -174,10 +177,10 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+`agent-model-floor`, the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
@@ -2102,11 +2105,17 @@ def role_list_drift(pointer_root):
     return lines
 
 
+def role_key(subagent_type) -> str:
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
+    normaliser: role_name and opus_spawn_hit's Explore grant both read the role through it."""
+    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
+
+
 def role_name(table, subagent_type) -> str:
     """The role a spawn names, as the table spells it: matched without case and without surrounding space.
     A role the table lacks keeps its own spelling, stripped. An empty role is the default role."""
     role = str(subagent_type or "").strip() or ROLE_DEFAULT
-    return next((name for name in table if name.lower() == role.lower()), role)
+    return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
 def role_model_check(tool: str, tool_input):
@@ -2318,7 +2327,8 @@ OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
     "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
     "reviewer, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
-    "(decision agent-model-cap). Remedy: drop the model field, or name the role's model."
+    "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
+    "Round 3 brief names sonnet."
 ) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
@@ -2340,7 +2350,9 @@ def opus_spawn_hit(tool: str, tool_input) -> str:
         return ""
     if role == "builder" and builder_third_round(brief):
         return ""
-    if role == EXPLORE_ROLE and ("audit", None) in marker_hits(brief):
+    # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles and the
+    # builder stay exact-case, as they were.
+    if role_key(role) == role_key(EXPLORE_ROLE) and ("audit", None) in marker_hits(brief):
         return ""
     return str(tool_input.get("model"))
 
@@ -3319,7 +3331,8 @@ def judge(payload) -> None:
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
-    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
+    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
+    # The override lifts the above-row refusal and never the no-model one (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:
@@ -3328,14 +3341,14 @@ def judge(payload) -> None:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
     # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
-    # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
+    # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
         load_reason, load_matched = running_lane_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
-    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is denied (owner ruling, item 127 pick a, Nov 1 17:25
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (owner ruling, item 127 pick a, Nov 1 17:25
     # CST). An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
