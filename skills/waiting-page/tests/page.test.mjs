@@ -2158,6 +2158,87 @@ test("a waiting ask says who has not read it, or who read it and is working on i
   assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
 });
 
+// Red cases for the round-1 review findings on the Ask box (no product change in these cases).
+test("the Ask section never shows the text null, in the waiting, answered and sent states", async (t) => {
+  const asks = {
+    "ask-n-wait": { id: "ask-n-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" },
+    "ask-n-fresh": { id: "ask-n-fresh", text: "A fresh answer", at: "2026-10-30T08:00:00Z", owner: "triage", answered: "2026-10-31T10:00:00Z", reply: "Yes, it does." },
+    "ask-n-seen": { id: "ask-n-seen", text: "A seen answer", at: "2026-10-29T08:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes, it did." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-30T11:00:00Z" } }); if (!page) return;
+  await shownBox(page, "A question still waiting");
+  const stray = () => page.evaluate(() => { const s = document.getElementById("asks").textContent, i = s.indexOf("null"); return i < 0 ? "" : s.slice(Math.max(0, i - 60), i + 10); });
+  const waiting = await stray();
+  assert.equal(waiting, "", "the waiting and answered states show the text null: " + JSON.stringify(waiting));
+  await page.fill("#askText", "A new ask for the list");
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  const sent = await stray();
+  assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
+});
+
+test("a new answer to an ask older than the newest 3 answered asks stays open in view, not behind Show older asks", async (t) => {
+  // Three answers seen at the last visit fill the cap. The new answer is older by at, so it sits fourth in the list.
+  const seen = (n, at) => ({ id: "ask-s" + n, text: "Seen answer " + n, at, owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Seen reply " + n + "." });
+  const asks = {
+    "ask-s1": seen(1, "2026-10-30T08:00:00Z"),
+    "ask-s2": seen(2, "2026-10-30T07:00:00Z"),
+    "ask-s3": seen(3, "2026-10-30T06:00:00Z"),
+    "ask-new": { id: "ask-new", text: "Old ask, new answer", at: "2026-10-01T09:00:00Z", owner: "triage", answered: "2026-10-31T08:00:00Z", reply: "The answer that came after the last visit." },
+    "ask-old": { id: "ask-old", text: "Oldest seen answer", at: "2026-09-15T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Seen long ago." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, "The answer that came after the last visit.");
+  // Only the seen answer past the cap stays behind the button.
+  assert.equal(await page.getByRole("button", { name: "Show 1 older ask", exact: true }).count(), 1, "the button does not say Show 1 older ask");
+});
+
+test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = await page.textContent("#askHint");
+  const long = "0123456789".repeat(420); // 4200 characters
+  // A value set in script is not held to the box's maxlength, as a draft or an Undo can leave it.
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, long);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"), null, { timeout: 1500 }).catch(() => {});
+  const sets = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+  if (sets.length) {
+    assert.equal(sets.length, 1, "Send wrote " + sets.length + " asks records");
+    assert.equal(sets[0].text.length, long.length, `Send ask stored ${sets[0].text.length} of ${long.length} characters, with no notice`);
+    assert.equal(sets[0].text, long, "the stored text is not the owner's words");
+    return;
+  }
+  // No write: the words stay in the box, and the hint row says why.
+  assert.equal(await page.inputValue("#askText"), long, "Send ask wrote nothing and dropped the typed words");
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
+});
+
+test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
+  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+  const page = await open(t); if (!page) return;
+  const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", sent);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await mustHave(page, "#askUndo", "Undo control");
+  const typed = "Typed after the send. ".repeat(6); // 126 characters, typed inside the window
+  await page.fill("#askText", typed);
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const value = await page.inputValue("#askText");
+  const hint = (await page.textContent("#askHint")).trim();
+  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
+  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+});
+
 async function openCap(t, labels, width, design) {
   const it = capItem(labels);
   const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
