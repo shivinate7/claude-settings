@@ -798,11 +798,22 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     return "\n".join(_split_heredocs(cmd)[0])
 
 
-# A later segment that runs a shell on a file (`sh x.txt`, `bash -e x.sh`, `source x`, `. x`): a body
-# written to that file is then run. A header (`bash <<EOF`) and a stdin shell (`bash -s`) name no file.
-_RUNS_FILE = re.compile(
-    r"(?:^|[;&|(`{])[ \t]*(?:(?:sudo|env|exec)[ \t]+)?(?:[^\s|;&]*[/\\])?(?:" + _SHELLS + r"|source|\.)"
-    r"(?:\.exe|\.cmd)?[ \t]+(?:-[\w-]+[ \t]+)*[^\s;&|<>()`$-]", re.M).search
+# A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), and the words of the command. A
+# quote or a comment hides no word from this reader: it can only keep more bodies in view, never fewer.
+_WRITE_TARGETS = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)").findall
+_WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
+
+
+def _plain_words(words):
+    return [word[2:] if word.startswith("./") else word for word in words]
+
+
+def _runs_written_file(text: str, headers) -> bool:
+    """True when a file a heredoc writes is named again outside a write to it: `sh f`, `sh < f`, `cat f | sh`,
+    `chmod +x f && ./f` may run the body. The word is compared as written, so `$HOME/f` matches only itself."""
+    words, written = _plain_words(_WORDS(text)), _plain_words(_WRITE_TARGETS(text))
+    return any(words.count(target) > written.count(target)
+               for header in headers for target in _plain_words(_WRITE_TARGETS(header)))
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
@@ -813,18 +824,24 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     _, bodies, unclosed = _walk_heredocs(cmd)
     if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
-    # bash runs a substitution of an unquoted body while it writes the body. A script body is the
-    # interpreter's own text, one command, and its header test below already keeps it where it counts.
-    if any(not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header))
-           for quote, body, header in bodies):
-        return cmd
+    # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
+    # lines of their own; the prose around them is data. A script body's header test below keeps it whole.
+    runs = []
+    for quote, body, header in bodies:
+        if not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header)):
+            from guard_env import _substitutions   # imported late: guard_env imports this file
+            texts, too_deep = _substitutions(body, heredoc=True)
+            if too_deep:
+                return cmd
+            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
     dropped = _drop_heredoc_bodies(cmd)
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _RUNS_FILE(text):
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, [header for _, _, header in bodies]):
         return cmd  # the body may be executed, so keep it under inspection
-    return dropped
+    return "\n".join([dropped] + runs)
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header

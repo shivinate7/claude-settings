@@ -333,7 +333,8 @@ def env_reference(word: str) -> str:
     return word if names_env_file(word) else ""
 
 
-_ESCAPED_QUOTE = re.compile(r"""\\['"]""")
+# Read left to right, a `\\` pair is one escaped backslash, so the quote after it is real.
+_ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 
 
 def _plain_escaped_quotes(cmd: str) -> str:
@@ -345,7 +346,7 @@ def _plain_escaped_quotes(cmd: str) -> str:
     for _, body, header in _split_heredocs(cmd)[1]:
         header = _without_message_values(header)
         if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
-            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub("_", body), 1)
+            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
     return cmd
 
 
