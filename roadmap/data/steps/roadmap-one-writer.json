@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.21002,
  "why": "Incident, Nov 1 17:2x CST: a lane session committed step c203 to the roadmap branch (87a9d9c9) while triage 5 was the only writer.",
- "note": "Shape: a guard refuses a push to the roadmap branch from a session that is not triage (the role the merge-role file names), with the remedy: send the step change to triage. Guard basis: named incident. Ready: no open question.\nDoing, Nov 1 18:03 CST: coordinator started its lane.",
- "updatedAt": "2026-11-02T00:04:00Z"
+ "note": "Shape: a guard refuses a push to the roadmap branch from a session that is not triage, read from the session's own tags (cs-build:triage), as rule merge-role-proof does; the merge-role file cannot prove it, because adding triage there would let triage merge, with the remedy: send the step change to triage. Guard basis: named incident. Ready: no open question.\nDoing, Nov 1 18:03 CST: coordinator started its lane. Red case: a git push, the form of 87a9d9c9 (lane, Nov 1 18:05 CST).",
+ "updatedAt": "2026-11-02T00:07:00Z"
 }
