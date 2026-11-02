@@ -276,10 +276,12 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     return done, False
 
 
-# A word that holds a glob. It is an environment word when it could match `.env`, or `.env.` and any
-# suffix. The test is a sample of the pattern itself (each glob filled in as the shortest and a one
-# letter match), so `.env.s*` and `.env.bak*` count with no list of suffixes to keep. A word that
-# starts with the example file's name stays exempt, as the example file is.
+# A word that holds a glob. It is an environment word when it could match any name that
+# `names_env_file` holds: a name that starts with `.env`, other than exactly `.env.example`. The test
+# is a sample of the pattern itself (each glob filled in as the shortest and a one letter match), run
+# through that same predicate, so `.env.s*`, `.envr*` and `.env.bak*` count with no list of suffixes
+# to keep. No prefix of the example name is exempt: `.env.example*` could match `.env.example.bak`,
+# which holds the same secrets, so it is refused.
 #
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
