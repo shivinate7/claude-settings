@@ -900,6 +900,8 @@
 - dated-claim-year-digits: the dated-claims upkeep row reads any four digits after the day as a year. So "Checked Nov 1 1830 CDT" lists a fresh claim (skills/roadmap/build.py, CLAIM).
 - dated-claim-dot-stops: that row stops at any ".", so "Checked hooks/guard.py on main Oct 20", "Oct. 28" and "Sept 28" are misses (skills/roadmap/build.py, CLAIM).
 - dated-claim-edges: that row counts days in UTC, not Central. An explicit future year masks older claims. "_Checked_" is a miss. A future plan date after the word rolls to last year and lists (skills/roadmap/build.py, dated_claims).
+- archive-no-record-any-repo: rule lane-closes-after-records denies any archive_session with no get_session record of the target, lane or not, in every repo; the steer costs one turn (hooks/guard_merge.py archive_hit). Decision: session-tiers
+- archive-tag-literals: archive_hit repeats the `cs-step:` and `cs-repo:` literals from skills/roadmap/build.py; a rename there fails closed with "no step or repo tag" (hooks/guard_merge.py). Decision: session-tiers
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
