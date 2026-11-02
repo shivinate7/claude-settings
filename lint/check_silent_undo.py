@@ -382,9 +382,12 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
     """lost_lines for one parent p of merge m; blobs reads every file text."""
     found = []
     pool = pool_of(cwd, p, m)
-    paths = set()
+    paths, from_base = set(), {}
     for b in bases:
-        paths |= set(raw_files(cwd, b, p))
+        files = raw_files(cwd, b, p)
+        paths |= set(files)
+        # a path main renamed since the base is read in the base at its old name, or its unchanged lines look added
+        from_base[b] = {new: (old, ob, nb) for old, (new, ob, nb) in renamed(cwd, b, p, files).items()}
     changed_pm = raw_files(cwd, p, m)
     paths &= set(changed_pm)  # a path whose blob is the same in p and m loses nothing
     pairs = renamed(cwd, p, m, changed_pm)
@@ -393,7 +396,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
         text_m = blobs.get(m, dst)
         flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
         in_p, in_m = counts(blobs.get(p, path)), counts(text_m)
-        in_b = [counts(blobs.get(b, path)) for b in bases]
+        in_b = [counts(blobs.get(b, from_base[b][path][0] if path in from_base[b] else path)) for b in bases]
         lost, hs = [], None
         for l, n in in_p.items():
             if any(l in c for c in in_b):
@@ -405,7 +408,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
             pool[l] -= moved
             if missing > moved:
                 hs = (hunks(cwd, pairs[path][1], pairs[path][2]) if path in pairs else hunks(cwd, p, m, path)) if hs is None else hs
-                mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
+                mod = any(l in hn and ho for b in bases for ho, hn in (hunks(cwd, *from_base[b][path][1:]) if path in from_base[b] else hunks(cwd, b, p, path)))
                 if not rewritten(l, hs, in_b, mod):
                     lost.append(l)
         if refs and lost:
