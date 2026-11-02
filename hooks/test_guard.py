@@ -14360,6 +14360,9 @@ for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jum
 add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
     prompt="round 1 of 3: check Round 2 of 3 logic")
+add("first-line marker: builder on sonnet with ROUND 2 OF 3 first and a later Round 3 of 3 gets no step-up refusal",
+    "allow", tool="Agent", model="sonnet", subagent_type="builder",
+    prompt="ROUND 2 OF 3 and Round 3 of 3")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
@@ -20332,6 +20335,30 @@ def marker_none_check():
     return True, "marker_hits(None) is an empty set"
 
 
+def brief_markers_order_check():
+    """brief_markers(brief) keeps the brief's line order, and a reviewer on haiku gets the Round 3 refusal for it
+    through step_up_reason."""
+    guard = _load_guard_module()
+    brief_markers = getattr(guard, "brief_markers", None)
+    step_up_reason = getattr(guard, "step_up_reason", None)
+    if brief_markers is None or step_up_reason is None:
+        return False, "guard.py has no brief_markers(brief) or step_up_reason(prompt, role, model) yet"
+    brief = "Round 3 of 3\nRound 2 of 3"
+    try:
+        got = [(kind.lower(), n) for kind, n in brief_markers(brief)]
+        reason = step_up_reason(brief, "reviewer", "haiku")
+    except Exception as exc:
+        return False, "brief_markers or step_up_reason raised %r" % (exc,)
+    wrong = []
+    if got != [("round", "3"), ("round", "2")]:
+        wrong.append("brief_markers gives %r, want the Round 3 marker then the Round 2 one" % (got,))
+    if not reason.startswith("Reviewer round 3 runs on Sonnet or Opus"):
+        wrong.append("a reviewer on haiku gets %r, want the Round 3 refusal" % (reason,))
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, "brief_markers keeps line order; a reviewer on haiku gets the Round 3 refusal"
+
+
 _BRIEF_MARKER_CHECKS = (
     ("brief markers: BRIEF_MARKERS has round, try and audit rows, each positioned, and the audit row holds "
      "EXPLORE_AUDIT_MARKER", brief_marker_table_check),
@@ -20358,6 +20385,11 @@ _BRIEF_MARKER_CHECKS = (
      marker_rows_check(("Builder, Round 3 of 3. Fix.", "round", "3", True),
                        ("Builder, Try 3 of 3. Fix.", "try", "3", False),
                        ("Find X.\nTry 3 of 3.", "try", "3", True))),
+    ("brief markers: a first line that starts with a marker in any case keeps the first-line rule off",
+     marker_rows_check(("ROUND 1 OF 3 then Round 2 of 3", "round", "2", False),
+                       ("Round 2 Of 3 and Round 3 of 3", "round", "3", False))),
+    ("brief markers: brief_markers keeps line order, and a reviewer on haiku gets the Round 3 refusal from it",
+     brief_markers_order_check),
 )
 for _label, _check in _BRIEF_MARKER_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
