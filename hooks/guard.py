@@ -251,7 +251,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -289,8 +289,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
-            project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -1531,6 +1531,22 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
     return full if outside else None
 
 
+def builder_test_path(path: str, cwd: str) -> bool:
+    """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
+    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
+    disables tests is judged on content, so only the Edit tools read it."""
+    rel = repo_rel(path, cwd)
+    return rel is not None and is_test_rel(rel)
+
+
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
+    """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
+    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True)
+            or interpreter_write_hit(raw, cwd, builder_test_path))
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -1552,7 +1568,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if is_test_rel(rel):
+    if builder_test_path(target, cwd):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2779,6 +2795,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         record(tool, "noted", "config-edit", matched)
 
+    # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
+    # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
+    # role is judged, the same gate as the Edit tools.
+    if role == BUILDER_ROLE:
+        matched = builder_shell_test_hit(raw, stripped, cwd)
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
@@ -3447,7 +3470,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw)))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
