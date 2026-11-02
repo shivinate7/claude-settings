@@ -965,6 +965,40 @@ def case_port_main_side():
          (("port-question", DEPARTS_RULE), "Departs"))
 
 
+# The port shapes of the round-2 review. A backticked or aliased main side names file:symbol and passes. A
+# placeholder or no-change change side is refused on a port page, a port task and a question box.
+PORT_OK_LINES = [
+    "Departs from: `hooks/guard.py:data_tool_hit` — adds a retry",
+    "Departs from: app/[id]/page.tsx:Home — adds a retry",
+    "Departs from: @/components/x.tsx:Button — adds a retry",
+]
+PORT_BAD_LINES = [
+    "Departs from: main — adds <X>",
+    "Departs from: hooks/guard.py:x — <what changes>",
+    "Departs from: hooks/guard.py:x — none",
+]
+
+
+def port_task(departs):
+    """A port task with a Why yours line, so only the port and departs checks can refuse it."""
+    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+            "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
+                       + departs}
+
+
+def case_port_departs_shapes():
+    for body in PORT_OK_LINES:
+        page("a port page item whose line is %r passes" % body, "set",
+             entry_of(page_item(port=True, departs=body)), None)
+        page("a port task whose line is %r passes" % body, "set", entry_of(port_task(body)), None)
+    for body in PORT_BAD_LINES:
+        page("a port page item whose line is %r is refused" % body, "set",
+             entry_of(page_item(port=True, departs=body)), (("port-question", DEPARTS_RULE), "Departs"))
+        page("a port task whose line is %r is refused" % body, "set", entry_of(port_task(body)),
+             ("port-question", None))
+        chat("a question whose line is %r is refused" % body, chat_box(departs=body), (DEPARTS_RULE, "Departs"))
+
+
 # ------------------------------------------------------------------ call_judge
 
 def case_call_judge():
@@ -1047,7 +1081,7 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_port_main_side, case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_port_main_side, case_port_departs_shapes, case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()
