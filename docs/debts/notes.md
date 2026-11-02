@@ -943,3 +943,6 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- builder-shell-cache-rm: guard builder-test-edit's shell check refuses a builder's `rm -rf tests/__pycache__` or `tests/.pytest_cache`, and `chmod +x`, `git rm --cached` or `tee x < tests/a.py` on a test path. Becomes a debt on a real hit in guard.log. Decision: builders-cannot-edit-tests.
+- builder-shell-formatters: the shell check lets through formatters (`ruff format .`, `black`, `prettier --write`), `dd of=`, `patch`, `git apply` and `awk -i inplace` on a test path. The commit-time diff note still logs them. Decision: builders-cannot-edit-tests.
+- builder-shell-override-lifts: a timed owner override lifts the shell refusal (no `never_lifted` entry for `builder_shell_test_hit`), while the write tool's builder refusal is never lifted. Decision: builders-cannot-edit-tests.
