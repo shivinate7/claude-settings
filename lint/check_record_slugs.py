@@ -93,9 +93,11 @@ def unchecked_feel_debts(root, moved):
     line is gone ("dropped"). Markers count at line start, with an optional "- ". Raises Unknown when git cannot
     show a file."""
     dirs = tuple(p + "/" for p in layout.candidates(root, "debts"))
+    # The folder's README and notes file sit beside the debts but are not debts: never checked, never shown.
+    not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
 
     def debt(f):
-        return f.startswith(dirs) and f.endswith(".md")
+        return f.startswith(dirs) and f.endswith(".md") and f not in not_debts
 
     out = []
     for status, old, new in moved:
