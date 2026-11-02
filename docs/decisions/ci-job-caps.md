@@ -2,7 +2,11 @@
 
 ## The ruling
 
-Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when something is broken, never because a job ran out of time. Each job in `.github/workflows/checks.yml` has a cap of about 2x its slowest run in the last 30 runs. The target is a slowest run under 80% of the cap. A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5). A cap rises only with a measured figure in the comment beside it.
+Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when something is broken, never because a job ran out of time. Owner, 2026-10-23, roadmap step c39: CI time caps start generous and warn before they fire.
+
+The two numbers do not conflict. The setting is a cap of about 2x the job's slowest run in the last 30 runs. The check is that the slowest run stays under 80% of that cap. A 2x cap puts the slowest run at about 50%, inside the check. A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5). A cap rises only with a measured figure in the comment beside it.
+
+Stopgap: the wide caps keep a run from timing out while its timing-bound tests remain. They stay wide until `test-strategy-reset` removes those tests (rule 2: no fixed sleep or wall-clock bound). Do not narrow a cap ahead of that removal.
 
 ## The table
 
