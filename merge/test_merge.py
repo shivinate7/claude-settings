@@ -9562,10 +9562,15 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml"):
-    """One run on main, as `GET actions/runs` lists it."""
+def sha_of(id_):
+    """The commit a main run of id `id_` ran on, unless the case names its own."""
+    return f"{id_:040x}"
+
+
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", head_sha=None):
+    """One run on main, as `GET actions/runs` lists it. Its commit is `sha_of(id_)` unless `head_sha` names one."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
+            "head_sha": head_sha or sha_of(id_), "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
 
 
 def main_job(name, conclusion, minutes=1):
@@ -9576,16 +9581,28 @@ def main_job(name, conclusion, minutes=1):
 
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
+    `compares`: (red commit, green commit) -> the status `compare/<red>...<green>` answers. A pair not listed reads "ahead", since the newer
+    run of each case sits on a later commit that holds the older one. `compare_error`: the (code, output) every compare read fails with.
+    `compare_reads`: the pair of each compare read, in order. A sha that is not 40 hex reads as a missing commit (HTTP 404)."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, compares=None, compare_error=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
+        self.compares, self.compare_error, self.compare_reads = compares or {}, compare_error, []
 
     def api(self, rel, *extra, method="GET", fields=None):
+        m = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)  # holds_head's read: it sends no fields, so it is answered before the runs read
+        if m:
+            self.compare_reads.append(m.groups())
+            if self.compare_error:
+                return self.compare_error
+            if not all(re.fullmatch(r"[0-9a-f]{40}", s) for s in m.groups()):
+                return 1, "gh: Not Found (HTTP 404)"
+            return 0, json.dumps({"status": self.compares.get(m.groups(), "ahead")})
         self.reads.append(rel)
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
@@ -9603,11 +9620,30 @@ class MainRunsHost(FakeHost, merge.Host):
         return self.jobs[int(m.group(1))]
 
 
+CHECK_PATH = ".github/workflows/check.yml"  # banchi #1003's workflow file: on the base, so its runs are judged
+CHECK_WORKFLOW = "\n".join([
+    "name: check", "on: [push, workflow_dispatch, schedule]", "jobs:",
+    "  ci-check:", "    runs-on: ubuntu-latest", "    timeout-minutes: 30", "    steps:", "      - run: echo ok",
+]) + "\n"
+BANCHI_SHA = "471dc26879f2e3e814a40b7e8ec19f14acb7d372"  # both banchi #1003 runs ran on this commit (2026-11-02)
+BANCHI_RED, BANCHI_GREEN = 41436198024, 41483723188  # the schedule run that failed, and the workflow_dispatch run that passed
+# The 28 jobs of each banchi run. 23 pass in both runs; the other five differ.
+BANCHI_PASSED = (["ci-check (ci-check-static)", "zizmor", "records", "browser-scope", "ci-check (ci-check-product-3)", "revert-guard",
+                  "already-passed", "ci-check (ci-check-product)", "ci-check (ci-check-product-2)", "ci-check (ci-check-guards-1)", "code-check",
+                  "ci-check (ci-check-guards-2)"] + [f"design-check ({i})" for i in (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)])
+BANCHI_RED_JOBS = [main_job(n, "success") for n in BANCHI_PASSED] + [
+    main_job("design-check (4)", "failure", 20), main_job("all-jobs-passed", "failure"), main_job("nightly-alarm", "success"),
+    main_job("design-check-passed", "skipped"), main_job("ci-done", "skipped")]
+BANCHI_GREEN_JOBS = [main_job(n, "success") for n in BANCHI_PASSED] + [
+    main_job("design-check (4)", "success"), main_job("all-jobs-passed", "success"), main_job("design-check-passed", "success"),
+    main_job("nightly-alarm", "skipped"), main_job("ci-done", "skipped")]
+
+
 class RedMainBrake(Env):
     """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW, LINKS_PATH: LINKS_WORKFLOW})  # the caps the timeout verdict reads, and the files judged
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW, LINKS_PATH: LINKS_WORKFLOW, CHECK_PATH: CHECK_WORKFLOW})  # the caps the timeout verdict reads, and the files judged
 
     def go(self, runs, jobs, *flags, confirm=True, **kw):
         self.host = MainRunsHost(self.co, self.other, runs, jobs, **kw)
@@ -9719,13 +9755,83 @@ class RedMainBrake(Env):
                               941: [main_job("checks", "success", 20), main_job("scope", "success")]})
         self.merged(rc, out)
 
-    def test_a_green_run_that_lacks_a_job_of_the_red_run_does_not_clear_it(self):
-        # a passing job of the red run counts too: its name must be in the green run
-        rc, out, before = self.go([main_run(951, "success", event="workflow_dispatch"), main_run(950, "failure", event="schedule")],
-                                  {950: [main_job("checks", "failure", 20), main_job("scope", "success")], 951: [main_job("checks", "success", 20)]})
+    def test_a_green_run_that_lacks_a_job_that_passed_in_the_red_run_clears_it(self):
+        # ruling pending: no-merge-onto-red-main cover set, 2026-11-02
+        # a job that passed in the red run needs no entry in the green run: only a job that failed or was cancelled there must be in it, as success
+        rc, out, _ = self.go([main_run(951, "success", event="workflow_dispatch"), main_run(950, "failure", event="schedule")],
+                             {950: [main_job("checks", "failure", 20), main_job("scope", "success")], 951: [main_job("checks", "success", 20)]})
+        self.merged(rc, out)
+
+    def test_the_banchi_red_schedule_run_is_cleared_by_a_dispatch_on_the_same_commit(self):
+        # banchi #1003: the schedule run failed design-check (4) and all-jobs-passed. The dispatch run on the same commit passed both.
+        # Its nightly-alarm and ci-done jobs are not red jobs of the schedule run, so only the failed jobs must pass in the dispatch run
+        rc, out, _ = self.go([main_run(BANCHI_GREEN, "success", name="check", event="workflow_dispatch", path=CHECK_PATH, head_sha=BANCHI_SHA),
+                              main_run(BANCHI_RED, "failure", name="check", event="schedule", path=CHECK_PATH, head_sha=BANCHI_SHA)],
+                             {BANCHI_RED: BANCHI_RED_JOBS, BANCHI_GREEN: BANCHI_GREEN_JOBS})
+        self.assertEqual(self.host.compare_reads, [], "runs on the same commit need no compare read")
+        self.merged(rc, out)
+
+    def test_a_green_run_on_an_older_commit_than_the_red_run_does_not_clear_it(self):
+        # the dispatch run started later but ran on a commit behind the red run's: compare red...green reads behind, so it holds none of the red run
+        rc, out, before = self.go([main_run(1211, "success", event="workflow_dispatch", head_sha=sha_of(1200)), main_run(1210, "failure", event="schedule")],
+                                  {1210: [main_job("checks", "failure", 20)], 1211: [main_job("checks", "success", 20)]},
+                                  compares={(sha_of(1210), sha_of(1200)): "behind"})
+        self.assertEqual(self.host.compare_reads, [(sha_of(1210), sha_of(1200))], "the green commit is compared with the red one before the verdict")
         self.refused(rc, out, before)
-        self.assertIn("run 950", out)
+        self.assertIn("run 1210", out)
+
+    def test_a_failed_compare_read_is_unknown_and_refuses(self):
+        rc, out, before = self.go([main_run(1221, "success", event="workflow_dispatch"), main_run(1220, "failure", event="schedule")],
+                                  {1220: [main_job("checks", "failure", 20)], 1221: [main_job("checks", "success", 20)]},
+                                  compare_error=(1, "gh: HTTP 500 (fake)"))
+        self.assertEqual(self.host.compare_reads, [(sha_of(1220), sha_of(1221))], "the commits are compared before a verdict is given")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("HTTP 500", out)
+
+    def test_a_green_run_on_a_later_commit_clears_it_after_one_compare_read(self):
+        # the newer commit holds the red run's: one compare read, red commit first, and the green run passed the red job
+        rc, out, _ = self.go([main_run(1231, "success", event="workflow_dispatch"), main_run(1230, "failure", event="schedule")],
+                             {1230: [main_job("checks", "failure", 20)], 1231: [main_job("checks", "success", 20)]})
+        self.assertEqual(self.host.compare_reads, [(sha_of(1230), sha_of(1231))], "the newer commit is compared once, red commit first")
+        self.merged(rc, out)
+
+    def test_a_schedule_only_job_that_failed_in_the_red_run_and_is_skipped_in_the_green_run_does_not_clear_it(self):
+        # the job runs on schedule only, so the dispatch run skips it: a failed entry needs a success entry in the green run
+        rc, out, before = self.go([main_run(1241, "success", event="workflow_dispatch"), main_run(1240, "failure", event="schedule")],
+                                  {1240: [main_job("checks", "success", 20), main_job("nightly-only", "failure", 20)],
+                                   1241: [main_job("checks", "success", 20), main_job("nightly-only", "skipped")]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1240", out)
+        self.assertIn("nightly-only: fail", out)
+
+    def cancelled_red_job_against(self, green_jobs):
+        # a cancelled job is no pass: the green run must hold it as success, so a missing or a skipped entry refuses
+        rc, out, before = self.go([main_run(1251, "success", event="workflow_dispatch"), main_run(1250, "failure", event="schedule")],
+                                  {1250: [main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 2)], 1251: green_jobs})
+        self.refused(rc, out, before)
+        self.assertIn("run 1250", out)
         self.assertIn("checks: fail", out)
+
+    def test_a_cancelled_red_job_missing_in_the_green_run_does_not_clear_it(self):
+        self.cancelled_red_job_against([main_job("checks", "success", 20)])
+
+    def test_a_cancelled_red_job_skipped_in_the_green_run_does_not_clear_it(self):
+        self.cancelled_red_job_against([main_job("checks", "success", 20), main_job("checks-macos", "skipped")])
+
+    def sha_less_pair_refuses(self, missing):
+        # the commit is the compare's input: a run that reports none is not known to hold the other run's commit, so it never clears it
+        red, green = main_run(1260, "failure", event="schedule"), main_run(1261, "success", event="workflow_dispatch")
+        (red if missing == "red" else green).pop("head_sha")
+        rc, out, before = self.go([green, red], {1260: [main_job("checks", "failure", 20)], 1261: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertTrue("run 1260" in out or "UNKNOWN" in out, "the refusal names the red run, or is unknown: " + out)
+
+    def test_a_red_run_without_a_head_sha_clears_nothing(self):
+        self.sha_less_pair_refuses("red")
+
+    def test_a_green_run_without_a_head_sha_clears_nothing(self):
+        self.sha_less_pair_refuses("green")
 
     def test_a_job_named_by_a_prefix_or_suffix_of_a_red_job_does_not_clear_it(self):
         # names match exactly: `checks` is not `checks-macos`, and `checks-macos` is not `checks`

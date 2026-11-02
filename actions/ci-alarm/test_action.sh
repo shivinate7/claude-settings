@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Red run with a fake `gh`. Each (workflow, event group) judges its newest run: a red group opens the
 # issue. A green run of another group clears it only when that run is newer, is the newest of its group,
-# succeeded, and passed every job of the red run. Runs of an event not in events.json, and of a deleted
-# or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
+# succeeded, has a success entry for each job of the red run that is neither success nor skipped, and its
+# head commit is the red run's or holds it (a compare read: ahead or identical). Runs of an event not in
+# events.json, and of a deleted or absent workflow, are not judged. A failed read or write prints `unknown`
+# and exits 0.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -15,7 +17,8 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for and
 # the runs of the --status it is asked for, as gh does; unparsable runs are echoed raw. `api` routes
 # the jobs of a run to $JOBS/<run id> and records each such read in $READS; a run with no jobs fixture
-# fails the read, so an unexpected read is unknown.
+# fails the read, so an unexpected read is unknown. A compare read (`compare/<a>...<b>`) is answered from
+# $COMPARES/<a>...<b>, is recorded in $READS too, and fails when it has no fixture.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
@@ -31,6 +34,12 @@ case "$1 $2" in
         id="${2#*actions/runs/}"; id="${id%%/*}"
         echo "$2" >> "${READS:-/dev/null}"
         if [ -f "${JOBS:-/nonexistent}/$id" ]; then cat "$JOBS/$id"; else echo "gh: no jobs fixture for run $id (fake)" >&2; exit 1; fi ;;
+      */compare/*)
+        echo "$2" >> "${READS:-/dev/null}"
+        pair="${2##*/compare/}"
+        [ -f "${COMPARES:-/nonexistent}/$pair" ] || { echo "gh: no compare fixture for $pair (fake)" >&2; exit 1; }
+        expr="$(printf '%s\n' "$@" | sed -n '/^--jq$/{n;p;}')"
+        if [ -n "$expr" ]; then jq -r "$expr" "$COMPARES/$pair"; else cat "$COMPARES/$pair"; fi ;;
       *) cat "$WORKFLOWS" ;;
     esac ;;
   "issue list") echo "${OPEN:-}" ;;
@@ -40,20 +49,26 @@ esac
 SH
 chmod +x "$tmp/bin/gh"
 # Fixture, one home. gh_run prints one run as `gh run list --json` returns it: args are workflow,
-# conclusion (null for a run still going), createdAt, url, event, databaseId (the run id) and status
-# (completed unless given). Workflow ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
-# gone 6 (absent from the list), late 7 (on page two of the workflows list), dman 8 and dinact 9
-# (disabled, on page two), links 10 (on page two).
+# conclusion (null for a run still going), createdAt, url, event, databaseId (the run id), status
+# (completed unless given) and headSha (HEAD_SHA unless given; `none` prints null). Workflow ids: ci 1,
+# deploy 2, alarm 3, pages 4, old 5 (deleted), gone 6 (absent from the list), late 7 (on page two of the
+# workflows list), dman 8 and dinact 9 (disabled, on page two), links 10 and check 11 (on page two).
+HEAD_SHA=$(printf '%040x' 7)
+sha() { printf '%040x' "$1"; }
 gh_run() {
-  local id concl
+  local id concl sha_json
   case "$1" in ci) id=1 ;; deploy) id=2 ;; alarm) id=3 ;; pages) id=4 ;; old) id=5 ;; gone) id=6 ;; late) id=7 ;;
-    dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; esac
+    dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; check) id=11 ;; esac
   concl="\"$2\""; [ "$2" = null ] && concl=null
-  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s"}\n' \
-    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}"
+  sha_json="\"${8:-$HEAD_SHA}\""; [ "${8:-}" = none ] && sha_json=null
+  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":%s}\n' \
+    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$sha_json"
 }
-# A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
-runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
+# A case starts with its runs: runs_are clears the jobs and the compare answers of the case before the jobs_of
+# and compare_is lines that follow it.
+runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs" "$tmp/compares"; mkdir -p "$tmp/jobs" "$tmp/compares"; }
+# compare_is <red sha> <green sha> <status>: the answer to `compare/<red>...<green>`, the read the cross-group clear makes when the shas differ.
+compare_is() { printf '{"status":"%s"}\n' "$3" > "$tmp/compares/$1...$2"; }
 # jobs_of <run id> [job:conclusion]...: the jobs of one run as `gh api .../actions/runs/<id>/jobs` lists them.
 jobs_of() {
   local id="$1"; shift
@@ -71,13 +86,14 @@ cat > "$tmp/workflows" <<'JSON'
   {"id": 7, "name": "late", "path": ".github/workflows/late.yml", "state": "active"},
   {"id": 8, "name": "dman", "path": ".github/workflows/dman.yml", "state": "disabled_manually"},
   {"id": 9, "name": "dinact", "path": ".github/workflows/dinact.yml", "state": "disabled_inactivity"},
-  {"id": 10, "name": "links", "path": ".github/workflows/links.yml", "state": "active"}]}
+  {"id": 10, "name": "links", "path": ".github/workflows/links.yml", "state": "active"},
+  {"id": 11, "name": "check", "path": ".github/workflows/check.yml", "state": "active"}]}
 JSON
 bad=0
-t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
+t() { # want (green, red, unknown, or refused: red or unknown) label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order] [compare reads: a count, when given]
   : > "$tmp/log"; : > "$tmp/reads"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="${3:-}" EMPTY="${4:-}" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+    FAIL="${3:-}" EMPTY="${4:-}" COMPARES="$tmp/compares" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
   ok=0
@@ -85,6 +101,8 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
     red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
+    refused) if [ "$shown" = red ]; then grep -q ISSUE "$tmp/log" && ok=1
+      elif [ "$shown" = unknown ]; then [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1; fi ;;
   esac
   [ "$code" = 0 ] || ok=0
   if [ -n "${5:-}" ] && ! grep -qF -- "$5" "$tmp/log"; then ok=0; fi
@@ -93,6 +111,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     got_reads="$(grep -o 'actions/runs/[0-9]*/jobs' "$tmp/reads" | sort | tr '\n' ' ')"
     [ "$expect_reads" = "$got_reads" ] || ok=0
   fi
+  if [ -n "${7:-}" ] && [ "$(grep -c '/compare/' "$tmp/reads")" != "$7" ]; then ok=0; fi
   if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
@@ -209,6 +228,59 @@ runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)"
 t unknown workflow-list-fails-is-unknown "api *actions/workflows*"
 t unknown workflow-list-with-empty-stdout-is-unknown "" "api *actions/workflows*"
 t unknown issue-create-fails-is-unknown-exit-0 "issue create"
+# The cross-group clear also reads the commits: a green run on another commit clears the red run only when its commit holds
+# the red one (compare ahead or identical). Runs on one commit need no compare read.
+# The banchi pair (2026-11-02, banchi #1003): both runs on one commit. 23 jobs pass in both runs; the other five differ.
+banchi_common() {
+  printf '%s\n' "ci-check (ci-check-static):success" zizmor:success records:success browser-scope:success \
+    "ci-check (ci-check-product-3):success" revert-guard:success already-passed:success "ci-check (ci-check-product):success" \
+    "ci-check (ci-check-product-2):success" "ci-check (ci-check-guards-1):success" code-check:success "ci-check (ci-check-guards-2):success"
+  for i in 1 2 3 5 6 7 8 9 10 11 12; do printf 'design-check (%s):success\n' "$i"; done
+}
+BANCHI_SHA=471dc26879f2e3e814a40b7e8ec19f14acb7d372
+mapfile -t BANCHI_RED_JOBS < <(banchi_common; printf '%s\n' "design-check (4):failure" "all-jobs-passed:failure" "nightly-alarm:success" "design-check-passed:skipped" "ci-done:skipped")
+mapfile -t BANCHI_GREEN_JOBS < <(banchi_common; printf '%s\n' "design-check (4):success" "all-jobs-passed:success" "design-check-passed:success" "nightly-alarm:skipped" "ci-done:skipped")
+runs_are "$(gh_run check success 2026-11-02T09:00:00Z https://runs/banchi-dispatch workflow_dispatch 41483723188 completed "$BANCHI_SHA")" \
+  "$(gh_run check failure 2026-11-01T10:00:00Z https://runs/banchi-schedule schedule 41436198024 completed "$BANCHI_SHA")"
+jobs_of 41436198024 "${BANCHI_RED_JOBS[@]}"
+jobs_of 41483723188 "${BANCHI_GREEN_JOBS[@]}"
+t green banchi-red-schedule-run-is-cleared-by-a-dispatch-on-the-same-commit "" "" "" "actions/runs/41436198024/jobs actions/runs/41483723188/jobs" 0
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2 completed "$(sha 20)")" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1 completed "$(sha 21)")"
+jobs_of 1 checks:failure
+jobs_of 2 checks:success
+compare_is "$(sha 21)" "$(sha 20)" behind
+t red green-run-on-an-older-commit-than-the-red-run-clears-nothing "" "" https://runs/red-1 "actions/runs/1/jobs actions/runs/2/jobs" 1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2 completed "$(sha 31)")" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1 completed "$(sha 30)")"
+jobs_of 1 checks:failure
+jobs_of 2 checks:success
+compare_is "$(sha 30)" "$(sha 31)" ahead
+t green green-run-on-a-later-commit-that-holds-the-red-one-clears-it "" "" "" "actions/runs/1/jobs actions/runs/2/jobs" 1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2 completed none)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
+jobs_of 1 checks:failure
+jobs_of 2 checks:success
+t refused green-run-without-a-head-sha-clears-nothing
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1 completed none)"
+jobs_of 1 checks:failure
+jobs_of 2 checks:success
+t refused red-run-without-a-head-sha-clears-nothing
+# ruling pending: no-merge-onto-red-main cover set, 2026-11-02
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
+jobs_of 1 checks:failure scope:success
+jobs_of 2 checks:success
+t green green-run-lacking-a-job-that-passed-in-the-red-run-clears-it "" "" "" "actions/runs/1/jobs actions/runs/2/jobs" 0
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
+jobs_of 1 checks:success nightly-only:failure
+jobs_of 2 checks:success nightly-only:skipped
+t red schedule-only-job-failed-in-the-red-run-and-skipped-in-the-green-run-does-not-clear-it "" "" https://runs/red-1 "actions/runs/1/jobs actions/runs/2/jobs"
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
+jobs_of 1 checks:failure checks-macos:cancelled
+jobs_of 2 checks:success
+t red cancelled-red-job-missing-in-the-green-run-does-not-clear-it "" "" https://runs/red-1 "actions/runs/1/jobs actions/runs/2/jobs"
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
+jobs_of 1 checks:failure checks-macos:cancelled
+jobs_of 2 checks:success checks-macos:skipped
+t red cancelled-red-job-skipped-in-the-green-run-does-not-clear-it "" "" https://runs/red-1 "actions/runs/1/jobs actions/runs/2/jobs"
+runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)"
 : > "$tmp/log"
 OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
 if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
