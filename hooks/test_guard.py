@@ -16068,6 +16068,9 @@ def worktree_home_pushd_case():
     allow = (
         "pushd " + slash(os.path.join(lane_a, "src")) + " && make",
         "pushd " + slash(scratch),
+        # `-n` suppresses the change of directory: the stack only, so it moves nothing.
+        "pushd -n " + slash(lane_b),
+        "pushd -n ../lane-b",
     )
     problems = []
     for command in deny:
