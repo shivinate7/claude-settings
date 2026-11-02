@@ -955,3 +955,4 @@
 - red-run-fixture-data-needs-none: a commit that adds only fixture data under `test_support`, `testdata` or `__snapshots__` is a test path (TEST_DIRS, hooks/guard.py:1383, read by is_test_rel), so it needs `Red-run: none: <reason>`. Decision: red-run-trailer-on-test-commits (Red-run trailer rule)
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
+- caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
