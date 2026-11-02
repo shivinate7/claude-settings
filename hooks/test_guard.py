@@ -7475,14 +7475,14 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
 # ---- heredoc false alarm (lane env-heredoc-false-alarm). A quoted delimiter makes the body text, so an
 # env read in it runs nothing. An unquoted body runs its substitutions, and only those are judged.
 _BT = "`"
-# Incident 2 (2026-11-01 23:38 CST): a quoted brief body named a python heredoc header and an env read.
+# Incident 2 of debt env-heredoc-false-alarm: a quoted brief body named a python heredoc header and an env read.
 sh("env: heredoc-false-alarm: a quoted cat body names a python heredoc header and an env read, allowed",
    "cat > scratch/brief.md <<'EOF'\nrun python3 - <<X later\ncat " + ENV + " is refused\nEOF",
    "allow", cwd=PROJ)
 # A clean python heredoc later in the call does not put an unrelated quoted cat body under scan.
 sh("env: heredoc-false-alarm: a quoted cat body with an env read, then a clean python heredoc, allowed",
    "cat > b.md <<'A'\ncat " + ENV + "\nA\npython3 - <<'B'\nprint(1)\nB", "allow", cwd=PROJ)
-# Inferred reproduction of incident 1 (2026-11-01 23:41 CST; the exact command is unknown). Bash never
+# Inferred reproduction of incident 1 of debt env-heredoc-false-alarm (exact command unknown). Bash never
 # expands a backtick or a `$( )` inside a quoted delimiter, so either one in a python string is text.
 sh("env: heredoc-false-alarm: inferred reproduction, a quoted python body, a backtick env read in a string",
    "python3 - <<'EOF'\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
