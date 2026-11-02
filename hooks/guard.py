@@ -2909,23 +2909,24 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is an
+# Decision sweep-shuts-down-idle-simulators, rulings 3 and 4. A boot is an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
 # A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
-# `simulator-boot-bypass` (docs/decisions/sim-test-is-the-one-boot-path.md, ruling 4).
+# `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
-def _simctl_boot_name(word: str, rest: list) -> str:
-    """The device a `simctl boot` names, by the command word WORD (`xcrun` or `simctl`). '' when it boots none."""
+def _simctl_boot_args(word: str, rest: list):
+    """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
+    command is no `simctl boot`. The list is empty when xargs feeds the device."""
     if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
         after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"] and len(after) > 1:
-            return after[1]
-    return ""
+        if after[:1] == ["boot"]:
+            return after[1:]
+    return None
 
 
 def _sim_boot_names(segment: str) -> list:
@@ -2953,10 +2954,10 @@ def _simulator_app_open(rest: list) -> bool:
     Simulator.app, or `-b com.apple.iphonesimulator`. macOS reads these names without case."""
     for i, arg in enumerate(rest):
         low = arg.lower().rstrip("/")
-        if arg in ("-a", "-b") and i + 1 < len(rest):
+        if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg) and i + 1 < len(rest):  # a cluster (`-ga`, `-an`) with a or b takes the next word
             value = basename(rest[i + 1].rstrip("/"))
-            if (arg == "-a" and re.sub(r"\.app$", "", value) == "simulator") or (
-                    arg == "-b" and value == "com.apple.iphonesimulator"):
+            if ("a" in arg and re.sub(r"\.app$", "", value) == "simulator") or (
+                    "b" in arg and value == "com.apple.iphonesimulator"):
                 return True
         elif low.endswith("/simulator.app") or low == "simulator.app":
             return True
@@ -2974,7 +2975,7 @@ def sim_bypass_hit(segment: str) -> str:
         word, rest = basename(tokens[start]), tokens[start + 1:]
         if word == "open" and _simulator_app_open(rest):
             return ("open " + " ".join(rest))[:100]
-        if _simctl_boot_name(word, rest):
+        if _simctl_boot_args(word, rest) is not None:
             return " ".join([tokens[start]] + rest)[:100]
     return next((hit for text in inner_commands(tokens) for part in split_segments(text)
                  if (hit := sim_bypass_hit(part))), "")
@@ -2983,7 +2984,7 @@ def sim_bypass_hit(segment: str) -> str:
 SIM_BYPASS_REASON = (
     "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
     "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
-    "(docs/decisions/sim-test-is-the-one-boot-path.md)"
+    "(decision sim-test-is-the-one-boot-path)"
 )
 
 
@@ -3032,7 +3033,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -3078,7 +3079,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
     unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
     that can write. Liftable by an owner override, unlike `worktree_home_hit`
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
     elif tool in SHELL_TOOLS:
