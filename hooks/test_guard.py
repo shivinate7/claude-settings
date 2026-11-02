@@ -14180,8 +14180,6 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer'")),
         ("reviewer Round 2 on sonnet", "allow",
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
-        ("reviewer Round 3 on opus", "allow",
-         _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'")),
         ("reviewer Round 3 on haiku", "deny",
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
         ("builder Try 3 on sonnet", "deny",
@@ -14249,6 +14247,11 @@ for _name, _verdict, _script in (
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
+# A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
+# Agent spawn (owner ruling, item 127 pick a, Nov 1 17:25 CST, rule agent-model-cap).
+add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
+    "agent-model-cap", tool="Workflow",
+    script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
 # Task spawn that sets model opus is refused under `agent-model-cap` (owner ruling, item 127 pick a, Nov 1 17:25
@@ -20160,7 +20163,7 @@ role_model_allow("role-model: design-reviewer on opus is allowed (standing grant
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
 
-# ---- H: a Workflow agent() call is judged as a spawn (debt workflow-agent-model-unchecked, decision agent-model-cap).
+# ---- H: a Workflow agent() call faces the role row and the Opus ceiling, as an Agent spawn does (decision agent-model-cap).
 # The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
 # Opus ceiling (agent-model-cap) and the role row (agent-role-model). The Audit: marker counts on the brief's first line
 # only. Failure classes: a false allow (an above-row agent() call in a script passes); a false deny (a comment, a string
