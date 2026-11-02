@@ -23,8 +23,7 @@ protection. GitHub's branch protection setting is the owner's to change.
 - Admins are included (`enforce_admins`), so the rule binds the owner.
 - Force pushes and branch deletion are blocked. The repo has no rulesets.
 - The protection holds the one required check. A new job goes in the `needs` of `all-jobs-passed`, not in
-  the protection. A repo that pins a list in `stamp.json` instead has `merge` refuse the run when the pinned
-  list and a non-empty protection disagree, and name both sets (c189).
+  the protection. A pinned `merge.requiredChecks` list in `stamp.json` must equal a non-empty branch protection list, or `merge` stops and names both sets (merge:pinned-mismatch, `refuse_pinned_mismatch`; roadmap step c189, the merge tool and branch protection work).
 - The switch changes only the required checks:
   `gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks`
   with `strict=false` and one check, `all-jobs-passed`, app id 15368 (GitHub Actions). It needs the shivinate7
