@@ -676,16 +676,73 @@ _PIPED_SHELL = re.compile(
 _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
+# ssh in command position on a header line: ssh hands the body to a remote shell.
+_SSH_FIRST = re.compile(
+    r"(?:^|[;&|(`])[ \t]*(?:(?:sudo|env|exec)[ \t]+)?(?:[^\s|;&]*[/\\])?ssh(?:\.exe)?[ \t][^\n]*<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETER_FIRST = _interpreter_header(_SHELLS + "|python[\\d.]*|perl|ruby|node")
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 
 def SHELL_HEREDOC(text: str) -> bool:
-    return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
+    return bool(_SHELL_FIRST(text) or _SSH_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
 
 
 def INTERPRETER_HEREDOC(text: str) -> bool:
-    return bool(_INTERPRETER_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
+    return bool(_INTERPRETER_FIRST(text) or _SSH_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
+
+
+# A header-line segment runs a file the heredoc wrote when it names the file as a command (a direct
+# path), or gives it to a shell or to `source` / `.` (and, for a rule that reads any interpreter,
+# to python, perl, ruby or node).
+_RUNS_SHELL = re.compile(r"(?:%s|source|\.)(?:\.exe|\.cmd)?" % _SHELLS).fullmatch
+_RUNS_INTERPRETER = re.compile(r"(?:%s|source|\.)(?:\.exe|\.cmd)?" % _INTERPRETERS).fullmatch
+_REDIRECT_OUT = re.compile(r"\d?>>?(?!&)(.*)", re.S).fullmatch
+
+
+def _written_files(headers) -> set:
+    """The files that heredoc header lines write: each unquoted `>` or `>>` target, and the names
+    given to `tee`."""
+    files = set()
+    for header in headers:
+        for segment in split_segments(header):
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                continue
+            quoted = getattr(tokens, "quoted", ())
+            for at, token in enumerate(tokens):
+                found = _REDIRECT_OUT(token) if at not in quoted else None
+                if found:
+                    files.add(found.group(1) or (tokens[at + 1] if at + 1 < len(tokens) else ""))
+            for at in command_indexes(tokens):
+                if basename(tokens[at]) == "tee":
+                    files.update(t for t in tokens[at + 1:] if not t.startswith("-"))
+    return files
+
+
+def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
+    """True when a segment of `stripped` (the header lines) runs a file that a heredoc header of
+    `cmd` writes, so the body is what runs. Reading or staging the file (`cat F`, `git add F`)
+    runs nothing."""
+    files = {name[2:] if name.startswith("./") else name
+             for name in _written_files(header for _, _, header in _split_heredocs(cmd)[1])} - {""}
+    if not files:
+        return False
+
+    def is_written(token: str) -> bool:
+        token = token[2:] if token.startswith("./") else token
+        return any(token == name or token.endswith("/" + name) for name in files)
+
+    runs = _RUNS_SHELL if shells_only else _RUNS_INTERPRETER
+    for segment in split_segments(stripped):
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            continue
+        for at in command_indexes(tokens):
+            if is_written(tokens[at]) or (
+                    runs(basename(tokens[at])) and any(is_written(t) for t in tokens[at + 1:])):
+                return True
+    return False
 
 
 # The only characters heredoc_heads acts on when nothing is open.
@@ -807,8 +864,10 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
     stripped = _drop_heredoc_bodies(cmd)
     # Bash reads a header or a pipe in header lines only, so the run test sees the lines left once
-    # every body is dropped: a body line such as `python3 - <<X` or `cat <<X | bash` is data.
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(stripped)):
+    # every body is dropped: a body line such as `python3 - <<X` or `cat <<X | bash` is data. A body
+    # that a later header-line segment runs from its file stays in view too.
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(stripped)) \
+            or _runs_written_file(cmd, stripped, shells_only):
         return cmd  # the body may be executed, so keep it under inspection
     return stripped
 
