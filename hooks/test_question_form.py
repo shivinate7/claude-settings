@@ -1112,6 +1112,74 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+class _BrokenPipeGit:
+    """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
+
+    def __init__(self, stderr):
+        self.stdin = self
+        self.stdout = io.BytesIO(b"")
+        self.stderr = io.BytesIO(stderr)
+        self.returncode = 128
+
+    def write(self, data):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def communicate(self, data=None, timeout=None):
+        return b"", self.stderr.read()
+
+
+def _unknown_after_broken_pipe(name, stderr):
+    """The unknown lines of past_rulings for a folder with a .git entry, where git's stdin write raises a broken pipe."""
+    from unittest import mock
+    import _nowindow  # the one home of a no-window child start, which _read_steps calls through
+    import question_form  # the one form check (hooks/question_form.py)
+    folder = os.path.join(RUN_FOLDER, name)
+    os.makedirs(folder, exist_ok=True)
+    open(os.path.join(folder, ".git"), "w", encoding="utf-8").close()
+    with mock.patch.object(_nowindow, "Popen", return_value=_BrokenPipeGit(stderr)):
+        _candidates, unknown = question_form.past_rulings(tcj.APPS_GOAL, folder)
+    return unknown
+
+
+def case_roadmap_broken_pipe_not_a_repo_is_absent():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("roadmap broken pipe: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    unknown = _unknown_after_broken_pipe(
+        "roadmap-not-a-repo", b"fatal: not a git repository (or any of the parent directories): .git\n")
+    check("roadmap broken pipe: a .git entry that is no repository reads the roadmap as absent, not unreadable",
+          "roadmap step notes (absent)" in unknown
+          and not any("roadmap step notes (unreadable" in line for line in unknown), str(unknown)[:300])
+    check("roadmap broken pipe: the absent roadmap does not refuse the question",
+          not question_form.unreadable_sources(unknown), str(question_form.unreadable_sources(unknown))[:300])
+
+
+def case_roadmap_broken_pipe_other_stderr_stays_unreadable():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("roadmap broken pipe: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    unknown = _unknown_after_broken_pipe("roadmap-other-stderr", b"fatal: unable to read tree deadbeef\n")
+    roadmap = [line for line in unknown if "roadmap step notes" in line]
+    check("roadmap broken pipe: other stderr text stays unreadable, so the question refuses",
+          len(roadmap) == 1 and "unreadable" in roadmap[0] and "absent" not in roadmap[0], str(unknown)[:300])
+
+
 # ------------------------------------------------------------------ item 51's field: a picture's focus at the top level
 
 def case_item_51_stray_field():
@@ -1137,7 +1205,8 @@ def main():
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
-                 case_past_rulings_skips_the_debt_notes_file):
+                 case_past_rulings_skips_the_debt_notes_file,
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
         try:
             case()
         except Exception as exc:
