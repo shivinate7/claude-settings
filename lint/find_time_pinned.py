@@ -627,7 +627,7 @@ def mask_js(src):
     Quote and backtick delimiters stay."""
     n = len(src)
     out = list(src)
-    holes = []  # brace depth at each open `${`
+    template_parts = []  # brace depth at each open `${`
     depth = 0
     last, word = "", ""  # last significant code char, and the identifier ending there
     i = 0
@@ -647,7 +647,7 @@ def mask_js(src):
             elif ch == "`":
                 return k + 1, False
             elif ch == "$" and src[k + 1:k + 2] == "{":
-                holes.append(depth)
+                template_parts.append(depth)
                 return k + 2, True
             else:
                 blank(k, k + 1)
@@ -711,8 +711,8 @@ def mask_js(src):
             i = j
             continue
         if c == "`":
-            i, hole = template(i + 1)
-            last, word = ("{", "") if hole else ("`", "")
+            i, in_template_part = template(i + 1)
+            last, word = ("{", "") if in_template_part else ("`", "")
             continue
         if c in "'\"":
             j = string_end(i, c)
@@ -743,10 +743,10 @@ def mask_js(src):
         if c == "{":
             depth += 1
         elif c == "}":
-            if holes and depth == holes[-1]:
-                holes.pop()
-                i, hole = template(i + 1)
-                last, word = ("{", "") if hole else ("`", "")
+            if template_parts and depth == template_parts[-1]:
+                template_parts.pop()
+                i, in_template_part = template(i + 1)
+                last, word = ("{", "") if in_template_part else ("`", "")
                 continue
             depth = max(depth - 1, 0)
         last, word = c, ""
@@ -980,7 +980,7 @@ def mask_swift(src):
             k += 1
         return k < n and src[k] == '"'
 
-    def skip_hole(k):
+    def skip_interpolation(k):
         """Index after the `)` that closes an interpolation whose body starts at k."""
         d = 1
         while k < n and d:
@@ -1008,7 +1008,7 @@ def mask_swift(src):
         p = body
         while p < n:
             if src.startswith(esc, p):
-                p = skip_hole(p + len(esc) + 1) if src.startswith("(", p + len(esc)) else p + len(esc) + 1
+                p = skip_interpolation(p + len(esc) + 1) if src.startswith("(", p + len(esc)) else p + len(esc) + 1
                 continue
             if src.startswith(close, p):
                 return body, p, p + len(close)
