@@ -582,7 +582,7 @@ class GhLock(Lock):
         msg = lock_message(ttl, now, self.holder)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
-            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
+            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
         if c:
             if is_net(c, out):
