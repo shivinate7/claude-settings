@@ -1,9 +1,9 @@
 {
  "title": "Watch whether compaction loses rulings, to revisit the no-limit ruling",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.33756,
  "why": "Owner, Nov 1 17:56 CST (page item 109, pick b): no rotation limit, and some way to see if it should be revisited.",
- "note": "Shape: after each compaction, a standing session's next report names any ruling or fact it had to recover from git or the page (a Deviations line). Triage reads those lines at each roadmap re-weigh and brings the ruling back to the owner if losses repeat. Cost: no new log, file or process; it reads reports already written. Ruling home: decision session-tiers (PR #978). Ready: no open question.",
- "updatedAt": "2026-11-01T23:59:00Z"
+ "note": "Shape: after each compaction, a standing session's next report names any ruling or fact it had to recover from git or the page (a Deviations line). Triage reads those lines at each roadmap re-weigh and brings the ruling back to the owner if losses repeat. Cost: no new log, file or process; it reads reports already written. Ruling home: decision session-tiers (PR #978). Ready: no open question. Built as PR #986, open at Nov 1 19:32 CST.",
+ "updatedAt": "2026-11-02T01:32:00Z"
 }

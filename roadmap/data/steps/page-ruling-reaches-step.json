@@ -1,9 +1,9 @@
 {
  "title": "A ruling answered on the waiting page always reaches its roadmap step",
  "why": "Incident, Nov 1 17:35 CST: the owner ruled on Oct 28 to keep the GitHub apps (page item 9), but step c153's note never got it, so triage asked again (item 145).",
- "note": "Shape: the roadmap build lists each closed page item whose answer is not on its home step, in the upkeep list triage reads each pass. Cost: one page read per roadmap build; no new process. Guard basis: named incident (Nov 1). Ready: no open question.",
+ "note": "Shape: the roadmap build lists each closed page item whose answer is not on its home step, in the upkeep list triage reads each pass. Cost: one page read per roadmap build; no new process. Guard basis: named incident (Nov 1). Ready: no open question. Built as PR #981, open at Nov 1 19:32 CST.",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.33762,
- "updatedAt": "2026-11-01T23:40:00Z"
+ "updatedAt": "2026-11-02T01:32:00Z"
 }

@@ -1,9 +1,9 @@
 {
-  "title": "Inside each tier of the waiting page, newer questions rise and ones asked before and still unanswered sink, with their options folded",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 103.33765,
-  "why": "Owner ask, Nov 1 17:16 CST (page note on item 142): \"after triage here sorts questions into severity, there needs to be another sort within the subgroups where items that have been previously asked and weren't answered sink lower (and their answer choices collapse, I can be able to uncollapse it though) and newer questions come higher\".",
-  "note": "Today the writer's rank orders items inside a tier (skill waiting-page, The writer), with unranked items oldest first. Change: inside each tier, an item the owner has already seen and left unanswered sorts below newer ones, and its options start folded behind one control that unfolds them; a group still sits together. Open: what counts as seen (a lastAnswer with no pick, or shown across earlier saves) is for the designer and lane to settle from the page's data; never a new owner question unless it departs from this ask. Port: no; skill waiting-page's page.html, every repo's page on its next republish. Screen lane: designer first, design reviewer after. Done check: a page with one old unanswered item and one new item in the same tier shows the new one first and the old one folded, at every size and theme. Needs no answer. Placed after page-item-checked-at-write (triage 5).",
-  "updatedAt": "2026-11-01T23:20:00Z"
+ "title": "Inside each tier of the waiting page, newer questions rise and ones asked before and still unanswered sink, with their options folded",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.33765,
+ "why": "Owner ask, Nov 1 17:16 CST (page note on item 142): \"after triage here sorts questions into severity, there needs to be another sort within the subgroups where items that have been previously asked and weren't answered sink lower (and their answer choices collapse, I can be able to uncollapse it though) and newer questions come higher\".",
+ "note": "Today the writer's rank orders items inside a tier (skill waiting-page, The writer), with unranked items oldest first. Change: inside each tier, an item the owner has already seen and left unanswered sorts below newer ones, and its options start folded behind one control that unfolds them; a group still sits together. Open: what counts as seen (a lastAnswer with no pick, or shown across earlier saves) is for the designer and lane to settle from the page's data; never a new owner question unless it departs from this ask. Port: no; skill waiting-page's page.html, every repo's page on its next republish. Screen lane: designer first, design reviewer after. Done check: a page with one old unanswered item and one new item in the same tier shows the new one first and the old one folded, at every size and theme. Needs no answer. Placed after page-item-checked-at-write (triage 5). Built as PR #997, open at Nov 1 19:32 CST.",
+ "updatedAt": "2026-11-02T01:32:00Z"
 }
