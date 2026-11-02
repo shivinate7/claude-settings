@@ -7,7 +7,7 @@
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -53,6 +53,13 @@ class Dropped(Stop):
 
 class Held(Stop):
     pass
+
+# The cite each refusal prints, in the house form (decision <slug>, <gloss>). Message text only.
+LOCK_CITE = "(decision merge-lock, one run holds the merge lock for a bounded time and never waits on a lock that could expire)"
+PIN_CITE = "(decision main-branch-protection, the merge tool reads the check names from the protection)"
+BASE_CITE = "(decision merge-needs-current-base, a merge needs a green run that holds for the current base)"
+GRANT_CITE = "(decision standing-merge-grant, a pull request GitHub reads BLOCKED or BEHIND never merges)"
+STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the default base)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -111,6 +118,12 @@ def sh(args, cwd=None, input=None, env=None, timeout=None):
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
+
+def ancestor(cwd, tip, base):
+    """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
+    that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    return git_reads.branch_is_ancestor(cwd, base, tip)
 
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
@@ -196,7 +209,7 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
             try:
                 before_wait(wait)
             except NetStop as e:
-                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first. {e}\n{out}") from None
+                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first {LOCK_CITE}. {e}\n{out}") from None
         say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
         pause(wait)
 
@@ -265,7 +278,7 @@ def say(*lines):
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
-LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (a rate wait is the exception to the 600 s cap; standing-merge-grant)
+LOCK_MAX_HOLD = 6 * 3600  # seconds: the bound on how far a rate wait extends the lock, counted from the take. It does not cap the take's own expiry (decision standing-merge-grant)
 
 def lock_ref(b):
     """The one name of the lock ref. Mac and cloud runs must share it, or each would hold a lock the other cannot see."""
@@ -280,7 +293,7 @@ def old_lock_ref(b):
 
 def refuse_old_lock(b, old, now):
     if old and old[1] > now:
-        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
+        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53. " + LOCK_CITE)
 
 def boot_stamp():
     """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
@@ -383,7 +396,7 @@ def holder_state(held):
 def refuse_or_take_over(b, held, now):
     """A live lock stops the run (Held), unless its holder's pid is dead on this host: then one line says so and the take goes on, as for an expired lock."""
     if holder_state(held) != "dead":
-        raise Held(holder_text(b, held, now))
+        raise Held(holder_text(b, held, now) + " " + LOCK_CITE)
     f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
     say(f"merge: took over the merge lock on {b}: its holder, PR #{f.get('pr', '?')} (branch {f.get('branch', '?')}), pid {f['pid']} on {f['host']}, is dead.")
 
@@ -425,17 +438,17 @@ class Lock:
             return
         now = self.now()
         if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
-            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now. Run again.")
+            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now {LOCK_CITE}. Run again.")
         need = int(now + wait + LOCK_MARGIN)
         if need <= self.until:
             return
         if need > self.began + LOCK_MAX_HOLD:
-            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take. Run again.")
+            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take {LOCK_CITE}. Run again.")
         msg = re.sub(r"^expires: \d+$", f"expires: {need}", self.message, flags=re.M)
         try:
             sha = self.swap(self.base, msg)
         except Stop as e:
-            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire. Run again. {e}") from e
+            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire {LOCK_CITE}. Run again. {e}") from e
         self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
     def release(self, b, token):
@@ -463,7 +476,7 @@ class GitLock(Lock):
         ref = ref or lock_ref(b)
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
-            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
@@ -482,13 +495,13 @@ class GitLock(Lock):
         msg = lock_message(ttl, now, self.holder)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         # --force-with-lease with an empty expect creates only. With a sha it swaps only that
         # expired lock. So two runs that break one expired lock cannot both win.
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            raise Held("another run took the merge lock first")
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -497,11 +510,11 @@ class GitLock(Lock):
         ref = lock_ref(b)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha}  # this run's before the push: a push that lands with a lost reply still leaves a lock release can delete
         c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{self.sha}", "origin", f"{sha}:{ref}")
         if c:
-            raise Stop("the lock ref moved, or the push failed: " + out)
+            raise Stop("the lock ref moved, or the push failed " + LOCK_CITE + ": " + out)
         return sha
 
     def released(self, b, lease):
@@ -532,7 +545,7 @@ class GitLock(Lock):
         if c:
             c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
             if c2:
-                raise Stop("unlock failed: " + out + "\n" + out2)
+                raise Stop("unlock failed " + LOCK_CITE + ": " + out + "\n" + out2)
         return True
 
 class GhLock(Lock):
@@ -555,13 +568,13 @@ class GhLock(Lock):
         c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
-                raise NetStop("cannot read the merge lock: " + sha)
+                raise NetStop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
-            raise Stop("cannot read the merge lock: " + sha)
+            raise Stop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
         c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
         if is_net(c, out):  # an unread expiry is no lock that never expires
-            raise NetStop("cannot read the merge lock commit: " + out)
+            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + out)
         return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
 
     def acquire(self, b, ttl):
@@ -571,23 +584,23 @@ class GhLock(Lock):
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
-                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
+                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock " + LOCK_CITE + ": " + out)
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
-            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch: " + tree)
+            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
-            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
+            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
         if c:
             if is_net(c, out):
-                raise NetStop("cannot take the merge lock: " + out)
+                raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
-                raise Stop("cannot take the merge lock: " + out)
-            raise Held("another run took the merge lock first")
+                raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -597,14 +610,14 @@ class GhLock(Lock):
         ref = f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}"
         c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=True)
         if c or cur.strip() != self.sha:
-            raise Stop("the lock is not this run's any more" if not c else "cannot read the lock: " + cur)
+            raise Stop("the lock is not this run's any more " + LOCK_CITE if not c else "cannot read the lock " + LOCK_CITE + ": " + cur)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
         c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
         if c:
-            raise Stop("cannot move the lock: " + out)
+            raise Stop("cannot move the lock " + LOCK_CITE + ": " + out)
         return sha.strip()
 
     @staticmethod
@@ -621,9 +634,9 @@ class GhLock(Lock):
         """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
-            raise NetStop("unlock failed, still failing after the retries. Run again: " + out)
+            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
         if c and not self.gone(out):
-            raise Stop("unlock failed: " + out)
+            raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return not c
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
@@ -802,7 +815,7 @@ class Host:
         if held is None:
             say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
         elif held and set(held) != set(self.required):
-            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)}. "
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
                        'Set merge.requiredChecks to "protection" so the protection list is the one source.')
 
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
@@ -911,11 +924,11 @@ class Host:
                 self.pause(self.minute)
                 continue
             if info["base"] != base:
-                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait."
+                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
-                return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
+                return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
             red, pending = self.settle(red, pending, *self.run_state(sha))
@@ -981,33 +994,59 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The CI alarm reads the same file
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clear in base_state. The CI alarm reads the same file and the same clear rule
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A green push or dispatch never hides a red schedule run; a dispatch
-        clears an older red push. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
+        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
+        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
+        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
+        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
-            red, unknown = [], []
-            for r in {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.values():
+            red, unknown, read = [], [], {}
+
+            def jobs_of(r):  # a run's jobs, read once per call
+                if r["id"] not in read:
+                    read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                return read[r["id"]]
+            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
+            age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
+
+            def cleared(r):
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
+                names = {j["name"] for j in jobs_of(r)}
+                for n in newest.values():
+                    if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
+                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"):
+                        continue
+                    theirs = {}
+                    for j in jobs_of(n):
+                        theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
+                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in names):
+                        return True
+                return False
+            for r in newest.values():
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
-                got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
+                got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
                 steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    red.append(f"{where}: " + "; ".join(jobs))
+                    if not cleared(r):
+                        red.append(f"{where}: " + "; ".join(jobs))
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
@@ -1122,7 +1161,7 @@ class Host:
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
         state_now = self.pr(n)["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
-            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base. gh's merge refuses it the same way, so no merge call was sent."
+            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
             c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
@@ -1604,10 +1643,10 @@ def holds_base(wt, base_ref, sha, before_run=None):
     """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
     (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
     the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
-    c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
-    if c == 0:
+    held = ancestor(wt, base_ref, sha)
+    if held:
         return None, None
-    if c == 1:
+    if held is False:
         ok, why = small_base_move(wt, base_ref, sha, before_run)
         if ok:
             return None, why
@@ -1615,7 +1654,8 @@ def holds_base(wt, base_ref, sha, before_run=None):
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
                 f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}."), None
-    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}", None
+    return (f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
+            f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`)."), None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -1655,7 +1695,11 @@ def ff_main(root, base, commit):
     c, out = git(root, "fetch", "-q", "origin")
     if c:
         raise Stop("git fetch origin failed, so the local main cannot be moved: " + out)
-    if git(root, "merge-base", "--is-ancestor", commit, f"refs/remotes/origin/{base}")[0]:
+    on_origin = ancestor(root, commit, f"refs/remotes/origin/{base}")
+    if on_origin is None:
+        raise Stop(f"cannot read whether {commit[:9]} is on origin/{base}: this clone is shallow or git could not tell. "
+                   "Nothing was moved. Run `git fetch --unshallow` and run again.")
+    if not on_origin:
         raise Stop(f"{commit[:9]} is not on origin/{base}. Nothing was moved.")
     tree = holder(root, base)
     if tree:
@@ -1741,7 +1785,11 @@ def cut_local(root, branch, merged):
     held = holder(root, branch)
     if held and not remove_held_tree(root, branch, held, merged):
         return
-    if git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+    inside = ancestor(root, f"refs/heads/{branch}", merged)
+    if inside is None:
+        say(f"merge: {branch} kept here: git could not tell whether its tip is in the merged head {merged[:9]} "
+            "(a shallow clone cuts the history: run `git fetch --unshallow`).")
+    elif not inside:
         say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
@@ -1773,10 +1821,11 @@ def read_lanes(wt, base_ref, sha):
         return n % 2 == 1
     tips = []
     for t in took:
-        c, out = git(wt, "merge-base", "--is-ancestor", t, base_ref)
-        if c not in (0, 1):  # 1 is "not an ancestor"; any other code is a failed read
-            raise ValueError(f"git merge-base failed on {t[:9]}: " + (out.splitlines() or ["?"])[-1])
-        if c:
+        c = ancestor(wt, t, base_ref)
+        if c is None:  # a failed read, or a shallow clone that cut the history: never "not an ancestor"
+            raise ValueError(f"git merge-base failed on {t[:9]}: git could not tell (a shallow clone needs "
+                             "`git fetch --unshallow`)")
+        if not c:
             tips.append(t)
     return tips, {t for t in tips if all(reverted(h) for h in took[t])}
 
@@ -1864,12 +1913,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
         proofs = {}
         def proof(b):  # why the tip is not in the merge commit, or None; one run per lane
             if b not in proofs:
-                a = git(root, "merge-base", "--is-ancestor", heads[b], commit)[0]
+                a = ancestor(root, heads[b], commit)  # None in a shallow clone: the proof could not run, the branch stays
                 why = None
-                if a == 1:
+                if a is False:
                     proven = guard_core.branch_cherry_empty(root, commit, heads[b])
                     why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
-                elif a:
+                elif a is None:
                     why = "the proof could not run."
                 proofs[b] = why
             return proofs[b]
@@ -2289,7 +2338,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
-                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
+                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
             say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
         else:
             if resumed:

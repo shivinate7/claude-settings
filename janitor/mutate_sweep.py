@@ -316,7 +316,7 @@ MUTATIONS = [
      '    if answer.returncode == 0:\n'
      '        return True\n'
      '    if answer.returncode == 1:\n'
-     '        return False\n'
+     '        return False if is_shallow(where) is False else None\n'
      '    return None',
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
