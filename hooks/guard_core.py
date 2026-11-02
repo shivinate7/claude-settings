@@ -804,7 +804,7 @@ def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
     runs = _RUNS_SHELL if shells_only else _RUNS_INTERPRETER
     ends = []
     segments = split_segments(stripped, ends)
-    piped = False   # the segment before pipes a written file into this one (`cat F | bash`)
+    fed = False   # the segment before pipes a written file into this one (`cat F | bash`)
     for segment, end in zip(segments, ends):
         tokens = segment_tokens(segment)
         for at, word in ([] if tokens is None else _command_words(tokens)):
@@ -816,9 +816,9 @@ def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
             words, stdin = _operands(tokens, at + 1)
             for script in _script_operands(name, words):
                 if (_run_name(script) in files) if script != "-" else (
-                        piped or any(_run_name(source) in files for source in stdin)):
+                        fed or any(_run_name(source) in files for source in stdin)):
                     return True
-        piped = end == "|" and tokens is not None and any(_run_name(t) in files for t in tokens)
+        fed = end == "|" and tokens is not None and any(_run_name(t) in files for t in tokens)
     return False
 
 
