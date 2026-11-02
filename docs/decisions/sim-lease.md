@@ -11,6 +11,8 @@ The shared iPhone Duo simulator (UDID `AC2E94F9-0E44-4D9C-B27A-54DA45BC4698`) ha
 - No timer and no daemon. Each call checks expiry itself. State is one file, `state/sim-lease.json` under the config dir, under a file lock.
 - The existing simulator rules stay: the boot cap 2, the reuse rule and the idle sweep of `sweep-shuts-down-idle-simulators`. `bin/sim-test` is not leased: it uses the iPhone 18 Pro.
 
+How to work on the Duo once you hold it lives in the shivinate7/home repo, record `duo-simulator`. This record does not restate it.
+
 Gap: nothing makes a session take the lease. The simulator MCP tool, `hinge` and raw `simctl` are not gated. Sessions run `sim-lease take` first by hand. A guard rule waits for an incident.
 
 Risk: owner-named need (chat, 2026-11-02 13:00 CST). The owner ruled at 13:05 CST that the gated device is the iPhone Duo, not the iPhone 17.
