@@ -222,13 +222,22 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
 
 UNDO_MEMO = {}
 
+def silent_undo():
+    """The silent-undo check module (lint/check_silent_undo.py), the one home of the check and of its excuse line."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_silent_undo
+    return check_silent_undo
+
+def drops_line(path, why):
+    """The excuse line the silent-undo check reads, for a change of the merge tool's own that drops lines of path."""
+    return f"{silent_undo().TRAILER}: {path} -- {why}"
+
 def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the owner passed
     --undo-check-unknown-ok "<reason>": that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
-    import check_silent_undo as undo
+    undo = silent_undo()
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
     # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
     try:
@@ -1287,7 +1296,7 @@ def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
     msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", "Rebuild the records page",
-           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
+           "-m", drops_line(RECORDS_PAGE, "a generated page, rebuilt by the generator")]  # the silent-undo check reads the rebuilt page as generated
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim: " + out)
@@ -1325,7 +1334,7 @@ def records_proof(wt, base_ref):
                 raise Stop(f"the records page {RECORDS_PAGE} conflicts with {base_ref} and the generator writes no page for this repo, so nothing was merged. Resolve the page by hand on the branch.")
             # the rebuilt page drops lines a side added; the silent-undo check after the next wait must read that as generated
             c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page",
-                         "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt on the merged tree")
+                         "-m", drops_line(RECORDS_PAGE, "a generated page, rebuilt on the merged tree"))
             if c:
                 raise Stop("cannot commit the merge of the base: " + out)
             healed = True
@@ -1717,7 +1726,7 @@ def revert_claim(root, wt, branch, claim_sha):
         subject = git(wt, "log", "-1", "--format=%s", claim_sha)[1].strip()
         why = "the merge tool reverts its own claim"
         c, out = git(wt, "commit", "-q", "-m", f'Revert "{subject}"', "-m", f"This reverts commit {claim_sha}.",
-                     "-m", "\n".join(f"Drops-lines: {p} -- {why}" for p in paths))
+                     "-m", "\n".join(drops_line(p, why) for p in paths))
     if not c:
         c, out = git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     if c:
