@@ -1010,3 +1010,4 @@
 - checkout-f-cluster: `git checkout -fb x` passes while `git switch -fc x` is read as a force; checkout reads -f exactly and switch reads clusters (hooks/guard_shared_tree.py).
 - switch-clean-cluster-false-alarm: `git switch -Cf x` asks or denies, and `git clean -fdn` or `-nfd` in a lost primary is refused, though a dry run deletes nothing (hooks/guard_shared_tree.py).
 - merge-liftable-worktree-gone: the worktree-gone branch of fail() in merge/merge.py raises a plain Stop, so a liftable stop that reaches it prints its flag and also "No override lifts this refusal". It needs the tree removed after the claim push plus an unreadable-history stop. Step: refusal-stricter-fixes (refusals narrowed to their rule).
+- cloud-disk-full: with the brake off in a cloud session (`CLAUDE_CODE_REMOTE=true`), a cloud lane can use up its disk allowance. Writes then fail with "no space left on device". Decision: machine-load-brake (the machine-load brake).
