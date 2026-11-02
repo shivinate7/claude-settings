@@ -32,7 +32,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
-  record the answer goes to), `context` (plain text, line breaks kept).
+  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.

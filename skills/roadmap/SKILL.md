@@ -135,10 +135,13 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
-  is the words `item <n>` in any case, with an optional `#` (`page item 9`). Each item is cited on its
-  own: "items 9 and 10" cites item 10 only. Each entry reads `<id> (page item <n>)`. Triage files
-  the ruling on the step's note. The row reads one `unknown (<why>)` entry, never an empty list, when:
+  is the words `item <n>` in any case, with an optional `#` (`page item 9`). Cite each item on its
+  own, as `item <n>`. "items 9 and 10" cites neither item, and "item 9 and 10" cites item 9 only.
+  Each entry reads `<id> (page item <n>)`. Triage files the ruling on the step's note. The row reads
+  one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
+  - the live file is not a JSON object;
+  - the live file has no `threads` or `pulls` list;
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old or is more than 5 minutes ahead;
   - there is no `items` list;
   - an `items` row has the wrong shape (`n` not an int, `status` or `home` not a string).
