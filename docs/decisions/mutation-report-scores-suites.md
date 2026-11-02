@@ -62,9 +62,9 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 | banchi TypeScript | 2 | 10 | 0 | 7 | 3 | 0% | 100% | 100 points |
 | banchi Python (T7 group runner) | 14 | 59 | 26 | 23 | 10 | 44% | 100% | 56 points |
 
-- Not scored. q_max: PRs 971 and 759 read UNKNOWN, since every changed suite was red on the clean source (timeout or assert). PRs 979 and 752 read NO_TESTS. 10 PRs read NO_PRODUCT. banchi TypeScript: 13 NO_TESTS, 35 NO_PRODUCT. banchi Python: 11 NO_TESTS, 25 NO_PRODUCT.
+- Not scored. q_max: PRs 971 and 759 read UNKNOWN. No mutant ran, because the 900 s budget ran out first (inferred: the log holds no skip note and no all-unusable reason). PRs 979 and 752 read NO_TESTS. 10 PRs read NO_PRODUCT. banchi TypeScript: 13 NO_TESTS, 35 NO_PRODUCT. banchi Python: 11 NO_TESTS, 25 NO_PRODUCT.
 - Not run. q_max: 3 in PRs 885 and 993, and 10 in the UNKNOWN PRs. banchi Python: 6 in PRs 981 and 926. A mutant not run is not a survivor.
-- Skipped. Seven q_max PRs skipped one file, `harness/browser/verify.test.mjs`: "Invalid string length" (4) or heap exhaustion (3). Each row still shows a rate.
+- Skipped. Seven q_max PRs skipped one file, `harness/browser/verify.test.mjs`: "Invalid string length" (4) or heap exhaustion (3). Six of the seven rows still show a rate.
 - T6 reads UNKNOWN. Its clean run needs `demo-assets/`, which a checkout leaves out. No PR of the 50 touched it.
 - Survivors. Per-mutant lists are too long for this record, so these are per-file counts.
   - q_max (51): `harness/browser/verify.test.mjs` 20, a test file. `src/components/RfpSafetyPanel.tsx`, `src/components/Chat.tsx` and `harness/model-calls-map.mjs` 4 each. `harness/decision-refs.mjs` 3. Three more files with 2 each. 10 files with 1 each.
@@ -79,7 +79,7 @@ Open items, each a debt:
 - `banchi-replay-no-select`: banchi rows do not say that every changed suite ran.
 - `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
 
-No CI check is built. On 2026-11-02 no CI check reads the replay. The owner rules on one.
+On 2026-11-02 no CI check reads the replay. The owner rules on one.
 
 ## Cost
 
