@@ -114,6 +114,9 @@ ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
 KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
+SEND_TOOLS = _transcript.SEND_TOOLS  # the send predicates live in lint/_transcript.py, one home
+ARTIFACT_DATA = _transcript.ARTIFACT_DATA
+_writes_n = _transcript.writes_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
 STEP_PATH = "roadmap/data/steps/%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
@@ -132,9 +135,6 @@ ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|stand
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
-ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
-WRITE_VERBS = ("set", "update", "batch")
 HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
 HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
@@ -465,38 +465,6 @@ def _proves(use, n):
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
     return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
-
-
-def _in_items(d):
-    return (d.get("collection") == "items"
-            or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
-
-
-def _is_write(d):
-    """False for a dict whose action or op is a verb other than set, update, batch."""
-    verb = d.get("action", d.get("op"))
-    return not isinstance(verb, str) or verb in WRITE_VERBS
-
-
-def _has_n(node, n):
-    if isinstance(node, dict):
-        if not _is_write(node):
-            return False
-        v = node.get("n")
-        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
-                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
-            return True
-        return any(_has_n(c, n) for c in node.values())
-    return isinstance(node, list) and any(_has_n(c, n) for c in node)
-
-
-def _writes_n(node, n):
-    """True when a write dict that names the items collection holds key n == n at any depth below it."""
-    if isinstance(node, dict):
-        if not _is_write(node):
-            return False
-        return (_in_items(node) and _has_n(node, n)) or any(_writes_n(c, n) for c in node.values())
-    return isinstance(node, list) and any(_writes_n(c, n) for c in node)
 
 
 def page_problem(item_id, rest, text, k, stamp, pages):
