@@ -13944,6 +13944,22 @@ ol("a design labelled B: a bottom strip on option a is denied", "deny",
 ol("a design labelled a bottom strip on option a is allowed", "allow",
    ol_item(options=ol_opt(0, design="pic"), designs=[{"slug": "pic", "label": "a bottom strip"}]))
 
+# Round 3: a design's own `option` names the option it belongs to, and wins over another option's slug (optionDesigns
+# in skills/waiting-page/page.html). An update that carries designs and no options has no stored options to judge, so
+# the design's own `option` is its key. A design with no `option` has no key to judge.
+ol("an update with designs only, a design of option a labelled Option B, is denied", "deny",
+   {"designs": [{"slug": "p", "option": "a", "label": "Option B"}]}, action="update")
+ol("a decision whose design of option a is labelled B: strip, while option b carries its slug, is denied", "deny",
+   ol_item(options=ol_opt(1, design="p"), designs=[{"slug": "p", "option": "a", "label": "B: strip"}]))
+ol("an update with designs only, a design of option b labelled B: strip, is allowed", "allow",
+   {"designs": [{"slug": "p", "option": "b", "label": "B: strip"}]}, action="update")
+ol("an update with designs only, a design of option a labelled a bottom strip, is allowed", "allow",
+   {"designs": [{"slug": "p", "option": "a", "label": "a bottom strip"}]}, action="update")
+ol("an update with designs only, a design with no option labelled Option B, is allowed", "allow",
+   {"designs": [{"slug": "p", "label": "Option B"}]}, action="update")
+ol("a label B-tree keyed a is allowed", "allow", ol_item(options=ol_opt(0, label="B-tree")))
+ol("a label B.C. office keyed a is allowed", "allow", ol_item(options=ol_opt(0, label="B.C. office")))
+
 # The page's letters and none. The guard's copy must match them: the page's letterOf maps index i to
 # String.fromCharCode(65 + i % 26), and NONE is "none". Each check reads one line, anchored at a line start,
 # so a copy in a comment never stands for the page's line.
