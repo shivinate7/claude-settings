@@ -116,6 +116,24 @@ def matches(template, live):
     return at >= 0 and skeleton_before(got[:at]) and TAIL.fullmatch(got[at + len(want):]) is not None
 
 
+def carries_data(template, live):
+    """True when the live page's designData block or roadmap block differs from the template's own empty
+    one (white space ignored), so a republish of `live` as it stands would drop nothing. Fails toward True:
+    a page whose blocks cannot be found is not judged empty. A live page with no roadmap marker predates
+    the block and counts as empty there, as splice.carry reads it."""
+    def part(text, span):
+        return " ".join(text[span[0]:span[1]].split())
+    try:
+        if part(template, splice.design_span(template, "the template")) != part(live, splice.design_span(live, "the live page")):
+            return True
+        if splice.markers(live) and (part(template, splice.block_span(template, "the template"))
+                                     != part(live, splice.block_span(live, "the live page"))):
+            return True
+    except SystemExit:
+        return True
+    return False
+
+
 def page_id(url):
     # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
     return url.rstrip("/").rsplit("/", 1)[-1]

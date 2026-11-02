@@ -2793,13 +2793,19 @@ def data_tool_hit(tool_input, cwd=""):
 # code is not main's skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py
 # `matches`, the one home of "current" (the designData, roadmap block and title text are ignored, so a
 # page the writer's --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
+# Known limit: a republish when the live page truly holds no data is refused too; the guard cannot read the live page.
 # A read, a list, an asset upload, a publish of another page, an unreadable file or an unreadable main
-# is not judged: unknown allows and logs one line. A current page writes the stamp
+# is not judged: unknown allows and logs one line. A republish of a current page whose designData and
+# roadmap blocks both equal main's own empty ones (stale_pages.carries_data) is refused too: it would drop
+# the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
+                     "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
+                     "with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
 
 
 def _stale_pages_module():
@@ -2852,6 +2858,8 @@ def page_stale_hit(tool_input, cwd):
         return None
     if not stale_pages.matches(text, live):
         return PAGE_STALE_REASON, path
+    if not stale_pages.carries_data(text, live):
+        return PAGE_EMPTY_REASON, path
     if blob and not stale_pages.write_stamp(root, blob):
         record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
     return None
