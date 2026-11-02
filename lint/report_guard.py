@@ -30,6 +30,13 @@ waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clic
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+
+On every Stop, landed or not, it also reads <config dir>/state/refusals/<session_id>.jsonl, which
+hooks/refusal_note.py writes for each tool the auto-mode classifier refused. A pending tool the reply
+does not name in its Input Needed section blocks. A built-in tool counts only in backticks; an MCP
+tool counts by its full name. Each tool the reply names is cleared, on a
+stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
+Cost: one stat per Stop when the session had no refusal.
 """
 import json
 import os
@@ -527,6 +534,61 @@ def pick_has_a_control(records, text, cwd):
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
+def names_tool(section, tool):
+    """True when the Input Needed text names `tool`. A built-in tool (Edit, Bash) is an English word,
+    so only its backticked name counts. An MCP tool counts by its full name, in backticks or not;
+    a short form of it (the part after the last `__`) does not."""
+    if "__" in tool:
+        return bool(re.search(r"(?<!\w)" + re.escape(tool) + r"(?!\w)", section))
+    return ("`%s`" % tool) in section
+
+
+def pending_refusals(hook, text):
+    """Settle the session's refusals file against the reply and return the tool names still unnamed.
+
+    A tool the reply names under Input Needed is dropped from the file (the file goes when none is
+    left); the rest stay. One stat per Stop when the session had no refusal. Fails open: [] on any error.
+    Spec: docs/decisions/refusals-reach-the-owner.md."""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.refusals_path(hook.get("session_id"))
+        if path is None or not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            rows = []
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
+                    rows.append((line.rstrip("\n"), row["tool_name"]))
+        section = input_needed_section(text)
+        kept = [(line, tool) for line, tool in rows
+                if not names_tool(section, tool)]
+        if len(kept) != len(rows):
+            if kept:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("".join(line + "\n" for line, _ in kept))
+            else:
+                os.remove(path)
+        return [tool for _, tool in kept]
+    except Exception:
+        return []
+
+
+def refusal_reason(tools):
+    """The block reason for refused tools the reply has not raised, or ''."""
+    if not tools:
+        return ""
+    names = ", ".join("`%s`" % tool for tool in tools)
+    return (
+        "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
+        "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
+        "and a line in the repo's debt notes file (notes.md) that names it." % names)
+
+
 def _marker_path(hook):
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import local_time
@@ -593,6 +655,7 @@ def main():
     if hook.get("hook_event_name") != "Stop":
         return
     if hook.get("stop_hook_active"):
+        pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
         if reasons:
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
@@ -604,9 +667,16 @@ def main():
     except Exception:
         pass
 
+    # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
+    refusal = refusal_reason(pending_refusals(hook, last_reply(hook)))
+
+    def stop_for_refusal():
+        if refusal:
+            print(json.dumps({"decision": "block", "reason": refusal}))
+
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
-        return
+        return stop_for_refusal()
 
     records = []
     try:
@@ -622,14 +692,14 @@ def main():
                 if isinstance(rec, dict):
                     records.append(rec)
     except Exception:
-        return
+        return stop_for_refusal()
 
     last_human_idx = None
     for i, rec in enumerate(records):
         if is_last_human(rec):
             last_human_idx = i
     if last_human_idx is None:
-        return
+        return stop_for_refusal()
 
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
@@ -647,6 +717,7 @@ def main():
         except Exception:
             pass
         try:
+            pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
@@ -684,6 +755,8 @@ def main():
         reasons.append(
             "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
             "plus a few words, like \"D12, short titles for records\".")
+    if refusal:
+        reasons.append(refusal)
     if reasons:
         reason = " ".join(reasons)
         if shape_ok:

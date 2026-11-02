@@ -615,6 +615,21 @@ function Get-InstallLogLines([string]$Cfg) {
     return @(Get-Content -LiteralPath $lp)
 }
 
+# Get-InstallLogStampProblems LINES PREFIX OFFSET: one string per problem in LINES, the install log lines that
+# name PREFIX (e.g. 'install.ps1:'). Each must start with yyyy-MM-ddTHH:mm:ss, a sign, HH:mm and a space,
+# and carry the offset OFFSET. An empty result means every line holds.
+# Its shell twin is stamp_problems in hooks/test_install_src.sh: a PowerShell case cannot call that step.
+function Get-InstallLogStampProblems([string[]]$Lines, [string]$Prefix, [string]$Offset) {
+    $named = @($Lines | Where-Object { $_.Contains($Prefix) })
+    if ($named.Count -eq 0) { return @("no line of the install log names $Prefix") }
+    $problems = @()
+    foreach ($l in $named) {
+        if ($l -notmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d ') { $problems += "no offset stamp: $l"; continue }
+        if ($l.Substring(19, 6) -ne $Offset) { $problems += "offset $($l.Substring(19, 6)), want ${Offset}: $l" }
+    }
+    return @($problems)
+}
+
 # Add-NoSubdirRule DIR: deny the current user the right to make a sub-directory in DIR. A directory
 # symlink is a sub-directory, so the link try fails there, while a file in DIR, a link in any other
 # folder, and a copy into a directory that already exists in DIR all still work. That makes a skill
@@ -778,6 +793,11 @@ try {
         Check "hookgonefail1: install.ps1 still writes its run summary line to the install log" ($null -ne $hfMode)
         Check "hookgonefail1: the summary line's hook= field does not state a removal" ($null -ne $hfMode -and $hfMode -ne 'removed')
         Check "hookgonefail1: the install log names the hook and says the delete failed" $hfNamed
+        # The delete-failed line is install.ps1's own log line too: it must carry the zone offset.
+        $hfOffset = Get-Date -Format zzz
+        $hfStamps = @(Get-InstallLogStampProblems @($hfLines) 'install.ps1:' $hfOffset)
+        Check "hookgonefail1: each install.ps1 install-log line, the delete-failed line included, carries the zone offset ($hfOffset)" ($hfStamps.Count -eq 0)
+        if ($hfStamps.Count) { Write-Host "  hookgonefail1 stamp problems: $($hfStamps -join ' | ')" }
         if (-not $hfNamed -or $null -eq $hfMode) { Write-Host "  hookgonefail1: exit $($hfRes.Exit); log hook= '$hfMode'; install log: $($hfLines -join ' | ')" }
     }
 } finally {
@@ -803,6 +823,16 @@ try {
     Check "hookwrite1: the marked post-merge hook is still there when symlinks fail" ($null -ne $hwText -and $hwText.Contains($HookMarker))
     Check "hookwrite1: the hook was rewritten, not left as the stale one" ($null -ne $hwText -and -not $hwText.Contains('# stale body'))
     Check "hookwrite1: the install log's hook= field says installed" ((Get-InstallLogHookMode $HwCfg) -eq 'installed')
+    # install.ps1's own log lines carry the zone offset this host has now.
+    $hwOffset = Get-Date -Format zzz
+    $hwStamps = @(Get-InstallLogStampProblems @(Get-InstallLogLines $HwCfg) 'install.ps1:' $hwOffset)
+    Check "hookwrite1: each install.ps1 install-log line starts with an ISO 8601 stamp that carries the zone offset ($hwOffset)" ($hwStamps.Count -eq 0)
+    if ($hwStamps.Count) { Write-Host "  hookwrite1 stamp problems: $($hwStamps -join ' | ')" }
+    # The post-merge hook's own log lines: the hook text install.ps1 wrote, read here, not run (see the gap note).
+    # No date stamp in it may lack the zone offset, and the offset form must be used.
+    $hwBareStamp = ($null -ne $hwText) -and (($hwText -match '\$\(date\)') -or ($hwText -match 'date \+%Y-%m-%dT%H:%M:%S\)'))
+    Check "hookwrite1: the post-merge hook writes no date stamp without the zone offset" (($null -ne $hwText) -and -not $hwBareStamp)
+    Check "hookwrite1: the post-merge hook formats its stamps with the zone offset" (($null -ne $hwText) -and ($hwText -match '%:?z|-Iseconds'))
     if ($hwRes.Exit -ne 0) { Write-Host "  hookwrite1 output: $($hwRes.Text)" }
 } finally {
     Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
@@ -905,6 +935,180 @@ try {
     if ($lfDi -and $lfDi.LinkType) { [IO.Directory]::Delete($lfDDst) }
     Remove-Item -Recurse -Force $LfTmp -ErrorAction SilentlyContinue
 }
+
+# ---- retired files: ps1 twins of hooks/test_install_src.sh retired2, 3, 4, 5, 6 -----------------
+# Copy mode (CLAUDE_SETTINGS_FORCE_COPY=1) lands every file as a copy, the mode the incident hit.
+# Shipped = git lists the file under the clone (tracked, or untracked and not ignored). The manifest is $CLAUDE_DIR\backups\install-manifest.txt.
+# Red on the current install.ps1 is unmeasured locally: no pwsh runs in the authoring session.
+# The cases use a fresh clone each, built here: New-WtFixture makes a worktree pair, not one clone.
+function New-RetiredClone([string]$Root) {
+    $clone = Join-Path $Root 'clone'
+    New-Item -ItemType Directory -Force -Path (Join-Path $clone 'hooks'), (Join-Path $clone 'skills\keep-skill') | Out-Null
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $clone 'install.ps1')
+    Set-Content -Path (Join-Path $clone 'CLAUDE.md') -Value '# retired content' -Encoding utf8
+    Set-Content -Path (Join-Path $clone 'settings.json') -Value '{}' -Encoding utf8
+    Set-Content -Path (Join-Path $clone 'landed-dirs.txt') -Value "hooks`nskills" -Encoding utf8
+    Set-Content -Path (Join-Path $clone 'hooks\keep_hook.py') -Value 'keep' -Encoding utf8
+    Set-Content -Path (Join-Path $clone 'skills\keep-skill\SKILL.md') -Value 'keep' -Encoding utf8
+    git -C $clone init -q -b main | Out-Null
+    git -C $clone add -A | Out-Null
+    git -C $clone -c user.email=t@example.com -c user.name=t commit -q -m base | Out-Null
+    return $clone
+}
+
+# Commit everything the clone holds now. Call it only when no ignored-only leftover is on disk yet.
+# Then move the pinned checkout <clone>-live, made by an earlier run, to the new main, as
+# merge/install_from_main.sh does: install.ps1 refuses a pin that is not detached at main.
+function Save-RetiredClone([string]$Clone, [string]$Msg) {
+    git -C $Clone add -A | Out-Null
+    git -C $Clone -c user.email=t@example.com -c user.name=t commit -q -m $Msg | Out-Null
+    if (Test-Path -LiteralPath "${Clone}-live") { git -C "${Clone}-live" checkout -q --detach main | Out-Null }
+}
+
+# Show-FailedRun CASE LABEL RUN: prints a run's exit code and output when it exited non-zero, so a red CI run shows its cause.
+function Show-FailedRun([string]$Case, [string]$Label, $Run) {
+    if ($Run.Exit -ne 0) { Write-Host "${Case} ${Label}: exit $($Run.Exit), output:"; Write-Host $Run.Text }
+}
+
+# retiredps1-a (retired2): a copy of a hook and a skill main stopped tracking is removed on the next run.
+$RtAroot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-retired-a-" + [guid]::NewGuid().ToString('N'))
+$RtAhome = Join-Path $RtAroot 'home'; $RtAcfg = Join-Path $RtAroot 'claude'; $RtAlogs = Join-Path $RtAroot 'logs'
+New-Item -ItemType Directory -Force -Path $RtAhome, $RtAcfg, $RtAlogs | Out-Null
+try {
+    $rtAclone = New-RetiredClone $RtAroot
+    Set-Content -Path (Join-Path $rtAclone 'hooks\retired_copy.py') -Value 'copy' -Encoding utf8
+    New-Item -ItemType Directory -Force -Path (Join-Path $rtAclone 'skills\retired-skill') | Out-Null
+    Set-Content -Path (Join-Path $rtAclone 'skills\retired-skill\SKILL.md') -Value 'old skill' -Encoding utf8
+    Save-RetiredClone $rtAclone 'ship retired copies'
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rtA1 = Invoke-InstallProc (Join-Path $rtAclone 'install.ps1') $RtAcfg $RtAhome $RtAlogs
+        git -C $rtAclone rm -q hooks/retired_copy.py | Out-Null
+        git -C $rtAclone rm -q -r skills/retired-skill | Out-Null
+        Save-RetiredClone $rtAclone 'retire the copies'
+        $rtA2 = Invoke-InstallProc (Join-Path $rtAclone 'install.ps1') $RtAcfg $RtAhome $RtAlogs
+    } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    Show-FailedRun 'retiredps1-a' 'run 1' $rtA1
+    Show-FailedRun 'retiredps1-a' 'run 2' $rtA2
+    Check "retiredps1-a: both runs exit 0" ($rtA1.Exit -eq 0 -and $rtA2.Exit -eq 0)
+    Check "retiredps1-a: the retired hook copy is removed by the second run" (-not (Test-Path -LiteralPath (Join-Path $RtAcfg 'hooks\retired_copy.py')))
+    Check "retiredps1-a: the retired skill copy is removed by the second run" (-not (Test-Path -LiteralPath (Join-Path $RtAcfg 'skills\retired-skill')))
+} finally {
+    Remove-Item -Recurse -Force $RtAroot -ErrorAction SilentlyContinue
+}
+
+# retiredps1-b (retired3): an owner's file the manifest does not list is kept. Passes on the current installer.
+$RtBroot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-retired-b-" + [guid]::NewGuid().ToString('N'))
+$RtBhome = Join-Path $RtBroot 'home'; $RtBcfg = Join-Path $RtBroot 'claude'; $RtBlogs = Join-Path $RtBroot 'logs'
+New-Item -ItemType Directory -Force -Path $RtBhome, $RtBcfg, $RtBlogs | Out-Null
+try {
+    $rtBclone = New-RetiredClone $RtBroot
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rtB1 = Invoke-InstallProc (Join-Path $rtBclone 'install.ps1') $RtBcfg $RtBhome $RtBlogs
+        Set-Content -Path (Join-Path $RtBcfg 'hooks\owner_tool.py') -Value 'mine' -Encoding utf8
+        $rtB2 = Invoke-InstallProc (Join-Path $rtBclone 'install.ps1') $RtBcfg $RtBhome $RtBlogs
+    } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    $rtBgot = if (Test-Path -LiteralPath (Join-Path $RtBcfg 'hooks\owner_tool.py')) { (Get-Content -Raw -LiteralPath (Join-Path $RtBcfg 'hooks\owner_tool.py')).Trim() } else { $null }
+    Show-FailedRun 'retiredps1-b' 'run 1' $rtB1
+    Show-FailedRun 'retiredps1-b' 'run 2' $rtB2
+    Check "retiredps1-b: both runs exit 0" ($rtB1.Exit -eq 0 -and $rtB2.Exit -eq 0)
+    Check "retiredps1-b: an owner's file the manifest does not list keeps its content" ($rtBgot -eq 'mine')
+} finally {
+    Remove-Item -Recurse -Force $RtBroot -ErrorAction SilentlyContinue
+}
+
+# retiredps1-c (retired4): a recorded copy the owner hand-edited is kept, and the next run names it.
+$RtCroot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-retired-c-" + [guid]::NewGuid().ToString('N'))
+$RtChome = Join-Path $RtCroot 'home'; $RtCcfg = Join-Path $RtCroot 'claude'; $RtClogs = Join-Path $RtCroot 'logs'
+New-Item -ItemType Directory -Force -Path $RtChome, $RtCcfg, $RtClogs | Out-Null
+try {
+    $rtCclone = New-RetiredClone $RtCroot
+    Set-Content -Path (Join-Path $rtCclone 'hooks\edited_hook.py') -Value 'print("v1")' -Encoding utf8
+    Save-RetiredClone $rtCclone 'ship edited_hook'
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rtC1 = Invoke-InstallProc (Join-Path $rtCclone 'install.ps1') $RtCcfg $RtChome $RtClogs
+        Set-Content -Path (Join-Path $RtCcfg 'hooks\edited_hook.py') -Value 'print("mine")' -Encoding utf8
+        git -C $rtCclone rm -q hooks/edited_hook.py | Out-Null
+        Save-RetiredClone $rtCclone 'retire edited_hook'
+        $rtC2 = Invoke-InstallProc (Join-Path $rtCclone 'install.ps1') $RtCcfg $RtChome $RtClogs
+    } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    $rtCgot = if (Test-Path -LiteralPath (Join-Path $RtCcfg 'hooks\edited_hook.py')) { (Get-Content -Raw -LiteralPath (Join-Path $RtCcfg 'hooks\edited_hook.py')).Trim() } else { $null }
+    Show-FailedRun 'retiredps1-c' 'run 1' $rtC1
+    Show-FailedRun 'retiredps1-c' 'run 2' $rtC2
+    Check "retiredps1-c: both runs exit 0" ($rtC1.Exit -eq 0 -and $rtC2.Exit -eq 0)
+    Check "retiredps1-c: the hand-edited copy keeps the owner's edit" ($rtCgot -eq 'print("mine")')
+    Check "retiredps1-c: the second run names edited_hook.py in its output" ($rtC2.Text -match 'edited_hook\.py')
+} finally {
+    Remove-Item -Recurse -Force $RtCroot -ErrorAction SilentlyContinue
+}
+
+# retiredps1-d (retired5): with no manifest, an owner's real folder under a listed skill name is moved to backups\retired.
+$RtDroot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-retired-d-" + [guid]::NewGuid().ToString('N'))
+$RtDhome = Join-Path $RtDroot 'home'; $RtDcfg = Join-Path $RtDroot 'claude'; $RtDlogs = Join-Path $RtDroot 'logs'
+New-Item -ItemType Directory -Force -Path $RtDhome, $RtDcfg, $RtDlogs | Out-Null
+try {
+    $rtDclone = New-RetiredClone $RtDroot
+    Set-Content -Path (Join-Path $rtDclone 'retired-files.txt') -Value 'skills/tile-windows' -Encoding utf8
+    Save-RetiredClone $rtDclone 'retired list'
+    New-Item -ItemType Directory -Force -Path (Join-Path $RtDcfg 'skills\tile-windows') | Out-Null
+    Set-Content -Path (Join-Path $RtDcfg 'skills\tile-windows\SKILL.md') -Value 'owner skill text' -Encoding utf8
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rtD1 = Invoke-InstallProc (Join-Path $rtDclone 'install.ps1') $RtDcfg $RtDhome $RtDlogs
+    } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    $rtDkept = @(Get-ChildItem -LiteralPath (Join-Path $RtDcfg 'backups\retired') -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match 'owner skill text' })
+    Show-FailedRun 'retiredps1-d' 'run 1' $rtD1
+    Check "retiredps1-d: the run exits 0" ($rtD1.Exit -eq 0)
+    Check "retiredps1-d: the owner's folder is gone from skills\" (-not (Test-Path -LiteralPath (Join-Path $RtDcfg 'skills\tile-windows')))
+    Check "retiredps1-d: the owner's SKILL.md is under backups\retired" ($rtDkept.Count -ge 1)
+} finally {
+    Remove-Item -Recurse -Force $RtDroot -ErrorAction SilentlyContinue
+}
+
+# retiredps1-e (retired6): a folder holding only an ignored file is not landed, and an old copy of it is removed.
+$RtEroot = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-retired-e-" + [guid]::NewGuid().ToString('N'))
+$RtEhome = Join-Path $RtEroot 'home'; $RtEcfg = Join-Path $RtEroot 'claude'; $RtElogs = Join-Path $RtEroot 'logs'
+New-Item -ItemType Directory -Force -Path $RtEhome, $RtEcfg, $RtElogs | Out-Null
+try {
+    $rtEclone = New-RetiredClone $RtEroot
+    Set-Content -Path (Join-Path $rtEclone '.gitignore') -Value '*.local' -Encoding utf8
+    New-Item -ItemType Directory -Force -Path (Join-Path $rtEclone 'skills\tile-windows') | Out-Null
+    Set-Content -Path (Join-Path $rtEclone 'skills\tile-windows\SKILL.md') -Value 'tile' -Encoding utf8
+    Save-RetiredClone $rtEclone 'ship tile-windows'
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rtE1 = Invoke-InstallProc (Join-Path $rtEclone 'install.ps1') $RtEcfg $RtEhome $RtElogs
+        # main drops tile-windows. Run 2 reads the pinned checkout, not the clone, so the ignored-only
+        # leftovers go in the pin after it moves to main. The tracked .gitignore (*.local) hides them from git.
+        git -C $rtEclone rm -q -r skills/tile-windows | Out-Null
+        Save-RetiredClone $rtEclone 'retire tile-windows'
+        $rtEpin = "${rtEclone}-live"
+        New-Item -ItemType Directory -Force -Path (Join-Path $rtEpin 'skills\tile-windows'), (Join-Path $rtEpin 'skills\ghost-skill') | Out-Null
+        Set-Content -Path (Join-Path $rtEpin 'skills\tile-windows\cache.local') -Value 'cache' -Encoding utf8
+        Set-Content -Path (Join-Path $rtEpin 'skills\ghost-skill\cache.local') -Value 'cache' -Encoding utf8
+        Set-Content -Path (Join-Path $rtEpin 'hooks\cache.local') -Value 'cache' -Encoding utf8
+        # Without the ignore rule the leftovers count as shipped, so a red case would not mean the gate failed.
+        $rtEignored = $true
+        foreach ($rtEf in 'skills/tile-windows/cache.local', 'skills/ghost-skill/cache.local', 'hooks/cache.local') {
+            git -C $rtEpin check-ignore -q $rtEf | Out-Null
+            if ($LASTEXITCODE -ne 0) { $rtEignored = $false }
+        }
+        Check "retiredps1-e: the leftovers are ignored in the pinned checkout" $rtEignored
+        $rtE2 = Invoke-InstallProc (Join-Path $rtEclone 'install.ps1') $RtEcfg $RtEhome $RtElogs
+    } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    Show-FailedRun 'retiredps1-e' 'run 1' $rtE1
+    Show-FailedRun 'retiredps1-e' 'run 2' $rtE2
+    Check "retiredps1-e: both runs exit 0" ($rtE1.Exit -eq 0 -and $rtE2.Exit -eq 0)
+    Check "retiredps1-e: the old copy of tile-windows is removed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\tile-windows')))
+    Check "retiredps1-e: ghost-skill, never tracked, is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\ghost-skill')))
+    Check "retiredps1-e: an ignored-only file in hooks is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'hooks\cache.local')))
+} finally {
+    Remove-Item -Recurse -Force $RtEroot -ErrorAction SilentlyContinue
+}
+
 } else {
     Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
     Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
@@ -924,6 +1128,11 @@ try {
     Write-Host "SKIP: hookwrite1: install.ps1 runs only on Windows"
     Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
     Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-a: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-b: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-c: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-d: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-e: install.ps1 runs only on Windows"
 }
 
 # ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
