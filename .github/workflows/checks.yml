@@ -349,6 +349,9 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
+      - name: Waiting page export fixture suite
+        run: python3 skills/waiting-page/test_export_page.py
+
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
