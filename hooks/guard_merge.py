@@ -611,19 +611,19 @@ ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
-    "then retry."
+    "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
-    "that pull request merges or is closed as replaced, then retry."
+    "that pull request merges or is closed as replaced, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry."
+    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers."
+    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 

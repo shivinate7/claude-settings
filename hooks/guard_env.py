@@ -7,8 +7,9 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, is_powershell, norm, split_segments,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    is_powershell, norm, split_segments,
 )
 
 
@@ -34,10 +35,18 @@ from guard_core import (
 # the allow list, and neither is the next one nobody thought of.
 
 ENV_ALLOWED = ".env.example"
+ENV_PREFIX = ".env"
 
-# The whole basename: `.env`, or a variant such as `.env.local`. The example file is checked in and
-# is documentation, so it is exempt. A variant is held, because it holds the same secrets.
-ENV_BASENAME = re.compile(r"^\.env(\.[A-Za-z0-9_.\-]+)?$")
+
+def names_env_file(name: str) -> bool:
+    """The one predicate for an environment file's BASENAME, in every form of the guard.
+
+    A name is held when it starts with `.env`: `.env`, `.env.local`, `.envrc`, `.environment`. The
+    whole name `.env.example` is the one exception. It is checked in and is documentation. A variant
+    is held, because it holds the same secrets. The Write and Edit form (`is_env`) and the shell form
+    (`env_reference`, `_glob_could_name_env`) both call this, so no form reads a narrower name.
+    """
+    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED
 
 # A word prefix that is a PATH, for deciding whether a backslash before `.env` is a separator or a
 # regex escape. `.\.env` and `C:\Users\me\.env` are paths. The `process\.env` in a grep pattern is
@@ -106,6 +115,7 @@ def _blank_messages(segment: str) -> str:
     return ENV_MESSAGE_ARG.sub(blank, segment)
 
 ENV_ADVICE = (
+    "(decision env-file-stays-unread, a session never reads an environment file). "
     "Remedy: ask the user for the value and never read the file. "
     "To RUN something that needs those variables, hand the file to the runner with the "
     "--env-file flag ahead of node, npm, npx or a container command. "
@@ -267,10 +277,12 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     return done, False
 
 
-# A word that holds a glob. It is an environment word when it could match `.env`, or `.env.` and any
-# suffix. The test is a sample of the pattern itself (each glob filled in as the shortest and a one
-# letter match), so `.env.s*` and `.env.bak*` count with no list of suffixes to keep. A word that
-# starts with the example file's name stays exempt, as the example file is.
+# A word that holds a glob. It is an environment word when it could match any name that
+# `names_env_file` holds: a name that starts with `.env`, other than exactly `.env.example`. The test
+# is a sample of the pattern itself (each glob filled in as the shortest and a one letter match), run
+# through that same predicate, so `.env.s*`, `.envr*` and `.env.bak*` count with no list of suffixes
+# to keep. No prefix of the example name is exempt: `.env.example*` could match `.env.example.bak`,
+# which holds the same secrets, so it is refused.
 #
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
@@ -285,14 +297,12 @@ ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
 
 def _glob_could_name_env(word: str) -> bool:
-    if word.startswith(ENV_ALLOWED):
-        return False
-    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x")):
+    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x", ".envrc")):
         return True
     for fill in ("", "x"):
         sample = ENV_GLOB_PART.sub(
             lambda m: (m.group(1) or "a") if m.group(0) != "*" else fill, word)
-        if sample == ".env" or sample.startswith(".env."):
+        if names_env_file(sample):
             return True
     return False
 
@@ -318,13 +328,26 @@ def env_reference(word: str) -> str:
         word = tail
         break
     word = re.sub(r"\\(?!\.)", "", word)
-    if word == ENV_ALLOWED:
-        return ""
     if ENV_GLOB.search(word) and word.startswith("."):
         return word if _glob_could_name_env(word) else ""
-    if not ENV_BASENAME.match(word):
-        return ""
-    return word
+    return word if names_env_file(word) else ""
+
+
+# Read left to right, a `\\` pair is one escaped backslash, so the quote after it is real.
+_ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
+
+
+def _plain_escaped_quotes(cmd: str) -> str:
+    """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
+    character. Those languages read the backslash as an escape, but the word reader below does not:
+    a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
+    if "<<" not in cmd or "\\" not in cmd:
+        return cmd
+    for _, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
+    return cmd
 
 
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
@@ -345,6 +368,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
+    cmd = _plain_escaped_quotes(cmd)
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
@@ -662,7 +686,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
 
 def is_env(path: str) -> bool:
     name = norm(path).rsplit("/", 1)[-1]
-    return name.startswith(".env") and name != ENV_ALLOWED
+    return names_env_file(name)
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.

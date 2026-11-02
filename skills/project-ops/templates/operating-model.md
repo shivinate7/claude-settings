@@ -21,9 +21,12 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The builder reads it to list steps in progress with no live lane.
+  Each pull row carries `createdAt`, so the builder can list a stale draft.
   Triage, as the waiting-page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
-  asks. It may run agents.
+  asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
+  rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
+  It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
@@ -108,6 +111,8 @@ parent, or miss a message while busy.
   and tell the owner in one line where it went.
 - Only triage writes new steps, merges, order and closes. Another session sends the item to triage,
   with the owner's message attached.
+- Owner feedback about another repo goes to that repo's triage, with the owner's message attached
+  (decision owner-feedback-inbox, one feedback inbox per repo).
 - A session rewrites the note, status and brief of a step it works on.
 - The roadmap is a current record, not a log. Rewrite a note to what is true now. Keep each ruling
   as one dated line.
