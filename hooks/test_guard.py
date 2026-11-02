@@ -11016,11 +11016,10 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
-# ---- a builder's shell write to a test file. The Nov 1 incident changed lint/test_rule_audit.py through
-# a python heredoc in Bash. The early warning reads a write tool's own path only, so a builder's Bash
-# must be judged on its command. The cases run in a real checkout (GITMAIN), as the 2026-10-13 ruling
-# above asks, so a refusal does not rest on the outside-repo reading. Each DENY writes a test path by a
-# shell form. Each ALLOW reads a test, writes a non-test path, or prints a test path.
+# ---- a builder's shell write to a test file. The early warning reads a write tool's own path only, so a
+# builder's Bash must be judged on its command. The cases run in a real checkout (GITMAIN), as the
+# audit-high ruling above asks, so a refusal does not rest on the outside-repo reading. Each DENY writes
+# a test path by a shell form. Each ALLOW reads a test, writes a non-test path, or prints a test path.
 BG = dict(B, cwd=GITMAIN)
 INCIDENT_CMD = (
     "python3 - <<'EOF'\n"
