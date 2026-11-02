@@ -41,7 +41,7 @@ const write = (name, text) => {
 const PHONE = '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>';
 // A strip: 2400 px wide and 300 high, drawn at 2400, so the card scales it down to a thin band.
 const STRIP = '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>';
-// A phone-shaped mockup whose focus is a 300x40 bar at its natural size. The page never shrinks it, so no floor applies.
+// A phone-shaped mockup whose focus is a 300x40 bar. The page scales it near 1, so the one-half floor does not apply.
 const SMALL = '<div style="width:390px;height:844px"><div id="bar" style="width:300px;height:40px">x</div></div>';
 // A full-width band, 390 wide and 56 high, as a phone-width focus: the page scales it near 1, never below one half.
 const BAND = '<div style="width:390px;height:844px"><div id="band" style="width:390px;height:56px">x</div></div>';
@@ -131,7 +131,7 @@ test("a missing --item is unknown, exit 3", () => {
   assert.equal(got.code, 3, `exit code, stderr: ${got.stderr.slice(0, 200)}`);
 });
 
-// Round 2 cases. The selector finds option cards only, so a ranked card (div.opt.ranked with label.head) is unmeasured.
+// A ranked item (div.opt.ranked) holds its option picture in a card too. A strip there is refused as a pick-one strip is.
 test("a ranked item whose option picture is a strip is a miss, exit 1, not unknown", async (t) => {
   if ((await needEnv(t, "chromium", chromium)) === null) return;
   const problem = answer("ranked-strip", pageWith(MOCKS),
@@ -142,8 +142,8 @@ test("a ranked item whose option picture is a strip is a miss, exit 1, not unkno
   assert.ok(heights.some((h) => h < MIN_PIC), `the problem names no height below MIN_PIC (${MIN_PIC}): ${problem}`);
 });
 
-// The floor applies only to a picture the page shrank (scale below 1) that still draws under MIN_PIC high.
-test("a 300x40 focus drawn at natural size is not a miss: no floor without a shrink", async (t) => {
+// A picture under MIN_PIC high is refused only when the page scales it below one half. Scaled near 1, it passes.
+test("a 300x40 focus is not a miss: the page scales it near 1, never below one half", async (t) => {
   if ((await needEnv(t, "chromium", chromium)) === null) return;
   assert.equal(answer("natural", pageWith(MOCKS), item({ focus: "#bar", slug: "m3" }), 0), null);
 });
