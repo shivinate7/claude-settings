@@ -142,7 +142,7 @@ Other tools, in `judge` order:
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   coordinator-scope    deny. A cloud coordinator's own write (no `agent_id`, CLAUDE_CODE_REMOTE true,
-                       merge role `coordinator` for the environment's session id) to a repository path
+                       and its own tags carry cs-build:coordinator, read from its transcript) to a repository path
                        outside the record homes (the kinds of COORDINATOR_KINDS at the repo's own layout
                        paths, or a record-branch checkout's folders) and its scratchpad. A path in no
                        repository passes. The shell form reads the targets frozen-path reads, after a
@@ -301,7 +301,6 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
-        from shared_names import read_merge_role  # the one reader of the role file, for rule coordinator-scope
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
@@ -328,7 +327,7 @@ while True:
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, _add_shape, _commit_shape,
             _is_python, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            TRUST_REASON, archive_hit, trust_card_hit, undrafted_pr_create, uses_merge_tool,
+            TRUST_REASON, archive_hit, own_tier_tagged, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3979,21 +3978,24 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
 # checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it).
-# The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose merge role
-# is `coordinator`: read_merge_role matches the role file to the environment's session id, never to the
-# payload's. An owner override lifts the rule: it is not in never_lifted.
+# The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose own tags
+# carry cs-build:coordinator: guard_merge.own_tier_tagged reads the newest get_session record of the session's own id
+# (override.remote_session_id, the environment's, never the payload's) in its transcript, or an own
+# set_session_tags call that adds the tag to that id. No role file is read. No transcript, no record or a read
+# error is no coordinator. An owner override lifts the rule: it is not in never_lifted.
 # What a shell call writes: the words `_shell_write_hit` reads (a `cp` counts by its destination; an `mv`
 # source counts too, because it is removed), a python program (`-c` or a heredoc, read with the `ast` parser:
 # an `open` in a write mode, `write_text`, `write_bytes`, `touch`, `unlink`, on a path the program spells out
 # or binds once to a literal), `perl -i` and `dd of=`.
 # A `git commit` is judged on the pathspecs on its line, else the index plus every path an earlier `git add`
 # of the same call reaches (`-a`: the modified tracked files too).
-# Cost (rule outcomes-mechanize-rules): the role file is read first, at most once per call. Nothing else is
-# read unless the session is a coordinator and the call names a repository path: then lint/layout.json, the
-# repo's extras file and git config (lint/layout.py, file reads), the settings clone pointer
-# (~/.claude/CLAUDE.md) and, for a checkout that has roadmap/data, one `git symbolic-ref`. A `git commit` adds
-# one `git diff --cached` (plus `git diff` for `-a`) and one `git rev-parse`; each `git add` before it adds one
-# `git rev-parse` and one `git ls-files`. A git read that fails judges nothing. Not read: symlinks inside a
+# Cost (rule outcomes-mechanize-rules): the cheap filters run first (cloud, no agent, a write or shell tool). A call that
+# names a repository path then reads lint/layout.json, the repo's extras file and git config (lint/layout.py, file
+# reads), the settings clone pointer (~/.claude/CLAUDE.md) and, for a checkout that has roadmap/data, one
+# `git symbolic-ref`. A `git commit` adds one `git diff --cached` (plus `git diff` for `-a`) and one
+# `git rev-parse`; each `git add` before it adds one `git rev-parse` and one `git ls-files`. Only a call that
+# would be refused reads the transcript, once, so a write to a record home reads none. Never a role file; no new
+# process, file or timer. A git read that fails judges nothing. Not read: symlinks inside a
 # target path, python paths built at run time, a `sh -c` script.
 COORDINATOR_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo", "records-index",
                      "design", "scorecard")
@@ -4344,30 +4346,37 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
         return ""
     if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
         return ""
-    if read_merge_role() != "coordinator":
-        return ""
     session_id = session_id_of(payload)
 
     def detail(label: str, path: str) -> str:
         return label + log_path(path, LOG_MAX_MATCHED - len(label))
 
-    if tool in WRITE_TOOLS:
-        for target in write_targets(tool_input):
-            if coordinator_path_outside(target, cwd, session_id):
-                return detail("", target)
+    def judged() -> str:
+        if tool in WRITE_TOOLS:
+            for target in write_targets(tool_input):
+                if coordinator_path_outside(target, cwd, session_id):
+                    return detail("", target)
+            return ""
+        raw = str(tool_input.get("command", "") or "")
+        stripped = strip_heredoc_bodies(raw)
+        hit = _shell_write_hit(stripped, cwd, lambda word, where: coordinator_path_outside(word, where, session_id),
+                               follow_cd=True, writes_first=True)
+        if hit:
+            return detail("shell write: ", hit)
+        hit = coordinator_commit_hit(stripped, cwd)
+        if hit:
+            label = hit.split(" ", 2)
+            return detail(" ".join(label[:2]) + " ", label[2]) if len(label) == 3 else hit
+        hit = coordinator_interpreter_hit(raw, cwd, session_id)
+        return detail("interpreter write: ", hit) if hit else ""
+
+    hit = judged()
+    if not hit:
         return ""
-    raw = str(tool_input.get("command", "") or "")
-    stripped = strip_heredoc_bodies(raw)
-    hit = _shell_write_hit(stripped, cwd, lambda word, where: coordinator_path_outside(word, where, session_id),
-                           follow_cd=True, writes_first=True)
-    if hit:
-        return detail("shell write: ", hit)
-    hit = coordinator_commit_hit(stripped, cwd)
-    if hit:
-        label = hit.split(" ", 2)
-        return detail(" ".join(label[:2]) + " ", label[2]) if len(label) == 3 else hit
-    hit = coordinator_interpreter_hit(raw, cwd, session_id)
-    return detail("interpreter write: ", hit) if hit else ""
+    from override import remote_session_id   # the own id: the environment's, in the session_ form
+    transcript = payload.get("transcript_path")
+    return hit if own_tier_tagged(transcript if isinstance(transcript, str) else "", remote_session_id() or "",
+                                  "coordinator") else ""
 
 
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
