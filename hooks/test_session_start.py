@@ -28,6 +28,7 @@ LIMIT = 50  # the notice starts above this many agent worktrees
 NOTICE = re.compile(r"agent[ -]worktree", re.IGNORECASE)
 # The one printed line whose text starts "session tier: ", quoted in the hook's printf call.
 TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
+UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook's line when the caution level is unread
 
 
 def hook_tier_line():
@@ -153,20 +154,52 @@ class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
         with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
+    def write_extras(self, keys):
+        """The repo's extras file holds `keys` as JSON, beside the kinds key every extras file has."""
+        os.makedirs(os.path.join(self.primary, ".claude"), exist_ok=True)
+        with open(os.path.join(self.primary, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+            json.dump(dict({"kinds": {}}, **keys), handle)
+
+    def assert_unknown_caution(self, lines):
+        """The unknown line prints once, never a public line. Layout.py's facts and acts come with it, which
+        shows the line came from the layout's own read and not from the hook's fallback."""
+        self.assertIn(UNKNOWN_LINE, lines)
+        self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1, lines)
+        self.assertFalse(any(line.startswith("repo caution: public") for line in lines), lines)
+        self.assertTrue(any(line.startswith("repo fact: ") for line in lines), lines)
+        self.assertTrue(any(line.startswith("repo act: ") for line in lines), lines)
+
     def test_private_visibility_prints_the_private_solo_level(self):
         self.point_at()
-        os.makedirs(os.path.join(self.primary, ".claude"))
-        with open(os.path.join(self.primary, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
-            json.dump({"kinds": {}, "visibility": "private"}, handle)
+        self.write_extras({"visibility": "private"})
         lines = self.run_hook()
         self.assertIn("repo caution: private-solo", lines)
         self.assertTrue(any(line.startswith("repo fact: ") for line in lines))
         self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1)
 
+    def test_public_visibility_prints_the_public_level(self):
+        self.point_at()
+        self.write_extras({"visibility": "public"})
+        lines = self.run_hook()
+        self.assertIn("repo caution: public", lines)
+        self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1)
+
+    def test_no_extras_file_prints_unknown_never_public(self):
+        self.point_at()
+        self.assert_unknown_caution(self.run_hook())
+
+    def test_an_extras_file_with_no_readable_visibility_prints_unknown_never_public(self):
+        self.point_at()
+        for keys in ({}, {"visibility": None}, {"visibility": 3}, {"visibility": "default"},
+                     {"visibility": "secret-ish"}):
+            with self.subTest(keys=keys):
+                self.write_extras(keys)
+                self.assert_unknown_caution(self.run_hook())
+
     def test_a_read_that_cannot_run_prints_unknown_never_a_level(self):
         self.point_at(layout_json="{broken")
         lines = self.run_hook()
-        self.assertIn("repo caution: unknown, the level could not be read", lines)
+        self.assertIn(UNKNOWN_LINE, lines)
         self.assertFalse(any(line.startswith("repo caution: public") for line in lines))
 
 
