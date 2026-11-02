@@ -221,6 +221,21 @@ FORM_VARIANTS = [
     ("comment openers and an apostrophe in the lines are plain text",
      parts(goal="Goal: keep the runner's merge, with //path, /* glob and # tags, working.",
            problem="Problem (risk): don't parse # or // here, so it needs your word."), None),
+    # The copied template, with a real stake and kind, is refused on the page and in a chat box.
+    ("placeholder: the copied Goal line is refused", parts(goal="Goal: <the goal>"), (FORM_RULE, "Goal")),
+    ("placeholder: the copied Problem line is refused",
+     parts(problem="Problem (goal): <the problem in one plain sentence, and why it needs his word>"),
+     (FORM_RULE, "Problem")),
+    ("placeholder: the copied Based on line is refused", parts(based=["Based on (read): <one premise>"]),
+     (FORM_RULE, "Based on")),
+    ("placeholder: the Based on template with <kind> is refused by the kind check",
+     parts(based=["Based on (<kind>): <one premise>"]), (FORM_RULE, "Based on")),
+    # Real text around angle brackets is text, not a placeholder.
+    ("placeholder: real text with angle brackets passes",
+     parts(goal="Goal: render <Button> right", problem="Problem (risk): the <Modal> in the lint job needs your word.",
+           based=["Based on (read): the <Card> prop renders twice."]), None),
+    ("placeholder: a JSX lone quote and comment openers beside angle brackets pass",
+     parts(goal="Goal: fix the <p>Don't</p> text, and keep // and /* in paths as plain text."), None),
 ]
 for _kind in PREMISE_KINDS:
     FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise." % _kind]), None))
@@ -233,6 +248,21 @@ def case_form_lines():
     for name, found, want in FORM_VARIANTS:
         page(name, "set", entry_of(page_item(**found)), want)
         chat(name, chat_box(**found), want)
+
+
+def case_form_placeholders_on_edits():
+    # The copied template on the other page paths: an update that carries the context, a str_replace that
+    # swaps the Goal line, and a stood pick's Problem line. The set path is FORM_VARIANTS.
+    page("placeholder: an update of kind decision with the copied Goal line is refused", "update",
+         entry_of({"kind": "decision", "context": form_text(goal="Goal: <the goal, in the owner's terms>")}),
+         (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for the copied template is refused", GOAL,
+                    "Goal: <the goal>", (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for real text with angle brackets passes", GOAL,
+                    "Goal: render <Button> right", None)
+    page("placeholder: a stood pick with the copied Problem line is refused", "set",
+         entry_of(page_item(problem="Problem: <the problem, and why it needs his word>", stands=True)),
+         (FORM_RULE, "Problem"))
 
 
 # ------------------------------------------------------------------ gain and loss in each option
@@ -994,7 +1024,8 @@ def case_widens_words_in_the_reply_judge_prompt():
 
 
 def main():
-    for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
+    for case in (case_item_92, case_form_lines, case_form_placeholders_on_edits,
+                 case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,

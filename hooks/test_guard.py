@@ -11925,6 +11925,25 @@ pq("the Departs from line is read in any case, at a line start", "allow",
    pq_item(port=True, context=PQ_CTX + "\ndeparts from: a.ts:f \u2014 x", holds=None))
 pq("a Departs from phrase mid-line does not count", "deny",
    pq_item(port=True, context="This item departs from: a.ts:f", holds=None))
+# A port's Departs from line names the file and symbol on main. A line that says none, names no file:symbol on
+# the main side, or says main is refused, and so is a second such line. The port word is read from the context
+# when `port` is not set.
+for _body in ("Departs from: none", "Departs from: the approval flow — adds a retry on timeout",
+              "Departs from: main — adds a retry on timeout",
+              "Departs from: agent-model-cap — adds a retry on timeout"):
+    pq("a port whose line %r names no file:symbol on main is denied" % _body, "deny",
+       pq_item(port=True, context=PQ_CTX + "\n" + _body, holds=None))
+pq("a port found by its words, with no port flag, and Departs from none is denied", "deny",
+   pq_item(context=PQ_CTX + "\nDeparts from: none", holds=None))
+pq("an update that marks a port with Departs from none is denied", "deny",
+   {"port": True, "kind": "decision", "context": OJ_FORM + "\n" + PQ_CTX + "\nDeparts from: none"},
+   action="update")
+pq("a task about a port with Departs from none is denied", "deny",
+   pq_item(kind="task", context=PQ_CTX + "\nDeparts from: none", holds=None))
+pq("a port with a good Departs from line and a second that says none is denied", "deny",
+   pq_item(port=True, context=PQ_CTX + "\n" + PQ_DEPARTS + "\nDeparts from: none", holds=None))
+pq("a port whose line names hooks/x.py:foo and a real change is allowed", "allow",
+   pq_item(port=True, context=PQ_CTX + "\nDeparts from: hooks/x.py:foo — adds a retry on timeout", holds=None))
 pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False, departs=True))
 pq("a non-port item with holds is allowed", "allow",
    pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits.", departs=True))
