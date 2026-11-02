@@ -368,7 +368,7 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A sentence whose subject is the session ("The session merges PR #374 after your pick.") and that
+# A sentence whose subject is the session ("The session merges it after your pick.") and that
 # names no `you`: the session makes that press, so the owner presses nothing. "you" in the sentence
 # (the session opens it and you press Merge) keeps the press.
 SESSION_PRESS = re.compile(r"^\s*(?:(?:then|and|after\s+your\s+pick),?\s+)?(?:the|a|this)\s+session\b", re.I)
