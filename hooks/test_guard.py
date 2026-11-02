@@ -6863,10 +6863,10 @@ sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
 
-# THE AGENT BRANCH (incident 2026-11-02: 32 worktree-agent-* branches reached origin). A worktree-agent-*
-# branch is one agent's own work, and it never reaches origin. The refusal reads where the push GOES: a
-# bare push or a HEAD spec from the agent's worktree, or a named destination from anywhere. A delete, a
-# fetch, a lane slug and a name that holds the prefix only inside stay allowed.
+# THE AGENT BRANCH (32 worktree-agent-* branches reached origin, which is why this rule exists). A
+# worktree-agent-* branch is one agent's own work, and it never reaches origin. The refusal reads where
+# the push GOES: a bare push or a HEAD spec from the agent's worktree, or a named destination from
+# anywhere. A delete, a fetch, a lane slug and a name that holds the prefix only inside stay allowed.
 AGENT_PUSH_RULE = "agent-branch-push"
 
 
