@@ -1,6 +1,6 @@
 # Triage handoff: claude-settings
 
-Written by triage 5 (session_013NEJL1qEunLpTi68de3Jrv), Nov 2 2026 12:40 CST, at the owner's 12:31 CST wind-down; updated 13:15 CST after the coordinator's last pass. Coordinator: session_013NEJL2pASwRjgJDnsvnpNe.
+Written by triage 5 (session_013NEJL1qEunLpTi68de3Jrv), Nov 2 2026 12:40 CST, at the owner's 12:31 CST wind-down; updated 13:15 and 13:06 CST after the coordinator's last pass. Coordinator: session_013NEJL2pASwRjgJDnsvnpNe.
 
 ## Role
 
@@ -99,11 +99,11 @@ Written by triage 5 (session_013NEJL1qEunLpTi68de3Jrv), Nov 2 2026 12:40 CST, at
 - b) Block below a floor: gain Weak tests stop merging. Lose: GitHub minutes on every batch, and false reds in banchi until it can run tests per file.
 - c) By hand only: gain No CI cost. Lose: Nothing watches test strength between hand runs.
 
-### 164 branch-delete-mac-session: Mac session for branch deletes
+### 170 branch-delete-list: delete 136 old branches from your Mac
 
-- Title: Start a Claude Code session on your Mac in the claude-settings folder, so old branches can be deleted
-- Owner: coordinator (session_013NEJL2pASwRjgJDnsvnpNe). Home: branch-cleanup. Kind: task.
-- Task: On your Mac, open the Claude desktop app: Settings, Claude Code, Remote Control, and add your claude-settings folder. Or run claude remote-control in that folder. The branch-cleanup lane then puts the delete command in its PR.
+- Title: Run the branch delete list from a Claude Code session on your Mac
+- Owner: coordinator (session_013NEJL2pASwRjgJDnsvnpNe). Home: branch-cleanup. Kind: task, with command {mac, powershell}.
+- Task: a session on the owner's computer runs 136 leased branch deletes under the standing grant 'acts the cloud refuses'. List: branch branch-cleanup, docs/plans/briefs/branch-cleanup-mac-deletes.md, d9a3e8f5. Checked 12:55 CST: every tip matches origin, every archive copy exists at the same tip. Item 164 (start a Mac session) closed into it.
 
 ### 166 newer-run-clears-red: newer green run clears a red
 
@@ -217,7 +217,7 @@ Ten lanes wound down at 12:31 CST went back to todo (13:10 CST); each lane's bra
 - When PR #987 merges: mark feel-fixes with feel and deviceCheck {how, at}.
 - When batches 59 and 60 merge: mark c203 and merge-undo-scan-follows-renames done.
 - When the coordinator settles the agent-model-cap item: mark refusal-looser-fixes done.
-- Item 164: route its answer to the coordinator (lane branch-cleanup is wound down). Items 161, 166: route to the coordinator and the batch runner. Item 169: route to the coordinator for lane rotation-text-current. Item 162 closed 13:05 CST: trial run gd is archived.
+- Item 170: route its answer to the coordinator; after the deletes run, re-point the debt named in roadmap/outbox/triage.md. Items 161, 166: route to the coordinator and the batch runner. Item 169: route to the coordinator for lane rotation-text-current. Item 162 closed 13:05 CST: trial run gd is archived.
 - trust-error-record: its owner question goes through the question check before any page item.
 - c121: mark per repo as each roll-out visit closes.
 - Roadmap build upkeep left at 13:10 CST (run `python3 ~/.claude/skills/roadmap/build.py --repo <roadmap checkout> --live live.json --block --out block.html`): 12 page rulings not on their step, 6 draft PRs over 12 h with no live lane, 17 notes over 250 words, 3 new top-5 steps with no placement line, 3 Step trailers naming no step (stale-note-recheck).

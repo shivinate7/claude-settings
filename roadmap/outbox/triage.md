@@ -9,3 +9,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - code-check-exclude-fork-point (c182, PR #777 round 2): the exclude list is compared against main's entries plus the fork point's, so a branch can re-add an entry main removed after the fork.
 - code-check-precommit-rename (c182): in a pre-commit run, an unstaged new file makes a rename read as a plain delete; CI is not affected.
 - code-check-unknown-main-noise (c182): without --main, every run prints "unknown: main"; noise only.
+- debt-branch-pointer (triage, Nov 2 13:02 CST): docs/debts/agent-reports-with-live-watcher.md names branch stop-blocks-live-tasks; once page item 170's deletes run, that branch lives only as archive/stop-blocks-live-tasks (same tip b8feeb52). Re-point the debt in the same edit.
