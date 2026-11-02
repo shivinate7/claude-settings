@@ -13,6 +13,9 @@ asks for the score. The failure classes under test:
 - UNKNOWN never reads as a rate or as green;
 - a mutant that a suite kills is not run on the suites after it, and a mutant that suite misses is;
 - each finished mutant prints one line before its pull request's row, so a long pull request shows progress;
+- a profile's `select` gives the suites to run against each product file's mutants, and a failed select falls
+  back to every changed suite, with a note in the row;
+- a `pr_budget` leaves the mutants not started past it as `not_run`, never as a kill, a survivor or a crash;
 - a replay leaves the repository, the temp folders and the child processes as it found them.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
@@ -26,6 +29,7 @@ hooks/test_mutate_js.py (TempRunFolderTests).
 Process checks use `ps` and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
 import contextlib
+import inspect
 import json
 import os
 import re
@@ -424,15 +428,21 @@ test('pass at 60', () => {
   assert.equal(pass(60), true);
 });
 """
-# A counting suite appends an x to its log on each run. The wait makes it the slower suite, so the
-# quickest-first order runs the other suite first.
-COUNT_HEAD = ("import fs from 'node:fs';\n"
-              "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);\n"
-              "fs.appendFileSync(@LOG@, 'x');\n")
+def wait_head(ms):
+    """A statement that holds the suite's thread for `ms` milliseconds, so each run of it takes that long."""
+    return "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, %d);\n" % ms
 
 
-def counting_suite(text, log):
-    return text.replace(JS_HEAD, JS_HEAD + COUNT_HEAD.replace("@LOG@", json.dumps(log)), 1)
+def sleeping_suite(text, ms):
+    """`text` with each run held for `ms` milliseconds."""
+    return text.replace(JS_HEAD, JS_HEAD + wait_head(ms), 1)
+
+
+def counting_suite(text, log, wait_ms=1000):
+    """`text` with a run counter: each run appends an x to `log`. The wait makes it the slower suite by default,
+    so the quickest-first order runs the other suite first."""
+    head = "import fs from 'node:fs';\n" + wait_head(wait_ms) + "fs.appendFileSync(%s, 'x');\n" % json.dumps(log)
+    return text.replace(JS_HEAD, JS_HEAD + head, 1)
 
 
 def band_pr(name, number, suites):
@@ -471,6 +481,113 @@ def counted_replay(name, first, second):
         mutants = expected_mutants(repo, sha, "src/band.mjs", lines=changed(repo, sha, "src/band.mjs"))
         CACHE[key] = (row, runs, mutants)
     return CACHE[key]
+
+
+# Per-file selection. The base holds two product files, a suite for each, and a selector that lists the suites of
+# one file (shaped like q_max's harness/tests-for.mjs). The pull request changes both files and both suites. Each
+# suite counts its runs, so a case reads from the logs which suite ran against which file's mutants. Neither suite
+# kills a mutant: each checks only that its export is a function. So no run ends early, and each suite runs on every
+# mutant the replay gives it, whatever the order of the suites.
+SELECTOR_LISTS = """\
+// Prints the suites that test one product file. The replay ignores each line that names no changed suite.
+const path = process.argv[2];
+console.log('tests for ' + path);
+if (path === 'src/x.mjs') {
+  console.log('test/a.test.mjs');
+  console.log('test/unchanged.test.mjs');
+} else if (path === 'src/y.mjs') {
+  console.log('test/b.test.mjs');
+}
+"""
+SELECTOR_FAILS_FOR_Y = """\
+const path = process.argv[2];
+console.log('tests for ' + path);
+if (path === 'src/x.mjs') {
+  console.log('test/a.test.mjs');
+} else if (path === 'src/y.mjs') {
+  console.error('no list for ' + path);
+  process.exit(1);
+}
+"""
+SELECT_X_BASE = "export const LABEL_X = 'x';\n"
+SELECT_X_PR = SELECT_X_BASE + "\nexport function capX(n) {\n  if (n > 10) {\n    return 10;\n  }\n  return n;\n}\n"
+SELECT_Y_BASE = "export const LABEL_Y = 'y';\n"
+SELECT_Y_PR = SELECT_Y_BASE + "\nexport function passY(score) {\n  return score >= 50;\n}\n"
+SELECT_A_BASE = JS_HEAD + ("import { LABEL_X } from '../src/x.mjs';\n\n"
+                           "test('label x', () => {\n  assert.equal(LABEL_X, 'x');\n});\n")
+SELECT_A_PR = JS_HEAD + """import { capX } from '../src/x.mjs';
+
+test('capX is exported', () => {
+  assert.equal(typeof capX, 'function');
+});
+"""
+SELECT_B_BASE = JS_HEAD + ("import { LABEL_Y } from '../src/y.mjs';\n\n"
+                           "test('label y', () => {\n  assert.equal(LABEL_Y, 'y');\n});\n")
+SELECT_B_PR = JS_HEAD + """import { passY } from '../src/y.mjs';
+
+test('passY is exported', () => {
+  assert.equal(typeof passY, 'function');
+});
+"""
+SELECT_PROFILE = dict(JS_PROFILE, select=["node", "harness/tests-for.mjs", "{path}"])
+
+
+def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False):
+    """One merged pull request, 1, that changes src/x.mjs, src/y.mjs, test/a.test.mjs and test/b.test.mjs. Its base
+    holds `selector` at harness/tests-for.mjs. With `pr_deletes_selector` the pull request deletes that file, so the
+    selector is missing at its commit. Built once per `name`."""
+    key = "select-" + name
+    if key not in CACHE:
+        repo = new_repo(name)
+        put(repo, {"README.md": "base\n", "src/x.mjs": SELECT_X_BASE, "src/y.mjs": SELECT_Y_BASE,
+                   "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE,
+                   "harness/tests-for.mjs": selector})
+        commit(repo, "Base")
+        logs = {"a": os.path.join(fresh(), "runs-a.txt"), "b": os.path.join(fresh(), "runs-b.txt")}
+        files = {"src/x.mjs": SELECT_X_PR, "src/y.mjs": SELECT_Y_PR,
+                 "test/a.test.mjs": counting_suite(SELECT_A_PR, logs["a"], wait_ms=0),
+                 "test/b.test.mjs": counting_suite(SELECT_B_PR, logs["b"], wait_ms=0)}
+        if pr_deletes_selector:
+            files["harness/tests-for.mjs"] = None
+        sha = pull_request(repo, 1, "Select per file", files)
+        mutants = {"x": expected_mutants(repo, sha, "src/x.mjs", lines=changed(repo, sha, "src/x.mjs")),
+                   "y": expected_mutants(repo, sha, "src/y.mjs", lines=changed(repo, sha, "src/y.mjs"))}
+        CACHE[key] = {"repo": repo, "sha": sha, "logs": logs, "mutants": mutants}
+    return CACHE[key]
+
+
+def select_run(name, **options):
+    """The replay of select_fixture(name) with every mutant kept, and the runs each suite made. Returns (row, runs,
+    fixture). The runs are read right after the replay, because a later replay appends to the logs too."""
+    key = "select-run-" + name
+    if key not in CACHE:
+        fixture = select_fixture(name, **options)
+        row = replay(fixture["repo"], fixture["sha"], SELECT_PROFILE, limit=1000)
+        runs = {suite: runs_in(path) for suite, path in fixture["logs"].items()}
+        CACHE[key] = (row, runs, fixture)
+    return CACHE[key]
+
+
+# Budget. One band pull request whose suite holds each run for BUDGET_RUN_MS. The clean run and the first mutant
+# start within about 4 s (the mutant engine and the checkout take about 0.6 s), and a second mutant would start
+# after about 6.8 s. BUDGET_S sits between the two, so the budget cuts after the first mutant.
+BUDGET_RUN_MS = 3000
+BUDGET_S = 5.0
+
+
+def budget_fixture():
+    """One band pull request, 42, whose suite holds each run for BUDGET_RUN_MS. Built once."""
+    if "budget" not in CACHE:
+        CACHE["budget"] = band_pr("budget", 42, {"test/band.test.mjs": sleeping_suite(JS_BAND_TEST, BUDGET_RUN_MS)})
+    return CACHE["budget"]
+
+
+def replay_budget(repo, sha, pr_budget, limit=4):
+    """A replay of `sha` with one job, so the budget alone decides which mutants start. None is no budget."""
+    if "pr_budget" not in inspect.signature(api("replay_pr")).parameters:
+        raise AssertionError("replay_pr has no pr_budget parameter yet")
+    return api("replay_pr")(repo, sha, JS_PROFILE, limit=limit, seed=0, suite_timeout=60, jobs=1,
+                            pr_budget=pr_budget)
 
 
 LATIN_NAME_SRC = b"export const NAME = 'caf\xe9';\n"  # latin-1 e-acute: not UTF-8, so no text decodes it
@@ -901,6 +1018,73 @@ class EarlyStopTests(unittest.TestCase):
         self.assertEqual(runs, 1 + row["made"], "the second suite must run on each mutant, plus the clean source")
 
 
+class SelectTests(unittest.TestCase):
+    """The profile's `select` argv names the suites to run against each product file's mutants."""
+
+    def test_a_changed_suite_the_selector_does_not_list_for_a_file_never_runs_on_its_mutants(self):
+        row, runs, fixture = select_run("main")
+        made_x, made_y = len(fixture["mutants"]["x"]), len(fixture["mutants"]["y"])
+        self.assertGreater(made_x, 0, "src/x.mjs needs mutants")
+        self.assertGreater(made_y, 0, "src/y.mjs needs mutants")
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(row["unusable"], {}, "both suites must be green on the clean source")
+        self.assertEqual(row["made"], made_x + made_y)
+        self.assertEqual(runs["a"], 1 + made_x, "suite a ran %d times, want its clean run and the %d mutants of "
+                         "src/x.mjs only" % (runs["a"], made_x))
+        self.assertEqual(runs["b"], 1 + made_y, "suite b ran %d times, want its clean run and the %d mutants of "
+                         "src/y.mjs only" % (runs["b"], made_y))
+
+    def test_a_selector_that_fails_for_one_file_runs_every_changed_suite_on_that_file(self):
+        row, runs, fixture = select_run("fails", selector=SELECTOR_FAILS_FOR_Y)
+        made_x, made_y = len(fixture["mutants"]["x"]), len(fixture["mutants"]["y"])
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(runs["a"], 1 + made_x + made_y, "suite a must run on each mutant of src/x.mjs, and on each "
+                         "mutant of src/y.mjs after the fallback")
+        self.assertEqual(runs["b"], 1 + made_y, "suite b must run on each mutant of src/y.mjs after the fallback, "
+                         "and on no mutant of src/x.mjs, which its selector lists for src/x.mjs only")
+        self.assertIn("src/y.mjs", repr(row.get("notes")), "the row must record the fallback for src/y.mjs")
+
+    def test_a_selector_missing_at_the_pr_commit_falls_back_to_every_changed_suite(self):
+        row, runs, fixture = select_run("gone", pr_deletes_selector=True)
+        made_x, made_y = len(fixture["mutants"]["x"]), len(fixture["mutants"]["y"])
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(runs["a"], 1 + made_x + made_y, "suite a must run on every mutant after the fallback")
+        self.assertEqual(runs["b"], 1 + made_x + made_y, "suite b must run on every mutant after the fallback")
+        notes = repr(row.get("notes"))
+        self.assertIn("src/x.mjs", notes, "the row must record the fallback for src/x.mjs")
+        self.assertIn("src/y.mjs", notes, "the row must record the fallback for src/y.mjs")
+
+
+class PrBudgetTests(unittest.TestCase):
+    """--pr-budget: a mutant not started once the pull request's time has passed the budget is not_run. It is never
+    a kill, a survivor or a crash."""
+
+    def test_mutants_not_started_past_the_budget_are_not_run(self):
+        repo, sha = budget_fixture()
+        row = replay_budget(repo, sha, BUDGET_S)
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(row["made"], 4)
+        ran = row["killed"] + row["crashed"] + row["survived"]
+        self.assertEqual(ran, 1, "the budget must cut after the first mutant: %r" % row)
+        self.assertEqual(row["not_run"], 3)
+        self.assertEqual(len(row["survivors"]), row["survived"], "a mutant not run is not a survivor")
+
+    def test_no_budget_runs_every_mutant(self):
+        repo, sha = budget_fixture()
+        row = replay_budget(repo, sha, None, limit=2)
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(row["made"], 2)
+        self.assertEqual(row.get("not_run", 0), 0)
+        self.assertEqual(row["killed"] + row["crashed"] + row["survived"], 2)
+
+    def test_the_cli_takes_pr_budget_and_prints_the_not_run_count(self):
+        repo, _sha = budget_fixture()
+        code, out, err = run_cli(["--replay", repo, "--profile", "fixture-js", "--prs", "1", "--limit", "4",
+                                  "--suite-timeout", "60", "--jobs", "1", "--pr-budget", str(BUDGET_S)])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn("not_run", out, out)
+
+
 def fake_row(**changes):
     row = {"pr": 7, "sha": "a" * 40, "title": "Fake", "status": "OK", "reason": "", "made": 5,
            "killed": 4, "crashed": 1, "survived": 0, "survivors": [], "unusable": {}}
@@ -933,6 +1117,13 @@ class FormatTests(unittest.TestCase):
         self.assertIn("no suite green on clean", unknown[0])
         self.assertNotIn("%", text, "UNKNOWN never reads as a rate")
         self.assertNotIn("OK", text, "UNKNOWN never reads as green")
+
+    def test_a_row_with_mutants_not_run_shows_their_count(self):
+        row = fake_row(made=5, killed=1, crashed=0, survived=1, not_run=3)
+        text = api("format_replay")([row])
+        lines = [line for line in text.split("\n") if "not_run" in line]
+        self.assertTrue(lines, "no line shows not_run:\n" + text)
+        self.assertIn("3", lines[0], lines[0])
 
 
 class CliTests(unittest.TestCase):
