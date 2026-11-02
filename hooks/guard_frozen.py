@@ -3,10 +3,8 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
-import ast
 import os
 import re
-import textwrap
 
 import guard_core
 from guard_core import (
@@ -221,7 +219,23 @@ MUTATING_COMMAND = (
 )
 
 
-def writes_to(path: str, cmd: str) -> bool:
+# A command that hands its arguments to another program, so a mutating word in them may run.
+_RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
+
+
+def _mutates_as_command(command: str, words) -> bool:
+    """True when the segment's own command (`command`, its resolved name) changes the files it names:
+    a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
+    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
+    if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+        return True
+    if command == "git":
+        rest = [word for word in words if not word.startswith("-")]
+        return any(word in ("mv", "rm") for word in rest[:2])
+    return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -235,6 +249,10 @@ def writes_to(path: str, cmd: str) -> bool:
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
+    # `command` is the segment's resolved command name, given by a caller that reads a mutating
+    # word only in command position (`grep -n install tests/x.py` reads, never writes).
+    if command is not None and not _mutates_as_command(command, words):
+        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
@@ -566,7 +584,8 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
+                     command_position=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -615,9 +634,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, at) and writes_to(word, text):
+            if predicate(word, at) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
                 return word
     return ""
+
+
+def _segment_command(words):
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+    index = resolve_command(tuple(words))
+    if index is None:
+        index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
+    command = _name(words[index]) if index < len(words) else ""
+    return command, [word for word in words[index + 1:] if word]
 
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
@@ -653,45 +681,66 @@ _PY_WRITE_CALL = re.compile(
 _STRING_LITERAL = re.compile(r"""'([^'\n]+)'|"([^"\n]+)\"""")
 
 
+def _join_path(head: str, tail: str) -> str:
+    return head.rstrip("/") + "/" + tail if head else tail
+
+
 def _py_paths(node, env):
     """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
-    name assigned one of those, or a chain of path calls. Empty when it cannot be told."""
+    name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
+    `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
+    reads `tests`. Empty when no piece is known."""
+    import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
         return list(env.get(node.id, ()))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return [a.rstrip("/") + "/" + b for a in _py_paths(node.left, env) for b in _py_paths(node.right, env)]
+        left, right = _py_paths(node.left, env), _py_paths(node.right, env)
+        if not right:
+            return left
+        return [_join_path(a, b) for a in (left or [""]) for b in right]
     if isinstance(node, ast.Call):
         func = node.func
         name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
         if name in _PATH_CTORS or name == "join":
-            parts = [_py_paths(arg, env) for arg in node.args]
-            if not parts or not all(parts):
-                return []
             out = [""]
-            for options in parts:
-                out = [(a.rstrip("/") + "/" + b) if a else b for a in out for b in options]
-            return out
+            for options in (_py_paths(arg, env) for arg in node.args):
+                if options:
+                    out = [_join_path(a, b) for a in out for b in options]
+            return out if out != [""] else []
         if isinstance(func, ast.Attribute) and func.attr in _PATH_PASS:
             return _py_paths(func.value, env)
     return []
 
 
-def _py_env(tree):
-    """Every simple `name = <path>` assignment of the script, in any scope: a name set twice holds both."""
-    env = {}
-    for _ in range(2):   # the second pass resolves a name built from a name
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                for value in _py_paths(node.value, env):
-                    known = env.setdefault(node.targets[0].id, [])
-                    if value not in known:
-                        known.append(value)
-    return env
+def _py_env_at(tree):
+    """A function `env_at(node)`: the path each simple `name = <path>` assignment bound, as it stands
+    where `node` begins. One pass in source order; a later top-level assignment replaces the value, one
+    inside an `if`, loop, `try` or function adds to it, since either may not run."""
+    import ast
+    top = {id(statement) for statement in tree.body}
+    events = sorted(
+        (node for node in ast.walk(tree)
+         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)),
+        key=lambda node: (node.end_lineno, node.end_col_offset))
+
+    def env_at(call):
+        env = {}
+        for node in events:
+            if (node.end_lineno, node.end_col_offset) > (call.lineno, call.col_offset):
+                break
+            name, values = node.targets[0].id, _py_paths(node.value, env)
+            if id(node) in top:
+                env[name] = values
+            else:
+                env[name] = env.get(name, []) + [v for v in values if v not in env.get(name, [])]
+        return env
+    return env_at
 
 
 def _py_mode_writes(mode) -> bool:
+    import ast
     return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(c in mode.value for c in "wax+")
 
 
@@ -701,9 +750,10 @@ def _py_arg(call, index, keyword):
     return next((kw.value for kw in call.keywords if kw.arg == keyword), None)
 
 
-def _py_written(tree, env):
-    """The path expression of each write call of a script: `open` with a writing mode, `write_text`,
+def _py_written(tree, env_at):
+    """(call, path expression) of each write call of a script: `open` with a writing mode, `write_text`,
     `write_bytes`, the destination of a copy, a move or a rename."""
+    import ast
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -711,29 +761,32 @@ def _py_written(tree, env):
         func = node.func
         if isinstance(func, ast.Name):
             if func.id == "open" and _py_mode_writes(_py_arg(node, 1, "mode")):
-                out.append(_py_arg(node, 0, "file"))
+                out.append((node, _py_arg(node, 0, "file")))
             elif func.id in _COPY_NAMES and len(node.args) >= 2:
-                out.append(node.args[1])
+                out.append((node, node.args[1]))
         elif isinstance(func, ast.Attribute):
             attr, owner = func.attr, func.value
             module = isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "codecs", "gzip", "bz2")
             if attr in ("write_text", "write_bytes"):
-                out.append(owner)
+                out.append((node, owner))
             elif attr == "open" and module and _py_mode_writes(_py_arg(node, 1, "mode")):
-                out.append(_py_arg(node, 0, "file"))
+                out.append((node, _py_arg(node, 0, "file")))
             elif attr == "open" and not module and _py_mode_writes(_py_arg(node, 0, "mode")):
-                out.append(owner)
+                out.append((node, owner))
             elif attr in _COPY_NAMES and isinstance(owner, ast.Name) and owner.id == "shutil" and len(node.args) >= 2:
-                out.append(node.args[1])
+                out.append((node, node.args[1]))
             elif attr in ("replace", "rename") and isinstance(owner, ast.Name) and owner.id == "os" \
                     and len(node.args) >= 2:
-                out.append(node.args[1])
-            elif attr in ("replace", "rename") and not module and len(node.args) == 1 and _py_paths(owner, env):
-                out.append(node.args[0])   # Path.rename(target) writes the target
-    return [expression for expression in out if expression is not None]
+                out.append((node, node.args[1]))
+            elif attr in ("replace", "rename") and not module and len(node.args) == 1 \
+                    and _py_paths(owner, env_at(node)):
+                out.append((node, node.args[0]))   # Path.rename(target) writes the target
+    return [(call, expression) for call, expression in out if expression is not None]
 
 
 def _py_hit(body: str, cwd: str, predicate) -> str:
+    import ast
+    import textwrap
     try:
         tree = ast.parse(textwrap.dedent(body))
     except (SyntaxError, ValueError):
@@ -745,9 +798,9 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
                 if predicate(text, cwd):
                     return text
         return ""
-    env = _py_env(tree)
-    for expression in _py_written(tree, env):
-        for path in _py_paths(expression, env):
+    env_at = _py_env_at(tree)
+    for call, expression in _py_written(tree, env_at):
+        for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
     return ""
@@ -814,7 +867,15 @@ def _inline_scripts(command: str):
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
-    `node -e` script. A script that only reads a path, or names it in a string, hits nothing."""
+    `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    A crash of the scan reads as no hit: it must never skip the rules after it."""
+    try:
+        return _interpreter_write_hit(raw, cwd, predicate)
+    except Exception:
+        return ""
+
+
+def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
