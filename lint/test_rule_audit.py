@@ -752,11 +752,20 @@ HOME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 MAX_DEPTH = 12
 PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call sites are scanned
 
-# Refusal id -> its home (a step slug or debt id), for an id that still prints no cite. The refusal
-# sweep (PR 1029) gives the uncited rule rewrites to refusal-uncited-rewrites, agent-model-cap to
-# refusal-looser-fixes, and the rest to the sweep step refusal-matches-rule.
+# Refusal id -> its home (a step slug or debt id), for an id that still prints no cite. The
+# refusal-vs-rule record gives the uncited rule rewrites to refusal-uncited-rewrites, agent-model-cap
+# to refusal-looser-fixes, and the rest to the sweep step refusal-matches-rule.
 REFUSAL_UNCITED_EXEMPT = {
     "agent-model-cap": "refusal-looser-fixes",
+    "gh-login-switch": "refusal-uncited-rewrites",
+    "handoff-unread": "refusal-uncited-rewrites",
+    "item-field-rendered": "refusal-uncited-rewrites",
+    "merge-role-proof": "refusal-uncited-rewrites",
+    "option-letter-keys": "refusal-uncited-rewrites",
+    "page-stale": "refusal-uncited-rewrites",
+    "question-departs": "refusal-uncited-rewrites",
+    "rework-off-page": "refusal-uncited-rewrites",
+    "trust-card-in-build": "refusal-uncited-rewrites",
     "agent-model-floor": "refusal-matches-rule",
     "ask-alone": "refusal-matches-rule",
     "background-end": "refusal-matches-rule",
@@ -951,6 +960,8 @@ class _Reasons:
         if isinstance(expr, ast.Name):
             return self._name(expr.id, mod, locs, d, None)
         if isinstance(expr, ast.Subscript):
+            if isinstance(expr.slice, ast.Constant) and isinstance(expr.slice.value, int) and expr.slice.value >= 0:
+                return self._elt(expr.value, expr.slice.value, mod, locs, d)  # `reason[0]` of a tuple-valued name
             return self._dict(expr, mod, locs, d)
         if isinstance(expr, ast.Call):
             if isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
@@ -973,6 +984,8 @@ class _Reasons:
         if depth > MAX_DEPTH:
             return None
         d = depth + 1
+        if isinstance(expr, ast.Constant) and expr.value is None:  # `return None`: no tuple, so no element
+            return []
         if isinstance(expr, ast.Tuple):
             return self.alts(expr.elts[i], mod, locs, d) if i < len(expr.elts) else None
         if isinstance(expr, ast.IfExp):
@@ -1290,6 +1303,19 @@ class RefusalCiteFixtureTests(unittest.TestCase):
                '    return ""\n'
                'refuse(t, "deny", "dead-id", why(1), m)\n')
         self.assertEqual(status_of(src, "dead-id"), ["cited"])
+
+    def test_an_element_of_a_tuple_a_call_returns_is_read(self):
+        src = ('def hit(x):\n'
+               '    if x:\n'
+               '        return "see decision alpha", x\n'
+               '    return None\n'
+               'def go(x):\n'
+               '    behind = hit(x)\n'
+               '    if behind:\n'
+               '        refuse(t, "deny", "tuple-id", behind[0], behind[1])\n')
+        self.assertEqual(status_of(src, "tuple-id"), ["cited"])
+        uncited = src.replace("see decision alpha", "no cite here")
+        self.assertEqual(status_of(uncited, "tuple-id"), ["no cite"])
 
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
