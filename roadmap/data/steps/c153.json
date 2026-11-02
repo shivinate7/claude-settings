@@ -4,6 +4,6 @@
  "status": "done",
  "order": 103.76,
  "why": "Your GitHub audit, Oct 27 23:01 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh211VfMPE9qfHmdrFTC9vz7X): Cloudflare Workers and Pages, Render and Renovate are installed beside Claude, and the repo has no secrets, deploy keys or webhooks.",
- "note": "Done, no change. Ruling (owner, Oct 28 14:40 CDT, page item 9): keep the apps' access to claude-settings as is, because it makes calling into a repo straightforward; revisit if it gets bloated. Use, checked Nov 1: Renovate opened 2 PRs here; Cloudflare serves joyous (its worker); Render opened none here. Filing miss: the Oct 28 ruling reached the page item but not this note, so triage 5 asked again on Nov 1 (item 145, withdrawn). Fix: step page-ruling-reaches-step.",
- "updatedAt": "2026-11-01T23:40:00Z"
+ "note": "Done, no change. Ruling: decision github-apps-keep-access (owner, page item 9, Oct 28 14:40 CDT). Use, checked Nov 1: Renovate opened 2 PRs here; Cloudflare serves joyous (its worker); Render opened none here. Filing miss: the Oct 28 ruling reached the page item but not this note, so triage 5 asked again on Nov 1 (item 145, withdrawn). Fix: step page-ruling-reaches-step.",
+ "updatedAt": "2026-11-02T14:33:00Z"
 }

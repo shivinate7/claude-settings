@@ -1,10 +1,10 @@
 {
-  "ask": "See c37 (goal 2), batch 3, lane ci-time-caps.",
-  "note": "Done. Your word, Oct 23. Landed in #566 (checked at f463787): skill ci-hygiene sets a 60-minute cap on a job with fewer than 5 green runs; the merge tool warns at 70% of a cap; a timeout with every step green gets its own verdict, re-cap or split. #570 (Oct 24) set the Windows rest job to 38 minutes from 5 green runs. Not checked: whether the timing test passed its 20 runs under load.",
-  "order": 111.65,
-  "phase": "cleanup",
-  "status": "done",
-  "title": "CI time caps start generous and warn before they fire",
-  "updatedAt": "2026-10-26T05:30:00Z",
-  "why": "Your gripe, Oct 23: CI that is new, or that just gained tests, keeps timing out and failing."
+ "ask": "See c37 (goal 2), batch 3, lane ci-time-caps.",
+ "note": "Done. Ruling: decision ci-job-caps (owner, Oct 23; stopgap line Nov 1 18:44 CST). Landed in #566 (checked at f463787): skill ci-hygiene sets a 60-minute cap on a job with fewer than 5 green runs; the merge tool warns at 70% of a cap; a timeout with every step green gets its own verdict, re-cap or split. #570 (Oct 24) set the Windows rest job to 38 minutes from 5 green runs. Not checked: whether the timing test passed its 20 runs under load.",
+ "order": 111.65,
+ "phase": "cleanup",
+ "status": "done",
+ "title": "CI time caps start generous and warn before they fire",
+ "updatedAt": "2026-11-02T14:33:00Z",
+ "why": "Your gripe, Oct 23: CI that is new, or that just gained tests, keeps timing out and failing."
 }
