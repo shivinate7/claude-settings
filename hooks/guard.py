@@ -1735,7 +1735,7 @@ LANE_EFFORT_REASON = (
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Start the agent or session with model sonnet or opus, "
+    "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
@@ -2107,7 +2107,8 @@ def role_list_drift(pointer_root):
 
 def role_key(subagent_type) -> str:
     """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
-    normaliser: role_name and opus_spawn_hit's Explore grant both read the role through it."""
+    normaliser in this file: role_name and opus_spawn_hit's Explore grant both read the role through it.
+    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
     return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
@@ -3320,7 +3321,8 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, its third on Sonnet or Opus, a builder's third on Opus.
+    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
+    # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
