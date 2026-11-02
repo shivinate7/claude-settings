@@ -91,27 +91,32 @@ and `opus builders 2h`:
 - The whole prompt, in any case, after leading whitespace. Any other text grants nothing, as for
   `override`.
 - `<lane slug>` names one target. A branch slug changes on a checkout, so the gate compares it to
-  the lane's own `cs-step:<slug>` session tag, set when the session was made. How the gate reads the
+  the session's tags, set when the session was made: `cs-step:<slug>` for a lane, `cs-build:<tier>`
+  for a batch runner, and `cs-repo:<owner>/<name>` for both, since step ids repeat across repos.
+  The coordinator writes the tags, so a mistyped tag routes a grant to the wrong session. It is
+  still one named act for the owner's length. A session with no matching tag fails closed. How the gate reads the
   tag (one `get_session` at start, or the start hook): to be named in the build. Unmeasured.
 - `<act>` comes from a fixed catalogue in one home, a constant the gate reads (rule
   building-allow-list-is-the-constant). The act's full scope sits in the owner's words or the
   constant, never in a record a model writes. First entries, one per incident:
-  - `merge <pr>`: `~/.claude/bin/merge <pr> --confirm` for that PR number only. The PR is
-    required. The lead session only, never its agents.
-  - `self-edit`: an Edit or Write in the target's own worktree, to `hooks/`, `lint/`, `skills/` or
+  - `merge <pr>`: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
+    cloud rule still allows any PR (section 2, the gate). The PR is required. The lead session only, never its agents.
+  - `self-edit`: an Edit or Write in the calling agent's own worktree (its cwd's checkout), to `hooks/`, `lint/`, `skills/` or
     `agents/`. It takes no PR. Never `settings.json`, `.claude/` or `state/`, and never a path
     outside that worktree. A written allow rule or hook would outlive the grant, because a file
     does not expire. Edits in a lane worktree are not live: the pointer checkout stays on main.
 - A waiting-page answer is not an act of its own. The page offers the owner a grant line with one
   of these acts (section 4).
-- The length is required. The clock is the server time of the owner's event, never the target's.
+- The length is required, with its unit: a bare number grants nothing, as for `opus 4`. The clock is the server time of the owner's event, never the target's.
 - `grant off <lane slug>` ends every grant for that target. It travels like a grant. The gate
-  takes the newest grant or off event it holds for its target. An off whose relay is lost leaves the
+  takes the newest grant per act, and an off ends all of them. An off whose relay is lost leaves the
   grant to its end, so lengths stay short.
 
 ### The gate
 
-The gate runs in the receiving session, before the classifier. It approves only a call that matches
+The gate runs in the receiving session, before the classifier. It lifts the classifier only. It
+emits `allow` only after every guard check and sibling hook passed. It never lifts an act on the
+"Outside every override" list of decision owner-override (role and model guards, frozen paths). It approves only a call that matches
 the act in the catalogue exactly. Anything else falls through to the classifier as today. Three
 gates exist:
 
@@ -126,7 +131,8 @@ It cannot scope to one session or expire, so it is the baseline only.
 
 `merge/cloud_allow.json` already holds such a rule in the cloud:
 `Bash(~/.claude/bin/merge * --confirm)`, for every PR. Batch runner 8 was still refused "Merge
-Without Review". Why: unknown. The probe of step 1 reads it first. The `merge <pr>` act is narrower
+Without Review". Why: unknown. If a static allow rule did not skip the classifier there, a hook
+`allow` may not either, and the probe may end Design A. The probe of step 1 reads it first. The `merge <pr>` act is narrower
 than that rule, so it adds nothing while the rule stands. Question 7 asks whether to narrow the rule.
 
 Build step 1 of any design is a probe in one session. A hook returns `allow` on one act the
@@ -150,7 +156,7 @@ that.
 
 Transport:
 
-1. The owner types `grant runner-8 merge 2h` in the coordinator.
+1. The owner types `grant runner-8 merge 1049 2h` in the coordinator.
 2. The coordinator's prompt hook (`hooks/local_time.py`) checks the form and prints one context
    line: the grant parsed, and the relay to send. It writes nothing beyond the inbox line it
    already writes for each prompt. The hook gets no event uuid, so the pointer is the coordinator's
@@ -167,7 +173,9 @@ Transport:
    - carries `client_platform` (measured once: the owner's typed "b" at 22:43 CST had
      `"client_platform": "desktop_app"`; relayed messages arrive as `ReadNotifications` tool
      results with `"origin": "mcp_send_message"`). Web and phone events: unmeasured. Until each
-     client is probed, the gate fails closed on it;
+     client is probed, the gate fails closed on it. The probe records `inbound_origin` and
+     `created_at` on an owner event and on a relayed event. The gate allow-lists the measured
+     values and fails closed when either is missing;
    - is the whole grant word, names this session, and names the act of the pending call;
    - is inside its length, by the event's `created_at`.
 
@@ -240,8 +248,8 @@ fail.
 Design A. A page save is not owner-attested today (Design C). So the page does not carry the
 grant. It offers the grant line instead: an item whose answer grants an act shows its
 `grant` line, which the owner taps to copy and sends in the coordinator's
-chat. That send is an owner event, and Design A carries it. The item prose shows the act, the PR
-and the length, so the owner reads what the line grants before sending. The grant is what the
+chat. That send is an owner event, and Design A carries it. The page draws the line and the item
+prose from the same fields, which show the act, the PR and the length, so the owner reads what the line grants before sending. The grant is what the
 owner sends, whatever the item said.
 
 One home holds both: the grant word, its catalogue and the gate. Step page-save-reaches-auto-mode
