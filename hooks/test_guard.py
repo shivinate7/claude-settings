@@ -2482,16 +2482,17 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
-# HEREDOC BODY WITH A LONE QUOTE, THEN A SHARED RESTORE. segment_roots (guard.py ~1228) loses sync
-# when a heredoc body holds a lone quote. The shell stays in the lane (cwd), the body is data, and the
-# restore names the shared checkout with -C, so it must deny. A lone quote inside a shell `#` comment
-# does not desync, so the python body keeps its quote outside any comment.
+# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
+# body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
+# not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in
+# the shared checkout, so it must deny. A lone quote inside a shell `#` comment does not desync, so the
+# python body keeps its quote outside any comment.
 sh("per-file deny: node heredoc, a lone apostrophe in the body, then cd shared and restore f.txt",
-   "node <<'EOF'\n// don't\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
-   "deny", "shared-tree", cwd=GITWT)
+   "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT)
 sh("per-file deny: python heredoc, a lone double quote in the body, then cd shared and restore",
-   "python3 <<'EOF'\ntotal = \"\nEOF\n" + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
-   "deny", "shared-tree", cwd=GITWT)
+   "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT)
 
 # SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the segments,
 # every later segment is judged as the shared checkout, so a later discard of a dirty file is denied.
@@ -2541,13 +2542,14 @@ chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the s
             VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
 chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
             VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
-# 4. A PowerShell Set-Location into another checkout is refused by other-checkout
-# (worktree_home_cd_parse_forms_case). Here the Set-Location stays in the lane's own root, and the
-# restore names the shared checkout with -C, so it denies as shared-tree. The aliases and
-# Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
-sh("per-file deny: PowerShell Set-Location within the worktree, then -C shared restore f.txt, from a worktree",
-   "Set-Location " + slash(GITWT) + "; " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
-   "deny", "shared-tree", tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
+# 4. A PowerShell Set-Location into the shared checkout, from a cwd in no checkout. The cd act does not
+# judge it there, so the shared-tree rule reads the folder it moved to and denies the restore. The
+# aliases and Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
+# Set-Location into another checkout from a lane is refused by other-checkout instead
+# (worktree_home_cd_parse_forms_case).
+sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a folder in no checkout",
+   "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
+   "deny", "shared-tree", tool="PowerShell", cwd=NOGIT, lacks=(CHAIN_ASK,))
 for _cd in ("sl", "chdir", "Push-Location"):
     chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask command"
                 % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
@@ -15758,6 +15760,8 @@ def worktree_home_cross_checkout_cost_case():
          {"command": "cd " + slash(lane_a) + " && ls"}, None, 0),
         ("shell cd into a sibling checkout", "Bash", lane_a,
          {"command": "cd " + slash(lane_b)}, None, 1),
+        ("shell cd out of the clone, then ls", "Bash", lane_a,
+         {"command": "cd " + slash(scratch) + " && ls"}, None, 0),
         ("Write into its own checkout", "Write", lane_a,
          {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
         ("Write from a cwd in no repository", "Write", NOGIT,
@@ -16014,6 +16018,56 @@ def worktree_home_cd_then_write_case():
     if problems:
         return False, "; ".join(problems)
     return True, "a relative write into another checkout, resolved from the cd's folder, is refused"
+
+
+def worktree_home_cd_after_untracked_case():
+    """Rule 0, other-checkout, a later cd is judged from where the shell really is. After a move the
+    guard cannot read (`"$HOME"`, `-`) an absolute cd into another checkout is still refused. After a
+    failed cd the shell stays where it was, so a relative cd climbs from there, and a cd into another
+    checkout is refused. From a lane."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
+    ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
+    rows = (
+        'cd "$HOME" && cd TARGET && make',
+        "cd - ; cd TARGET",
+        "cd GHOST ; cd TARGET",
+        "cd GHOST ; cd ../lane-b && make",
+    )
+    problems = []
+    for template in rows:
+        command = template.replace("TARGET", slash(lane_b)).replace("GHOST", slash(ghost))
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(command, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an absolute cd after an untracked move, and a relative cd after a failed cd, are refused"
+
+
+def worktree_home_pushd_case():
+    """Rule 0, other-checkout, `pushd` is a move, as `cd` is. From a lane, a `pushd` into another checkout
+    is refused, bare or chained, and a `pushd` within the cwd's own checkout or into a folder outside the
+    clone passes."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcopush")
+    deny = (
+        "pushd " + slash(lane_b),
+        "pushd " + slash(lane_b) + " && make",
+        "pushd ../lane-b >/dev/null && make",
+    )
+    allow = (
+        "pushd " + slash(os.path.join(lane_a, "src")) + " && make",
+        "pushd " + slash(scratch),
+    )
+    problems = []
+    for command in deny:
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(command, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    for command in allow:
+        _expect_call(problems, command, "allow", "Bash", lane_a, None, command)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "pushd into another checkout is refused; pushd within the own checkout or outside the clone passes"
 
 
 def worktree_home_later_field_case():
@@ -16417,6 +16471,11 @@ LOG_CHECKS = (
      worktree_home_cd_override_case),
     ("worktree-home: any session's write into another checkout is refused after a cd the cd act "
      "passes, when the write resolves against that cd's folder", worktree_home_cd_then_write_case),
+    ("worktree-home: an absolute cd into another checkout is refused after an untracked move, a cd - "
+     "or a failed cd, and a relative cd after a failed cd is read from where the shell stayed",
+     worktree_home_cd_after_untracked_case),
+    ("worktree-home: pushd into another checkout is refused, bare or chained; a pushd within the "
+     "cwd's own checkout, or outside the clone, passes", worktree_home_pushd_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -21167,6 +21226,8 @@ LOG_RULE_FAMILY = (
     ("worktree-home: orchestrator", "worktree-home"),
     ("worktree-home: any session's write into another checkout of its clone", "worktree-home"),
     ("worktree-home: any session's write into another checkout is refused after a cd", "worktree-home"),
+    ("worktree-home: an absolute cd into another checkout is refused after an untracked move", "worktree-home"),
+    ("worktree-home: pushd into another checkout", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
