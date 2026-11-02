@@ -2034,7 +2034,7 @@ class Restates(unittest.TestCase):
     def test_a_quoted_record_name_passes(self):
         self.assert_passes(self.child('- The "%s" record names the grant, and this repo keeps its own check.' % GRANT))
 
-    # Ruling 2026-11-02 11:55 CST (owner ruling fb-1041-2): a copy inside double quotes is still a copy.
+    # A copy in quotes is still a copy.
     def test_a_quoted_owner_quote_beside_a_quoted_record_name_is_refused(self):
         unit = ('- The "%s" record names the grant, and this repo keeps its own check. Owner words: "%s"'
                 % (GRANT, grant_quote()))
@@ -2072,7 +2072,7 @@ class Restates(unittest.TestCase):
         repo = Repo(self).write("docs/decisions/own-rule.md", "# Own rule\n\n" + FILLER + "\n")
         self.assert_passes(repo.write("CLAUDE.md", "- " + FILLER + "\n"))
 
-    # Ruling 2026-11-02 11:55 CST (owner ruling fb-1041-2): quoted copies are refused, so no quote wrap passes.
+    # A copy in quotes is still a copy, so no quote wrap passes.
     def test_a_copy_in_a_heading_kind_line_comment_or_code_span_passes(self):
         line = grant_line()
         for wrap in ("# %s", "Kind: %s", "<!-- %s -->", "`%s`"):
