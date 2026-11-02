@@ -3,7 +3,8 @@
 
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
-None of them may read PASS. The last class plans the real checks job: every step gets one line.
+None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
+The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 Run: python3 lint/test_ci_job.py
 """
@@ -339,6 +340,55 @@ class LintBase(Job):
         rc, lines, out = self.run_job(self.NARRATION, args=("--lint", "--base", "origin/other"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
+
+
+class GithubBaseRef(Job):
+    """A pull-request run sets GITHUB_BASE_REF in each step's env, as the Actions runner does: the base without its
+    remote. With no base there is no pull-request run, so the variable is unset even when the caller's env sets it.
+    ci-job relays no step output, so each step writes the value it sees to seen.txt. `<unset>` is no ref name."""
+
+    SEEN = "printf '%s' \"${GITHUB_BASE_REF-<unset>}\" > seen.txt"
+
+    def seen_after(self, *steps, args=(), env=None):
+        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job."""
+        path = os.path.join(self.root, "seen.txt")
+        if os.path.exists(path):
+            os.remove(path)
+        rc, lines, out = self.run_job(*steps, args=args, env=env)
+        if not os.path.exists(path):
+            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
+        with open(path, encoding="utf-8") as f:
+            return self.verdicts(lines), f.read(), out
+
+    def test_a_pull_request_run_sets_github_base_ref_to_the_base_without_its_remote(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"))
+        self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+    def test_the_base_keeps_every_slash_after_its_remote(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/release/1.2"))
+        self.assertEqual((verdicts, seen), (["PASS"], "release/1.2"), out)
+
+    def test_a_base_replaces_a_github_base_ref_the_caller_set(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"),
+                                              env={"GITHUB_BASE_REF": "stale"})
+        self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+    def test_a_step_env_that_sets_github_base_ref_wins_over_the_base(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env={"GITHUB_BASE_REF": "from-step"}),
+                                              args=("--base", "origin/main"))
+        self.assertEqual((verdicts, seen), (["PASS"], "from-step"), out)
+
+    def test_with_no_base_github_base_ref_is_unset_even_when_the_caller_sets_it(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={"GITHUB_BASE_REF": "stale"})
+        self.assertEqual((verdicts, seen), (["PASS"], "<unset>"), out)
+
+    def test_a_lint_run_with_a_base_sets_github_base_ref_for_its_lint_steps(self):
+        os.makedirs(os.path.join(self.root, "lint"))
+        with open(os.path.join(self.root, "lint", "seen_base_ref.py"), "w", encoding="utf-8") as f:
+            f.write("import os\nopen('seen.txt', 'w', encoding='utf-8').write(os.environ.get('GITHUB_BASE_REF', '<unset>'))\n")
+        verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
+                                              args=("--lint", "--base", "origin/main"))
+        self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
 
 
 class RealChecks(unittest.TestCase):
