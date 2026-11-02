@@ -5,7 +5,7 @@
 Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). A session that publishes from an older file puts old page code on the page the owner reads. The guard now refuses that publish, and a stamp lets the next session start say when the page is behind.
 
 - Guard rule `page-stale` (`hooks/guard.py`, `page_stale_hit`) judges an `Artifact` call that publishes this repo's waiting page.
-  - It judges only a call with no `action` or `action` publish, no `asset: true`, a `file_path`, and a `url` with the same artifact id as `layout.waiting_page` of the cwd's repo (`layout.is_waiting_page_url`, called by `question_form.waiting_page_root`; the `/artifact/` and `/code/artifact/` forms, a trailing slash and a query compare equal). Any other call, a read, a list, an asset upload or a publish of another page, leaves before it loads `stale_pages`.
+  - It judges only a call with no `action` or `action` publish, no `asset: true`, a `file_path`, and a `url` with the same artifact id as `layout.waiting_page` of the cwd's repo (`layout.is_waiting_page_url`, called by `question_form.waiting_page_root`; the `/artifact/` and `/code/artifact/` forms, a trailing slash and a query compare equal; a bare `.../artifact/` names no page). Any other call, a read, a list, an asset upload or a publish of another page, leaves before it loads `stale_pages`.
   - It loads `stale_pages.py` from `skills/waiting-page/` beside the hooks folder, else from the config folder. It gets main's `page.html` with `find_template(None)` and compares with `matches`, the one home of "current". The designData body, the roadmap block and the title text are ignored, so a page that `stale_pages.py --write` built passes.
   - Behind: it denies. The reason says to read the live page, run `stale_pages.py --page <saved live page> --write <out>`, and publish `<out>`. It names no forbidden target.
   - Unknown (main unreadable, the file unreadable or empty, `stale_pages.py` missing): it allows and logs one `noted` line under `page-stale`. The rule fails open.
@@ -17,8 +17,11 @@ Every republish of a waiting page is main's `skills/waiting-page/page.html` with
   - Every `Artifact` call also runs the session-home record step that every guard call runs (`session_home_keep`): one path walk and one small file read, and one write only when the record is missing or changed.
   - Per waiting-page publish: one python import of `stale_pages`, one read-only git process (no fetch, no network), one file read, one stamp file write.
   - Session start: one python start and one git process, only in a repo with a waiting page. Any other repo pays one grep.
-  - No timer, no new long-lived process, no new log beyond the one `noted` line on unknown.
-- Known limit: a first publish with no `url` passes.
+  - No timer, no new long-lived process, no new log beyond the one `noted` line on unknown or on a failed stamp write.
+- Known limit: that the `/artifact/` and `/code/artifact/` forms with one id name one page is unmeasured.
+- Known limit: a first publish with no `url` passes. So does a republish by the same `file_path` with no `url`: it redeploys to the same url, unjudged.
+- Known limit: the stamp is written at PreToolUse, so a publish that then fails still stamps. A stamp write that fails logs one `noted` line under `page-stale`.
+- Known limit: the session-start line compares blob shas, not `matches`. A `page.html` edit that `matches` ignores (title text, white space) prints the line until the page is republished.
 - Known limit: the rule never fetches. A stale local `origin/main` makes an old page read as current, and a newer page as behind.
 - Known limit: an `ArtifactData` write is not gated here. It writes items, not page code.
 - Known limit: a fresh cloud container has no stamp, so its session start prints no line.

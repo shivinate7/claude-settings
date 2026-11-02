@@ -31,7 +31,7 @@ or empty `Departs from:` line (a bullet or bold label is read), a line with no s
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
-position's letter) and `rework-off-page` (an open item never says it is being reworked).
+position's letter, and a label that opens with a letter tag names that letter) and `rework-off-page` (an open item never says it is being reworked).
 
 An update is judged only for the fields it carries. A closed item passes the form: it asks the owner
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
@@ -869,7 +869,20 @@ KEY_NAMED = re.compile(
     r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
-                      "item's text by that letter (option A, pick b), never by any other key.")
+                      "item's text by that letter (option A, pick b), never by any other key. An option's "
+                      "label carries no letter of its own: the page's key is the only letter, so a label "
+                      "never opens with a tag such as B: or Option B.")
+
+# A label's opening letter tag. Incident, Nov 1 16:12 CST: options keyed a-d carried the labels "B: ...",
+# "D: ...", "A: ...", "C: ...", so the owner's answer letter named two options. Only an opening tag counts:
+# `X:` `X)` `X.` `X]` before a space or end, `(X)`, `[X]`, a spaced dash after X, or the words "Option X". A
+# letter word ("A rail"), "A/B", "AI-first", "B2B" and "E.g." are text, not tags.
+LABEL_TAG = re.compile(r"""^\s*(?:\*\*)?(?:
+    (?i:option)\s+(?P<word>[A-Za-z])(?![\w-])
+    |\((?P<paren>[A-Za-z])\)
+    |\[(?P<square>[A-Za-z])\]
+    |(?P<plain>[A-Za-z])(?:\*\*)?(?:[:).\]](?=[\s*]|$)|\s[\u2014\u2013-]\s)
+    )""", re.X)
 
 
 def _letter_of(index: int) -> str:
@@ -898,7 +911,8 @@ def key_named_hit(texts) -> str:
 
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
-    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
+    position's letter, has a label that opens with another letter's tag, or names an option in its text by a
+    letter-and-digit key. A task, a note and a
     closed item pass; an update that carries no `options` has no keys to judge."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
@@ -918,6 +932,9 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
+            m = LABEL_TAG.match(o.get("label")) if isinstance(o.get("label"), str) else None
+            if m and next(v for v in m.groupdict().values() if v).lower() != key:
+                return "option label that opens with a letter tag other than its key: " + m.group(0).strip()
     return key_named_hit(_item_text_fields(data))
 
 
