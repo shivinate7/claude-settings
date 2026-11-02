@@ -10386,6 +10386,7 @@ class MergeRoleCheck(CloudSession):
         self.assertTrue(err.strip(), "the refusal said nothing on stderr")
         self.assertNotIn("--confirm", err)
         self.assertNotIn("Traceback", err)
+        return err
 
     def assert_reaches_host(self, *argv, **env):
         """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
@@ -10407,6 +10408,7 @@ class MergeRoleCheck(CloudSession):
         for old in OLD_PARSER_ERRORS:  # the failure must come from the writer, not from a parser that has never heard of --role
             self.assertNotIn(old, err)
         self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
+        return err
 
     # ---- the constants and the reader
     # decision session-tiers: only a batch runner merges
@@ -10501,6 +10503,7 @@ class MergeRoleCheck(CloudSession):
         # names the review record and says the batch runner finds the PR. It no longer hands over the number and the head.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
+        # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
         self.assertRegex(err, r"(?i)review record")
         self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
@@ -10510,6 +10513,10 @@ class MergeRoleCheck(CloudSession):
         # A session without a role must not learn which role to claim: the text names the batch runner only as the one that finds the PR.
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
+
+    def test_the_confirm_refusal_names_the_lane_lint_step(self):
+        err = self.assert_refused()
+        self.assertIn("merge --lane-lint", err, "the --confirm refusal does not name merge --lane-lint")
 
     # ---- the role check lets through
     # decision session-tiers: the coordinator never merges, so a recorded coordinator role is refused (was: merges)
@@ -10598,6 +10605,10 @@ class MergeRoleCheck(CloudSession):
                 self.assertTrue(err.strip(), "the refusal said nothing on stderr")
                 for named in ("coordinator", "batch-runner"):
                     self.assertNotIn(named, err)
+
+    def test_the_role_refusal_names_the_lane_lint_step(self):
+        err = self.assert_writer_refused("--role", "lane")
+        self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
