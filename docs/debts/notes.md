@@ -886,6 +886,8 @@
 - install-sh-unchecked-skill-mv: install.sh moves an old skill backup with an unchecked `mv` (install.sh move_old_skill_baks). Decision: install-manifest-prunes
 - install-tarball-no-prune: an install from a source with no .git counts every file in the extracted tree as shipped, so a file main removed stays in place (install.sh tarball fallback). Decision: install-manifest-prunes
 - install-first-run-rm-no-retry: on the first run with no manifest, a failed delete of a listed link into the clone is not held back. The manifest is then written, and the link is never retried (install.sh retire_listed). Decision: install-manifest-prunes
+- install-ps1-nonascii-names: the install.ps1 post-merge hook reads git without -z and the installer decodes -z output with the console encoding, so a non-ASCII shipped name could be skipped. No such name ships now. Decision: install-manifest-prunes
+- install-manifest-test-gaps: no test runs install.ps1's manifest code outside CI, none feeds git a failure mid-install, and none uses odd file names. Decision: install-manifest-prunes
 - option-letter-keys-label-word-tag: a label that opens with a word tag other than Option, such as "Approach B:" or "Plan B:", passes LABEL_TAG. It is kept out because "Plan B" is plain English (hooks/question_form.py LABEL_TAG; decision option-keys-are-letters)
 - report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
 - report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
