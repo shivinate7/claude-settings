@@ -17,7 +17,7 @@ Incidents:
 
 - Reported 2026-11-01 19:02 CST, home repo: a simulator crash-looped for 7 minutes before anyone stopped it. The step estimate of about 10 seconds to stop it is unmeasured.
 
-Basis: named incident, the home crash loop. Landed: not yet. The code is not built.
+Basis: named incident, the home crash loop. Landed: 2026-11-02.
 
 Kind: process
 Home: bin/sim-test

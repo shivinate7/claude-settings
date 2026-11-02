@@ -21,7 +21,7 @@ Incidents:
 
 - Reported 2026-11-01 19:02 CST, home repo: a simulator crash-looped for 7 minutes. The lane that reported it said that `sim-test` takes no machine-wide lock. It also said that a lane that boots with `simctl` or the Simulator panel skips `sim-test`.
 
-Basis: named incident, the home crash loop, 2026-11-01 19:02 CST. Landed: 2026-11-02 for rule 4, planned for the same batch as this record. Rules 1 to 3 are not built yet.
+Basis: named incident, the home crash loop, 2026-11-01 19:02 CST. Landed: 2026-11-02.
 
 Kind: process
 Home: bin/sim-test
