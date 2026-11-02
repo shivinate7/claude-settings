@@ -277,12 +277,12 @@ class CheckCase(Fixture):
         self.assertGap(out, later, "add a second widget test", rel)
         self.assertNotIn(landed[:7], out, out)
 
-    def test_untrailered_test_commit_in_repo_without_gate_is_flagged(self):
-        """No rollout exemption without the gate file at HEAD. The script runs by its absolute path, from the scratch repo."""
+    def test_untrailered_test_commit_in_repo_without_check_is_flagged(self):
+        """No rollout exemption without the check file at HEAD. The script runs by its absolute path, from the scratch repo."""
         rel, sha = self.scratch_repo_test_commit()
         self.assertFlagged(sha, "add widget tests", rel, script=MODULE, cwd=self.tree)
 
-    def test_trailered_test_commit_in_repo_without_gate_passes(self):
+    def test_trailered_test_commit_in_repo_without_check_passes(self):
         """The same scratch repo, with a valid trailer on its test commit, is green. The script runs by its absolute path."""
         self.scratch_repo_test_commit(red=GOOD)
         self.assertClean(script=MODULE, cwd=self.tree)
