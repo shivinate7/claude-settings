@@ -32,6 +32,15 @@ A reply that holds Input Needed or a prose line ending in `?` also gets the past
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+On landed turns it also blocks a reply sentence that says decision D was rewritten (rewritten, rewrote,
+rewrites, rewrite of) for a ruling when D's record was last committed before that ruling, on the default
+branch and on HEAD alike (`reports-rewrite-stamp`, named incident F119: sessions said decision ci-job-caps
+was rewritten for the owner's 2026-11-01 18:44 CST ruling while main showed it last touched on Oct 28).
+The ruling time is a stamp in the sentence (`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's
+Central date), else, for "under" or "by" decision R, R's last commit on the default branch. "In place"
+alone does not trigger. An unknown id, no time or a failed git read passes. Cost: one regex read of the
+reply, and only on a reply that matches it, one `git log -1` process per cited record (at most
+REWRITE_CAP) plus the default-branch lookup; no file, no timer, no log.
 """
 import json
 import os
@@ -530,6 +539,98 @@ def pick_has_a_control(records, text, cwd):
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
+# reports-rewrite-stamp: a sentence that says decision D was rewritten for a ruling. See the module docstring.
+REWRITE_RE = re.compile(r"\b(?:rewrote|rewritten|rewrites|rewrite\s+of)\b", re.I)
+REWRITE_CAP = 5  # most records one reply may make this check read
+_SLUG = r"[a-z0-9][a-z0-9-]*"
+DECISION_ID_RE = re.compile(r"\bdecisions?\s+`?(" + _SLUG + r")`?", re.I)
+RULING_BY_RE = re.compile(r"\b(?:under|by)\s+(?:decisions?\s+)?`?(" + _SLUG + r")`?", re.I)
+STAMP_FULL_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+STAMP_CLOCK_RE = re.compile(r"(?<![\d:-])(\d{1,2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+STAMP_ZONE_HOURS = {"CST": -6, "CDT": -5, "UTC": 0, "GMT": 0}
+FENCE_RE = re.compile(r"```.*?```", re.S)
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+
+
+def _central(at):
+    """`YYYY-MM-DD HH:MM CST` (or CDT) for an instant, from the time hook's own clock."""
+    import local_time
+    return " ".join(local_time.line(lambda: at).split()[2:5])
+
+
+def _parse_iso(value):
+    from datetime import datetime, timezone
+    at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _stamp_time(sentence, human_ts):
+    """The ruling instant a stamp in `sentence` names, else None. A clock-only stamp takes the Central
+    date of the last human record's timestamp, else of the hook's clock."""
+    from datetime import datetime, timedelta, timezone
+    full = STAMP_FULL_RE.search(sentence)
+    if full:
+        day, clock, zone = full.groups()
+    else:
+        clk = STAMP_CLOCK_RE.search(sentence)
+        if not clk:
+            return None
+        import local_time
+        try:
+            turn = _parse_iso(human_ts)
+        except (TypeError, ValueError):
+            turn = local_time.clock()
+        day = _central(turn).split()[0]
+        clock, zone = clk.groups()
+    hour, minute = clock.split(":")
+    tz = timezone(timedelta(hours=STAMP_ZONE_HOURS[zone]))
+    year, month, date = (int(x) for x in day.split("-"))
+    return datetime(year, month, date, int(hour), int(minute), tzinfo=tz)
+
+
+def rewrite_stamp_problem(text, human_ts, cwd):
+    """The refusal text when a sentence says decision D was rewritten for a ruling that is later than
+    D's last commit on the default branch and on HEAD, else ''. Fails open on any unknown."""
+    sentences = [s for s in SENTENCE_SPLIT_RE.split(FENCE_RE.sub(" ", text)) if REWRITE_RE.search(s)]
+    if not sentences:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import git_reads
+    from datetime import datetime, timezone
+    root = repo_root(cwd)
+    if not root:
+        return ""
+    folder = layout.path(root, "decisions")
+    base = git_reads.resolve_default_base(root)
+    if not base:
+        return ""
+    reasons, seen = [], set()
+    for sentence in sentences:
+        by = RULING_BY_RE.search(sentence)
+        cited = [m for m in DECISION_ID_RE.finditer(sentence) if not (by and by.start() <= m.start() < by.end())]
+        if not cited:
+            continue
+        d = cited[0].group(1).lower()
+        if d in seen or len(seen) >= REWRITE_CAP:
+            continue
+        seen.add(d)
+        ruling = _stamp_time(sentence, human_ts)
+        if ruling is None and by:
+            r_epoch = git_reads.last_commit_epoch(root, [base], "%s/%s.md" % (folder, by.group(1).lower()))
+            if r_epoch is not None:
+                ruling = datetime.fromtimestamp(r_epoch, timezone.utc)
+        if ruling is None:
+            continue
+        d_epoch = git_reads.last_commit_epoch(root, [base, "HEAD"], "%s/%s.md" % (folder, d))
+        if d_epoch is None or d_epoch >= ruling.timestamp():
+            continue
+        reasons.append(
+            "Rewrite-stamp guard: decision `%s` was last committed %s, on main and on HEAD, before the "
+            "ruling %s that it is said to be rewritten for. Rewrite the record first, or say it is not "
+            "rewritten yet." % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)), _central(ruling)))
+    return " ".join(reasons)
+
+
 def _marker_path(hook):
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import local_time
@@ -881,6 +982,12 @@ def main():
     except Exception:
         pass
     reasons += relay
+    try:
+        rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
+        if rewrite:
+            reasons.append(rewrite)
+    except Exception:
+        pass
     cite = bare_cite(text)
     if cite:
         reasons.append(

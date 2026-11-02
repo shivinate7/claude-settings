@@ -242,6 +242,19 @@ def resolve_default_base(where: str, remote: str = "origin"):
     return read_default_base(where, remote)[0]
 
 
+def last_commit_epoch(where: str, revs, pathspec: str):
+    """The commit time, in epoch seconds, of the newest commit that touches `pathspec` and is
+    reachable from any of `revs`. One `git log -1` call. None when git does not answer, or when no
+    such commit exists (an unknown file): the caller cannot tell the two apart and fails open."""
+    answer = _git(where, "log", "-1", "--format=%ct", *revs, "--", pathspec)
+    if answer is None or answer.returncode != 0:
+        return None
+    try:
+        return int(answer.stdout.strip())
+    except ValueError:
+        return None
+
+
 def branch_is_ancestor(where: str, base: str, branch: str):
     """True when `branch`'s tip is already reachable from `base`, False when it plainly is not,
     None when the question could not be answered (an unresolvable revision, a git that would not
