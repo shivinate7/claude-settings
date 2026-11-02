@@ -2064,6 +2064,253 @@ const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l,
   designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
 const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
   return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+// ---------------------------------------------------------------- the Ask box (step page-ask-box)
+// Contract: docs/design/page-ask-box-notes.md on design/page-ask-box, sections 3, 5, 6 and 8.
+// The notes name no ids, so the selectors take the mockup's: #askText (the box), #askSend, #askUndo.
+const ASK_TEXT = "Can the waiting page take a question from me?";
+const ASK_ANSWERED = { id: "ask-an1", text: "Can I see the lane queue?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes. It is on the Status tab." };
+// A missing control fails by name, not by a wait that times out.
+async function mustHave(page, sel, what) {
+  const n = await page.locator(sel).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: ${sel} is missing`);
+}
+// A text the page shows, as its box. A text the page does not show fails with the text named.
+async function shownBox(page, text) {
+  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+  const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+  assert.ok(shown, `the page does not show: ${text}`);
+  return loc.boundingBox();
+}
+
+test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const log = await page.evaluate(() => window.__log);
+  const asks = log.filter((l) => l[0] === "set" && l[1] === "asks");
+  assert.equal(asks.length, 1, "Send wrote " + asks.length + " asks records");
+  const [, , key, body] = asks[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, ASK_TEXT, "the text is not the owner's words");
+  assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "at is not an ISO time: " + body.at);
+  assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
+});
+
+test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const key = await page.evaluate(() => window.__log.find((l) => l[0] === "set" && l[1] === "asks")[2]);
+  await mustHave(page, "#askUndo", "Undo control");
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
+  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+});
+
+test("the asks list is newest first by at, whatever order the records came in", async (t) => {
+  // Insertion order and id order both differ from newest first, so only a sort by at passes.
+  const asks = {
+    "ask-zz1": { id: "ask-zz1", text: "Middle ask text", at: "2026-10-30T09:00:00Z" },
+    "ask-aa1": { id: "ask-aa1", text: "Newest ask text", at: "2026-10-31T09:00:00Z" },
+    "ask-mm1": { id: "ask-mm1", text: "Oldest ask text", at: "2026-10-29T09:00:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  const top = {};
+  for (const text of ["Newest ask text", "Middle ask text", "Oldest ask text"]) top[text] = (await shownBox(page, text)).y;
+  assert.ok(top["Newest ask text"] < top["Middle ask text"] && top["Middle ask text"] < top["Oldest ask text"], "the asks are not newest first: " + JSON.stringify(top));
+});
+
+test("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.text);
+  assert.equal(await page.getByText(ASK_ANSWERED.reply, { exact: true }).isVisible(), false, "a seen answer is open");
+  const show = page.getByRole("button", { name: "Show answer" });
+  assert.equal(await show.count(), 1, "no Show answer control on the folded ask");
+  await show.click();
+  await shownBox(page, ASK_ANSWERED.reply);
+});
+
+test("an answer the viewer has not seen stays open, with the New answer mark", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-29T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.reply);
+  await shownBox(page, "New answer");
+});
+
+test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
+  const asks = {
+    "ask-w01": { id: "ask-w01", text: "Nobody has read this yet", at: "2026-10-31T08:00:00Z" },
+    "ask-w02": { id: "ask-w02", text: "The writer has read this", at: "2026-10-31T07:00:00Z", owner: "triage", read: "2026-10-31T07:30:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  await shownBox(page, "Waiting for triage to read it.");
+  await shownBox(page, /^Read by triage/);
+  await shownBox(page, /Waiting for its answer\./);
+  assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
+});
+
+// Red cases for the Ask box: no stray null, the cap on new answers, the 4000-character limit, Ctrl+Enter, paste and Copy ask.
+test("the Ask section never shows the text null, in the waiting, answered and sent states", async (t) => {
+  const asks = {
+    "ask-n-wait": { id: "ask-n-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" },
+    "ask-n-fresh": { id: "ask-n-fresh", text: "A fresh answer", at: "2026-10-30T08:00:00Z", owner: "triage", answered: "2026-10-31T10:00:00Z", reply: "Yes, it does." },
+    "ask-n-seen": { id: "ask-n-seen", text: "A seen answer", at: "2026-10-29T08:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes, it did." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-30T11:00:00Z" } }); if (!page) return;
+  await shownBox(page, "A question still waiting");
+  const stray = () => page.evaluate(() => { const s = document.getElementById("asks").textContent, i = s.indexOf("null"); return i < 0 ? "" : s.slice(Math.max(0, i - 60), i + 10); });
+  const waiting = await stray();
+  assert.equal(waiting, "", "the waiting and answered states show the text null: " + JSON.stringify(waiting));
+  await page.fill("#askText", "A new ask for the list");
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  const sent = await stray();
+  assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
+});
+
+test("a new answer to an ask older than the newest 3 answered asks stays open in view, not behind Show older asks", async (t) => {
+  // Three answers seen at the last visit fill the cap. The new answer is older by at, so it sits fourth in the list.
+  const seen = (n, at) => ({ id: "ask-s" + n, text: "Seen answer " + n, at, owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Seen reply " + n + "." });
+  const asks = {
+    "ask-s1": seen(1, "2026-10-30T08:00:00Z"),
+    "ask-s2": seen(2, "2026-10-30T07:00:00Z"),
+    "ask-s3": seen(3, "2026-10-30T06:00:00Z"),
+    "ask-new": { id: "ask-new", text: "Old ask, new answer", at: "2026-10-01T09:00:00Z", owner: "triage", answered: "2026-10-31T08:00:00Z", reply: "The answer that came after the last visit." },
+    "ask-old": { id: "ask-old", text: "Oldest seen answer", at: "2026-09-15T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Seen long ago." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, "The answer that came after the last visit.");
+  // Only the seen answer past the cap stays behind the button.
+  assert.equal(await page.getByRole("button", { name: "Show 1 older ask", exact: true }).count(), 1, "the button does not say Show 1 older ask");
+});
+
+test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = await page.textContent("#askHint");
+  const long = "0123456789".repeat(420); // 4200 characters
+  // A value set in script is not held to the box's maxlength, as a draft or an Undo can leave it.
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, long);
+  await mustHave(page, "#askSend", "Send ask button");
+  if (await page.locator("#askSend").isDisabled()) {
+    // Over the limit Send ask is off, so nothing is written, the words stay in the box, and the hint gives the limit.
+    const off = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+    assert.equal(off, 0, "Send ask wrote " + off + " asks records while it was off");
+    assert.equal(await page.inputValue("#askText"), long, "the words in the box changed while Send ask was off");
+    const notice = (await page.textContent("#askHint")).trim();
+    assert.ok(notice && notice !== short.trim() && /4000|limit/i.test(notice) && await page.locator("#askHint").isVisible(), "no limit notice in the hint: " + JSON.stringify(notice));
+    return;
+  }
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"), null, { timeout: 1500 }).catch(() => {});
+  const sets = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+  if (sets.length) {
+    assert.equal(sets.length, 1, "Send wrote " + sets.length + " asks records");
+    assert.equal(sets[0].text.length, long.length, `Send ask stored ${sets[0].text.length} of ${long.length} characters, with no notice`);
+    assert.equal(sets[0].text, long, "the stored text is not the owner's words");
+    return;
+  }
+  // No write: the words stay in the box, and the hint row says why.
+  assert.equal(await page.inputValue("#askText"), long, "Send ask wrote nothing and dropped the typed words");
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
+});
+
+test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
+  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+  const page = await open(t); if (!page) return;
+  const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", sent);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await mustHave(page, "#askUndo", "Undo control");
+  const typed = "Typed after the send. ".repeat(6); // 126 characters, typed inside the window
+  await page.fill("#askText", typed);
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const value = await page.inputValue("#askText");
+  const hint = (await page.textContent("#askHint")).trim();
+  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
+  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+});
+
+test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await card(page, DECISION).locator(".title").click();
+  await page.keyboard.press("b");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  assert.equal(await page.locator("#send").isDisabled(), false, "no answer is staged, so the case proves nothing");
+  await page.focus("#askSend");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "answers"), null, { timeout: 1500 }).catch(() => {});
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "answers").length);
+  assert.equal(writes, 0, "Ctrl+Enter on Send ask wrote " + writes + " answers record(s)");
+});
+
+test("pasting 4200 characters into the ask box keeps all of them and shows the over-limit notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = (await page.textContent("#askHint")).trim();
+  const long = "0123456789".repeat(420); // 4200 characters
+  // insertText takes the same route as a paste, so the box's maxlength applies to it as it does to a paste.
+  await page.fill("#askText", "");
+  await page.click("#askText");
+  await page.keyboard.insertText(long);
+  const value = await page.inputValue("#askText");
+  assert.equal(value.length, long.length, `the box holds ${value.length} of ${long.length} pasted characters`);
+  const hint = (await page.textContent("#askHint")).trim();
+  const shown = await page.locator("#askHint").isVisible();
+  assert.ok(shown && hint !== short && /4000|limit/i.test(hint), "no over-limit notice in the hint: " + JSON.stringify(hint));
+});
+
+test("over the limit, Send ask is disabled, or a press changes the hint to the notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await mustHave(page, "#askSend", "Send ask button");
+  const over = "0123456789".repeat(420); // 4200 characters, set as a draft or an Undo can leave it
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, over);
+  if (!(await page.locator("#askSend").isDisabled())) {
+    const before = (await page.textContent("#askHint")).trim();
+    await page.click("#askSend");
+    await page.waitForFunction((b) => document.getElementById("askHint").textContent.trim() !== b || window.__log.some((l) => l[0] === "set" && l[1] === "asks"), before, { timeout: 1500 }).catch(() => {});
+    const after = (await page.textContent("#askHint")).trim();
+    assert.notEqual(after, before, "Send ask is enabled over the limit, and a press leaves the hint as it was");
+  }
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+  assert.equal(writes, 0, "Send ask wrote an ask over the limit");
+});
+
+test("Copy ask after a failed write changes the hint to the copy result", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await mustHave(page, "#askCopy", "Copy ask button");
+  await page.click("#askCopy");
+  await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
+});
+
 async function openCap(t, labels, width, design) {
   const it = capItem(labels);
   const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
