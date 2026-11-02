@@ -56,6 +56,12 @@ def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
 
 
+def hook_feedback(body):
+    """A Stop hook's feedback as a live transcript stores it: a user text record with isMeta true."""
+    return {"type": "user", "isSidechain": False, "isMeta": True,
+            "message": {"role": "user", "content": "Stop hook feedback:\n" + body}}
+
+
 def peer_msg(body, stamp=None):
     """A cross-session reply in the shape a real transcript stores: type user, origin.kind peer,
     isMeta true. It lands mid-turn, so it is never the owner's last message."""
@@ -1072,11 +1078,11 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(bad, True))
 
     def test_rw_feedback_record_counted_as_human_keeps_spawns(self):
-        # Assumed shape of the hook's feedback record: a plain user text record after the block.
+        # The hook's feedback record as a live transcript stores it: a user text record with isMeta true.
         self.missing_report_block()
         records = [human("do the task"), tool_use_msg("Agent", self.BUILDER), tool_result_msg(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text("All done."), human("Stop hook feedback: send the report"),
+                   assistant_text("All done."), hook_feedback("send the report"),
                    assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** merge")]
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
@@ -1436,6 +1442,7 @@ class PickSendTests(unittest.TestCase):
     # pick-send check can block it.
     PICK = PickGuardTests.PICK.replace("Two ways:", "Two ways. After 5 minutes unanswered it goes to the waiting page.", 1)
     LANE_PICK = PICK.replace("> **Next** wait", "> **Next** wait " + PAGE)
+    TASK_NOTE = "<task-notification>\n<task-id>t9</task-id>\n</task-notification>"
 
     def setUp(self):
         self.scratch = tempfile.mkdtemp(dir=_ISOLATION["dir"])
@@ -1505,10 +1512,13 @@ class PickSendTests(unittest.TestCase):
         with open(self.pick_file(), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
-    def owner_turn(self, middle=(), reply=PICK):
-        """The owner turn that asked the pick: the owner message before the ask, then the (offset, record)
-        pairs in `middle` with offsets in seconds from the ask, then the final reply, stamped now."""
-        records = [self.stamp(human("decide"), self.ask_at - 60), self.stamp(assistant_text(self.PICK), self.ask_at)]
+    def owner_turn(self, middle=(), reply=PICK, before=()):
+        """The owner turn that asked the pick: the owner message before the ask, the (offset, record) pairs in
+        `before` between that message and the ask, the ask, the pairs in `middle` after it, then the final
+        reply, stamped now. Offsets are seconds from the ask."""
+        records = [self.stamp(human("decide"), self.ask_at - 60)]
+        records += [self.stamp(rec, self.ask_at + offset) for offset, rec in before]
+        records.append(self.stamp(assistant_text(self.PICK), self.ask_at))
         records += [self.stamp(rec, self.ask_at + offset) for offset, rec in middle]
         records.append(self.stamp(assistant_text(reply), time.time()))
         return records
@@ -1540,10 +1550,39 @@ class PickSendTests(unittest.TestCase):
             state = json.load(handle)
         return {k: v for k, v in state.items() if k != "sent"}
 
+    def send_record(self):
+        """A send of the pick to the page writer."""
+        return tool_use_msg(self.SEND, {"session_id": "session_writer",
+                                        "message": "Pick: fold the guard or add a hook."})
+
+    @staticmethod
+    def queued(text):
+        """An owner message typed while the session runs: a queued_command attachment."""
+        return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
+
+    def wake_rows(self):
+        """The records that wake a session into a new turn, as (label, record) pairs."""
+        return (("task notification", human(self.TASK_NOTE)), ("queued command", self.queued("Next question.")))
+
+    def assert_wake_pick_recorded_then_blocks(self, earlier, wake):
+        """A pick asked in the turn that `wake` starts, after an earlier turn made the `earlier` records (a call and
+        its result). Stop 1 records the pick, and once it is 6 minutes old the next Stop blocks on it."""
+        self.clear_state()
+        out = self.stop([human("decide")] + list(earlier) + [wake, assistant_text(self.PICK)])
+        self.assertIsNone(out, "the pick was blocked on its first Stop: %s" % out)
+        open_picks = self.picks_in_file() if os.path.exists(self.pick_file()) else {}
+        self.assertIn("fold the guard", json.dumps(open_picks),
+                      "an earlier turn's send or box call kept the later turn's pick from being recorded")
+        self.age_picks(360)
+        before = [(-50 + i, rec) for i, rec in enumerate(earlier)] + [(-30, wake)]
+        out = self.stop(self.owner_turn(self.quiet_work(), before=before))
+        self.assertIsNotNone(out, "the pick did not block once 6 minutes old")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("fold the guard", out["reason"])
+
     def sent_turn(self):
         """The owner turn that asked the pick, then a send of it to the writer after the ask."""
-        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
-        return self.owner_turn([(300, send), (301, tool_result_msg())])
+        return self.owner_turn([(300, self.send_record()), (301, tool_result_msg())])
 
     # Failure class 1: a reply that only mentions a past question records nothing and never blocks.
     def test_c1_mention_of_a_past_question_records_nothing(self):
@@ -1594,7 +1633,7 @@ class PickSendTests(unittest.TestCase):
 
     # Failure class 5: a task notification, agent end, system reminder or peer message after the ask does not clear.
     def test_c5_non_owner_records_after_the_ask_do_not_clear(self):
-        notices = (("task notification", human("<task-notification>\n<task-id>t9</task-id>\n</task-notification>")),
+        notices = (("task notification", human(self.TASK_NOTE)),
                    ("agent end", human("<agent-message>\nLint is green.\n</agent-message>")),
                    ("system reminder", human("<system-reminder>\nThe task tools were not used.\n</system-reminder>")),
                    ("peer message", peer_msg("Triage is done.")))
@@ -1610,9 +1649,7 @@ class PickSendTests(unittest.TestCase):
 
     # Failure class 6: an owner message after the ask clears the pick, and an empty file is removed.
     def test_c6_owner_message_after_the_ask_clears(self):
-        owner_rows = (("owner message", human("Fold it, A.")),
-                      ("queued owner message", {"type": "attachment",
-                                                "attachment": {"type": "queued_command", "prompt": "Fold it, A."}}))
+        owner_rows = (("owner message", human("Fold it, A.")), ("queued owner message", self.queued("Fold it, A.")))
         for label, rec in owner_rows:
             with self.subTest(label):
                 self.clear_state()
@@ -1744,8 +1781,7 @@ class PickSendTests(unittest.TestCase):
 
     def test_r2_f3_send_in_the_asking_turn_counts(self):
         # Catches: a send in the turn that asked the pick was not counted, so the pick blocked six minutes on.
-        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
-        records = [human("decide"), send, tool_result_msg(), assistant_text(self.PICK)]
+        records = [human("decide"), self.send_record(), tool_result_msg(), assistant_text(self.PICK)]
         self.assertIsNone(self.stop(records))
         if os.path.exists(self.pick_file()):
             self.age_picks(360)
@@ -1792,6 +1828,50 @@ class PickSendTests(unittest.TestCase):
         out = self.stop(records)
         self.assertIsNotNone(out, "the re-recorded pick never blocked")
         self.assertIn("fold the guard", out["reason"])
+
+    # The send and box scans read the asking turn only: records from an earlier turn never settle or box its pick.
+    def test_send_from_an_earlier_turn_does_not_settle_a_later_pick(self):
+        # Catches: a send in an earlier turn settled a pick that a later wake asked (a task notification or a queued command).
+        for label, wake in self.wake_rows():
+            with self.subTest(label):
+                self.assert_wake_pick_recorded_then_blocks((self.send_record(), tool_result_msg()), wake)
+
+    def test_box_from_an_earlier_turn_does_not_box_a_later_pick(self):
+        # Catches: an AskUserQuestion in an earlier turn boxed a pick that a later wake asked (a task notification or a queued command).
+        for label, wake in self.wake_rows():
+            with self.subTest(label):
+                self.assert_wake_pick_recorded_then_blocks((tool_use_msg(self.ASK, {}), tool_result_msg()), wake)
+
+    def test_send_after_the_wake_still_settles_the_pick(self):
+        # Control: a send in the asking turn, after the wake that starts it, still counts.
+        for label, wake in self.wake_rows():
+            with self.subTest(label):
+                self.clear_state()
+                records = [human("decide"), wake, self.send_record(), tool_result_msg(), assistant_text(self.PICK)]
+                out = self.stop(records)
+                self.assertIsNone(out, "%s: a pick sent in its asking turn was blocked: %s" % (label, out))
+                open_picks = self.picks_in_file() if os.path.exists(self.pick_file()) else {}
+                self.assertEqual(open_picks, {}, "%s: a send in the asking turn left the pick open" % label)
+
+    # A Stop hook's feedback record is not the owner's message, so it never clears an open pick.
+    def test_hook_feedback_does_not_clear_an_open_pick(self):
+        # Catches: a feedback record (isMeta true, string content) read as an owner message, clearing a 10-minute pick.
+        rows = (("hook feedback", hook_feedback("send the report"), True),
+                ("owner message control", human("Fold it, A."), False))
+        for label, rec, blocks in rows:
+            with self.subTest(label):
+                self.clear_state()
+                self.record_pick()
+                self.age_picks(self.STALE)
+                out = self.stop(self.owner_turn([(300, rec)], reply="Still waiting on you."))
+                if blocks:
+                    self.assertIsNotNone(out, "%s after the ask cleared a 10-minute pick" % label)
+                    self.assertEqual(out["decision"], "block")
+                    self.assertIn("fold the guard", out["reason"])
+                else:
+                    self.assertIsNone(out, "%s did not clear the pick: %s" % (label, out))
+                    self.assertFalse(os.path.exists(self.pick_file()),
+                                     "%s: a cleared pick left the file behind" % label)
 
 
 class ConfigReportTests(unittest.TestCase):
