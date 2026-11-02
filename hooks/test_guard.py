@@ -193,6 +193,7 @@ NO_PS = "Windows has no ps, so ownership reads unknown and this case does not ru
 NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
 NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
+NO_EXEC_BIT = "Windows git ignores the exec bit (core.filemode is false), so a chmod makes no mode change here"
 
 
 def skip_case(label, reason):
@@ -577,6 +578,26 @@ WTPRUNESTALE = os.path.join(ROOT, "wtprunestale")
 WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
+
+# BASE COPIES (the base-copies incident, Nov 1 22:41 CST). A worktree whose staged files are byte-equal to
+# its branch base, with no unpushed commit, must remove. BCINC is that state: its branch moved onto P1 with
+# `update-ref`, so its index holds the base P0, an ancestor of HEAD. Each other tree breaks one condition
+# of BCINC. BCORIGIN is a bare origin. BCMAIN and BCSECOND are clones of it: BCMAIN is the primary every
+# tree hangs from, and BCSECOND is the other tree that pushes P1.
+BCORIGIN = os.path.join(ROOT, "bc-origin.git")
+BCSEED = os.path.join(ROOT, "bc-seed")
+BCMAIN = os.path.join(ROOT, "bc-main")
+BCSECOND = os.path.join(ROOT, "bc-second")
+BCINC = os.path.join(ROOT, "bc-inc")                # case 1: the incident state, no other condition
+BCUNIQUE = os.path.join(ROOT, "bc-unique")          # case 2: a worktree edit whose content is in no commit
+BCUNTRACKED = os.path.join(ROOT, "bc-untracked")    # case 3: an untracked file beside the incident
+BCUNPUSHED = os.path.join(ROOT, "bc-unpushed")      # case 4: an unpushed commit on HEAD beside the incident
+BCBYPASS = os.path.join(ROOT, "bc-bypass")          # case 5: a staged blob held only by an unpushed commit
+BCCLEAN = os.path.join(ROOT, "bc-clean")            # case 6: a clean tree on a pushed branch
+BCLOCKED = os.path.join(ROOT, "bc-locked")          # the incident tree, locked
+BCLIVE = os.path.join(ROOT, "bc-live")              # the incident tree, with a live session standing in it
+BCLIVECFG = os.path.join(ROOT, "bc-livecfg")        # the config folder holding that session's record
+BCEXEC = os.path.join(ROOT, "bc-exec")              # the incident tree, f.txt at mode 100755 in the base
 
 # SYMLINK WORKTREES (the feed-build incident). An agent linked
 # `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
@@ -1803,6 +1824,145 @@ def _build_worktrees():
             % (prune_clean_check.stdout, prune_clean_check.stderr)
         )
 
+# The status lines of the incident state: f.txt staged as its base copy, and g.txt staged as a deletion.
+BC_INCIDENT = ["M  f.txt", "D  g.txt"]
+
+
+def _base_git(where, *args):
+    """One git call for the base-copy fixture. A failed call stops the suite, as the other builders do."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: git %s failed in %r. stderr: %s"
+                 % (" ".join(args), where, done.stderr.strip()))
+    return done
+
+
+def _base_copy_tree(where, branch, moved=True, executable=False):
+    """Build one base-copy tree at `where`: a linked worktree of BCMAIN on `branch`, pushed at the base P0.
+    When `executable`, P0 is a commit that sets f.txt to mode 100755, so the base carries the exec bit.
+    When `moved`, BCSECOND pushes P1 (a change to f.txt, and a new g.txt) to that branch. BCMAIN then fetches
+    it and moves the branch onto P1 with `update-ref`, which leaves the worktree's index on P0."""
+    _base_git(BCMAIN, "worktree", "add", "-q", where, "-b", branch)
+    if executable:
+        _base_git(where, "update-index", "--chmod=+x", "f.txt")
+        _base_git(where, *IDENT, "commit", "-q", "-m", "make f.txt executable on " + branch)
+    _base_git(where, "push", "-q", "origin", branch)
+    if not moved:
+        return
+    _base_git(BCSECOND, "fetch", "-q", "origin")
+    _base_git(BCSECOND, "checkout", "-q", "-B", branch, "origin/" + branch)
+    write(os.path.join(BCSECOND, "f.txt"), "changed on %s\n" % branch)
+    write(os.path.join(BCSECOND, "g.txt"), "new on %s\n" % branch)
+    _base_git(BCSECOND, "add", "-A")
+    _base_git(BCSECOND, *IDENT, "commit", "-q", "-m", "change " + branch)
+    _base_git(BCSECOND, "push", "-q", "origin", branch)
+    _base_git(BCMAIN, "fetch", "-q", "origin")
+    _base_git(BCMAIN, "update-ref", "refs/heads/" + branch, "refs/remotes/origin/" + branch)
+
+
+def _require_base_copy(where, status, unpushed, staged_ancestor=True):
+    """Stop the suite unless `where` really shows the status lines named, `unpushed` commits of HEAD on no
+    remote-tracking ref, and, for the incident shape, a staged f.txt that equals the base copy and not HEAD.
+    A case refused for the wrong reason would pass unnoticed otherwise, so each shape is read back with git."""
+    lines = sorted(_porcelain(where))
+    if lines != sorted(status):
+        sys.exit("fixture setup failed in build_fixtures: %r git status --porcelain is %r, want %r"
+                 % (where, lines, sorted(status)))
+    missing = run_vcs(where, "rev-list", "HEAD", "--not", "--remotes").stdout.split()
+    if len(missing) != unpushed:
+        sys.exit("fixture setup failed in build_fixtures: %r has %d commits of HEAD on no remote-tracking "
+                 "ref, want %d" % (where, len(missing), unpushed))
+    if staged_ancestor:
+        index = run_vcs(where, "rev-parse", ":f.txt").stdout.strip()
+        base = run_vcs(where, "rev-parse", "origin/main:f.txt").stdout.strip()
+        head = run_vcs(where, "rev-parse", "HEAD:f.txt").stdout.strip()
+        if not index or index != base or index == head:
+            sys.exit("fixture setup failed in build_fixtures: %r staged f.txt is not the base copy: "
+                     "index %r, base %r, HEAD %r" % (where, index, base, head))
+
+
+def _build_base_copies():
+    """The base-copy trees. BCINC is the incident state, and each other tree breaks one condition of it.
+    Built once, on the first case that names one of them."""
+    _base_git(ROOT, "init", "-q", "--bare", BCORIGIN)
+    _base_git(BCORIGIN, "symbolic-ref", "HEAD", "refs/heads/main")
+    make_repo(BCSEED, {"f.txt": "base\n", "k.txt": "k base\n"})
+    _base_git(BCSEED, "remote", "add", "origin", BCORIGIN)
+    _base_git(BCSEED, "push", "-q", "origin", "main")
+    _base_git(ROOT, "clone", "-q", BCORIGIN, BCMAIN)
+    _base_git(ROOT, "clone", "-q", BCORIGIN, BCSECOND)
+
+    # Case 1: the incident. Nothing else is wrong with this tree.
+    _base_copy_tree(BCINC, "bc-inc")
+    _require_base_copy(BCINC, BC_INCIDENT, 0)
+
+    # Case 2: one worktree edit whose content is in no commit. Its index blob is still the base copy.
+    _base_copy_tree(BCUNIQUE, "bc-unique")
+    write(os.path.join(BCUNIQUE, "k.txt"), "unique text, in no commit\n")
+    _require_base_copy(BCUNIQUE, BC_INCIDENT + [" M k.txt"], 0)
+
+    # Case 3: an untracked file beside the incident.
+    _base_copy_tree(BCUNTRACKED, "bc-untracked")
+    write(os.path.join(BCUNTRACKED, "new.txt"), "untracked\n")
+    _require_base_copy(BCUNTRACKED, BC_INCIDENT + ["?? new.txt"], 0)
+
+    # Case 4: one unpushed commit on HEAD, beside the incident. The commit is limited to u.txt, so the
+    # staged base copies stay staged and the tree stays dirty, as in case 1.
+    _base_copy_tree(BCUNPUSHED, "bc-unpushed")
+    write(os.path.join(BCUNPUSHED, "u.txt"), "local only\n")
+    _base_git(BCUNPUSHED, "add", "u.txt")
+    _base_git(BCUNPUSHED, *IDENT, "commit", "-q", "-m", "local only", "--", "u.txt")
+    _require_base_copy(BCUNPUSHED, BC_INCIDENT, 1)
+
+    # Case 5: the staged f.txt is the blob of one unpushed commit X, which only HEAD's reflog keeps. HEAD is
+    # then moved back to the pushed tip with `update-ref`, so the index keeps X and HEAD is fully pushed.
+    _base_copy_tree(BCBYPASS, "bc-bypass", moved=False)
+    write(os.path.join(BCBYPASS, "f.txt"), "unpushed text, in one local commit\n")
+    _base_git(BCBYPASS, "add", "f.txt")
+    _base_git(BCBYPASS, *IDENT, "commit", "-q", "-m", "local only")
+    local_commit = _base_git(BCBYPASS, "rev-parse", "HEAD").stdout.strip()
+    _base_git(BCBYPASS, "update-ref", "refs/heads/bc-bypass", "refs/remotes/origin/bc-bypass")
+    _require_base_copy(BCBYPASS, ["M  f.txt"], 0, staged_ancestor=False)
+    staged = _base_git(BCBYPASS, "rev-parse", ":f.txt").stdout.strip()
+    committed = _base_git(BCBYPASS, "rev-parse", local_commit + ":f.txt").stdout.strip()
+    reflog = _base_git(BCBYPASS, "log", "-g", "--format=%H", "HEAD").stdout.split()
+    on_remote = _base_git(BCBYPASS, "branch", "-r", "--contains", local_commit).stdout.strip()
+    if staged != committed or local_commit not in reflog or on_remote:
+        sys.exit("fixture setup failed in build_fixtures: the bypass tree does not hold the unpushed blob in "
+                 "HEAD's reflog only: staged %r, committed %r, in reflog %r, on a remote %r"
+                 % (staged, committed, local_commit in reflog, on_remote))
+
+    # Case 6: a clean tree on a pushed branch, with no condition broken.
+    _base_copy_tree(BCCLEAN, "bc-clean", moved=False)
+    _require_base_copy(BCCLEAN, [], 0, staged_ancestor=False)
+
+    # Locked: the incident tree, locked. The lock is the only condition that refuses it.
+    _base_copy_tree(BCLOCKED, "bc-locked")
+    _base_git(BCMAIN, "worktree", "lock", BCLOCKED, "--reason", "fixture")
+    _require_base_copy(BCLOCKED, BC_INCIDENT, 0)
+
+    # Live session: the incident tree, with one record whose cwd is the tree and whose pid is this run's own.
+    _base_copy_tree(BCLIVE, "bc-live")
+    self_pid = os.getpid()
+    os.makedirs(os.path.join(BCLIVECFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(BCLIVECFG, "sessions", "%d.json" % self_pid),
+        json.dumps({"pid": self_pid, "cwd": slash(BCLIVE), "startedAt": _real_process_start_ms(self_pid)}),
+    )
+    _require_base_copy(BCLIVE, BC_INCIDENT, 0)
+
+    # Exec bit: the incident tree, with f.txt at mode 100755 in its base. The worktree copy is chmod 0655.
+    # git reads that as 100644 (it tests the owner bit only), so f.txt is dirty in its mode alone.
+    if os.name != "nt":  # Windows git ignores the exec bit, so this tree could not be built there
+        _base_copy_tree(BCEXEC, "bc-exec", executable=True)
+        os.chmod(os.path.join(BCEXEC, "f.txt"), 0o655)
+        _require_base_copy(BCEXEC, ["MM f.txt", "D  g.txt"], 0)
+
+
+lazy_fixture([BCMAIN, BCINC, BCUNIQUE, BCUNTRACKED, BCUNPUSHED, BCBYPASS, BCCLEAN, BCLOCKED, BCLIVE,
+              BCLIVECFG, BCEXEC], _build_base_copies)
+
+
 def _build_links():
     """The symlink worktrees: a link to a folder outside, a link to a tracked file, and controls."""
     # ----------------------------------------------------------------- symlink worktrees
@@ -2923,6 +3083,113 @@ sh("worktree remove: a session record for a pid that is no longer running does n
    VCS + " worktree remove " + slash(WTDEADSESSION), "allow", cwd=WTMAIN, config=WTDEADCFG)
 sh("worktree remove: a live pid whose recorded start time does not match does not deny",
    VCS + " worktree remove " + slash(WTSTALESTART), "allow", cwd=WTMAIN, config=WTSTALESTARTCFG)
+
+# BASE COPIES. Each case is a tree in the state built by _build_base_copies. Case 1 is the incident: its
+# staged files are the base copy, an ancestor of HEAD, and nothing else is wrong, so it passes. Cases 2 to 5
+# each break one condition, and cases 7 and 8 keep the locked and live reads on the incident tree. Each of
+# those is refused today on the dirty read. After the build, each must be refused on its own condition.
+# Case 5 pairs with case 1: the matching commit is pushed in case 1 and unpushed in case 5. Case 6 is a
+# clean tree on a pushed branch, and it keeps today's allow.
+sh("worktree remove: base copies, the incident tree, whose index is an ancestor of HEAD, passes",
+   VCS + " worktree remove " + slash(BCINC), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, the same incident tree passes with the force flag",
+   VCS + " worktree remove --force " + slash(BCINC), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, one worktree edit whose content is in no commit still denies",
+   VCS + " worktree remove " + slash(BCUNIQUE), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, an untracked file beside the incident tree still denies",
+   VCS + " worktree remove " + slash(BCUNTRACKED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, an unpushed commit on HEAD still denies",
+   VCS + " worktree remove " + slash(BCUNPUSHED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, a staged blob held only by an unpushed commit still denies",
+   VCS + " worktree remove " + slash(BCBYPASS), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, the same staged blob with the force flag still denies",
+   VCS + " worktree remove --force " + slash(BCBYPASS), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, a clean tree on a pushed branch keeps today's allow",
+   VCS + " worktree remove " + slash(BCCLEAN), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, the incident tree, locked, still denies",
+   VCS + " worktree remove " + slash(BCLOCKED), "deny", "shared-tree", cwd=BCMAIN)
+sh("worktree remove: base copies, the incident tree under a live session still denies",
+   VCS + " worktree remove " + slash(BCLIVE), "deny", "shared-tree", cwd=BCMAIN, config=BCLIVECFG)
+
+# THE EXEC BIT. BCEXEC is the incident tree with f.txt at mode 100755 in its base and 0655 in the worktree.
+# git reads that copy as 100644, so the tree holds a change no pushed commit has. The guard must refuse it.
+if os.name != "nt":
+    sh("worktree remove: base copies, the incident tree whose exec bit differs in the worktree still denies",
+       VCS + " worktree remove " + slash(BCEXEC), "deny", "shared-tree", cwd=BCMAIN)
+else:
+    skip_case("worktree remove: base copies, the incident tree whose exec bit differs in the worktree still denies",
+              NO_EXEC_BIT)
+
+
+# THE COST OF THE PUSHED-COPY READ. dirty_paths_are_pushed_copies (git_reads.py) states its cost: at most 14
+# fixed git starts, then one ls-tree per candidate tried and one for-each-ref per candidate a match uses, with
+# 2 + BASE_COPY_REFLOG_CAP candidates at most. Each git start of that read goes through `_git`, so the count is
+# taken there, on a fresh load of git_reads.py. The incident tree must answer True: a False would stop the
+# read early and the count would prove nothing about the whole read.
+def _load_git_reads():
+    """git_reads.py, loaded fresh from the folder GUARD sits in, so a patch to it touches no other load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "git_reads_cost_case", os.path.join(os.path.dirname(GUARD), "git_reads.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _tree_marks(where):
+    """{path: mtime_ns} of every file and folder under WHERE, a `.git` entry excluded. A write moves one."""
+    marks = {}
+    for folder, dirnames, filenames in os.walk(where):
+        for name in dirnames + filenames:
+            if name != ".git":
+                path = os.path.join(folder, name)
+                marks[path] = os.lstat(path).st_mtime_ns
+    return marks
+
+
+def base_copies_read_cost_case():
+    """The stated cost of dirty_paths_are_pushed_copies, measured on the incident tree, writes nothing."""
+    materialize(BCINC)
+    git_reads = _load_git_reads()
+    starts = []
+    real_git = git_reads._git
+
+    def counting_git(where, *args):
+        starts.append(args)
+        return real_git(where, *args)
+
+    lines = _porcelain(BCINC)
+    marks = _tree_marks(BCINC)
+    git_reads._git = counting_git
+    try:
+        got = git_reads.dirty_paths_are_pushed_copies(BCINC, lines)
+    finally:
+        git_reads._git = real_git
+    fixed = [args for args in starts if "ls-tree" not in args and "for-each-ref" not in args]
+    ls_tree = [args for args in starts if "ls-tree" in args]
+    for_each_ref = [args for args in starts if "for-each-ref" in args]
+    candidates = 2 + git_reads.BASE_COPY_REFLOG_CAP
+    problems = []
+    if got is not True:
+        problems.append("the incident tree read as %r, want True" % (got,))
+    if len(fixed) > 14:
+        problems.append("%d fixed git starts, want at most 14" % len(fixed))
+    if len(ls_tree) > candidates:
+        problems.append("%d ls-tree starts, want at most %d candidates" % (len(ls_tree), candidates))
+    if len(for_each_ref) > len(ls_tree):
+        problems.append("%d for-each-ref starts, want at most one per candidate tried (%d)"
+                        % (len(for_each_ref), len(ls_tree)))
+    if _tree_marks(BCINC) != marks:
+        problems.append("a file or folder in the tree changed mtime during the read")
+    if _porcelain(BCINC) != lines:
+        problems.append("git status --porcelain changed during the read")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "fixed %d (bound 14), ls-tree %d and for-each-ref %d (candidate bound %d), no file written" % (
+        len(fixed), len(ls_tree), len(for_each_ref), candidates)
+
+
+FIXTURELESS_CHECKS.add(base_copies_read_cost_case)  # builds only the base-copy trees it reads
 
 # `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
 # is an ASK, never a deny, whatever the run location.
@@ -11594,6 +11861,12 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
+# base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
+BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
+                        "starts and writes no file")
+LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
+LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -20696,6 +20969,180 @@ for _label, _check in (
     ("override: a guard copy that cannot import override never allows on an override",
      ov_no_module_check),
 ):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# The prompt grammar (decision owner-override, the orchestrator's call on the keyword grammar). A
+# punctuation mark after the word, with a space or the end of the prompt after it, separates it from its
+# reason or its length: `override, yes` is a one-act override and `override, 15m` a timed one. A mark run
+# into a word (`override.py`, `override-15m`) belongs to that word and grants nothing. A word after a
+# length or after `off` grants nothing. `override, off` is covered by ov_grammar_off_mark_check.
+# Each row is one prompt, typed in a session of its own at OV_T0. The grant it leaves is "once", "timed"
+# (with minutes) or None for no file. A one-act grant logs its reason, when it has one.
+OV_GRANT_ROWS = (
+    ("override, yes", "once", None, "yes"),
+    ("Override. go", "once", None, "go"),
+    ("override! yes", "once", None, "yes"),
+    ("override; reason", "once", None, "reason"),
+    ("override - reason", "once", None, "reason"),
+    ("override, 15m", "timed", 15, None),
+    ("override", "once", None, None),
+    ("override.", "once", None, None),
+    ("override: reason", "once", None, "reason"),
+    ("override yes", "once", None, "yes"),
+    ("override 15m", "timed", 15, None),
+    ("override: 15m", "timed", 15, None),
+    ("overrides", None, None, None),
+    ("override15m", None, None, None),
+    ("override 15m please", None, None, None),
+    ("override, 15m please", None, None, None),
+    ("please override", None, None, None),
+    ("override.py is broken", None, None, None),
+    ("override-able", None, None, None),
+    ("override-based approach", None, None, None),
+    ("override-15m", None, None, None),
+    ("override.15m", None, None, None),
+)
+
+
+def ov_grant_of(config, session):
+    """What the session's override file holds: (kind, until), or (None, None) for no file. A file that
+    does not parse reads as ("unreadable", None)."""
+    path = ov_pass_path(config, session)
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data["kind"], datetime.fromisoformat(data["until"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "unreadable", None
+
+
+def ov_reason_logged(config, session, reason):
+    """True when guard.log holds the reason line of this session's one-act override."""
+    try:
+        with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return False
+    return any(len(f) == 6 and f[2] == "override-reason" and f[5] == session and reason in f[4]
+               for f in (line.split("\t") for line in lines))
+
+
+def ov_grant_phrase(kind, minutes):
+    """The grant a prompt leaves, in words: for a case label and for its pass line."""
+    if kind == "once":
+        return "a one-act override"
+    if kind == "timed":
+        return "a timed override of %d minutes" % minutes
+    return "nothing"
+
+
+def ov_grant_label(prompt, kind, minutes):
+    return "override grammar: `%s` grants %s" % (prompt, ov_grant_phrase(kind, minutes))
+
+
+def ov_grant_check(session, prompt, kind, minutes, reason):
+    """The owner types `prompt` at OV_T0 in `session`. The override file it leaves is `kind`, lasting
+    `minutes` when timed, or no file for None. ov_type writes the file by hand when override.py does not
+    import, so any note from it fails the case."""
+    config = ov_config("grant")
+
+    def check():
+        note = ov_type(config, session, prompt)
+        if note:
+            return False, note
+        got, until = ov_grant_of(config, session)
+        if got != kind:
+            return False, "left %s, want %s" % (got or "no file", kind or "no file")
+        length = OV_ONCE_SECONDS if kind == "once" else minutes * 60 if kind == "timed" else None
+        if length is not None and until != OV_T0 + timedelta(seconds=length):
+            return False, "ends at %s, want %s" % (until, OV_T0 + timedelta(seconds=length))
+        if reason and not ov_reason_logged(config, session, reason):
+            return False, "no override-reason line in guard.log holds %r" % reason
+        return True, ov_grant_phrase(kind, minutes)
+    return check
+
+
+def ov_grammar_lift_check():
+    """`override, yes` is a one-act override: it lifts the next refused act once, then the act is refused."""
+    config, session, rule = ov_config("grant"), "ov-grant-lift", "machine-wide-kill"
+    ok, why = ov_story([("with no override", lambda: ov_kill(config, session, 0), "deny", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override, yes")
+    if note:
+        return False, note
+    ok, why = ov_story([
+        ("first kill", lambda: ov_kill(config, session, 60), "allow", rule),
+        ("second kill, override spent", lambda: ov_kill(config, session, 120), "deny", rule),
+    ])
+    if not ok:
+        return False, why
+    return True, "one kill lifted, then the kill was refused again"
+
+
+def ov_grammar_off_check():
+    """`override off` removes the session's one-act override and leaves no file."""
+    config, session = ov_config("grant"), "ov-grant-off"
+    note = ov_type(config, session, "override")
+    if note:
+        return False, note
+    if ov_grant_of(config, session)[0] != "once":
+        return False, "`override` left no one-act override"
+    note = ov_type(config, session, "override off", 60)
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, session)):
+        return False, "`override off` left the override file"
+    return True, "`override off` removed the one-act override"
+
+
+def ov_grammar_off_mark_check():
+    """`override, off` is `override off`: the mark is dropped, so it ends an active timed override at
+    once. With no override before it, it leaves no file. The kill is the proof the override was live."""
+    config, rule = ov_config("grant"), "machine-wide-kill"
+    bare = "ov-grant-off-none"
+    note = ov_type(config, bare, "override, off")
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, bare)):
+        return False, "`override, off` left a file with no override before it"
+    session = "ov-grant-off-timed"
+    note = ov_type(config, session, "override 15m")
+    if note:
+        return False, note
+    got, until = ov_grant_of(config, session)
+    if got != "timed" or until != OV_T0 + timedelta(seconds=OV_TIMED_SECONDS):
+        return False, "`override 15m` left %s, want a timed override of 15 minutes" % (got or "no file")
+    ok, why = ov_story([
+        ("kill under the timed override", lambda: ov_kill(config, session, 60), "allow", rule),
+    ])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override, off", 120)
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, session)):
+        return False, "`override, off` left the timed override file"
+    ok, why = ov_story([("kill after `override, off`", lambda: ov_kill(config, session, 180), "deny", rule)])
+    if not ok:
+        return False, why
+    return True, "`override, off` ended the timed override, and left no file with none"
+
+
+for _n, (_prompt, _kind, _minutes, _reason) in enumerate(OV_GRANT_ROWS):
+    _check = ov_grant_check("ov-grant-%d" % _n, _prompt, _kind, _minutes, _reason)
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((ov_grant_label(_prompt, _kind, _minutes), _check))
+for _label, _check in (
+    ("override grammar: `override off` removes the one-act override", ov_grammar_off_check),
+    ("override grammar: `override, off` ends a timed override, and leaves no file with none",
+     ov_grammar_off_mark_check),
+    ("override grammar: `override, yes` lifts one kill, then the kill is refused again", ov_grammar_lift_check),
+):
+    FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
