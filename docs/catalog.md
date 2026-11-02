@@ -18,7 +18,7 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 | Key | Kind | Event | Matcher | If | Model | Effort | What it does |
 |---|---|---|---|---|---|---|---|
 | `hooks/stall_watch.py` | hook | Stop | - | - | no model | n/a | At Stop, lists each open background job whose output file did not change for the quiet age. |
-| `lint/report_guard.py` | hook | Stop | - | - | no model | n/a | At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error. |
+| `lint/report_guard.py` | hook | Stop | - | - | claude-sonnet-5-5 | model default: the call passes no effort | At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error. |
 | `hooks/config_watch.py` | hook | Stop | - | - | no model | n/a | At the end of the turn, checks the agent model cap in each watched settings file. Reverts a cap change that no tool call explains, or a raise past its expiry time. |
 | `hooks/ruling_home.py` | hook | Stop | - | - | no model | n/a | At Stop, refuses once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost. |
 | `hooks/precompact_handoff.py` | hook | Stop | - | - | no model | n/a | At Stop, refuses once each time the context size passes a new checkpoint, and tells the session to rewrite its handoff. Silent on stop_hook_active or an error. |
@@ -51,6 +51,7 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 | `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | After a write or shell call, checks the agent model cap in each watched settings file. Reverts a cap change that the guard did not ask about, or a raise past its expiry time. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | After `gh pr ready <N>`, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs. |
 | `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After such a call, appends each simulator that the call took from Shutdown to Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such device. A device that fails the check is stopped and booted once more. |
+| `hooks/refusal_note.py` | hook | PermissionDenied | - | - | no model | n/a | At PermissionDenied, notes each tool the auto-mode classifier refuses, so the Stop guard can make the reply ask the owner about it. Prints nothing. |
 | `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
 
 ## Mods

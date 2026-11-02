@@ -2,11 +2,14 @@
 
 ## The ruling
 
-Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when something is broken, never because a job ran out of time. Owner, 2026-10-23, roadmap step c39: CI time caps start generous and warn before they fire.
+Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. The owner named the CI fix step that ends the stopgap; it reads as decision `test-strategy-reset` (tests prove outcomes and never fail on runner speed). This repo's caps, with their measured runs, are in the table below.
 
-The two numbers do not conflict. The setting is a cap of about 2x the job's slowest run in the last 30 runs. The check is that the slowest run stays under 80% of that cap. A 2x cap puts the slowest run at about 50%, inside the check. A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5). A cap rises only with a measured figure in the comment beside it.
+Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
-Stopgap (owner, 2026-11-01 18:44 CST, with step c39): the caps are generous on purpose. A step here (`test-strategy-reset`) replaces time-pinned tests with tests that check outcomes, not time taken. Until those fixes reach a repo, its time-pinned tests stay, so each repo raises its caps generously in the meantime. Do not narrow a cap, or ask whether a cap means "about 2x" or "under 80%", before that removal reaches the repo.
+- A full CI run is red only when something is broken, never because a job ran out of time.
+- The target is a slowest run under 80% of the cap.
+- A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
+- A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
 ## The table
 
@@ -34,7 +37,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 - One full run on the branch (workflow dispatch, run 40559535659, 2026-10-27) measured each job under its new cap: checks 16.9 of 36, checks-guard 7.4 of 22, checks-windows-rest 6.2 of 28, checks-windows-sweep 12.4 of 40, shell-macos 7.6 of 18. The highest was checks-windows-guard-2 at 13.0 of 20 (65%). One run is n=1, so the next 30 runs on main replace the projections.
 - `checks-windows-rest`: run 40542065223 (push to main) ended at the 38 min cap that was in force. The job started 16:33:37 UTC, so the cap fired at 17:11:37. GitHub's cancel grace then ran 5 more minutes, to 17:16:37, which is the 43.0 min figure. The step "Record stamp engine fixture suite" (normal slowest 1.5 min, n 28) started at 16:53:15 and never finished. That step now has its own 5 min cap, so a hang reads red at the step.
 - `checks-windows-sweep`: the fixture suite takes 8.2 min slowest and the mutation test 10.9 min slowest (push only).
-- `checks` was not re-capped: 2x its new slowest (19.8) is above 36, and a raise has no measured reason.
+- `checks` is not re-capped. Its projected slowest is 19.8 of 36 (55%).
 - `checks` slowest is still above half its cap, so debt `checks-job-near-timeout` stays open.
 
 ## How to measure again
