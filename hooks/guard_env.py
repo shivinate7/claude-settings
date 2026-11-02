@@ -7,8 +7,9 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, is_powershell, norm, split_segments,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    is_powershell, norm, split_segments,
 )
 
 
@@ -332,6 +333,23 @@ def env_reference(word: str) -> str:
     return word if names_env_file(word) else ""
 
 
+# Read left to right, a `\\` pair is one escaped backslash, so the quote after it is real.
+_ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
+
+
+def _plain_escaped_quotes(cmd: str) -> str:
+    """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
+    character. Those languages read the backslash as an escape, but the word reader below does not:
+    a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
+    if "<<" not in cmd or "\\" not in cmd:
+        return cmd
+    for _, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
+    return cmd
+
+
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
@@ -350,6 +368,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
+    cmd = _plain_escaped_quotes(cmd)
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH

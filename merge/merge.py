@@ -7,7 +7,7 @@
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -118,6 +118,12 @@ def sh(args, cwd=None, input=None, env=None, timeout=None):
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
+
+def ancestor(cwd, tip, base):
+    """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
+    that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    return git_reads.branch_is_ancestor(cwd, base, tip)
 
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
@@ -272,7 +278,7 @@ def say(*lines):
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
-LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (a rate wait is the exception to the 600 s cap; standing-merge-grant)
+LOCK_MAX_HOLD = 6 * 3600  # seconds: the bound on how far a rate wait extends the lock, counted from the take. It does not cap the take's own expiry (decision standing-merge-grant)
 
 def lock_ref(b):
     """The one name of the lock ref. Mac and cloud runs must share it, or each would hold a lock the other cannot see."""
@@ -988,33 +994,59 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The CI alarm reads the same file
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clear in base_state. The CI alarm reads the same file and the same clear rule
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A green push or dispatch never hides a red schedule run; a dispatch
-        clears an older red push. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
+        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
+        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
+        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
+        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
-            red, unknown = [], []
-            for r in {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.values():
+            red, unknown, read = [], [], {}
+
+            def jobs_of(r):  # a run's jobs, read once per call
+                if r["id"] not in read:
+                    read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                return read[r["id"]]
+            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
+            age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
+
+            def cleared(r):
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
+                names = {j["name"] for j in jobs_of(r)}
+                for n in newest.values():
+                    if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
+                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"):
+                        continue
+                    theirs = {}
+                    for j in jobs_of(n):
+                        theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
+                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in names):
+                        return True
+                return False
+            for r in newest.values():
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
-                got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
+                got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
                 steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    red.append(f"{where}: " + "; ".join(jobs))
+                    if not cleared(r):
+                        red.append(f"{where}: " + "; ".join(jobs))
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
@@ -1611,10 +1643,10 @@ def holds_base(wt, base_ref, sha, before_run=None):
     """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
     (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
     the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
-    c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
-    if c == 0:
+    held = ancestor(wt, base_ref, sha)
+    if held:
         return None, None
-    if c == 1:
+    if held is False:
         ok, why = small_base_move(wt, base_ref, sha, before_run)
         if ok:
             return None, why
@@ -1622,7 +1654,8 @@ def holds_base(wt, base_ref, sha, before_run=None):
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
                 f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}."), None
-    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}", None
+    return (f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
+            f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`)."), None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -1662,7 +1695,11 @@ def ff_main(root, base, commit):
     c, out = git(root, "fetch", "-q", "origin")
     if c:
         raise Stop("git fetch origin failed, so the local main cannot be moved: " + out)
-    if git(root, "merge-base", "--is-ancestor", commit, f"refs/remotes/origin/{base}")[0]:
+    on_origin = ancestor(root, commit, f"refs/remotes/origin/{base}")
+    if on_origin is None:
+        raise Stop(f"cannot read whether {commit[:9]} is on origin/{base}: this clone is shallow or git could not tell. "
+                   "Nothing was moved. Run `git fetch --unshallow` and run again.")
+    if not on_origin:
         raise Stop(f"{commit[:9]} is not on origin/{base}. Nothing was moved.")
     tree = holder(root, base)
     if tree:
@@ -1748,7 +1785,11 @@ def cut_local(root, branch, merged):
     held = holder(root, branch)
     if held and not remove_held_tree(root, branch, held, merged):
         return
-    if git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+    inside = ancestor(root, f"refs/heads/{branch}", merged)
+    if inside is None:
+        say(f"merge: {branch} kept here: git could not tell whether its tip is in the merged head {merged[:9]} "
+            "(a shallow clone cuts the history: run `git fetch --unshallow`).")
+    elif not inside:
         say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
@@ -1780,10 +1821,11 @@ def read_lanes(wt, base_ref, sha):
         return n % 2 == 1
     tips = []
     for t in took:
-        c, out = git(wt, "merge-base", "--is-ancestor", t, base_ref)
-        if c not in (0, 1):  # 1 is "not an ancestor"; any other code is a failed read
-            raise ValueError(f"git merge-base failed on {t[:9]}: " + (out.splitlines() or ["?"])[-1])
-        if c:
+        c = ancestor(wt, t, base_ref)
+        if c is None:  # a failed read, or a shallow clone that cut the history: never "not an ancestor"
+            raise ValueError(f"git merge-base failed on {t[:9]}: git could not tell (a shallow clone needs "
+                             "`git fetch --unshallow`)")
+        if not c:
             tips.append(t)
     return tips, {t for t in tips if all(reverted(h) for h in took[t])}
 
@@ -1871,12 +1913,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
         proofs = {}
         def proof(b):  # why the tip is not in the merge commit, or None; one run per lane
             if b not in proofs:
-                a = git(root, "merge-base", "--is-ancestor", heads[b], commit)[0]
+                a = ancestor(root, heads[b], commit)  # None in a shallow clone: the proof could not run, the branch stays
                 why = None
-                if a == 1:
+                if a is False:
                     proven = guard_core.branch_cherry_empty(root, commit, heads[b])
                     why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
-                elif a:
+                elif a is None:
                     why = "the proof could not run."
                 proofs[b] = why
             return proofs[b]
