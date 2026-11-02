@@ -10,7 +10,13 @@ Why, three events:
 - Incident 2026-09-06, a write into another checkout: a session wrote into a different checkout of the same clone. `worktree-home` judges only isolated agents, so it could not see a top-level session or one started in `.claude/worktrees/<x>`.
 - Banchi notes-folder refusal, 2026-10-27 (outbox `banchi-guard-shared-notes`, Banchi's guard blocks shared notes): Banchi's own guard clause `tree` in `scripts/guard-shell.py` refuses every write outside the checkout, so it refused `~/Library/Application Support/Claude-Work/side-session-notes/`, where the Claude app keeps side-session notes. A folder in no checkout must stay writable.
 
-Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28.
+Risk: incident (2026-09-06, and the three below). `other-checkout` landed 2026-10-28.
+
+Scratchpad worktree incidents, each a refusal of a write into the session's own scratchpad worktree:
+
+- Lane `cc-update-behavior-diff`, 2026-11-01 22:00 CST, after a resume.
+- The coordinator, 2026-11-01 23:28 CST: a `cd` into `scratchpad/wt-notes` then a commit was refused, while the `git -C` form passed.
+- Triage 5, 2026-11-01: a `cd` into its roadmap worktree, then a heredoc.
 
 ### `worktree-home`: an agent stays in its recorded home
 
@@ -25,7 +31,7 @@ Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28.
 
 - **Who.** Every session: the top-level session, a session started in `.claude/worktrees/<x>`, and every agent.
 - **The act.** A write whose resolved target sits in a checkout of the clone other than the checkout that holds `cwd`. The checkouts are the primary and each linked worktree. A nested worktree under `<primary>/.claude/worktrees/` owns its own files; the deepest checkout that holds a path owns it. So primary to nested worktree, worktree to primary, and worktree to sibling are refused. A write inside the call's own checkout passes.
-- **Outside the clone passes.** A scratchpad, `~/.claude`, or a notes folder such as `~/Library/Application Support/Claude-Work/side-session-notes/` is in no checkout.
+- **Outside the clone passes.** `~/.claude`, or a notes folder such as `~/Library/Application Support/Claude-Work/side-session-notes/`, is in no checkout. This session's own scratchpad passes by real path (`under_session_scratchpad`), even when a linked worktree of the clone lives there, which `clone_checkouts` would otherwise list as another checkout. Another session's scratchpad, and any call that carries an `agent_id` (an agent shares its session's id), do not pass.
 - **The common git directory passes.** `<primary>/.git` is shared by every checkout, so a linked worktree may write `.git/info/exclude`.
 - **Removing a worktree by hand is refused.** `rm -rf .claude/worktrees/<x>` from the primary is a write into another checkout. The refusal names `git worktree remove` and the janitor sweep, the proper tools.
 - **Tools.** Write, Edit, MultiEdit and NotebookEdit targets, and the shell write targets that frozen-path reads (`_shell_write_hit`: a redirect, a mutating command, `sed -i`). A relative shell target resolves against the folder a leading `cd` moved to (`dir_before_segment`), or against `cwd` when that folder cannot be told. A shell read, or a git command run with `-C` into another checkout, is no write here.
