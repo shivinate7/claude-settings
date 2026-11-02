@@ -467,7 +467,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
 
 
 _LIVE_GROUPS = set()  # process group ids of the children running now, so a signal can kill them
-_LIVE_LOCK = threading.Lock()
+_LIVE_LOCK = threading.RLock()  # re-entrant: a signal handler runs on the main thread, which may hold it
 _STOP = threading.Event()  # set by `request_stop`: no child starts after it
 
 
@@ -667,6 +667,7 @@ INSTALL_TIMEOUT = 900
 _MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PW_FAILURE = re.compile(r"^\s*\d+\) .* ─{3,}\s*$", re.M)
+_PW_NOT_ASSERT = re.compile(r"Test timeout of|has been closed")
 _PW_FRAME = re.compile(r"^\s*(?:>\s*)?\d+ \|", re.M)
 _PW_ASSERT = re.compile(r"\bexpect\((?:received|locator|page|response)\)|AssertionError|ERR_ASSERTION")
 
@@ -686,7 +687,10 @@ def classify_playwright(code, output: str, timed_out: bool) -> str:
         frame = _PW_FRAME.search(block)
         # The error text ends where the source frame starts. The frame quotes the line that stood when
         # the error was thrown, so an `expect(page)` in it is no evidence of an assertion.
-        if _PW_ASSERT.search(block[:frame.start()] if frame else block):
+        error = block[:frame.start()] if frame else block
+        # A timeout or a closed target reads red first: a web-first matcher that timed out prints its own
+        # `expect(...)` error after the timeout line, and that is no assertion about the mutant.
+        if not _PW_NOT_ASSERT.search(error) and _PW_ASSERT.search(error):
             return "assert"
     return "crash"
 
