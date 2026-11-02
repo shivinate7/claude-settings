@@ -1511,6 +1511,88 @@ def case_page_filing_reads_do_not_grow_with_the_copy():
           all(1 <= n <= 4 for n in counts), extra)
 
 
+CORRUPT_ITEM = '{"id": "disk-cleanup", "n": 98'  # an item file cut short: not JSON
+
+
+def commit_files(root, files, message):
+    """Writes {path: text} into `root` and commits them in one commit."""
+    for rel, text in files.items():
+        write_file(os.path.join(root, *rel.split("/")), text)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", message)
+
+
+def stale_origin_repo():
+    """A clone whose refs/remotes/origin/roadmap is the commit before the one that files item 98. The source
+    repo, which the clone's origin names, holds the filed copy. git clone makes the clone, so origin is a real
+    remote, and the local roadmap branch is gone, as in record_repo. Built once per run."""
+    def build():
+        src = make_repo("stale-origin-src", tracked=("decisions/a-ruling.md",), extras=filing_extras())
+        git(src, "checkout", "-q", "-b", RECORD_BRANCH)
+        commit_files(src, copy_files((("sweep-notes", 99),)), "record branch before item 98")
+        stale = git(src, "rev-parse", "HEAD").strip()
+        commit_files(src, copy_files(FILED), "page writer files item 98")
+        git(src, "checkout", "-q", "main")
+        root = os.path.join(ROOT, "repos", "stale-origin")
+        git(ROOT, "clone", "-q", src, root)
+        git(root, "update-ref", "refs/remotes/origin/" + RECORD_BRANCH, stale)
+        return root
+    return shared_repo("stale-origin", build)
+
+
+def case_page_corrupt_item_file_is_unknown_never_a_block():
+    """A copy with an item file that is not JSON is unreadable. The filing is unknown, so the page item is never
+    refused for it, with its send or without. The send check decides alone."""
+    for label, key, files in (
+            ("a corrupt item beside a good one", "corrupt-beside",
+             {"waiting/items/sweep-notes.json": json.dumps({"id": "sweep-notes", "n": 99}),
+              "waiting/items/disk-cleanup.json": CORRUPT_ITEM}),
+            ("a corrupt item alone", "corrupt-alone", {"waiting/items/disk-cleanup.json": CORRUPT_ITEM})):
+        repo = record_repo(key, files)
+        p = page_run(new_cfg(), "page-corrupt", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        expect_filing_unknown("page filing: unreadable copy (%s), with its send" % label, p)
+        p = page_run(new_cfg(), "page-corrupt-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+        expect_send_missing("page filing: unreadable copy (%s), with no send, blocks on the send" % label,
+                            p, "fb-0958-7", "98")
+
+
+def case_page_stale_origin_ref_names_the_fetch():
+    """A filed number that the clone's origin ref lacks is refused, and the remedy names the fetch. The copy is
+    read as of the last fetch. The hook fetches nothing: the origin ref is the same after the run."""
+    repo = stale_origin_repo()
+    before = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
+    source = git(os.path.join(ROOT, "repos", "stale-origin-src"), "rev-parse", RECORD_BRANCH).strip()
+    check("page filing: the remote's record branch is past the clone's origin ref", source != before,
+          "remote %s, origin ref %s" % (source, before))
+    p = page_run(new_cfg(), "page-stale", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    expect_unfiled("page filing: n 98 on the remote, not in the origin ref, refuses", p, "fb-0958-7", "98")
+    reason = block_reason(p) or ""
+    check("page filing: the remedy names `git fetch origin %s`" % RECORD_BRANCH,
+          "git fetch origin %s" % RECORD_BRANCH in reason, reason)
+    check("page filing: the remedy says the copy is read as of the last fetch",
+          "last fetch" in reason.lower(), reason)
+    after = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
+    check("page filing: the hook fetches nothing, so the origin ref does not move",
+          after == before, "before %s, after %s" % (before, after))
+
+
+def case_page_stood_down_send_does_not_check_the_filing():
+    """A send the check stood down on proves nothing, so the filing check does not run for it. An unfiled number
+    then blocks on nothing, and the send stand-down message is the only one. Covers a transcript with no owner
+    record and a transcript that is missing."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-stood-down", [(NEUTRAL, (PAGE_ITEM,))], [], cwd=repo)
+    expect_stand_down("page filing: stood-down send (no owner record), n 98 unfiled: no filing block", p, "owner")
+    cfg = new_cfg()
+    write_file(inbox_of(cfg, "page-stood-down-absent"), render_block(NEUTRAL, items=(PAGE_ITEM,)))
+    p = guard(cfg, "page-stood-down-absent", cwd=repo)
+    expect_stand_down("page filing: stood-down send (no transcript), n 98 unfiled: no filing block", p,
+                      "transcript")
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -3398,6 +3480,9 @@ CASES = (
     case_page_filing_needs_a_waiting_page_repo,
     case_page_malformed_home_refused_beside_a_filed_number,
     case_page_filing_reads_do_not_grow_with_the_copy,
+    case_page_corrupt_item_file_is_unknown_never_a_block,
+    case_page_stale_origin_ref_names_the_fetch,
+    case_page_stood_down_send_does_not_check_the_filing,
     case_repo_send_naming_the_repo_passes,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
