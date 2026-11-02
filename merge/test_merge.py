@@ -9030,13 +9030,16 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
-    def pair(self, red_event, newer_event, red_jobs, newer_jobs, newer_conclusion="success", newer_status="completed", red_conclusion="failure"):
-        """A red run (id 930, `red_event`, concluded `red_conclusion`) and a newer run of the other event group (id 931) on the same file. A job list is
-        (name, conclusion) pairs. The newer run's jobs are read only when it is completed: a run in progress is never read."""
+    def pair(self, red_event, newer_event, red_jobs, newer_jobs, newer_conclusion="success", newer_status="completed", red_conclusion="failure",
+             newer_path=".github/workflows/checks.yml"):
+        """A red run (id 930, `red_event`, concluded `red_conclusion`, in checks.yml) and a newer run of the other event group (id 931, in
+        `newer_path`, checks.yml by default: the same file). A job list is (name, conclusion) pairs. The newer run's jobs are read only when it
+        is completed: a run in progress is never read. A file other than checks.yml must be on main (push_base) to be judged at all."""
         jobs = {930: [main_job(name, conclusion) for name, conclusion in red_jobs]}
         if newer_status == "completed":
             jobs[931] = [main_job(name, conclusion) for name, conclusion in newer_jobs]
-        return self.go([main_run(931, newer_conclusion, status=newer_status, event=newer_event),
+        name = os.path.splitext(os.path.basename(newer_path))[0]
+        return self.go([main_run(931, newer_conclusion, name=name, status=newer_status, event=newer_event, path=newer_path),
                         main_run(930, red_conclusion, event=red_event)], jobs)
 
     def test_a_green_dispatch_with_the_same_jobs_clears_a_red_schedule_run(self):
@@ -9117,6 +9120,14 @@ class RedMainBrake(Env):
         rc, out, before = self.pair("schedule", "push", [("checks", "failure")], [("checks", "failure")], newer_conclusion="failure")
         self.refused(rc, out, before)
         self.assertIn("run 930", out)
+
+    def test_a_green_run_of_another_workflow_file_with_the_same_jobs_clears_nothing(self):
+        # a candidate is a run of the red run's own file: deploy.yml's green push run has the job `checks`, and it is not read at all
+        push_base(self, {".github/workflows/deploy.yml": MAIN_WORKFLOW})
+        rc, out, before = self.pair("schedule", "push", [("checks", "failure")], [("checks", "success")], newer_path=".github/workflows/deploy.yml")
+        self.refused(rc, out, before)
+        self.assertIn("run 930", out)
+        self.assertNotIn("actions/runs/931/jobs", self.host.reads, "a run of another workflow file is never a candidate, so it is never read")
 
     def test_a_newer_run_in_progress_clears_nothing(self):
         rc, out, before = self.pair("schedule", "push", [("checks", "failure")], [], newer_status="in_progress")

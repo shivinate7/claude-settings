@@ -11,6 +11,9 @@ work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_
 [ -n "$work" ] || { echo "FAIL - run folder: lint/_test_temp.py made no run folder"; exit 1; }
 trap 'rm -rf "$work"' EXIT
 tmp="$work/case"; mkdir -p "$tmp/bin"
+# The alarm's temp root, and the files the fakes note: TMPSEEN gets a line when a gh call finds TMPDIR non-empty,
+# PYLOG gets the subcommand of each clears.py start. reset_run clears them before each case.
+export TMPDIR="$tmp/tmpdir" TMPSEEN="$tmp/seen" PYLOG="$tmp/pylog"
 # Fake gh. FAIL is a glob over "$1 $2" or over the whole command line; a call that matches it exits 1. EMPTY
 # is a glob too, matched the same way; a call that matches it exits 0 with no output. `run list` keeps only
 # the --json fields it is asked for, as gh does; unparsable runs are echoed raw. The jobs of a run come from
@@ -19,6 +22,7 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # fails on that read for that reason alone.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
+if [ -n "$(ls -A "${TMPDIR:-/nonexistent}" 2>/dev/null)" ]; then echo seen >> "$TMPSEEN"; fi
 if [ -n "${FAIL:-}" ] && { [[ "$1 $2" == $FAIL ]] || [[ "$*" == $FAIL ]]; }; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && { [[ "$1 $2" == $EMPTY ]] || [[ "$*" == $EMPTY ]]; }; then exit 0; fi
 case "$1 $2" in
@@ -42,6 +46,14 @@ case "$1 $2" in
 esac
 SH
 chmod +x "$tmp/bin/gh"
+# Counting python3: the alarm starts clears.py through it, and each start notes its subcommand in PYLOG, then runs the real python3.
+real_py="$(command -v python3)"
+cat > "$tmp/bin/python3" <<SH
+#!/usr/bin/env bash
+case "\$*" in *clears.py*) echo "\$2" >> "\$PYLOG" ;; esac
+exec "$real_py" "\$@"
+SH
+chmod +x "$tmp/bin/python3"
 # Fixture, one home. gh_run prints one run as `gh run list --json` returns it: args are workflow,
 # conclusion, createdAt, url, event. Ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
 # gone 6 (absent from the list), late 7 (on page two of the workflows list), dman 8 and dinact 9
@@ -83,8 +95,9 @@ cat > "$tmp/workflows" <<'JSON'
   {"id": 9, "name": "dinact", "path": ".github/workflows/dinact.yml", "state": "disabled_inactivity"}]}
 JSON
 bad=0
+reset_run() { : > "$tmp/log"; : > "$tmp/seen"; : > "$tmp/pylog"; rm -rf "$tmp/tmpdir"; mkdir -p "$tmp/tmpdir"; }
 t() { # want label [FAIL glob for the fake gh] [EMPTY glob for the fake gh]
-  : > "$tmp/log"
+  reset_run
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" LOG="$tmp/log" FAIL="${3:-}" EMPTY="${4:-}" \
     GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
@@ -96,10 +109,20 @@ t() { # want label [FAIL glob for the fake gh] [EMPTY glob for the fake gh]
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
   [ "$code" = 0 ] || ok=0
-  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out)"; bad=1; fi
+  # The alarm made its temp folder under TMPDIR (a gh call saw it non-empty) and left nothing in it.
+  left="$(ls -A "$tmp/tmpdir")"
+  [ -s "$tmp/seen" ] && [ -z "$left" ] || ok=0
+  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; temp left: ${left:-none})"; bad=1; fi
+}
+# clears.py starts of the last case: the `candidates` and `clears` starts the alarm made, from PYLOG. Args: candidates clears label.
+starts_are() {
+  local c k
+  c="$(grep -c '^candidates$' "$tmp/pylog")"; k="$(grep -c '^clears$' "$tmp/pylog")"
+  if [ "$c" = "$1" ] && [ "$k" = "$2" ]; then echo "ok   $3"; else echo "FAIL $3 (candidates $c, clears $k)"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push)" "$(gh_run ci success 2026-01-01 u0 push)"
 t red latest-red-opens-issue
+starts_are 1 0 "a red run with no candidate starts clears.py once, for candidates"
 runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 push)"
 t green red-then-fixed-is-quiet
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push)"
@@ -111,11 +134,16 @@ t red one-red-workflow-among-green
 runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 jobs_of u0 checks:success nightly:failure
 jobs_of u1 checks:success nightly:skipped
-t red red-schedule-is-not-cleared-by-a-newer-green-push
+t red red-schedule-is-not-cleared-by-a-newer-green-push-with-a-different-job-set
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 jobs_of u0 checks:failure
 jobs_of u1 scope:success
-t red red-schedule-is-not-cleared-by-a-newer-green-dispatch
+t red red-schedule-is-not-cleared-by-a-newer-green-dispatch-with-a-different-job-set
+# The same job names in another workflow file clear nothing: a candidate is a run of the red run's own file.
+runs_are "$(gh_run deploy success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success
+t red red-schedule-is-not-cleared-by-a-newer-green-push-of-another-workflow-file
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 push)"
@@ -126,6 +154,7 @@ runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci fai
 jobs_of u0 readme-links:failure checks:success
 jobs_of u1 readme-links:success checks:success
 t green red-schedule-is-cleared-by-a-newer-green-dispatch-with-the-same-jobs
+starts_are 1 1 "a red run cleared by its candidate starts clears.py twice: candidates once, clears once"
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule)" "$(gh_run ci failure 2026-01-01 u0 push)"
 jobs_of u0 readme-links:failure checks:success
 jobs_of u1 readme-links:success checks:success
@@ -225,7 +254,7 @@ runs_are "$(gh_run ci failure 2026-01-02 u1 push)"
 t unknown workflow-list-fails-is-unknown "api *actions/workflows*"
 t unknown workflow-list-with-empty-stdout-is-unknown "" "api *actions/workflows*"
 t unknown issue-create-fails-is-unknown-exit-0 "issue create"
-: > "$tmp/log"
+reset_run
 OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
 if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
 else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
