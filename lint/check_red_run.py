@@ -10,8 +10,9 @@ records that run as a trailer on the commit that adds the test:
     Red-run: <command> -> <N> failed on <sha>       N is 1 or more, sha is 7 or more hex digits
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
-The check reads each non-merge commit in <base>..HEAD. It judges a commit only when its parent tree holds this
-file, so a commit from before the check landed is not judged. A revert commit (git's `This reverts commit <sha>.`
+The check reads each non-merge commit in <base>..HEAD. When HEAD's tree holds lint/check_red_run.py (this repo),
+it judges a commit only when that commit's parent tree holds the file too, so a commit from before the check landed
+is not judged. In a repo whose HEAD lacks the file, it judges each commit in the range. A revert commit (git's `This reverts commit <sha>.`
 line) is not judged: its lines were judged once already. A test path is one that `is_test_rel` in hooks/guard.py
 judges (the one home), read from the install of this script, never from the repo it reads. A commit that only deletes test lines needs no trailer. A merge is not judged;
 the commits it brings in are.
@@ -90,8 +91,9 @@ def check_landed(root, parent):
 def gaps(root, base):
     """One line per commit that adds test lines with no valid trailer. Raises Unknown when git cannot say."""
     lines = []
+    rollout = check_landed(root, "HEAD")  # git's tree, not the disk: only a repo that tracks the check has a rollout
     for sha, parent, subject, message in commits(root, base):
-        if parent is None or REVERT.search(message) or not check_landed(root, parent):
+        if parent is None or REVERT.search(message) or (rollout and not check_landed(root, parent)):
             continue
         paths = added_test_paths(root, parent, sha)
         if paths and not has_trailer(message):
