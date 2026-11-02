@@ -2,8 +2,11 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT and 2026-10-30 15:06 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A session with no coordinator (solo or one lane) in claude-settings holds the 2026-10-10 grant there. A lane session that a coordinator started never merges. The grant holds "for now", until the owner withdraws it. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST and 2026-11-01 19:23 CST: the coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`), not a fixed list of repos. The 19:23 ruling, typed in the pr-acts-grant lane session: "yes coordinators can merge across repos that is okay it doens't need to juts be in its repo". Earlier, 17:37 CST, relayed by the coordinator: "YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC." Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A solo session with no coordinator and no lane holds the 2026-10-10 grant in claude-settings. A lane session never merges its own PR (owner, 19:23 CST, rejecting the option that lets a lane merge: "option C absolutely not correct"). The grant holds "for now", until the owner withdraws it. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
+## Reviews
+
+Owner, 2026-11-01 19:23 CST: "all of my projects is just me on there there's no other person just me and claude". So a review is a reviewer agent's report only. No session posts a GitHub review or approval, in any repo.
 ## The switch
 
 Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, option c): the grant's home in each repo is a true/false switch, `merge.standingGrant`, in that repo's merge settings, `.github/stamp.json`. The rule `questions-go-to-owner` (questions go to the owner) allows the merge tool's config as a grant's home. The owner's words: "can we basically have like a =true/false on either claude.md or some sorta guard so it can be enabled / disabled on the session? adding to the parent claude.md makes less sense".
@@ -20,7 +23,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. It never asks the owner to merge.
+- The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. It never asks the owner to merge. A lane never merges.
 - The batch runner still builds the batches. It may run the merge tool under the coordinator's grant. It holds no grant of its own.
 - While another owner repo's own sessions are not working, the claude-settings coordinator works there only as decision `session-tiers` (the session tiers) allows (bullet "A coordinator in another repo"; owner, 2026-10-30 13:22 and 13:25 CDT). A repo is not working when the session list shows no live session for it. The coordinator uses the agents it starts in its own session to build, review and batch. It merges under the same grant and the same checks. It never widens what that repo's tools accept, because a shared tool never grows a second form (decision `uniform-over-variants`: a repo matches a shared format).
 - The grant covers the merge act only. It lifts no check. These limits still apply:

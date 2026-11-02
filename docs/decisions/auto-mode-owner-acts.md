@@ -20,14 +20,14 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
-| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only the batch's integration pull request, named as such there | this record |
+| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration pull request: the batch's, named as such there, or the one outcome PR of a solo or one-lane build that goes into no integration branch, named by the session that owns it | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
 An allow rule for `merge --role` waits on the tag check of #878 (merge role reads the session tag).
 
-"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
+"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR that joins a batch, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
 
 ### Archived Branch Delete
 
@@ -44,9 +44,17 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 - Check: the test reads the remedy's commands from the guard constant and fails until the entry quotes each one.
 - Gap: the classifier sees commands, not their output. A failed archive push followed by a delete is still allowed by this entry. The guard's own remote-contains test still refuses the local `git branch -D` then.
 
+### Marking a lone lane's PR ready
+
+Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: "when an operation is occuring solo and/or there is only one "outcome" PR (ie it's not going into an integration branch) then of course they can be marked ready".
+
+- The entry now covers the one outcome PR of a solo or one-lane build that goes into no integration branch, named by the session that owns it. Rule `git-integration-branch-merge` already treats a lone lane as its own integration PR.
+- A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
+- The merge itself is not in this entry (see the standing merge grant record).
+
 ### Incidents for the owner PR and owner message entries
 
-Marking the integration pull request ready has no measured refusal yet: unmeasured. The ruling names it, so it stays.
+Marking ready a lone lane's pull request was refused twice, as "Unrequested Commit in a Connected App" (coordinator-reported): q_max #997 at 16:28 CST and banchi #1004 at 17:36 CST, 2026-11-01. Marking a batch's integration pull request ready has no measured refusal: unmeasured. The 2026-10-30 ruling names it, so it stays.
 
 Both were refused as "External System Writes" on 2026-10-30:
 
