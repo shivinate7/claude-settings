@@ -8,7 +8,8 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, dir_before_segment, norm, split_segments,
+    REDIRECT, _expanded, _resolved, basename, dir_before_segment, norm, resolve_command,
+    segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -218,11 +219,41 @@ MUTATING_COMMAND = (
 )
 
 
-# A word that only runs another command or opens a clause: `sudo rm x` and `then rm x` still run `rm`.
-_COMMAND_PREFIX = re.compile(r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|env|time|nohup|exec|then|do|else)\s+)*")
+# The in-place flag of `sed`: `-i`, `-i.bak`, a cluster such as `-ri`, `-Ei` or `-ie`, `--in-place`.
+# Of `perl`: `-pi`, `-0pi`, `-pie`. Perl's cluster holds only switches that take no word, so
+# `-MList::Util` is not read as `-i`.
+SED_IN_PLACE = r"-[A-Za-z0-9]*i\S*|--in-place(?:=\S*)?"
+PERL_IN_PLACE = r"-[0-9pnlawsTtUWX]*i\S*"
 
 
-def writes_to(path: str, cmd: str, command_only: bool = False) -> bool:
+def command_of(segment: str) -> tuple:
+    """(name, arguments) of the program a segment runs, read with the shared command reader
+    (`resolve_command`): `sudo -u x`, `timeout 5`, `nice`, `env -i`, `if`, `then`, `while`, `{`
+    and `!` lead to the program, and `/bin/rm` reads `rm`. ('', []) when it names none."""
+    tokens = segment_tokens(segment) if segment.strip() else None
+    at = resolve_command(tokens) if tokens else None
+    if at is None:
+        return "", []
+    return basename(tokens[at]).removesuffix(".exe"), list(tokens[at + 1:])
+
+
+def _command_writes(path: str, name: str, args: list) -> bool:
+    """True when the program `name`, run with `args`, changes the path that `args` names."""
+    if not any(path in arg for arg in args):
+        return False
+    if re.fullmatch(MUTATING_COMMAND, name):
+        return True
+    if name == "sed":
+        return any(re.fullmatch(SED_IN_PLACE, arg) for arg in args)
+    if name == "perl":
+        return any(re.fullmatch(PERL_IN_PLACE, arg) for arg in args)
+    if name == "git":
+        at = guard_core._git_subcommand_index(["git"] + args, 0) - 1
+        return args[at:at + 1] in (["rm"], ["mv"])
+    return False
+
+
+def writes_to(path: str, cmd: str, command: tuple = None) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -233,21 +264,22 @@ def writes_to(path: str, cmd: str, command_only: bool = False) -> bool:
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.
 
-    `command_only` (opt-in, for a rule that must not alarm on a read) counts a mutating word only
-    as the command word of the segment `cmd`: `grep -n copy x` and `sed -n '/move/p' x` read.
-    Only the MUTATING_COMMAND form changes; the redirect, `sed` and `perl` forms read as before.
+    `command` (opt-in, for a rule that must not alarm on a read) is the segment's (name, arguments)
+    from `command_of`. A mutating word, the `sed` or `perl` in-place flag, and `git rm` or `git mv`
+    then count only as that program: `grep -n copy x` and `rg "sed -i" x` read. Without it, those
+    words match anywhere in `cmd`. The redirect form reads the same either way.
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
-    if command_only:
-        if re.match(_COMMAND_PREFIX.pattern + MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
-            return True
-    elif re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    if command is not None:
+        return _command_writes(path, *command)
+    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*(?:-i\b|--in-place)[^\n;|&]*" + target, cmd):
+    if re.search(r"\bsed\b[^\n;|&]*(?:-i\b|--in-place|\s(?:" + SED_IN_PLACE + r"))[^\n;|&]*" + target,
+                 cmd):
         return True
-    if re.search(r"\bperl\b[^\n;|&]*\s-[pnlaw]*i[\w.]*(?=\s)[^\n;|&]*" + target, cmd):
+    if re.search(r"\bperl\b[^\n;|&]*\s" + PERL_IN_PLACE + r"(?=\s)[^\n;|&]*" + target, cmd):
         return True
     return False
 
@@ -474,10 +506,16 @@ _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
 
-def _copy_reads(raw, predicate, cwd):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
+def _copy_reads(raw, predicate, cwd, wrapped=False):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set.
+    `wrapped` finds `cp` with the shared command reader, past a wrapper or a clause word (`time`,
+    `then`, `do`); without it, `cp` must lead the segment after its assignments."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    if wrapped:
+        start = resolve_command(words) if words else None
+        start = len(raw) if start is None else start
+    else:
+        start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
     if _name(raw[start] if start < len(raw) else "") != "cp":
         return set()
     operands, target, index = [], None, start + 1
@@ -582,7 +620,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `command_only` is `writes_to`'s opt-in: a mutating word counts
-    only as the command word."""
+    only as the program the segment runs (`command_of`), and a `cp` past a wrapper or a clause word
+    reads its sources (`_copy_reads`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -597,7 +636,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd)
+        data = set() if closed else _copy_reads(raw, predicate, cwd, wrapped=command_only)
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -622,12 +661,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 shown.extend(pieces)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        command = command_of(segments[number]) if command_only else None
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, at) and writes_to(word, text, command_only):
+            if predicate(word, at) and writes_to(word, text, command):
                 return word
     return ""
 

@@ -1566,8 +1566,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 #
 # The shell early warning of builder-test-edit (docs/decisions/builders-cannot-edit-tests.md,
 # "Shell early warning"). The act is the same as the write tool's: a test path (`is_test_rel`).
-# Shell forms (redirect, tee, sed -i, a heredoc header's redirect, PowerShell Set-Content or Out-File,
-# a leading `cd`) go through `_shell_write_hit`, the one scanner every path rule reads.
+# Shell forms (redirect, tee, sed -i, perl -pi, git rm or mv, a heredoc header's redirect, PowerShell
+# Set-Content or Out-File, a leading `cd`) go through `_shell_write_hit`, the one scanner every path
+# rule reads. Its `command_only` reads each segment's program with the shared `resolve_command`.
 # An interpreter writes from code, so its code is read too: the body of a heredoc, or the word after
 # `python -c` or `node -e`. Python is read with `ast` and flags `open(path, mode)` with w, a, x or +,
 # `.write_text` and `.write_bytes`, `.open(mode)` on a path, and the destination of `os.replace` and
@@ -1666,6 +1667,38 @@ class _PythonWrites(ast.NodeVisitor):
                     else:
                         self.names[name.id] = value
 
+    def forget(self, target):
+        """Drop each name `target` binds: its value is no longer the literal it held."""
+        for name in ast.walk(target) if target is not None else ():
+            if isinstance(name, ast.Name):
+                self.names.pop(name.id, None)
+
+    def visit_For(self, node):
+        self.visit(node.iter)
+        self.forget(node.target)
+        for child in node.body + node.orelse:
+            self.visit(child)
+
+    visit_AsyncFor = visit_For
+
+    def visit_With(self, node):
+        for item in node.items:
+            self.visit(item.context_expr)
+            self.forget(item.optional_vars)
+        for child in node.body:
+            self.visit(child)
+
+    visit_AsyncWith = visit_With
+
+    def visit_FunctionDef(self, node):
+        for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [
+                node.args.vararg, node.args.kwarg]:
+            if arg is not None:
+                self.names.pop(arg.arg, None)
+        self.generic_visit(node)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
     def opens_to_write(self, mode):
         return isinstance(mode, ast.Constant) and isinstance(mode.value, str) \
             and any(letter in mode.value for letter in "wax+")
@@ -1728,7 +1761,9 @@ def interpreter_code(tokens: list, segment: str, raw: str, before: int) -> tuple
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, powershell: bool) -> str:
     """The test path a builder's shell command writes, else ''. See the block comment above."""
     def at_test_path(path, where):
-        # A path in no repository is not judged here, as for the write tool's early warning.
+        # A path in no repository is not judged here (the lane ruling in builder-test-edit's record):
+        # a builder works in a repository, and an outside path named `test` is a false alarm. The
+        # write tool still judges such a path for a builder; only this shell check skips it.
         if any(mark in path for mark in "*?["):
             full = _expanded(path, where)
             return any(is_test_rel(rel) for rel in (repo_rel(found, where, outside=False)
