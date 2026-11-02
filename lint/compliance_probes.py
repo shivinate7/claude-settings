@@ -9,6 +9,7 @@
     python3 lint/compliance_probes.py words <child root>
     python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
+    python3 lint/compliance_probes.py restates <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -67,6 +68,15 @@ supersede: text in the child that departs from a shared rule and names no known 
 slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
   with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
   and the first three. No origin/main makes the group unknown. It calls lint/check_record_slugs.py.
+restates: a unit of the child's rule Markdown that copies the text of a claude-settings record (decision
+  child-cites-not-copies). It reads the same files and units as supersede, and the records of the decisions
+  folder of this script's own checkout, never the child's. Before it compares, it drops headings, `Kind:`, `Plan:`
+  and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read: a
+  copy in quotes is a copy. A unit is refused when its runs of SHARED_RUN or more words that a record also holds
+  cover at least SHARED_MIN of its words and at least RESTATES_SHARE of them. A unit with under SHARED_MIN
+  shared words passes, a record citation included. An item names the file, the line and the record, and the
+  remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
+  claude-settings checkout is n/a.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -448,22 +458,33 @@ def paragraphs(text, rel):
     return found
 
 
-def probe_supersede(root):
+def live_anchors():
+    """The live claude-settings rule anchors, read from this script's own checkout."""
     try:
         live = set(rule_audit.claude_md_anchors(rule_audit.rule_text()))
     except (OSError, ValueError) as err:
         raise CannotRun("rule text: %s" % err)
     if not live:
         raise CannotRun("no live rule anchors in the claude-settings rule files")
+    return live
+
+
+def is_settings(root, live):
+    """True when `root` holds its own rule files with at least NA_SHARE of the live anchors: it is claude-settings."""
     try:
         own = set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
     except (OSError, ValueError):
         own = set()  # a child holds no rule files
-    if len(own & live) >= NA_SHARE * len(live):
-        print("supersede: n/a - this is claude-settings")
-        return 0
-    hits, passes, seen = [], [], set()
-    for rel in [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]:
+    return len(own & live) >= NA_SHARE * len(live)
+
+
+def child_units(root):
+    """((file, first line, text) of each unit in the child's rule Markdown, the number of files read). A file
+    reached twice is read once."""
+    units, seen = [], set()
+    # A symlink is read after the files, so a file reached by both names is reported under its real one.
+    for rel in sorted((f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)),
+                      key=lambda f: os.path.islink(os.path.join(root, *f.split("/")))):
         real = os.path.realpath(os.path.join(root, *rel.split("/")))
         if real in seen:
             continue
@@ -471,26 +492,117 @@ def probe_supersede(root):
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        for number, paragraph in paragraphs(text, rel):
-            at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
-            if KNOWN_EXEMPTION.search(paragraph):
-                # An anchor comment is a definition, never a reference to an exemption.
-                named = RULE_REF.findall(ANCHOR_COMMENT.sub("", paragraph))
-                if any(n in live for n in named):
-                    if departure:
-                        passes.append("  known exemption, passes: %s: %s" % (at, shown))
-                elif named or departure:
-                    # With no id, a child's own lint exemption is not ours: it counts only beside departure wording.
-                    hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
-            elif departure:
-                hits.append("  departs, no exemption: %s: %s" % (at, shown))
-            for anchor in dict.fromkeys(rule_audit.claude_md_anchors(paragraph)):
-                if anchor in live:
-                    hits.append("  redefines rule:%s: %s" % (anchor, at))
+        units.extend((rel, number, paragraph) for number, paragraph in paragraphs(text, rel))
+    return units, len(seen)
+
+
+def probe_supersede(root):
+    live = live_anchors()
+    if is_settings(root, live):
+        print("supersede: n/a - this is claude-settings")
+        return 0
+    hits, passes = [], []
+    units, files = child_units(root)
+    for rel, number, paragraph in units:
+        at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
+        if KNOWN_EXEMPTION.search(paragraph):
+            # An anchor comment is a definition, never a reference to an exemption.
+            named = RULE_REF.findall(ANCHOR_COMMENT.sub("", paragraph))
+            if any(n in live for n in named):
+                if departure:
+                    passes.append("  known exemption, passes: %s: %s" % (at, shown))
+            elif named or departure:
+                # With no id, a child's own lint exemption is not ours: it counts only beside departure wording.
+                hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
+        elif departure:
+            hits.append("  departs, no exemption: %s: %s" % (at, shown))
+        for anchor in dict.fromkeys(rule_audit.claude_md_anchors(paragraph)):
+            if anchor in live:
+                hits.append("  redefines rule:%s: %s" % (anchor, at))
     lines = hits + passes
     if hits:
-        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), len(seen)), 1)
-    return finish("supersede", lines, "in shape - %d file(s) read" % len(seen), 0)
+        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), files), 1)
+    return finish("supersede", lines, "in shape - %d file(s) read" % files, 0)
+
+
+# A child unit that copies the text of a claude-settings record. The record text is read live from this script's own
+# checkout, so the probe keeps no copy (decision child-cites-not-copies).
+HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
+META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
+# One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
+# length) or an HTML comment. An opener with no closer is plain text. Quoted text is read: a copy in quotes is a copy.
+STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->")
+NUMBERED = re.compile(r"\S*\d\S*")
+TIME_ZONES = {"utc", "gmt", "cst", "cdt", "est", "edt", "pst", "pdt", "mst", "mdt"}
+SHARED_RUN = 5  # words in a row that a unit and a record hold
+SHARED_MIN = 12  # shared words that refuse a unit, and at least RESTATES_SHARE of its words
+RESTATES_SHARE = 0.5
+
+
+def plain_words(unit):
+    """The lowercase words of `unit` that a comparison reads: no heading, Kind/Plan/Home line, comment, code span,
+    number or time zone."""
+    if HEADING_LINE.match(unit) or META_LINE.match(unit):
+        return []
+    words = re.findall(r"[a-z]+", NUMBERED.sub(" ", STRIPPED.sub(" ", unit)).lower())
+    return [w for w in words if w not in TIME_ZONES]
+
+
+def record_index():
+    """{word run of SHARED_RUN: [slug of each record that holds it]}, read from the decisions folder of this script's
+    own checkout."""
+    base = os.path.dirname(HERE)
+    try:
+        folder = os.path.join(base, *layout.path(base, "decisions").split("/"))
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+    except (OSError, layout.LayoutError, KeyError) as err:
+        raise CannotRun("the records folder cannot be read: %s" % type(err).__name__)
+    if not names:
+        raise CannotRun("the records folder holds no record")
+    runs = {}
+    for name in names:
+        slug = name[:-len(".md")]
+        text = read(folder, name)
+        if text is None:
+            raise CannotRun("cannot read record %s" % slug)
+        for _, unit in paragraphs(text, slug):
+            words = plain_words(unit)
+            for at in range(len(words) - SHARED_RUN + 1):
+                holders = runs.setdefault(tuple(words[at:at + SHARED_RUN]), [])
+                if slug not in holders:
+                    holders.append(slug)
+    return runs
+
+
+def shared_with_records(words, runs):
+    """({slug: number of `words` in a run of SHARED_RUN words that record holds}, the number of `words` in such a run
+    of any record)."""
+    per_record, anywhere = {}, set()
+    for at in range(len(words) - SHARED_RUN + 1):
+        for slug in runs.get(tuple(words[at:at + SHARED_RUN]), ()):
+            per_record.setdefault(slug, set()).update(range(at, at + SHARED_RUN))
+            anywhere.update(range(at, at + SHARED_RUN))
+    return {slug: len(hit) for slug, hit in per_record.items()}, len(anywhere)
+
+
+def probe_restates(root):
+    if is_settings(root, live_anchors()):
+        print("restates: n/a - this is claude-settings")
+        return 0
+    runs = record_index()
+    units, files = child_units(root)
+    hits = []
+    for rel, number, paragraph in units:
+        words = plain_words(paragraph)
+        per_record, covered = shared_with_records(words, runs)
+        if covered < SHARED_MIN or covered < RESTATES_SHARE * len(words):
+            continue
+        slug = max(sorted(per_record), key=per_record.get)
+        hits.append("  copies a record: %s:%d: %d of %d words copy the record %s; name the record, keep only what "
+                    "applies to this repo" % (rel, number, covered, len(words), slug))
+    if hits:
+        return finish("restates", hits, "out - %d line(s) to read in %d file(s)" % (len(hits), files), 1)
+    return finish("restates", hits, "in shape - %d file(s) read" % files, 0)
 
 
 PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"
@@ -982,7 +1094,7 @@ def probe_words(root):
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "scorecard": scorecard}
+          "restates": probe_restates, "scorecard": scorecard}
 
 
 def main(argv):

@@ -1,0 +1,14 @@
+name: CLAUDE.md cites records
+description: >
+  Fails a run when a unit of the caller's CLAUDE.md files or .claude/**/*.md copies the text of a
+  claude-settings record, instead of naming the record. Runs `compliance_probes.py restates` from
+  this action's own checkout, which holds the records, against the caller's checkout. Exit 1 is a
+  copy, with the file, the line and the record named; exit 2 is unknown (the records or a caller
+  file cannot be read) and is red too. The caller needs actions/checkout before this step, so
+  GITHUB_WORKSPACE holds its repo. Decision: child-cites-not-copies.
+runs:
+  using: composite
+  steps:
+    - name: Check that CLAUDE.md names records and does not copy them
+      shell: bash
+      run: python3 "${{ github.action_path }}/../../lint/compliance_probes.py" restates "$GITHUB_WORKSPACE"
