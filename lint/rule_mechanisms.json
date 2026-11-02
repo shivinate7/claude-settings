@@ -747,8 +747,8 @@
     "building-comments-say-why": {
       "mechanism": {
         "kind": "check",
-        "ref": "lint/check_comment_narration.py",
-        "test": "lint/test_check_comment_narration.py::FlagsAddedLines.test_each_pattern_flags_an_added_comment"
+        "ref": "actions/code-check/code_check.py",
+        "test": "actions/code-check/test_action.py::CommentCheck.test_added_narrating_comment_is_red_and_names_the_line"
       }
     }
   }

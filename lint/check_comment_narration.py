@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Fails when a change adds a comment or docstring line that narrates history or review.
 
-    python3 lint/check_comment_narration.py --base origin/main
+    python3 lint/check_comment_narration.py --base origin/main [--exclude PREFIX ...]
 
 Rule: building-comments-say-why. A comment says what complex code does and why.
 Only lines the diff against the merge base adds can fail, so old lines never do.
+--exclude PREFIX (repeatable) drops each path that starts with PREFIX, a folder prefix such as `vendor/`.
 Only .py files are read. Comments come from `tokenize`, docstrings from `ast`,
 so the same words in any other string never fail.
 
@@ -84,10 +85,14 @@ def narrated_lines(path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="ref the change is measured against, such as origin/main")
+    ap.add_argument("--exclude", action="append", default=[], metavar="PREFIX",
+                    help="skip each path that starts with PREFIX (repeatable)")
     args = ap.parse_args(argv)
     hits = 0
     try:
         for path, lines in sorted(added_lines(args.base).items()):
+            if path.startswith(tuple(args.exclude)):
+                continue
             for n, text in sorted(set(narrated_lines(path))):
                 if n in lines:
                     for name, pat in PATTERNS.items():
