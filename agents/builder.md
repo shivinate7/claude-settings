@@ -43,6 +43,8 @@ pass: search, then run them. Report each test change the lane needs, with the ru
 time, for the test-author to re-point red then green. A test that pins a behaviour next to the
 ruled one is class (c). Carry this 4-class list in your report.
 
+A flake is a defect report: find its cause before you widen a bound (P6 in decision `test-practices`). Report a test deletion with P9's proof; the test-author makes it.
+
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one agent, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.

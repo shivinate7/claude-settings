@@ -9,8 +9,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. The load brake, not a
-  number, decides how many lanes run at once. It does not rotate (see below).
+  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
@@ -32,7 +32,12 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
-  record `records-index-at-merge`). Then it runs `--confirm` again to merge.
+  record `records-index-at-merge`). Then it runs `--confirm` again to merge. Batches overlap
+  (claude-settings record `no-merge-during-batch-ci`: no merge while a batch's CI runs). Once
+  batch N's ready run starts, the batch runner builds batch N+1 on N's head at ready, as a PR on
+  the same base, and runs it. N may merge while N+1's run goes on, because N+1's head contains
+  N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
+  fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
   runs names `frozen at <sha>`. It prints the merge output on the terminal, never

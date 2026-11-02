@@ -10,7 +10,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
 - Each build has one holder. In a build with a coordinator, the coordinator holds the grant and a batch runner uses it.
 - A session with no coordinator (solo or one lane) holds the 2026-10-10 grant in claude-settings only. The 19:23 ruling does not widen it.
-- In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the coordinator or batch-runner role. A cloud session with no coordinator and no such role cannot merge.
+- In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the batch-runner role. A cloud session with no batch runner cannot merge.
 - A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
 
@@ -26,7 +26,7 @@ Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, opt
 
 - The merge tool reads the switch from the base branch on origin, never from the pull request's tree. A pull request cannot turn its own grant on.
 - Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out.
-- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the coordinator or batch runner. Only the batch runner merges, by ruling (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
+- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the coordinator and the batch runner. The coordinator never merges (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
 - A value that is not `true` or `false` stops the merge tool as a broken config.
 - Outside the cloud the switch changes nothing. There the tool cannot tell the owner from a session, and the owner must stay able to merge the pull request that turns the switch back on.
 - The owner withdraws the grant in a repo by setting the switch to `false` on main, or by telling a session to. A withdrawal in chat still binds every session. The switch makes the merge tool enforce it.
