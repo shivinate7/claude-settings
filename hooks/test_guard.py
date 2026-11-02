@@ -14901,6 +14901,7 @@ MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
 MH_APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
 MH_SHOT = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
 MH_WIN_OWNER = "C:/Users/x"  # a Windows owner's home, as Path.home returns it
+MH_WIN_HOME = "C:\\Users\\x"  # the same home, as the HOME variable holds it
 
 
 def mh_design(**over):
@@ -14919,8 +14920,8 @@ def mh_judged(name, data, action="set", windows=False):
     home = os.path.join(ROOT, "pd", "mh-home-" + name)
     os.makedirs(home, exist_ok=True)
     with contextlib.ExitStack() as stack:
-        stack.enter_context(mock.patch.dict(os.environ, {"HOME": home}))
-        if windows:
+        stack.enter_context(mock.patch.dict(os.environ, {"HOME": MH_WIN_HOME if windows else home}))
+        if windows:  # Path.home and HOME both name the owner's home, so a judge that reads either one sees it
             stack.enter_context(mock.patch.object(pathlib.Path, "home", return_value=pathlib.PureWindowsPath(MH_WIN_OWNER)))
         calls, out, rows = pd_judged(pd_body(repo, data, action), name, seam=lambda page_file, item: (0, ""))
     decision, reason = read_decision(out)
