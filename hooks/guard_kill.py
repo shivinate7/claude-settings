@@ -126,9 +126,11 @@ def lsof_lists_pids(tokens) -> bool:
         return False
     return any(arg.startswith("-") and not arg.startswith("--") and "t" in arg
                for arg in tokens[index + 1:])
+PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
 # `lsof` counts only with a `-t` flag, which makes it a pid list; `lsof -i :3000` lists and no more.
-PID_SUBSTITUTION_RE = re.compile(
-    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof|lsof(?=[^)`]*\s-[A-Za-z]*t))\b")
+LSOF_SUBSTITUTION_RE = re.compile(
+    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?lsof(?=[^)`]*\s-[A-Za-z]*t)\b")
+KILLING_WORDS = {"kill", "pkill", "killall"}
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
@@ -405,9 +407,28 @@ def kill_fed_by_name(tokens) -> str:
     return "kill " + found.group(1) if found else ""
 
 
+def lsof_pids_reach_kill(all_tokens) -> str:
+    """Return the matched text when one call lists pids with `lsof -t` and also kills.
+
+    A pid list reaches a kill across a filter (`| head -1 | xargs kill`), a `while read` loop, a
+    `for` header, or a file written and read later. Reading each shape would leave a gap, so the
+    CALL is read: `lsof -t` passes only when no segment of it runs `kill`, `pkill` or `killall`.
+    `all_tokens` holds the tokens of every parsed segment of the call (rule
+    shared-trees-no-machine-wide-kill).
+    """
+    kill_word = ""
+    listed = ""
+    for tokens in all_tokens:
+        index = resolve_command(tokens)
+        if index is not None and basename(tokens[index]) in KILLING_WORDS:
+            kill_word = kill_word or basename(tokens[index])
+        if lsof_lists_pids(tokens) or LSOF_SUBSTITUTION_RE.search(" ".join(tokens)):
+            listed = "lsof -t"
+    return listed + " ... " + kill_word if listed and kill_word else ""
+
+
 def kill_fed_by_pipe(tokens, previous) -> str:
-    """The `xargs kill` half of `pgrep x | xargs kill` (or `lsof -t ... | xargs kill`); `previous` is the
-    segment before it."""
+    """The `xargs kill` half of `pgrep x | xargs kill`; `previous` is the segment before it."""
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) != "kill" or not previous:
         return ""
@@ -415,8 +436,6 @@ def kill_fed_by_pipe(tokens, previous) -> str:
         return ""
     before = resolve_command(previous)
     if before is not None and basename(previous[before]) in PID_LISTERS:
-        return "xargs kill"
-    if lsof_lists_pids(previous):
         return "xargs kill"
     return ""
 
@@ -482,6 +501,8 @@ def detach_wrapper_hit(tokens) -> str:
     `nohup` wraps detaches the same way, so the check reads past `nohup` to it.
     """
     index = _skip_assignments_and_keywords(tokens)
+    while index < len(tokens) and basename(tokens[index]) == "nohup":
+        index = _skip_assignments_and_keywords(tokens, index + 1)   # nohup hands on to its child
     if index >= len(tokens):
         return ""
     word = tokens[index]
@@ -506,8 +527,6 @@ def disown_after_background_hit(tokens) -> str:
         return "disown"
     for i, tok in enumerate(tokens):
         if tok != "&":
-    while index < len(tokens) and basename(tokens[index]) == "nohup":
-        index = _skip_assignments_and_keywords(tokens, index + 1)   # nohup hands on to its child
             continue
         rest = tokens[i + 1:]
         j = _skip_assignments_and_keywords(rest)

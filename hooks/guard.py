@@ -296,7 +296,7 @@ while True:
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            playwright_command_hit, playwright_install_hit,
+            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -2641,6 +2641,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
     previous = None
+    call_tokens = []
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -2648,6 +2649,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if tokens is None:
             previous = None
             continue
+        call_tokens.append(tokens)
         matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
         previous = tokens
         if matched:
@@ -2656,6 +2658,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
+    matched = lsof_pids_reach_kill(call_tokens)
+    if matched:
+        refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
