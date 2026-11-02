@@ -7,8 +7,8 @@ Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-3
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.`
 - Each build has one holder. In a build with a coordinator, the coordinator holds the grant.
-- A solo session with no coordinator and no lane holds the 2026-10-10 grant in claude-settings.
-- A lane session never merges its own PR. Owner, 19:23 CST, on the option that lets a lane merge: `option C absolutely not correct`.
+- A session with no coordinator (solo or one lane) holds the 2026-10-10 grant, now in any `shivinate7` repo.
+- A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
 
 This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
