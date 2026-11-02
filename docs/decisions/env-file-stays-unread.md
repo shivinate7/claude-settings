@@ -6,7 +6,7 @@ No session reads, writes or commits the contents of an environment file. The use
 
 One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. The guard's forms read one shared basename matcher in guard_env (`names_env_file`).
 
-Ruling: coordinator, 2026-11-01 22:42 CST. Process-only. The owner may reverse it. Reason: `.envrc` often holds exported secrets. That is the likely risk named below.
+Ruling: owner, Queue item 159 answer a, 2026-11-02 00:56 CST. Reason: `.envrc` often holds exported secrets. That is the likely risk named below.
 
 Shell form. `judge_shell` calls `env_refusal` and `env_heredoc_refusal`. A name is a word whose basename is in the scope above. A glob that could match a name counts as the name (`_glob_could_name_env`).
 
