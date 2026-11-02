@@ -707,8 +707,7 @@ def _report_with_reader_blocked(dw, hook, config):
             sys.modules.pop("guard_log_report", None)
 
 
-# Two unread notes whose lines carry a UTC offset: one west of UTC, one east. Both fall after the turn's
-# human message (2026-09-22), so both are in the turn.
+# Both are later than the turn's human message, so both are in the turn.
 OFFSET_UNREAD_LINES = [
     "2026-10-12T10:02:00-05:00\tBash\tnoted\tsubject-unread\tgit clean -fd\t" + SID,
     "2026-10-12T10:03:00+05:00\tBash\tnoted\tsubject-unread\tgit rebase origin/main\t-",
