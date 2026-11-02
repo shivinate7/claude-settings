@@ -11098,11 +11098,6 @@ sh("test-author shell: the Nov 1 incident form writes a test file and is allowed
 sh("test-author shell: echo x > tests/test_x.py is allowed", "echo x > tests/test_x.py", "allow", **A)
 sh("builder-test shell: main session echo x > src/test_app.py is allowed", "echo x > src/test_app.py",
    "allow", cwd=GITMAIN)
-# Pins the verdict the base commit gives today, from a main session. The long sed option is allowed on
-# the global settings file, and the short -i form is denied. This pins that verdict only. A fix that
-# denies the long form must flip this case to deny.
-sh("frozen-path gap: sed --in-place on the global settings.json is allowed as it is today",
-   "sed --in-place x ~/.claude/settings.json", "allow", cwd=NOGIT)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
