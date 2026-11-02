@@ -1,9 +1,0 @@
-{
- "title": "Auto mode lets batch runners merge",
- "phase": "now",
- "status": "todo",
- "order": 474,
- "why": "Owner, Queue item 149 b, Nov 1 22:16 CST: add an auto-mode allow line for batch-runner merges. Auto mode blocked runner 8's merges because the owner's grant was never said in its chat.",
- "note": "The lane adds the allow line to the shared settings and lands the grant in decision session-tiers or the merge tool's config, citing item 149 b. The page save is the owner's typed word for this lane. Waiting: q_max #1011, mailaudit #176, joyous #64, joyous #66. Ready. Port: yes.",
- "updatedAt": "2026-11-02T04:18:00Z"
-}
