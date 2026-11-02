@@ -2272,7 +2272,8 @@ def role_model_one(tool_input):
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below).
+# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
+# "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -2347,7 +2348,7 @@ def _load_value(reading: dict, key: str):
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal."""
-    if tool not in LANE_TOOLS:
+    if tool not in LANE_TOOLS or os.environ.get("CLAUDE_CODE_REMOTE") == "true":
         return "", ""
     try:
         reading = read_load()
@@ -2396,7 +2397,8 @@ def running_lane_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
     per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if (tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id)
+            or os.environ.get("CLAUDE_CODE_REMOTE") == "true"):
         return "", ""
     try:
         reading = read_load()
