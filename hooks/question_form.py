@@ -337,19 +337,21 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
-# A shell line in a step's backtick span or fence: it chains with an operator, its first word is a
-# Verb-Noun cmdlet, or its first word is a program the owner would run with an argument after it. A
-# program alone (`git`) names the tool in prose, and any other backticked word (`main`) or a file name
-# is not a shell line. A path that starts ./ or ../ is a shell line when an argument follows it, when
-# its name has no extension (`./build`), or when it ends in a script extension and a run verb comes
-# before the span in its sentence, or the span is a fence. `./docs/a.md` and an edited
-# `./hooks/guard.py` are files.
+# A shell line in a step's backtick span or fence: the command a segment runs (the span read by
+# guard_core's quote-aware reader, after any leading `VAR=value` words) is a Verb-Noun cmdlet, or a
+# program from SHELL_PROGRAMS that has an argument after it or is chained to another segment. An
+# operator alone makes no shell line: `foo|bar`, `title; subtitle`, `// a | b` and a markdown table
+# row start with no program. A program alone (`git`) names the tool in prose, and any other backticked
+# word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is a shell line when
+# an argument follows it, when its name has no extension (`./build`), or when it ends in a script
+# extension and a run verb comes before the span in its sentence, or the span is a fence.
+# `./docs/a.md` and an edited `./hooks/guard.py` are files.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
                             "gcloud", "bq", "winget"))
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
-SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
+ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
@@ -457,18 +459,23 @@ def _relative_run(words, run) -> bool:
 
 
 def _shell_line(span, run) -> bool:
-    """True when a line of this code span is a shell line (see SHELL_PROGRAMS). `run` is as for
-    _relative_run."""
-    for line in span.splitlines():
-        words = line.split()
-        if SHELL_OPERATOR.search(line):
-            return True
+    """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
+    _relative_run. The segments and their words come from guard_core, the one quote-aware shell
+    reader, so a quote or a comment opener in text hides no command, and a `|` in text makes none."""
+    import guard_core   # loads only for a step that holds a code span
+    segments = guard_core.split_segments(guard_core.PosixScript(span))
+    for segment in segments:
+        words = guard_core.segment_tokens(segment)
+        words = list(words) if words is not None else segment.split()
+        while words and ENV_ASSIGNMENT.match(words[0]):
+            words.pop(0)
         if not words:
             continue
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0]) or (len(words) >= 2 and words[0] in SHELL_PROGRAMS):
+        elif SHELL_CMDLET.fullmatch(words[0]) or (
+                words[0] in SHELL_PROGRAMS and (len(words) >= 2 or len(segments) >= 2)):
             return True
     return False
 
