@@ -17070,6 +17070,25 @@ def oc_git_dash_c_case():
     return _oc_verdict("allow", got, reason)
 
 
+def oc_notes_to_primary_case():
+    """A redirect from this session's notes worktree, the cwd, into a file in the primary checkout,
+    with no agent_id. The write lands in another checkout, so it stays refused."""
+    paths = _oc_fixture()
+    target = os.path.join(paths["primary"], "stray.txt")
+    got, reason = _oc_decide("Bash", paths["notes"], OC_SID, command="echo x > %s" % slash(target))
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_notes_to_session_wt_case():
+    """A redirect from this session's notes worktree, the cwd, into a file in the session worktree,
+    `.claude/worktrees/lane-a`, with no agent_id. The write lands in another checkout, so it stays
+    refused."""
+    paths = _oc_fixture()
+    target = os.path.join(paths["session_wt"], "stray.txt")
+    got, reason = _oc_decide("Bash", paths["notes"], OC_SID, command="echo x > %s" % slash(target))
+    return _oc_verdict("deny", got, reason)
+
+
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: git add and git commit after a cd into the scratchpad stay allowed (control)", oc_git_commit_after_cd_control_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 2 form with a redirect write from the primary passes", oc_incident_two_redirect_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 3 heredoc into a scratchpad worktree passes", oc_incident_three_case))
@@ -17083,12 +17102,15 @@ LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a symlink inside the scratc
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a dot-dot path out of the scratchpad into a session worktree stays refused", oc_dotdot_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the redirect write with an agent_id stays refused", oc_agent_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: git -C into a scratchpad worktree passes", oc_git_dash_c_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a redirect from the scratchpad worktree into the primary stays refused", oc_notes_to_primary_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a redirect from the scratchpad worktree into the session worktree stays refused", oc_notes_to_session_wt_case))
 # Each builds its own run-folder fixture and reads no lazy one, so a MUTATE_ONLY run skips the build.
 FIXTURELESS_CHECKS.update((oc_git_commit_after_cd_control_case, oc_incident_two_redirect_case,
                            oc_incident_three_case, oc_write_tool_case, oc_resume_shape_case,
                            oc_symlink_case, oc_other_session_case, oc_session_worktree_case,
                            oc_chained_cd_case, oc_symlink_inside_case, oc_dotdot_case,
-                           oc_agent_case, oc_git_dash_c_case))
+                           oc_agent_case, oc_git_dash_c_case, oc_notes_to_primary_case,
+                           oc_notes_to_session_wt_case))
 
 
 # =========================================================================== session-home
