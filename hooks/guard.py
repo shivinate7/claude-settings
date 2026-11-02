@@ -198,6 +198,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import ast
 import importlib
 import json
 import os
@@ -1560,6 +1561,190 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     return ""
 
 
+# ------------------------------------------------------------------ a builder's shell write to a test path
+#
+# The shell early warning of builder-test-edit (docs/decisions/builders-cannot-edit-tests.md,
+# "Shell early warning"). The act is the same as the write tool's: a test path (`is_test_rel`).
+# Shell forms (redirect, tee, sed -i, a heredoc header's redirect, PowerShell Set-Content or Out-File,
+# a leading `cd`) go through `_shell_write_hit`, the one scanner every path rule reads.
+# An interpreter writes from code, so its code is read too: the body of a heredoc, or the word after
+# `python -c` or `node -e`. Python is read with `ast` and flags `open(path, mode)` with w, a, x or +,
+# `.write_text` and `.write_bytes`, `.open(mode)` on a path, and the destination of `os.replace` and
+# `shutil.copy*`. A path is a literal, or a name set from a literal or `Path(literal)`. Node and
+# PowerShell are matched on the call and its first literal, outside comments.
+# RESIDUAL GAPS, allowed on purpose (guards stop mistakes, not attackers): a computed path, a body
+# that does not parse, `fs.promises`, `os.rename`, `shutil.move`, a call hidden behind an alias.
+INTERPRETER_NAME = re.compile(r"(python[\d.]*|py|nodejs?|node)(\.exe)?", re.IGNORECASE)
+PYTHON_CODE_FLAG = re.compile(r"-[A-Za-z]*c")
+NODE_CODE_FLAG = re.compile(r"-[A-Za-z]*[ep]|--eval|--print")
+JS_WRITE_CALL = re.compile(r"(?<![\w$])(?:writeFileSync|appendFileSync|createWriteStream)\s*\(\s*\0(\d+)\0")
+PS_WRITE_CALL = re.compile(r"\[(?:System\.)?IO\.File\]::(?:WriteAll|AppendAll)\w*\s*\(\s*\0(\d+)\0",
+                           re.IGNORECASE)
+
+
+def _literal_calls(code: str, call: "re.Pattern", line_comments: tuple, block: tuple,
+                   template: bool) -> list:
+    """The literal first argument of each call `call` matches in `code`, outside comments, in one pass.
+    A quote opens a string that a comment opener inside never ends. A single or double quote string
+    ends at its line end, so a lone quote hides no later line. With `template`, a backtick string
+    runs over lines, and one holding `${` is computed, so it names no path."""
+    strings, flat, at = [], [], 0
+    while at < len(code):
+        if any(code.startswith(opener, at) for opener in line_comments):
+            at = code.find("\n", at) if "\n" in code[at:] else len(code)
+        elif code.startswith(block[0], at):
+            end = code.find(block[1], at + len(block[0]))
+            at = len(code) if end < 0 else end + len(block[1])
+        elif code[at] in "'\"" or (template and code[at] == "`"):
+            quote, value, close = code[at], [], at + 1
+            while close < len(code) and code[close] != quote:
+                if code[close] == "\n" and quote != "`":
+                    break
+                if code[close] == "\\":
+                    close += 1
+                value.append(code[close:close + 1])
+                close += 1
+            text = "".join(value)
+            strings.append(None if quote == "`" and "${" in text else text)
+            flat.append("\0%d\0" % (len(strings) - 1))
+            at = close + 1 if code[close:close + 1] == quote else close
+        else:
+            flat.append(code[at])
+            at += 1
+    return [strings[int(found)] for found in call.findall("".join(flat)) if strings[int(found)]]
+
+
+def js_write_paths(code: str) -> list:
+    """The literal paths a Node source writes with fs.writeFileSync, appendFileSync or createWriteStream."""
+    return _literal_calls(code, JS_WRITE_CALL, ("//",), ("/*", "*/"), True)
+
+
+def powershell_write_paths(code: str) -> list:
+    """The literal paths a PowerShell source writes with [IO.File]::WriteAll* or AppendAll*."""
+    return _literal_calls(code, PS_WRITE_CALL, ("#",), ("<#", "#>"), False)
+
+
+class _PythonWrites(ast.NodeVisitor):
+    """Collects the literal paths a Python source writes, reading names in source order."""
+    COPIES = ("copy", "copy2", "copyfile", "copyfileobj", "copymode", "copystat", "copytree")
+
+    def __init__(self):
+        self.names, self.paths = {}, []
+
+    def path_of(self, node):
+        """The literal path an expression names, else None."""
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        if isinstance(node, ast.Name):
+            return self.names.get(node.id)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            left, right = self.path_of(node.left), self.path_of(node.right)
+            return None if left is None or right is None else left + "/" + right
+        if isinstance(node, ast.Call) and node.args and not node.keywords:
+            maker = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            parts = [self.path_of(arg) for arg in node.args]
+            if maker in ("Path", "PurePath", "PosixPath") and None not in parts:
+                return "/".join(parts)
+        return None
+
+    def visit_Assign(self, node):
+        self.visit(node.value)
+        value = self.path_of(node.value)
+        for target in node.targets:
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name):
+                    if value is None or not isinstance(target, ast.Name):
+                        self.names.pop(name.id, None)
+                    else:
+                        self.names[name.id] = value
+
+    def opens_to_write(self, mode):
+        return isinstance(mode, ast.Constant) and isinstance(mode.value, str) \
+            and any(letter in mode.value for letter in "wax+")
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        func, args = node.func, node.args
+        keyword = {item.arg: item.value for item in node.keywords if item.arg}
+        found = None
+        if isinstance(func, ast.Name) and func.id == "open" or (
+                isinstance(func, ast.Attribute) and func.attr == "open"
+                and isinstance(func.value, ast.Name) and func.value.id == "io"):
+            mode = args[1] if len(args) > 1 else keyword.get("mode")
+            target = args[0] if args else keyword.get("file")
+            found = target is not None and self.opens_to_write(mode) and self.path_of(target)
+        elif isinstance(func, ast.Attribute) and func.attr == "open":
+            mode = args[0] if args else keyword.get("mode")
+            found = self.opens_to_write(mode) and self.path_of(func.value)
+        elif isinstance(func, ast.Attribute) and func.attr in ("write_text", "write_bytes"):
+            found = self.path_of(func.value)
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and (
+                (func.value.id == "os" and func.attr == "replace")
+                or (func.value.id == "shutil" and func.attr in self.COPIES)):
+            target = args[1] if len(args) > 1 else keyword.get("dst")
+            found = target is not None and self.path_of(target)
+        if found:
+            self.paths.append(found)
+
+
+def python_write_paths(code: str) -> list:
+    """The literal paths a Python source writes. A source that does not parse writes none."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    found = _PythonWrites()
+    try:
+        found.visit(tree)
+    except RecursionError:
+        return []
+    return found.paths
+
+
+def interpreter_code(tokens: list, segment: str, raw: str, before: int) -> tuple:
+    """(language, [code]) for a segment that runs python or node: the word after `-c` or `-e`, and each
+    heredoc body whose header sits in the segment. ('', []) for any other command."""
+    at = resolve_command(tokens)
+    name = INTERPRETER_NAME.fullmatch(basename(tokens[at])) if at is not None else None
+    if name is None:
+        return "", []
+    language = "python" if name.group(1).lower().startswith("py") else "node"
+    flag = PYTHON_CODE_FLAG if language == "python" else NODE_CODE_FLAG
+    code = [tokens[i + 1] for i in range(at + 1, len(tokens) - 1)
+            if tokens[i][:1] == "-" and flag.fullmatch(tokens[i])]
+    if "<<" in segment:
+        code.extend(own_heredoc_bodies(segment, raw, before))
+    return language, code
+
+
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str, powershell: bool) -> str:
+    """The test path a builder's shell command writes, else ''. See the block comment above."""
+    def at_test_path(path, where):
+        rel = repo_rel(path, where)
+        return rel is not None and is_test_rel(rel)
+
+    matched = _shell_write_hit(guard_core._strip_heredoc_bodies_unconditionally(raw), cwd,
+                               at_test_path, follow_cd=True)
+    if matched:
+        return matched
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        if not tokens:
+            continue
+        language, codes = interpreter_code(tokens, segment, raw, before)
+        where = dir_before_segment(segments, number, cwd, ends) or cwd
+        reader = python_write_paths if language == "python" else js_write_paths
+        for code in codes:
+            for path in reader(code):
+                if at_test_path(path, where):
+                    return path
+    if powershell:
+        return next((path for path in powershell_write_paths(raw) if at_test_path(path, cwd)), "")
+    return ""
+
+
 def diff_bases(root: str):
     """The commits this agent's own work is measured against. Empty when git could not answer.
 
@@ -2778,6 +2963,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = project_config_shell_hit(stripped, cwd)
     if matched:
         record(tool, "noted", "config-edit", matched)
+
+    # 7c. A builder's shell write to a test path (the write tool's refusal, builder-test-edit).
+    if role == guard_core.BUILDER_ROLE:
+        matched = builder_shell_test_hit(raw, stripped, cwd, tool == "PowerShell")
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
