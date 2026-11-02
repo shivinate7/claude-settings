@@ -349,6 +349,15 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
+      - name: Waiting page export fixture suite
+        run: python3 skills/waiting-page/test_export_page.py
+
+      - name: Artifact cite fixture suite
+        run: python3 lint/test_check_artifact_cites.py
+
+      - name: Artifact cite check
+        run: python3 lint/check_artifact_cites.py --steps list
+
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 

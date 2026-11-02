@@ -152,6 +152,42 @@ def finish(group, lines, verdict, code):
     return code
 
 
+def git_ok(root, *args):
+    """The completed `git -C root <args>`, or None when git cannot start."""
+    try:
+        return _nowindow.run(["git", "-C", root, *args], capture_output=True)
+    except OSError:
+        return None
+
+
+def waiting_copy(root):
+    """None when `root` names no waiting page. Else "present", "missing waiting copy: ..." or "unknown - ...": whether the
+    waiting-data folder (decision waiting-data-in-repo) is on the record branch, read with git from the local ref, then
+    origin's. A ref that is not there (a shallow CI clone) is unknown, never a pass and never a fail."""
+    try:
+        if layout.waiting_page(root) == "unknown":
+            return None
+        branch, home = layout.record_branch(root), layout.path(root, "waiting-data")
+    except layout.LayoutError as err:
+        return "unknown - waiting copy: %s" % err
+    seen = False
+    for ref in ("refs/heads/" + branch, "refs/remotes/origin/" + branch):
+        probe = git_ok(root, "rev-parse", "--verify", "-q", ref + "^{commit}")
+        if probe is None or probe.returncode not in (0, 1):
+            return "unknown - waiting copy: git cannot read %s" % ref
+        if probe.returncode == 1:
+            continue
+        listed = git_ok(root, "ls-tree", "-r", "--name-only", ref, "--", home)
+        if listed is None or listed.returncode != 0:
+            return "unknown - waiting copy: git cannot list %s" % ref
+        seen = True
+        if any(line.startswith(home + "/") for line in listed.stdout.decode("utf-8", "replace").splitlines()):
+            return "present"
+    if not seen:
+        return "unknown - waiting copy: no record branch %s here or on origin" % branch
+    return "missing waiting copy: %s/ on record branch %s" % (home, branch)
+
+
 def probe_layout(root):
     try:
         rolled = layout.rolled_out(root)
@@ -192,11 +228,21 @@ def probe_layout(root):
         home = kept.get(name, kind["path"].strip("/"))
         if kind.get("set") == "core" and not any(f == home or f.startswith(home + "/") for f in files):
             lines.append("  missing core kind %s: %s" % (name, kind["path"]))
+    waiting = waiting_copy(root)
+    if waiting and waiting.startswith("missing"):
+        lines.append("  " + waiting)
+    unread = waiting if waiting and waiting.startswith("unknown") else None
     if not rolled:
+        if unread and not lines:
+            return finish("layout", [], unread, 2)  # an unread branch is never a clear preview
         lines = ["  preview" + line[1:] for line in lines]
-        return finish("layout", lines, "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, len(lines)), 0)
+        total = len(lines)
+        return finish("layout", lines + (["  " + unread] if unread else []),
+                      "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, total), 0)
     if lines:
-        return finish("layout", lines, "out - %d finding(s)" % len(lines), 1)
+        return finish("layout", lines + (["  " + unread] if unread else []), "out - %d finding(s)" % len(lines), 1)
+    if unread:
+        return finish("layout", [], unread, 2)  # an unread branch is never a pass
     return finish("layout", lines, "in shape", 0)
 
 
