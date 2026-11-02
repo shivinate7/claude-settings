@@ -14,8 +14,9 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # Fake gh. FAIL is a glob over "$1 $2" or over the whole command line; a call that matches it exits 1. EMPTY
 # is a glob too, matched the same way; a call that matches it exits 0 with no output. `run list` keeps only
 # the --json fields it is asked for, as gh does; unparsable runs are echoed raw. The jobs of a run come from
-# `api .../actions/runs/<id>/jobs`, every page of the fixture. The fake's `run view`, the old jobs read, prints
-# page one only: a case whose passing job sits on page two fails on that read for that reason alone.
+# `api .../actions/runs/<id>/jobs`: every page of the fixture with `--paginate`, else page one, as gh api does.
+# The fake's `run view`, the old jobs read, prints page one only: a case whose passing job sits on page two
+# fails on that read for that reason alone.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 if [ -n "${FAIL:-}" ] && { [[ "$1 $2" == $FAIL ]] || [[ "$*" == $FAIL ]]; }; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
@@ -28,7 +29,8 @@ case "$1 $2" in
     case "$*" in
       *"actions/runs/"*"/jobs"*)
         rid="$(printf '%s\n' "$@" | sed -n 's#.*actions/runs/\([0-9]*\)/jobs.*#\1#p' | head -1)"
-        cat "$JOBS/$rid.json" 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
+        f="$JOBS/$rid.json"
+        if [[ "$*" == *--paginate* ]]; then cat "$f"; else jq -c -s '.[0]' "$f"; fi 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
       *) cat "$WORKFLOWS" ;;
     esac ;;
   "run view")
@@ -192,6 +194,10 @@ jobs_of u2 checks:failure
 t red failed-jobs-read-of-one-candidate-does-not-hide-another-red-run "api *actions/runs/103/jobs*"
 if grep -q 'ci (failure): u1' "$tmp/log"; then echo "ok   the open issue names the red run that has no candidate"
 else echo "FAIL the open issue does not name the red run that has no candidate"; bad=1; fi
+# The only red run's candidate read fails: no red run is known, so the verdict is unknown, not red.
+runs_are "$(gh_run deploy failure 2026-01-01 u2 schedule)" "$(gh_run deploy success 2026-01-02 u3 push)"
+jobs_of u2 checks:failure
+t unknown only-red-run-with-a-failed-candidate-read-is-unknown "*103*jobs*"
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 jobs_of u0 readme-links:failure checks:success
 jobs_of u1 readme-links:success checks:success
