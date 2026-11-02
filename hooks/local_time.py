@@ -30,7 +30,9 @@ clock; tests set it.
 the answer, so an undone or withdrawn answer is never saved. A `list`, `query`, write or other tool
 saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
 line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
-text are read: a dict-shaped or pretty-printed document saves nothing. Each document whose `data.note` is
+text are read: a dict-shaped or pretty-printed document saves nothing. A document with `data.parked` true (a
+parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's word. Each other
+document whose `data.note` is
 a string, non-empty after strip and not `accepted pick`, becomes one inbox block, stamped with the
 answer's `data.at` in Central (the clock when `at` does not parse), with the text
 `Waiting page note, item <n> (<item>): <note>`. The label joins the note's first line, so it adds no

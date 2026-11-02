@@ -316,9 +316,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .parked > h2 { font: 700 15px/1.4 var(--body); margin: 0; }
 .pk-hint { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
 .parked .pk-list { list-style: none; margin: 0; padding: 0; display: grid; }
-/* One line: the text, then its acts. Narrow: the acts wrap under the text. Wide: they sit at the right. */
+/* One line: the text, then its acts. Narrow: the acts wrap under the text. Wide: they sit at the right, in a column as wide as the widest state (a sent badge with Change, 287px), so no state re-wraps the text. */
 .pk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 10px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
-@container (min-width: 600px) { .pk { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; } .pk-acts { justify-content: flex-end; } }
+@container (min-width: 600px) { .pk { grid-template-columns: minmax(0, 1fr) minmax(19rem, auto); align-items: center; gap: 16px; } .pk-acts { justify-content: flex-end; } }
 .pk-txt { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .pk-txt .ref { font-weight: 600; }
 .pk-txt .nt { color: var(--muted); }
@@ -327,7 +327,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 /* The acts row is one 44px cluster in every state, so a press, a Send or a badge moves nothing. */
 .pk-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; }
 .pk-acts .ans { min-height: 32px; }
-.pk .status { grid-column: 1 / -1; }
+.pk .status, .pk-why { grid-column: 1 / -1; }
+/* The reason an act is off, as text under the line: a touch screen has no hover, and a bubble clips at the edge. */
+.pk-why { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
 /* A toggle keeps the box of its widest label: both labels share one grid cell. */
 .btn.pkb { display: inline-grid; justify-items: center; position: relative; }
 .pkb > span { grid-area: 1 / 1; white-space: nowrap; }
@@ -337,11 +339,10 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 /* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
 .btn.dash.pkb { border-color: var(--faint); }
 .btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
-/* Off: dashed and still focusable, and the reason shows on hover and focus. */
-.btn.pkb[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; }
-.btn.pkb[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; width: max-content; max-width: min(320px, 80vw); white-space: normal; text-align: start; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Off: still focusable, with a solid --line edge and muted text, where a live Drop has a dashed --faint edge (3:1). The reason shows as .pk-why under the line. */
+.btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
-.sent-list .pkref { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sent-list .pkref { max-width: 24ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -353,14 +354,14 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .sent { background: var(--surface); border-bottom: 1px solid var(--line); }
 .sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
 .sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
-.sent-what { min-width: 0; display: grid; gap: 8px; }
+.sent-what { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .sent-line { margin: 0; }
 .stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
 .stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
 @media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
 @keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
 .sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
-.sent-list li { display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list li { max-width: 100%; display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
 .sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
 .sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
 .dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
@@ -984,16 +985,16 @@ const staged = () => [...answerable(), ...parkItems()].filter((it) => !isSaved(i
 const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
 const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
 
-/* ---------- Parked lines: a press stages an act, and Send writes answers/park-<id> as it writes an answer ---------- */
+/* ---------- Parked lines: a press stages an act, and Send writes answers/park.<id> as it writes an answer ---------- */
 // A parked line is a meta/page.parked entry. It is live only with a unique id of the slug form; any other line has both acts off.
 // Each live line is modelled as a pseudo item, so staged, Send, Undo, Withdraw and the draft store take it with no second path.
-// Its key starts with "park-", so it can never meet an item's key, and no card or count reads it.
-const ACTS = ["unpark", "drop"], PARK_ID = /^[a-z0-9-]{1,32}$/;
+// Its key is "park.<id>". An item slug holds no dot, so it can never meet an item's key, and no card or count reads it.
+const ACTS = ["unpark", "drop"], PARK_ID = /^[a-z0-9-]{1,32}$/, parkKey = (id) => "park." + id;
 function parkItems() {
-  const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = {};
-  list.forEach((p) => { count[p.id] = (count[p.id] || 0) + 1; });
+  const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = new Map(); // a Map: an id such as "constructor" is no prototype name here
+  list.forEach((p) => { count.set(p.id, (count.get(p.id) || 0) + 1); });
   const owner = plain(m && m.writer) || "the page's writer";
-  return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count[p.id] === 1).map((p) => ({ id: "park-" + p.id, park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
+  return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
 }
 function pressPark(it, act) {
   edited();
@@ -1005,8 +1006,16 @@ function changePark(it, sv) { state.changing[it.id] = true; edited(); state.draf
 function keepRouted(was, now) {
   const ids = (m) => ((m && Array.isArray(m.parked) ? m.parked : []).map((p) => p && p.id));
   const had = ids(was), has = new Set(ids(now));
-  had.forEach((id, i) => { const a = state.answers["park-" + id]; if (id && !has.has(id) && a && ACTS.includes(a.act)) state.routed[id] = { p: was.parked[i], act: a.act, i }; });
+  let pruned = false;
+  had.forEach((id, i) => {
+    if (typeof id !== "string" || has.has(id)) return;
+    const key = parkKey(id), a = state.answers[key];
+    if (a && ACTS.includes(a.act)) state.routed[id] = { p: was.parked[i], act: a.act, i };
+    // A routed or removed line leaves no staged act or open Change behind in the draft store.
+    if (key in state.draft || key in state.changing) { delete state.draft[key]; delete state.changing[key]; pruned = true; }
+  });
   Object.keys(state.routed).forEach((id) => { if (has.has(id)) delete state.routed[id]; });
+  if (pruned) saveDraft();
 }
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
@@ -1526,27 +1535,30 @@ function renderList() {
 }
 const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
 const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.", WHY_NODB = "This view cannot reach the page's store. Reply in the thread instead.";
-function pkToggle(p, it, act, why) {
-  const label = ACT_NAME[act], a = { type: "button", class: "btn pkb " + (act === "unpark" ? "alt" : "dash"), id: "pk-" + act + "-" + (it ? p.id : "noid"), "aria-label": label + " " + p.ref };
-  if (why) { a["aria-disabled"] = "true"; a["data-why"] = why; } else { a["aria-pressed"] = String((state.draft[it.id] || {}).act === act); a.onclick = () => pressPark(it, act); }
+// Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
+// No page id has the form "pk-<part>-<key>", so a parked id such as "h" meets no id of the page.
+function pkToggle(p, it, act, why, key) {
+  const label = ACT_NAME[act], a = { type: "button", class: "btn pkb " + (act === "unpark" ? "alt" : "dash"), id: "pk-" + act + "-" + key, "aria-label": label + " " + p.ref };
+  if (why) { a["aria-disabled"] = "true"; a["aria-describedby"] = "pk-why-" + key; } else { a["aria-pressed"] = String((state.draft[it.id] || {}).act === act); a.onclick = () => pressPark(it, act); }
   return h("button", a, h("span", { class: "off" }, label), h("span", { class: "on", "aria-hidden": "true" }, "✓ " + label));
 }
 // One line: the text, then its acts in one row. Off (no id, no store), staged, sent with Change, or routed with a filled badge.
-function pkLine(p, it, routed) {
-  const sv = it && isSaved(it) ? savedOf(it) : null, act = routed ? routed.act : sv ? sv.act : it ? (state.draft[it.id] || {}).act : null;
-  let acts;
+function pkLine(p, it, routed, index) {
+  const key = it || routed ? p.id : "_" + index, sv = it && isSaved(it) ? savedOf(it) : null, act = routed ? routed.act : sv ? sv.act : it ? (state.draft[it.id] || {}).act : null;
+  let acts, why = "";
   if (routed) acts = [h("span", { class: "ans filed" }, ACT_DONE[routed.act])];
   else if (sv) acts = [h("span", { class: "ans", title: "Sent " + fmt(sv.at) + ". Goes to " + it.owner + "." }, ACT_SENT[sv.act] || "Sent", " ", h("span", { class: "t" }, fmt(sv.at, false))),
-    h("button", { class: "btn quiet changebtn", type: "button", id: "pk-change-" + p.id, "aria-label": "Change " + p.ref, onclick: () => changePark(it, sv) }, "Change")];
-  else { const why = !it ? WHY_NOID : !state.db ? WHY_NODB : ""; acts = ACTS.map((a) => pkToggle(p, it, a, why)); }
-  const id = p.id || "noid";
-  return h("li", { class: "pk" + (act === "drop" ? " drop" : "") + (routed ? " routed" : ""), id: "pk-" + id },
+    h("button", { class: "btn quiet changebtn", type: "button", id: "pk-change-" + key, "aria-label": "Change " + p.ref, onclick: () => changePark(it, sv) }, "Change")];
+  else { why = !it ? WHY_NOID : !state.db ? WHY_NODB : ""; acts = ACTS.map((a) => pkToggle(p, it, a, why, key)); }
+  return h("li", { class: "pk" + (act === "drop" ? " drop" : "") + (routed ? " routed" : ""), id: "pk-line-" + key },
     h("p", { class: "pk-txt" }, h("span", { class: "ref" }, p.ref + ":"), " ", h("span", { class: "nt" }, p.note)),
-    h("div", { class: "pk-acts", id: "pk-acts-" + id }, acts),
+    h("div", { class: "pk-acts", id: "pk-acts-" + key }, acts),
+    // The reason an act is off is text on the line, so a phone sees it with no hover and nothing clips it.
+    why ? h("p", { class: "pk-why", id: "pk-why-" + key }, why) : null,
     it && state.notice[it.id] ? h("p", { class: "status", role: "status" }, state.notice[it.id]) : null);
 }
 function parkedEl() {
-  const live = parkItems(), rows = ((state.meta && state.meta.parked) || []).filter((p) => p && typeof p === "object").map((p) => pkLine(p, live.find((x) => x.park === p)));
+  const live = parkItems(), rows = ((state.meta && state.meta.parked) || []).filter((p) => p && typeof p === "object").map((p, i) => pkLine(p, live.find((x) => x.park === p), null, i));
   Object.values(state.routed).sort((a, b) => a.i - b.i).forEach((r) => { const el = pkLine(r.p, null, r); rows.splice(Math.min(r.i, rows.length), 0, el); routedWatch.observe(el); });
   if (!rows.length) return null;
   return h("section", { class: "parked", id: "parked", "aria-labelledby": "pk-h" }, h("h2", { id: "pk-h" }, "Parked by you"),
@@ -1558,7 +1570,7 @@ const routedWatch = new IntersectionObserver((es) => es.forEach((e) => {
   if (!el.isConnected) { routedWatch.unobserve(el); return; }
   if (performance.now() - lastScroll < 150) { setTimeout(() => { if (el.isConnected) { routedWatch.unobserve(el); routedWatch.observe(el); } }, 160); return; }
   const above = el.getBoundingClientRect().bottom <= 0, before = document.documentElement.scrollHeight;
-  routedWatch.unobserve(el); delete state.routed[el.id.replace(/^pk-/, "")]; render();
+  routedWatch.unobserve(el); delete state.routed[el.id.replace(/^pk-line-/, "")]; render();
   if (above) window.scrollBy(0, document.documentElement.scrollHeight - before);
 }));
 
@@ -1761,6 +1773,8 @@ function answerLine() {
       else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
     }
   });
+  // A staged park act is a line to the writer: the act, then the line's text in quotes, since the text may hold commas.
+  parkItems().filter((it) => !isSaved(it) && draftReady(it)).forEach((it) => parts.push(ACT_NAME[state.draft[it.id].act] + ' "' + plain(it.park.ref) + '"'));
   return parts.join(", ");
 }
 // One home for the clipboard write. A frame without permission refuses it, so each caller shows its own fallback.

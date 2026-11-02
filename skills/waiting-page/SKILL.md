@@ -120,9 +120,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
   has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
-- `answers/park-<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
+- `answers/park.<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
   `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
-  counts toward none, so never give an item an id that starts with `park-`. Undo and withdraw delete it, as for any answer.
+  counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
@@ -261,8 +261,8 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
 sessions that watch the page. Only the owning session reads, routes and closes its items. It reads
-the answers at each wake, and at the start of each turn while it has an item open:
-`ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
+the answers at each wake, and at the start of each turn while it has an item open (the writer also
+while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
 relays an answer. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the owning session routes and
 closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
@@ -279,7 +279,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
 - On a comment wake, read `answers/` for your own items only (by `owner` and `n`). Route them as
-  below. If no item in the comment is yours, stay silent.
+  below. The writer also reads each `answers/park.<id>` whenever `meta/page.parked` is not empty, and routes it
+  by the parked branch below. If no item in the comment is yours and you are not the writer of a page with parked lines, stay silent.
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
@@ -351,9 +352,9 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
-A parked answer (`answers/park-<id>`): the writer finds the entry in `meta/page.parked` by `id`.
+A parked answer (`answers/park.<id>`): the writer finds the entry in `meta/page.parked` by `id`.
 - `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
-- `drop`: file the abandon in the line's home (rule `building-land-design-or-abandon`).
+- `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.
 - Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
   With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
