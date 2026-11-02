@@ -943,3 +943,4 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- ci-alarm-stale-schedule-red: the CI alarm keeps reporting a stale schedule red that a newer same-job run of another group cleared for the merge tool, until the next scheduled run (lane red-main-stale-schedule). Decision: no-merge-onto-red-main.

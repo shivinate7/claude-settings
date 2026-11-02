@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Alarm when the newest completed run of any (workflow, event group) on BRANCH is red. Groups and
-# the judged events are in events.json, the one home merge/merge.py reads too. Env: BRANCH, SELF
+# the judged events are in events.json, the one home merge/merge.py reads too. This judges run
+# conclusions only. The merge tool also clears a red run by a newer same-job run of another group; this does not. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
 set -o pipefail
