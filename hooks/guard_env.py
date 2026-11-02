@@ -7,9 +7,9 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values, is_powershell, norm,
-    split_segments,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    is_powershell, norm, split_segments,
 )
 
 
@@ -333,6 +333,22 @@ def env_reference(word: str) -> str:
     return word if names_env_file(word) else ""
 
 
+_ESCAPED_QUOTE = re.compile(r"""\\['"]""")
+
+
+def _plain_escaped_quotes(cmd: str) -> str:
+    """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
+    character. Those languages read the backslash as an escape, but the word reader below does not:
+    a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
+    if "<<" not in cmd or "\\" not in cmd:
+        return cmd
+    for _, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub("_", body), 1)
+    return cmd
+
+
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
@@ -351,6 +367,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
+    cmd = _plain_escaped_quotes(cmd)
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
@@ -368,43 +385,18 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     return _env_relay(texts)
 
 
-_QX_OPEN = re.compile(r"(?:\bqx|%x)[ \t]*([({\[<])")
-_QX_CLOSE = {"(": ")", "{": "}", "[": "]", "<": ">"}
-
-
-def _qx_as_substitution(body: str) -> str:
-    """Write each Perl `qx(...)` and Ruby `%x(...)` as `$(...)`, so `_substitutions` reads the
-    command they run. The span ends at the bracket that closes the opener (nested pairs count)."""
-    out, at = [], 0
-    for opener in _QX_OPEN.finditer(body):
-        if opener.start() < at:
-            continue  # inside the span of an earlier one
-        open_char, depth, end = opener.group(1), 1, opener.end()
-        while end < len(body) and depth:
-            depth += (body[end] == open_char) - (body[end] == _QX_CLOSE[open_char])
-            end += 1
-        out += [body[at:opener.start()], "$(", body[opener.end():end - (depth == 0)], ")"]
-        at = end
-    return "".join(out) + body[at:]
-
-
 def env_heredoc_refusal(raw: str):
-    """`env_refusal` for the heredoc bodies that `strip_heredoc_bodies` drops before the layers run.
+    """`env_refusal` for the substitutions in the body of each UNQUOTED heredoc.
 
-    A dropped body is text, except for its spots that run a shell: an UNQUOTED body runs its
-    `$(...)`, backticks and `<(...)`, and the body of a python, node, perl or ruby header runs
-    those and also `qx(...)` and `%x(...)`, whatever its delimiter. Every other word of such a body
-    is the interpreter's own code, not shell words. A quoted delimiter (`<<'EOF'`) on any other
-    header makes the body text, and it stays dropped.
+    `strip_heredoc_bodies` drops a body before the layers run, and that is right for text. An
+    unquoted body still runs its `$(...)`, backticks and `<(...)`, so those are judged. A quoted
+    delimiter (`<<'EOF'`) makes the body text, and it stays dropped.
     """
-    for quote, body, header in _split_heredocs(raw)[1]:
-        interpreter = INTERPRETER_HEREDOC(_without_message_values(header))
-        if quote and not interpreter:
-            continue
-        refusal = env_refusal(_qx_as_substitution(body) if interpreter else body,
-                              subs_only=True, heredoc=True)
-        if refusal[0]:
-            return refusal
+    for quote, body, _ in _split_heredocs(raw)[1]:
+        if not quote:
+            refusal = env_refusal(body, subs_only=True, heredoc=True)
+            if refusal[0]:
+                return refusal
     return "", ""
 
 

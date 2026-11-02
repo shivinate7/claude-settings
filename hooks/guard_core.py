@@ -798,17 +798,31 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     return "\n".join(_split_heredocs(cmd)[0])
 
 
+# A later segment that runs a shell on a file (`sh x.txt`, `bash -e x.sh`, `source x`, `. x`): a body
+# written to that file is then run. A header (`bash <<EOF`) and a stdin shell (`bash -s`) name no file.
+_RUNS_FILE = re.compile(
+    r"(?:^|[;&|(`{])[ \t]*(?:(?:sudo|env|exec)[ \t]+)?(?:[^\s|;&]*[/\\])?(?:" + _SHELLS + r"|source|\.)"
+    r"(?:\.exe|\.cmd)?[ \t]+(?:-[\w-]+[ \t]+)*[^\s;&|<>()`$-]", re.M).search
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    if _walk_heredocs(cmd)[2]:
+    _, bodies, unclosed = _walk_heredocs(cmd)
+    if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
+    # bash runs a substitution of an unquoted body while it writes the body. A script body is the
+    # interpreter's own text, one command, and its header test below already keeps it where it counts.
+    if any(not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header))
+           for quote, body, header in bodies):
+        return cmd
     dropped = _drop_heredoc_bodies(cmd)
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
     # is text, and no body line may make another body look run.
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(dropped)):
+    text = _without_message_values(dropped)
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _RUNS_FILE(text):
         return cmd  # the body may be executed, so keep it under inspection
     return dropped
 

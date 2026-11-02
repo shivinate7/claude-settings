@@ -221,7 +221,7 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):\n'
+     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _RUNS_FILE(text):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
