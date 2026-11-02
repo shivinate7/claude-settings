@@ -1914,8 +1914,9 @@ class BadRoot(unittest.TestCase):
                 self.assertIn(done.returncode, (0, 1), done.stdout)
 
 
-# The restates group: a child unit that copies claude-settings record text, or names a record and holds a ruling time
-# from it, is refused. The fixtures read the records of this checkout at test time, so no case pastes record text.
+# The restates group: a child unit that copies claude-settings record text is refused. A unit that names a record is a
+# citation, with or without its ruling time, and passes. The fixtures read the records of this checkout at test time,
+# so no case pastes record text.
 CHECKOUT = os.path.dirname(os.path.dirname(PROBES))
 RECORDS = os.path.join(CHECKOUT, layout.path(CHECKOUT, "decisions"))
 GRANT = "standing-merge-grant"
@@ -1984,7 +1985,8 @@ def item_for(out, where):
 
 
 class Restates(unittest.TestCase):
-    """A unit that copies record text, or names a record with a ruling time from it, is refused. The other units pass."""
+    """A unit that copies a run of record text is refused. A unit that names a record, with or without its ruling time, is a
+    citation and passes."""
 
     def child(self, *units, rel="CLAUDE.md"):
         """A child whose `rel` holds `units`, a blank line between each: each one is a unit of its own."""
@@ -2010,9 +2012,10 @@ class Restates(unittest.TestCase):
     def test_a_copied_record_line_is_refused(self):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
 
-    def test_a_named_record_with_its_ruling_time_is_refused(self):
+    def test_a_named_record_with_its_ruling_time_passes(self):
+        # A citation: it names the record and its ruling time, and copies no run of the record's words.
         unit = "- Merge grant (owner, %s): see claude-settings %s. Batch runner details here." % (grant_time(), GRANT)
-        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+        self.assert_passes(self.child(unit))
 
     def test_a_record_named_in_backticks_with_no_time_passes(self):
         self.assert_passes(self.child(
@@ -2075,7 +2078,7 @@ class Restates(unittest.TestCase):
 
     def test_a_lone_quote_in_text_does_not_hide_a_copy(self):
         self.assert_passes(self.child("- Don't merge a red pull request, and keep this rule short."))
-        self.assert_refused(self.child("- Don't merge: " + grant_line() + " The owner's word decides."), "CLAUDE.md:1")
+        self.assert_refused(self.child("- Don't merge: " + grant_line() + " The owner's grant decides."), "CLAUDE.md:1")
 
     def test_comment_marks_inside_a_code_span_do_not_cut_the_unit(self):
         self.assert_passes(self.child("- Run `git log # main` and `curl //host` before merge."))
@@ -2109,6 +2112,21 @@ class Restates(unittest.TestCase):
         # 300 ordinary units, then one copy: the item names the copy's line, and no other unit is refused.
         units = ["- Repo note %d: %s" % (n, FILLER) for n in range(300)] + ["- " + grant_line()]
         self.assert_refused(self.child(*units), "CLAUDE.md:%d" % (2 * len(units) - 1))
+
+    def agents_symlink_child(self, *units):
+        """A child whose CLAUDE.md holds `units`, and whose root AGENTS.md is a symlink to it, as real child repos keep it."""
+        repo = self.child(*units)
+        os.symlink("CLAUDE.md", os.path.join(repo.root, "AGENTS.md"))
+        return repo.git("add", "-f", "AGENTS.md")
+
+    def test_an_agents_symlink_to_a_clean_claude_md_is_read_once(self):
+        self.assert_passes(self.agents_symlink_child("- Repo note: this repo keeps its own lane labels."))
+
+    def test_a_copy_read_through_an_agents_symlink_names_claude_md(self):
+        # AGENTS.md sorts before CLAUDE.md, so the link is read first. The item still names CLAUDE.md, where the copy is.
+        repo = self.agents_symlink_child("- Own rule for this repo.", "- " + grant_line())
+        self.assert_refused(repo, "CLAUDE.md:3")
+        self.assertNotIn("AGENTS.md", repo.run("restates")[1], "the item names the symlink AGENTS.md, not CLAUDE.md")
 
 
 class RestatesFixtures(unittest.TestCase):
