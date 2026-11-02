@@ -105,9 +105,10 @@ FAMILIES = {
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
+    "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
-    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, and an allowed publish of main's page writes the stamp",
+    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
@@ -442,6 +443,9 @@ GHSTATRED = os.path.join(ROOT, "ghstatred")    # a green check run, and one comm
 GHBATCH = os.path.join(ROOT, "ghbatch")        # merging pull request 1 while pull request 2, also ready on main, has its required check pending
 GHBATCHDONE = os.path.join(ROOT, "ghbatchdone")  # the same, with pull request 2's required check passed
 GHBATCHRED = os.path.join(ROOT, "ghbatchred")    # the same, with pull request 2's required check failed
+GHBATCHCONTAIN = os.path.join(ROOT, "ghbatchcontain")  # the same as GHBATCH, but pull request 2's head holds pull request 1's head (compare "ahead")
+GHBATCHDIVERGED = os.path.join(ROOT, "ghbatchdiverged")  # the same as GHBATCH, and pull request 2's head does not hold pull request 1's (compare "diverged")
+GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAIN, but pull request 1's head is behind main (compare "main...<head>" "behind")
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -978,6 +982,8 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
+    elif re.fullmatch(r"compare/[^/]+", rel):  # the containment read of "<base sha>...<head sha>": a pair not listed is diverged
+        print(json.dumps({"status": state.get("compares", {}).get(rel[len("compare/"):], "diverged")}))
     else:
         api_error(404, "Not Found")
 '''
@@ -985,7 +991,7 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None):
+                 count_file=None, compares=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
@@ -1044,6 +1050,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "others": [dict(o) for o in others],  # more pull requests on the base, each {number, head, draft, checks, ref, state, merged}: the batch brake and the archive guard read them; ref defaults to feat<number>, state to open
         "required": list(required),  # the names the base's protection requires
         "protection": protection,  # None: the read answers `required`; "absent": 404; "server": 500; "network": a refused connection
+        "compares": dict(compares or {}),  # "<base sha>...<head sha>" -> the status of the containment read; a pair not listed is "diverged"
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "checks"}],
         "broken": broken,
@@ -1204,6 +1211,12 @@ def build_fixtures():
     make_fake_gh(GHBATCH, "main", others=batch_other(("checks", "pending")))
     make_fake_gh(GHBATCHDONE, "main", others=batch_other(("checks", "pass")))
     make_fake_gh(GHBATCHRED, "main", others=batch_other(("checks", "fail")))
+    # Pull request 1's head is the fake's default head. The base read, "main...<that head>", is ahead when that head holds main's tip, behind when it does not.
+    make_fake_gh(GHBATCHCONTAIN, "main", others=batch_other(("checks", "pending")),
+                 compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "ahead"})
+    make_fake_gh(GHBATCHDIVERGED, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "diverged"})
+    make_fake_gh(GHBATCHBEHIND, "main", others=batch_other(("checks", "pending")),
+                 compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "behind"})
     # the guard's required names: a pinned list, or the branch protection (none, failed, or a list that is not pinned)
     make_fake_gh(GHPINNED, "main", others=batch_other(("checks", "pass"), ("gate", "pending")), required=["gate"])
     make_fake_gh(GHNOPROT, "main", others=batch_other(("sync", "pending")), protection="absent")
@@ -8650,6 +8663,12 @@ sh("merge-batch: gh pr merge is allowed when the other ready pr's required check
 add("merge-batch: the merge tool of the host is allowed when the other ready pr's required check has passed", "allow",
     tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
     env_path=GHBATCHDONE + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed while another ready pr that holds this head has a required check pending",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr that does not hold this head has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr holds this head but this head is behind main",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
 # The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
 # With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
 # other way is unknown, and a merge with an unknown read is denied.
@@ -11804,7 +11823,8 @@ add("swift-test: Edit of non-test native/abTests/x.swift is allowed", "allow", t
 # "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
 # (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
 # allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
-# logs, and the diff case is `xctestplan_logs_case` below.
+# refuses the builder's skip at commit and push (the builder-refuse section), and logs the author's
+# plan edit (`xctestplan_logs_case`).
 XCTESTPLAN = "native/Degen.xctestplan"
 add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny", rule=BT,
     tool="Edit", file_path=XCTESTPLAN, new_string='"skippedTests" : [ "LaunchTests" ]', **B)
@@ -11926,20 +11946,23 @@ BUILDER_GREEN = [
                                   "[tool.pytest.ini_options]\nminversion = '7'\n")),
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
+# A builder's test change is REFUSED at commit and push, and BLOCKED at the first stop. The
+# builder-refuse section below pins the base rule and the refusal text. The rule id is the one the refusal prints.
+BDIFF = "builder-diff"
 for _name, _change in BUILDER_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
     _repo = diff_repo("b-" + _name, _change)
-    sh("builder-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
+    sh("builder-diff: commit with a %s change is denied" % _name, COMMIT, "deny", rule=BDIFF,
        cwd=_repo, agent_id="bld1", agent_type="builder")
-    sh("builder-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
+    sh("builder-diff: push with a %s change is denied" % _name, PUSH, "deny", rule=BDIFF,
        cwd=_repo, agent_id="bld1", agent_type="builder")
-    add("builder-diff: stop with a %s change is allowed and logged" % _name, "allow",
+    add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BDIFF,
         event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
-add("builder-diff: stop after COMMITTING a test change is allowed and logged", "allow",
+add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: push after COMMITTING a test change is allowed and logged", PUSH, "allow",
+sh("builder-diff: push after COMMITTING a test change is denied", PUSH, "deny", rule=BDIFF,
    cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
@@ -11987,7 +12010,7 @@ add("builder-diff: test changes merged in from main are not the builder's", "all
 sh("builder-diff: commit after merging main in is allowed", COMMIT, "allow", cwd=_repo,
    agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-merged-main-own", _merge_main_in(True))
-add("builder-diff: its OWN new test after merging main in is allowed and logged", "allow",
+add("builder-diff: its OWN new test after merging main in is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 
 
@@ -11999,18 +12022,18 @@ def _own_test_then_new_branch(w):
 
 
 _repo = diff_repo("b-new-branch-name", _own_test_then_new_branch)
-add("builder-diff: a new branch name does not reset the base", "allow",
-    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: a new branch name does not reset the base at push", PUSH, "allow",
-   cwd=_repo, agent_id="bld1", agent_type="builder")
+add("builder-diff: a new branch name does not reset the base: the stop is blocked", "deny",
+    rule=BDIFF, event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: a new branch name does not reset the base: the push is denied", PUSH, "deny",
+   rule=BDIFF, cwd=_repo, agent_id="bld1", agent_type="builder")
 
-# The stop is never blocked (guard.py judge_stop). A builder stop with a test change and a dirty
-# main tree is an offence that logs, and the stop still goes through. This pins the first stop.
+# The first stop with a test change is blocked (guard.py judge_stop). A dirty main tree is no
+# builder change, so it does not change the verdict. The second stop is pinned in role_log_case.
 _repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                          # the MAIN tree is dirty too
                                          write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
-add("builder-diff: a stop with a test change is never blocked",
-    "allow", event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+add("builder-diff: a stop with a test change is blocked", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 add("builder-diff: an unread diff logs role-diff-unread and the first stop is allowed", "allow",
     event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder")
 add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
@@ -12050,8 +12073,9 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id):
-    """Run commit, push and stop for one agent in `repo`. Returns (stdout seen, guard.log rows)."""
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    Returns (stdout seen, guard.log rows)."""
     materialize(repo)
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -12063,7 +12087,7 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
-               "agent_id": agent_id, "agent_type": agent_type} for c in (COMMIT, PUSH)]
+               "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
                    "agent_type": agent_type})
     out = ""
@@ -12075,14 +12099,32 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
     return out, [line.split("\t") for line in text.splitlines() if line.strip()]
 
 
-def diff_logs_case():
-    """The diff check LOGS for the reviewer and never blocks: commit, push and stop each print
-    nothing and write one `noted` line named `builder-diff` or `author-diff`."""
+def _guard_answers(text):
+    """(decision, reason) for each JSON document in `text`, in order. A guard call prints one document."""
+    found, decoder, index = [], json.JSONDecoder(), 0
+    text = text.strip()
+    while index < len(text):
+        doc, index = decoder.raw_decode(text, index)
+        found.append(read_decision(json.dumps(doc)))
+        while index < len(text) and text[index].isspace():
+            index += 1
+    return found
+
+
+def diff_refusal_case():
+    """The diff check refuses a builder's test change at commit, push and stop, and logs a test-author's
+    diff. A test-author's diff logs for the reviewer and never blocks: commit, push and stop print nothing
+    and write one `noted` line each, named `author-diff`. The builder half is one run of the same three
+    calls on the incident repo; BUILDER_RED pins each call on its own."""
     problems = []
+    out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-incident"), _bd_inc, "builder", "bld1")
+    got = [decision for decision, _reason in _guard_answers(out)]
+    if got != ["deny", "deny", "deny"]:
+        problems.append("builder: expected deny at commit, push and stop, got %r" % got)
     for label, agent_type, agent_id, rule in (
-            ("b-rewritten", "builder", "bld1", "builder-diff"),
-            ("b-new-untracked", "builder", "bld1", "builder-diff"),
-            ("a-product-edit", "test-author", "auth1", "author-diff")):
+            ("a-product-edit", "test-author", "auth1", "author-diff"),
+            # An untracked file: the mutant that reads tracked files only is caught by this row alone.
+            ("a-product-new", "test-author", "auth1", "author-diff")):
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
                                   os.path.join(DIFFROOT, label), agent_type, agent_id)
         if out:
@@ -12090,21 +12132,27 @@ def diff_logs_case():
         hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == rule]  # six: session last
         if len(hits) != 3:
             problems.append("%s: expected 3 noted/%s lines, found %d" % (label, rule, len(hits)))
-    return (not problems), ("; ".join(problems) or "each diff check logged and allowed")
+    return (not problems), ("; ".join(problems) or "builder refused at three calls; each author diff logged and allowed")
 
 
 def _long_lived_main_tests(w):
-    """A long-lived worktree: cut long ago, main has since gained test files, and the branch has
-    merged main in. Those test files equal main's, so they are not the builder's."""
+    """A long-lived worktree: it was reset to a lane that main has since passed. Main gained test files
+    and a test change, and the branch merged main in. The merge entry is then deleted from HEAD's
+    reflog, so the lane tip and main's tip are two independent bases: the merge base with main is
+    the only route to main's tip. Those test files equal main's, so they are not the builder's."""
     main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 6\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "lane product")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "reset", "-q", "--hard", "lane")
     write(os.path.join(main, "tests/test_late.py"), "pass  # main added this later\n")
     write(os.path.join(main, "tests/test_a.py"), "pass  # main edited this later\n")
-    run_vcs(main, "add", "-A")
-    run_vcs(main, *IDENT, "commit", "-q", "-m", "main moves")
-    run_vcs(w, "switch", "-q", "-c", "feat")
-    merged = run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "main")
-    if merged.returncode != 0:
-        sys.exit("fixture setup failed: merge in %r: %s" % (w, merged.stderr.strip()))
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "main")
+    _must(w, "reflog", "delete", "HEAD@{0}")
     write(os.path.join(w, "src/app.py"), "x = 7\n")
 
 
@@ -12137,7 +12185,7 @@ def author_mutant_no_log_case():
 
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
-    ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
+    ("builder-diff: the diff check refuses a builder's test change and logs a test-author's diff", diff_refusal_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
     ("author-diff: a test-author's mutation test edit logs no author-diff line",
@@ -12659,18 +12707,11 @@ def _plan_repo(name, text):
 
 
 def xctestplan_logs_case():
-    """A builder's added skippedTests line logs once each at commit, push and stop, and never
-    blocks. A builder's added codeCoverage line logs nothing. A test-author's plan edit logs
-    no author-diff line."""
+    """A builder's added codeCoverage line logs nothing. A test-author's plan edit logs no
+    author-diff line. A builder's added skippedTests line is refused, not logged: see the
+    builder-refuse section, which builds the same plan repo (`xctestplan-skip`) once."""
     problems = []
-    skip = _plan_repo("xctestplan-skip", XCTESTPLAN_SKIP)
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-skip"), skip, "builder",
-                              "bld1")
-    if out:
-        problems.append("skip: expected silent allows, got %r" % out[:60])
-    hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "builder-diff"]  # six
-    if len(hits) != 3:
-        problems.append("skip: expected 3 noted/builder-diff lines, found %d" % len(hits))
+    skip = os.path.join(DIFFROOT, "xctestplan-skip")
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
                               _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE), "builder",
                               "bld1")
@@ -12682,11 +12723,743 @@ def xctestplan_logs_case():
     if out or rows:
         problems.append("author: a plan edit was judged: %r %r" % (out[:60], rows))
     return (not problems), ("; ".join(problems) or
-                            "a skippedTests line is logged; codeCoverage and a test-author's plan are not")
+                            "codeCoverage logs nothing; a test-author's plan edit logs no author-diff line")
 
 
-LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's skippedTests line is logged at commit, push "
-                         "and stop", xctestplan_logs_case))
+LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs nothing, and a "
+                         "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
+
+
+# =========================================================================== builder refusal
+#
+# A builder's test change is REFUSED at `git commit` and `git push`, and BLOCKED at its first
+# SubagentStop (decision builders-cannot-edit-tests). These cases pin the base rule in guard.py
+# diff_bases and diff_violation: each commit HEAD was handed by a reset, checkout, merge or pull is
+# a base. A base that holds one of the agent's own commits still vouches for each path that commit
+# did not change. A path offends only if it differs from every base that vouches for it. A test
+# file that both sides changed in a hand-resolved merge offends whatever it holds. The rows that pin
+# a stop, the write tool and a clean builder sit beside these.
+FAMILY = "builder-refuse"
+TEST_A = "tests/test_a.py"
+# The test-author's five cases, added to main's test file on the lane branch.
+LANE_FUNCS = ["def test_lane_%d():\n    assert %d\n\n" % (n, n) for n in range(1, 6)]
+LANE_TEXT = BASE_FILES[TEST_A] + "".join(LANE_FUNCS)
+# What a builder leaves after it removes four of the five: it differs from main AND from the lane tip.
+TRIMMED = BASE_FILES[TEST_A] + LANE_FUNCS[0]
+
+
+def _must(where, *args):
+    """One git call a fixture needs. A call that fails stops the run: a broken build proves nothing."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git %s in %r: %s" % (" ".join(args), where, done.stderr.strip()))
+
+
+def _product_commit(w):
+    write(os.path.join(w, "src/app.py"), "x = 3\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work")
+
+
+def _test_author_lane(w, rel=TEST_A, text=LANE_TEXT):
+    """The test-author's commit on branch `lane`, cut from main. Main's checkout ends on main."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, rel), text)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, "checkout", "-q", "main")
+
+
+def _incident(w):
+    """Cut at main. `reset --hard` to the lane tip, then the builder removes lines from the test file."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, TEST_A), TRIMMED)
+
+
+def _merge_commit(w):
+    """Cut at main. The builder commits product work, merges the lane tip (a merge commit), then
+    removes lines from the test file."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, TEST_A), TRIMMED)
+
+
+def _clean_merge(w):
+    """Cut at main. The builder merges the lane tip and changes product files only (Oct 2 false alarm)."""
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _clean_reset(w):
+    """Cut at main. The builder resets to the lane tip and changes product files only (Oct 2 false alarm)."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _own_then_clean_merge(w):
+    """Cut at main. The builder commits product work, merges the lane tip, then changes product files only."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _launder(w):
+    """Cut at main. The builder commits a test edit, makes a product commit on a side branch from it,
+    returns to its own branch and resets to the side commit, which contains its own test edit."""
+    write(os.path.join(w, TEST_A), "pass\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, "switch", "-q", "-c", "side")
+    write(os.path.join(w, "src/app.py"), "x = 5\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product on side")
+    _must(w, "switch", "-q", "work")
+    _must(w, "reset", "-q", "--hard", "side")
+
+
+def _shell_write(w):
+    """Cut at main. The test file is written by a Python process, as a Bash `python3 -c` call writes
+    it. No write tool runs, so no path check sees the write. Only the diff shows it."""
+    code = "open(%r, 'w').write(%r)" % (os.path.join(w, TEST_A), TRIMMED)
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: python write in %r: %s" % (w, done.stderr.strip()))
+
+
+NEW_TEST = "tests/test_lane_new.py"
+
+
+def _stale_revert(w):
+    """Cut at main. Reset to a lane tip that adds test lines, then write the test file back to the cut
+    point's exact bytes. The cut point is no base once the lane tip is one."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A])
+
+
+def _stale_delete(w):
+    """Cut at main. Clean-merge a lane tip that adds a new test file, then delete that file."""
+    _test_author_lane(w, NEW_TEST, "def test_lane_new():\n    assert 1\n")
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    os.remove(os.path.join(w, NEW_TEST))
+
+
+def _newer_main_merge(w):
+    """Cut at main. The builder commits product work on its lane, main gains a test change, and the
+    builder clean-merges main in. It changes no test."""
+    _product_commit(w)
+    main = w + "-main"
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "main")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _rebase_then_stale_revert(w):
+    """Cut at main. The builder commits product work and rebases onto the lane tip, then writes the test
+    file back to main's bytes. The rebase received the lane tip, which holds the lane's cases, so main's
+    bytes differ from it and the write is refused. Without the rebase, main's bytes match the only base."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "rebase", "-q", "lane")
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A])
+
+
+def _rebase_clean(w):
+    """Cut at main. The builder commits product work, rebases onto the lane tip and changes product files only."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "rebase", "-q", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _two_bases_test_edit(w):
+    """The long-lived worktree, then a builder's test edit that matches neither of its two bases."""
+    _long_lived_main_tests(w)
+    write(os.path.join(w, TEST_A), "pass\n")
+
+
+def _origin(w):
+    """A bare remote for the worktree's main checkout, so the builder can push and pull."""
+    main = w + "-main"
+    bare = w + "-origin"
+    _must(main, "init", "-q", "--bare", bare)
+    _must(main, "remote", "add", "origin", bare)
+
+
+def _f1_pull(w):
+    """Cut at main. The builder commits product work P and pushes it. The test-author adds test cases T1 on
+    top of P and pushes. The builder pulls T1 fast-forward and commits product work again. The pull is a
+    base the builder received, and it holds the builder's own P."""
+    main = w + "-main"
+    _origin(w)
+    _product_commit(w)
+    _must(w, "push", "-q", "origin", "HEAD:refs/heads/feat")
+    _must(main, "fetch", "-q", "origin")
+    _must(main, "checkout", "-q", "-b", "lane", "origin/feat")
+    write(os.path.join(main, TEST_A), LANE_TEXT)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, "push", "-q", "origin", "lane:refs/heads/feat")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "pull", "-q", "--ff-only", "origin", "feat")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work again")
+
+
+def _f1b_push_reset(w):
+    """Cut at main. The builder commits a test edit C1 and pushes it. It resets to the cut point, then to its
+    pushed C1, which holds its own commit, and commits product work on top."""
+    _origin(w)
+    write(os.path.join(w, TEST_A), "pass\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, "push", "-q", "origin", "HEAD:refs/heads/feat")
+    _must(w, "reset", "-q", "--hard", "HEAD~1")
+    _must(w, "reset", "-q", "--hard", "origin/feat")
+    write(os.path.join(w, "src/app.py"), "x = 5\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work")
+
+
+def _f2_conflict_merge(w):
+    """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
+    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
+    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _f2b_clean_merge(w):
+    """Cut at main. Reset to a lane tip that adds test cases to one test file. Main adds a different test file.
+    The builder merges main cleanly (`Merge made by`), and each test file equals one received base."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, "tests/test_main_new.py"), "def test_m():\n    assert 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds a file")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "main")
+
+
+def _f2_conflict_then_reset(w):
+    """The conflicted own merge of _f2_conflict_merge, then a reset to the lane tip, which leaves that merge
+    behind. The test file it conflicted in is no longer in the tree."""
+    _f2_conflict_merge(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+
+
+def _product_conflict_merge(w):
+    """Cut at main. Reset to a lane tip that changes a product file. Main changes the same product file on the
+    same line. The builder merges main, the product file conflicts, and the builder resolves it and commits the
+    merge by hand. No test file conflicts."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 6\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "lane product")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 9\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main product")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+MAIN_FIRST = "def test_main_first():\n    assert 9\n\n"
+
+
+def _push_main(w):
+    """Publish the main checkout's main to the worktree's origin, so the builder can fetch and rebase onto it."""
+    _must(w + "-main", "push", "-q", "origin", "main")
+
+
+def _c1_mid_merge(w):
+    """Cut at main. The builder commits product work. Main then changes a test file and the product file the
+    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
+    builder resolves the product file and stops before the commit."""
+    main = w + "-main"
+    _origin(w)
+    _push_main(w)
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    write(os.path.join(main, "src/app.py"), "x = 10\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
+    _push_main(w)
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, "src/app.py"), "x = 12\n")
+    _must(w, "add", "-A")
+
+
+def _c1_committed(w):
+    _c1_mid_merge(w)
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _g_lane_and_product(w):
+    """Cut from a lane tip that adds a test case at the end of the test file. The builder commits product work
+    on that tip. Main then prepends a test case to the same file, a different hunk, and is published."""
+    main = w + "-main"
+    _origin(w)
+    _test_author_lane(w, TEST_A, LANE_TEXT)
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main prepends a case")
+    _push_main(w)
+
+
+def _g2_rebase(w):
+    _g_lane_and_product(w)
+    _must(w, "fetch", "-q", "origin")
+    _must(w, *IDENT, "rebase", "origin/main")
+
+
+def _g3_pull_rebase(w):
+    _g_lane_and_product(w)
+    _must(w, *IDENT, "pull", "--rebase", "origin", "main")
+
+
+def _h1r_restore(w):
+    """After a clean rebase onto main, the builder writes main's bytes back over the test file, which drops the
+    test-author's case. The rebase kept main's side, but that does not license a write made after it: refused."""
+    _g2_rebase(w)
+    write(os.path.join(w, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+
+
+def _h1r_committed(w):
+    """The write-back of _h1r_restore, committed by the builder. The commit is the builder's own, and it drops
+    the test-author's case."""
+    _h1r_restore(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "restore main's test file")
+
+
+def _fixup_rebase(w):
+    """Cut at the test-author's lane tip. The builder commits product work, commits a fixup of it, then rebases
+    with autosquash. The todo editor is `true`, so the list runs as autosquash built it. Product files only."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "fixup! product work")
+    _must(w, *IDENT, "-c", "sequence.editor=true", "rebase", "-i", "--autosquash", "lane")
+    # A rebase that ran no fixup would pass for the wrong reason: check the squash and its reflog step.
+    subjects = run_vcs(w, "log", "--format=%s", "lane..HEAD").stdout.splitlines()
+    steps = run_vcs(w, "reflog", "--format=%gs", "HEAD").stdout
+    if subjects != ["product work"] or "rebase (fixup)" not in steps:
+        sys.exit("fixture setup failed: the fixup rebase in %r did not squash: %r" % (w, subjects))
+
+
+def _b1_cherry(w):
+    """Cut at main. The builder cherry-picks a test-author's commit, which adds a test case. The pick commits."""
+    main = w + "-main"
+    _test_author_lane(w)
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    _must(w, *IDENT, "cherry-pick", pick)
+
+
+def _b1b_cherry_staged(w):
+    """Cut at main. The builder cherry-picks a test-author's commit with --no-commit and stops before the commit."""
+    main = w + "-main"
+    _test_author_lane(w)
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    _must(w, *IDENT, "cherry-pick", "-n", pick)
+
+
+def _b1b_cherry_committed(w):
+    _b1b_cherry_staged(w)
+    _must(w, *IDENT, "commit", "-q", "-m", "cherry-picked test-author cases")
+
+
+def _j1_squash(w):
+    """Cut at main. The builder squash-merges a test-author's lane, which adds a test file, and commits the result."""
+    _test_author_lane(w, NEW_TEST, "def test_lane_new():\n    assert 1\n")
+    _must(w, *IDENT, "merge", "--squash", "lane")
+    _must(w, *IDENT, "commit", "-q", "-m", "squashed test-author case")
+
+
+def _i1_rebase_ours(w):
+    """A test-author's lane changes a line of the test file, and main changes the same line. The builder rebases
+    its product commit onto main. The rebase stops in the test file, and the builder keeps the upstream side
+    (`--ours` in a rebase). The replayed case is then empty, so the builder skips it."""
+    main = w + "-main"
+    _origin(w)
+    _test_author_lane(w, TEST_A, "def test_a():\n    assert 1 == 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), "def test_a():\n    assert 2 == 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes the case")
+    _push_main(w)
+    _must(w, "fetch", "-q", "origin")
+    stopped = run_vcs(w, *IDENT, "rebase", "origin/main")
+    if stopped.returncode == 0:
+        sys.exit("fixture setup failed: the rebase in %r did not stop in the test file" % w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2 == 2\n")
+    _must(w, "add", "-A")
+    cont = run_vcs(w, "-c", "core.editor=true", *IDENT, "rebase", "--continue")
+    if cont.returncode != 0:
+        _must(w, "rebase", "--skip")
+
+
+def _u2_new_test(w):
+    """The builder adds a test file that no base holds."""
+    write(os.path.join(w, "tests/test_new.py"), "def test_new():\n    assert 5\n")
+
+
+_bd_inc = diff_repo("bd-incident", _incident)
+# Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
+sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder")
+# Case 7: the same refused commit names no path, and gives an undo route and the orchestrator.
+sh("builder-refuse: the refused commit names no test path and gives an undo route",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_a"), carries=(("restore", "Restore", "put back"), "orchestrator"))
+
+# Case 2: a merge commit of the lane tip, then a removed line, is refused.
+_bd_merge = diff_repo("bd-merge-commit", _merge_commit)
+sh("builder-refuse: a merge commit of the lane tip, then a removed test line, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_merge, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a merge commit of the lane tip, then a removed test line, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_merge, agent_id="bld1", agent_type="builder")
+
+# Case 4: a commit that contains the builder's own test edit is no base, so the edit is still refused.
+_bd_launder = diff_repo("bd-launder", _launder)
+sh("builder-refuse: a reset to a commit that holds the builder's own test edit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_launder, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_launder, agent_id="bld1", agent_type="builder")
+
+# Case 5: the shell route. A test file written by `python3 -c` (no write tool) is refused by the diff.
+_bd_shell = diff_repo("bd-shell", _shell_write)
+sh("builder-refuse: a test file written by a Python process is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a test file written by a Python process is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
+
+# Stale revert: the cut point's bytes are no base once a reset has moved the worktree to a lane tip
+# that holds the test lines. The reverted file differs from that tip, so it is refused.
+_bd_stale = diff_repo("bd-stale-revert", _stale_revert)
+sh("builder-refuse: a stale revert to the cut point's bytes, after a reset to a lane tip, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_stale, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a stale revert to the cut point's bytes, after a reset to a lane tip, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_stale, agent_id="bld1", agent_type="builder")
+
+# Stale delete: a file the clean merge brought in is no base once the merge result holds it.
+_bd_stale_del = diff_repo("bd-stale-delete", _stale_delete)
+sh("builder-refuse: a stale delete of a test file a clean merge brought in is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_stale_del, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a stale delete of a test file a clean merge brought in is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_stale_del, agent_id="bld1", agent_type="builder")
+
+# Newer main: a builder that clean-merges a newer main into its own lane, and changes no test, is
+# allowed. The newer main is a base, and the file equals it.
+_bd_newer = diff_repo("bd-newer-main", _newer_main_merge)
+sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at commit",
+   COMMIT, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at push",
+   PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
+
+# Rebase: a builder that rebases onto the lane tip is judged against that tip. A test file written back
+# to main's bytes differs from it, so it is refused. The clean rebase is checked with the log checks below.
+_bd_rebase = diff_repo("bd-rebase-stale", _rebase_then_stale_revert)
+sh("builder-refuse: a builder's rebase onto a lane tip, then a test file written back to main's bytes, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_rebase, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's rebase onto a lane tip, then a test file written back to main's bytes, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_rebase, agent_id="bld1", agent_type="builder")
+
+# Two received bases: a test edit that matches neither is refused, and the refusal names no test path.
+_bd_two = diff_repo("bd-two-bases", _two_bases_test_edit)
+sh("builder-refuse: a test edit that matches neither of two received bases is denied at commit, naming no test path",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_two, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_a"), carries=(("restore", "Restore", "put back"), "orchestrator"))
+
+# Launder, kept: a test edit the builder pushed, then reset back to, is still its own test edit.
+_bd_f1b = diff_repo("bd-f1b-push-reset", _f1b_push_reset)
+sh("builder-refuse: a builder's pushed test edit, then a reset back to that push, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_f1b, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's pushed test edit, then a reset back to that push, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_f1b, agent_id="bld1", agent_type="builder")
+
+# A merge that conflicts in a test file and is resolved to the builder's own side is a test-author's to
+# resolve, so it is denied.
+_bd_f2 = diff_repo("bd-f2-conflict", _f2_conflict_merge)
+sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+
+# Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
+# diff_refusal_case (the a-product-edit row: author-diff at commit, push and stop).
+sh("builder-refuse: a test-author's commit with a product file is allowed",
+   COMMIT, "allow", cwd=os.path.join(DIFFROOT, "a-product-edit"), agent_id="auth1",
+   agent_type="test-author")
+
+# The xctestplan skip is a test change too (builder-refuse, not logged). Its repo is built once, here.
+_bd_plan = _plan_repo("xctestplan-skip", XCTESTPLAN_SKIP)
+sh("builder-refuse: a builder's skippedTests line is denied at commit", COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's skippedTests line is denied at push", PUSH, "deny", rule=BDIFF,
+   cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder's skippedTests line is blocked at the first stop", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+
+
+def clean_builder_case(label):
+    """Case 3, the Oct 2 false alarm. A builder that joined the lane tip and changed product files
+    only is allowed at commit, push and stop, and writes no builder-diff line."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
+                                  os.path.join(DIFFROOT, label), "builder", "bld1")
+        hits = [r for r in rows if len(r) > 3 and r[3] == BDIFF]
+        if out or hits:
+            return False, "expected silent allows and no builder-diff line, got %r and %d line(s)" % (
+                out[:60], len(hits))
+        return True, "allowed at commit, push and stop; no builder-diff line"
+    return case
+
+
+diff_repo("bd-clean-merge", _clean_merge)
+diff_repo("bd-clean-reset", _clean_reset)
+diff_repo("bd-own-clean-merge", _own_then_clean_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that merges the lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-merge")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that resets to the lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-reset")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder with its own product commit that then merges the lane "
+                         "tip is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-own-clean-merge")))
+diff_repo("bd-clean-rebase", _rebase_clean)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that rebases onto a lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-rebase")))
+
+
+def two_bases_reason_case():
+    """A deny on a test edit that matches neither of two received bases names no path and no commit, and its
+    one reason gives both undo routes: restore a changed test file, and delete a new one. The rule reads no
+    bases, so the reason cannot name one."""
+    out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-two"), _bd_two, "builder", "bld1")
+    answers = _guard_answers(out)
+    if not answers:
+        return False, "no guard answer for the commit"
+    decision, reason = answers[0]
+    main = _bd_two + "-main"
+    commits = [run_vcs(main, "rev-parse", rev).stdout.strip() for rev in ("lane", "main", "main~1")]
+    problems = []
+    if decision != "deny":
+        problems.append("expected deny at commit, got %r" % decision)
+    for sha in commits:
+        if sha[:12] in reason:
+            problems.append("the reason names a commit, %s" % sha[:12])
+    for word in ("tests/", "test_a"):
+        if word in reason:
+            problems.append("the reason names a test path: %r" % word)
+    for route in ("restore", "delete"):
+        if route not in reason.lower():
+            problems.append("the reason gives no %r undo route" % route)
+    return (not problems), ("; ".join(problems) or "the deny names no path and no commit, and gives both undo routes")
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on a test edit that matches neither of two received bases names no "
+                         "path or commit, and gives both undo routes", two_bases_reason_case))
+# A pull of a test-author's fast-forward onto the builder's own product commit is a received base.
+diff_repo("bd-f1-pull", _f1_pull)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that pulls a test-author's fast-forward over its own product "
+                         "commit, then commits product work, is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-f1-pull")))
+# A clean merge where each side changed a different test file: each file equals one received base.
+diff_repo("bd-f2b-clean-merge", _f2b_clean_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's clean merge of main, where each side changed a different "
+                         "test file, is allowed and logs no builder-diff line", clean_builder_case("bd-f2b-clean-merge")))
+# The conflicted merge a builder resets away leaves no resolution in the tree, so its test file is not judged.
+diff_repo("bd-conflict-reset", _f2_conflict_then_reset)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a test file, which it then resets away, "
+                         "is allowed and logs no builder-diff line", clean_builder_case("bd-conflict-reset")))
+# A conflict both sides made in a product file is no test path, so it does not offend for a builder.
+diff_repo("bd-product-conflict", _product_conflict_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a product file, both sides changed it, "
+                         "is allowed and logs no builder-diff line", clean_builder_case("bd-product-conflict")))
+
+
+def author_conflict_case():
+    """A test-author's conflicted merge of a test file is never refused, and logs nothing: a test file is the
+    test-author's own work, so the conflict is no offence for it."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-conflict"), _bd_f2, "test-author", "auth1")
+    hits = [r for r in rows if len(r) > 3 and r[3] in (BDIFF, "author-diff")]
+    if out or hits:
+        return False, "a test-author's conflicted test file was judged: %r and %d line(s)" % (out[:60], len(hits))
+    return True, "allowed at commit, push and stop; no builder-diff or author-diff line"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing",
+                         author_conflict_case))
+
+
+def logged_builder_case(label):
+    """Log-only: nothing is refused at commit, push or stop, and at least one builder-diff line is written."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1")
+        hits = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == BDIFF]
+        if out:
+            return False, "expected no refusal, got %r" % out[:60]
+        if not hits:
+            return False, "expected a builder-diff line, found none"
+        return True, "not refused at commit, push or stop; %d builder-diff line(s)" % len(hits)
+    return case
+
+
+def refused_push_and_stop_case(label):
+    """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
+    writes a builder-diff line. The commit check is left out: the row names push and stop only."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1", commit=False)
+        decisions = [decision for decision, _reason in _guard_answers(out)]
+        denied = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == BDIFF]
+        if decisions != ["deny", "deny"]:
+            return False, "expected a deny at push and at the first stop, got %r" % decisions
+        if len(denied) != 2:
+            return False, "expected two builder-diff deny lines, got %d" % len(denied)
+        return True, "denied at push and at the first stop; two builder-diff deny lines"
+    return case
+
+
+# Allow: a merge result and a plain cherry-pick of a test-author commit are git's, not the builder's. A commit
+# the builder makes from a staged pick or a squash is its own (the rows below).
+# The commit check runs in the state the builder stops in; push and stop run after the commit.
+_bd_c1_pre = diff_repo("bd-c1-pre", _c1_mid_merge)
+sh("builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit",
+   COMMIT, "allow", cwd=_bd_c1_pre, agent_id="bld1", agent_type="builder")
+diff_repo("bd-c1-post", _c1_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a merge of main with a product-file conflict, while main changed a test "
+                         "file, is allowed at push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-c1-post")))
+diff_repo("bd-g2-rebase", _g2_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase onto main where a test-author's commit and main change the same "
+                         "test file in different hunks is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-g2-rebase")))
+diff_repo("bd-g3-pull", _g3_pull_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a pull --rebase onto main where a test-author's commit and main change the "
+                         "same test file in different hunks is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-g3-pull")))
+diff_repo("bd-b1-cherry", _b1_cherry)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-author's commit is allowed and logs no "
+                         "builder-diff line", clean_builder_case("bd-b1-cherry")))
+_bd_b1b = diff_repo("bd-b1b-staged", _b1b_cherry_staged)
+sh("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit",
+   COMMIT, "allow", cwd=_bd_b1b, agent_id="bld1", agent_type="builder")
+# A staged cherry-pick that the builder commits, and a squash the builder commits, are plain commits of its own.
+# Their test file is refused at push and stop. A squash commit cannot be told apart from the builder's own commit,
+# so this is a known gap, named in docs/debts/notes.md (builders-squash-cherry-pick-n).
+diff_repo("bd-b1b-committed", _b1b_cherry_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit, then a "
+                         "commit, is denied at push and at the first stop",
+                         refused_push_and_stop_case("bd-b1b-committed")))
+diff_repo("bd-j1-squash", _j1_squash)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at "
+                         "the first stop", refused_push_and_stop_case("bd-j1-squash")))
+
+# A write after a rebase is the builder's own. Main's bytes written back over a test file the rebase replayed
+# drop the test-author's case, so the write is refused at commit, push and stop.
+_bd_h1r = diff_repo("bd-h1r-restore", _h1r_restore)
+sh("builder-refuse: after a rebase, main's bytes written back over a test file are denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: after a rebase, main's bytes written back over a test file are denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+add("builder-refuse: after a rebase, main's bytes written back over a test file are blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+# The same write, committed by the builder: the commit holds the drop, so push and the first stop are refused.
+diff_repo("bd-h1r-committed", _h1r_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: after a rebase, main's bytes written back over a test file and committed are "
+                         "denied at push and at the first stop",
+                         refused_push_and_stop_case("bd-h1r-committed")))
+# Allowed, no test edit: a rebase -i that squashes the builder's fixup into its product commit. It logs nothing.
+diff_repo("bd-fixup-rebase", _fixup_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase -i that squashes a fixup of the builder's product commits is allowed "
+                         "at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-fixup-rebase")))
+# Log-only: a conflict in a test file that the builder resolved during a rebase is a replay it chose, so the
+# guard logs it for the reviewer. Out of scope for the rebase write-back ruling: the builder resolved it with
+# `--ours` during the replay, which is not a write after the rebase. It stays logged only.
+diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
+                         logged_builder_case("bd-i1-rebase-ours")))
+
+# Undo route: a new test file is refused, and the reason says to delete it and names no test path.
+_bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
+sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_new"), carries=("delete",))
+sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_new"), carries=("delete",))
+
+
+def stop_pair_case():
+    """Case 6. A builder's first stop with a test change is blocked. Its second stop, with
+    stop_hook_active, is allowed silently and logs role-diff-unresolved."""
+    repo = os.path.join(DIFFROOT, "b-rewritten")
+    materialize(repo)
+    folder = os.path.join(ROOT, "stoppair")
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    body = {"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": "bld1", "agent_type": "builder"}
+    problems = []
+    first = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                           text=True, env=env, timeout=120)
+    if read_decision(first.stdout)[0] != "deny":
+        problems.append("first stop: expected a block, got %r" % first.stdout.strip()[:80])
+    second = subprocess.run([sys.executable, GUARD], input=json.dumps(dict(body, stop_hook_active=True)),
+                            capture_output=True, text=True, env=env, timeout=120)
+    if second.stdout.strip():
+        problems.append("second stop: expected a silent allow, got %r" % second.stdout.strip()[:80])
+    text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    if "role-diff-unresolved" not in text:
+        problems.append("no role-diff-unresolved line after the second stop")
+    return (not problems), ("; ".join(problems) or
+                            "first stop blocked; second stop allowed, logs role-diff-unresolved")
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
+                         "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
 
 
 # =========================================================================== failing open
@@ -13197,12 +13970,15 @@ LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writ
 # --------------------------------------------------------------------------- a waiting page behind main is not published
 FAMILY = "page-stale"
 #
-# Rule page-stale (hooks/guard.py, the Artifact tool). A publish of this repo's waiting page whose file is
-# behind main's skills/waiting-page/page.html is refused. Main is origin/main of the checkout that holds
-# stale_pages.py, so each case runs a copy of the guard in a checkout whose origin/main this suite
-# controls (WP_CHECK), never the real main. The copy finds stale_pages beside itself, as the guard does.
-# An allowed publish of main's page writes its full blob sha to <git common dir>/waiting-page-built.
-# Unknown, when main or the file cannot be read, allows: the rule fails open.
+# Rule page-stale (hooks/guard.py, the Artifact tool). A republish of this repo's waiting page is refused
+# when its file is behind main's skills/waiting-page/page.html, and when it is main's own page (main's title)
+# with designData and roadmap blocks that read as empty, white space aside, which would drop the page's live
+# data. A page with its own title was built by --write from a live page, so its empty blocks drop nothing and
+# it is allowed. A first publish, with no url, is never refused. Main is origin/main of the checkout that holds stale_pages.py, so each case runs a copy
+# of the guard in a checkout whose origin/main this suite controls (WP_CHECK), never the real main. The
+# copy finds stale_pages beside itself, as the guard does. An allowed publish writes main's full blob sha
+# to <git common dir>/waiting-page-built. Unknown, when main or the file cannot be read, allows: the rule
+# fails open.
 
 WP_DIR = os.path.join(ROOT, "pagestale")
 WP_CHECK = os.path.join(WP_DIR, "checkout")        # origin/main is its one commit: main's page.html
@@ -13212,6 +13988,10 @@ WP_GUARD_NOMAIN = os.path.join(WP_NOMAIN, "hooks", "guard.py")
 WP_CURRENT = os.path.join(WP_DIR, "current.html")  # main's page.html, byte for byte
 WP_BEHIND = os.path.join(WP_DIR, "behind.html")    # main's page with one div after its style block
 WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer's designData, roadmap and title text
+WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
+WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
+WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and both blocks empty
+WP_SPACED = os.path.join(WP_DIR, "spaced-empty.html")        # main's raw page with designData written as "{ }"
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
 WP_OTHER_URL = "https://claude.ai/artifact/wpother"
@@ -13235,15 +14015,21 @@ def wp_must(ok, why):
         sys.exit("fixture setup failed in build_page_checkout: %s" % why)
 
 
-def wp_writer(template):
-    """main's page with the three parts a writer's --write keeps live swapped for new text. Each part
-    must match exactly once in main's page."""
+def wp_writer(template, design=True, roadmap=True, title=True, design_text=WP_WRITER_DESIGN,
+              title_text="Queue, renamed // not a comment"):
+    """main's page with the parts a writer's --write keeps live swapped for new text, each part only when
+    its flag is set. Each part must match exactly once in main's page."""
     def swap(pattern, text, repl):
         wp_must(len(pattern.findall(text)) == 1, "%s does not match once in main's page" % pattern.pattern[:40])
         return pattern.sub(repl, text, count=1)
-    text = swap(WP_DESIGN, template, lambda m: m.group(1) + WP_WRITER_DESIGN + m.group(2))
-    text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
-    return swap(WP_TITLE, text, lambda m: "<title>Queue, renamed // not a comment</title>")
+    text = template
+    if design:
+        text = swap(WP_DESIGN, text, lambda m: m.group(1) + design_text + m.group(2))
+    if roadmap:
+        text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
+    if title:
+        text = swap(WP_TITLE, text, lambda m: "<title>%s</title>" % title_text)
+    return text
 
 
 def wp_put(path, text):
@@ -13259,7 +14045,12 @@ def wp_write_pages():
         template = handle.read()
     wp_must(template.count("</style>") == 1, "main's page has no single style block to add a div after")
     behind = template.replace("</style>", "</style>\n<div>x</div>", 1)
-    for path, text in ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template))):
+    pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
+             (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
+             (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)),
+             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Queue")),
+             (WP_SPACED, wp_writer(template, roadmap=False, title=False, design_text="{ }")))
+    for path, text in pages:
         wp_put(path, text)
 
 
@@ -13296,7 +14087,8 @@ def wp_control(folder, main):
     """The copy's own stale_pages.py gives the verdicts the cases assume: main's page, the behind page and
     the writer's page against a controlled main, or unknown with no main. A miss stops the run."""
     script = os.path.join(folder, "skills", "waiting-page", "stale_pages.py")
-    wants = [(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0)] if main else [(WP_CURRENT, 2)]
+    wants = ([(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0), (WP_DESIGN_LIVE, 0), (WP_ROADMAP_LIVE, 0),
+              (WP_TITLED_EMPTY, 0), (WP_SPACED, 0)] if main else [(WP_CURRENT, 2)])
     for page, code in wants:
         run = subprocess.run([sys.executable, script, "--page", page], capture_output=True, text=True,
                              cwd=folder, timeout=120)
@@ -13323,14 +14115,18 @@ def build_page_nomain():
     wp_control(WP_NOMAIN, main=False)
 
 
-lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER], build_page_checkout)
+lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE, WP_TITLED_EMPTY,
+              WP_SPACED], build_page_checkout)
 lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
 
 
 def wp_publish(name, expected, page, rule=None, guard=None, url=PQ_URL, **extra):
-    """One Artifact publish of `page` to `url`, judged by a copy of the guard in the controlled checkout."""
+    """One Artifact publish of `page`, judged by a copy of the guard in the controlled checkout. A url of
+    None is a first publish: the call carries no url key at all."""
+    if url is not None:
+        extra["url"] = url
     add("page-stale: " + name, expected, rule, tool="Artifact", cwd=PQ_REPO, guard=guard or WP_GUARD,
-        url=url, file_path=page, **extra)
+        file_path=page, **extra)
 
 
 wp_publish("a behind page with no action is refused", "deny", WP_BEHIND, rule="page-stale")
@@ -13340,7 +14136,16 @@ wp_publish("a behind page published to the code form of the waiting page is refu
            rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
 wp_publish("a behind page published to another artifact's code form is allowed", "allow", WP_BEHIND,
            url="https://claude.ai/code/artifact/wpother")
-wp_publish("main's page published to the waiting page is allowed", "allow", WP_CURRENT)
+wp_publish("main's page republished to the waiting page is refused: its designData and roadmap are empty",
+           "deny", WP_CURRENT, rule="page-stale")
+wp_publish("main's page republished to the code form of the waiting page is refused", "deny", WP_CURRENT,
+           rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
+wp_publish("main's page with designData written as a space-padded empty object is refused", "deny", WP_SPACED,
+           rule="page-stale")
+wp_publish("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
+wp_publish("a page with its own title and empty blocks, as a --write builds it, is allowed", "allow", WP_TITLED_EMPTY)
+wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
+wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
 wp_publish("a behind page published to another url is allowed", "allow", WP_BEHIND, url=WP_OTHER_URL)
 wp_publish("a read of the waiting page with a behind file is allowed", "allow", WP_BEHIND, action="read")
@@ -13364,14 +14169,14 @@ def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
 
 
 def wp_stamp_case():
-    """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
+    """An allowed publish of a page with live data writes main's blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
         os.remove(stamp)
-    out = wp_publish_run(WP_CURRENT)
+    out = wp_publish_run(WP_WRITER)
     if out:
-        return False, "the publish of main's page was refused: %r" % out[:100]
+        return False, "the publish of a page with live data was refused: %r" % out[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -13383,7 +14188,7 @@ def wp_stamp_case():
 
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
-LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
+LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live data writes the stamp", wp_stamp_case))
 
 
 # --------------------------------------------------------------------------- a design picture is checked at write
@@ -13557,19 +14362,19 @@ def pd_stamp_case():
         return open(stamp, encoding="utf-8").read().strip() if os.path.isfile(stamp) else None
 
     def names(got):
-        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_CURRENT)
+        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_WRITER)
 
     if os.path.exists(stamp):
         os.remove(stamp)
-    if wp_publish_run(WP_CURRENT):
-        return False, "the publish of main's page was refused"
+    if wp_publish_run(WP_WRITER):  # a page with live data: main's raw page is refused as a republish
+        return False, "the publish of a page with live data was refused"
     if not names(stamped()):
-        return False, "after an allowed publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+        return False, "after an allowed publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_WRITER)
     os.remove(stamp)
-    if wp_publish_run(os.path.relpath(WP_CURRENT, WP_CHECK)):
+    if wp_publish_run(os.path.relpath(WP_WRITER, WP_CHECK)):
         return False, "the publish by a relative file path was refused"
     if not names(stamped()):
-        return False, "after a relative publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+        return False, "after a relative publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_WRITER)
     behind = wp_publish_run(WP_BEHIND)
     if "page-stale" not in behind:
         return False, "a behind publish was not refused by page-stale: %r" % behind[:100]
@@ -21459,6 +22264,14 @@ def ov_role_acts(config, session):
     )
 
 
+def ov_builder_diff_acts(config, session):
+    """A builder's test change at commit, after a reset to the lane tip, as the incident does. builder-diff is
+    a role guard, so no override lifts it."""
+    materialize(_bd_inc)
+    return (OvAct("a builder's commit of a test change after a reset to the lane tip", "Bash",
+                  {"command": COMMIT}, BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder"),)
+
+
 def ov_exclusion_check(timed, make_acts, what):
     """The acts `make_acts` lists stay refused under either kind of override. A refusal the override does
     not lift does not spend it, so the next lifted act still goes through."""
@@ -21579,6 +22392,10 @@ for _label, _check in (
      ov_exclusion_check(False, ov_role_acts, "role")),
     ("override: the model and role guards stay refused under a timed override",
      ov_exclusion_check(True, ov_role_acts, "role")),
+    ("override: a builder's test change stays refused under a one-act override",
+     ov_exclusion_check(False, ov_builder_diff_acts, "bdiff")),
+    ("override: a builder's test change stays refused under a timed override",
+     ov_exclusion_check(True, ov_builder_diff_acts, "bdiff")),
     ("override: a shell write of the agent model cap stays asked under a one-act override",
      ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
     ("override: a shell write of the agent model cap stays asked under a timed override",

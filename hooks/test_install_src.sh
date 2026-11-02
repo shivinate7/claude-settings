@@ -78,6 +78,12 @@ work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
+# The hook's fetch bound is 2 s by default. A local fetch on a loaded Windows runner can take
+# longer, so a case that expects a behind count would read "freshness unknown" instead. The cases
+# test what prints after the fetch ran, so every hook run here gets a 30 s bound, under the CI
+# step's 3 min cap. caseF6 and caseG7 set 0 inline: they test the bound itself.
+export CLAUDE_SETTINGS_FETCH_TIMEOUT=30
+
 # Detect once whether this account can create a real symbolic link, and reuse the answer
 # everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
 # or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
