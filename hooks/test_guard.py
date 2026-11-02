@@ -8918,9 +8918,9 @@ def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
     return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
 
 
-def role_tag_call(tool_id, session=ROLE_OWN, tag="cs-build:coordinator"):
-    """One paired set_session_tags call that adds `tag` to `session`."""
-    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": [tag]}),
+def role_tag_call(tool_id, session=ROLE_OWN, tag="cs-build:coordinator", key="add"):
+    """One paired set_session_tags call that adds `tag` to `session`, or removes it when `key` is "remove"."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], key: [tag]}),
             role_result(tool_id, "ok")]
 
 
@@ -22644,6 +22644,9 @@ CS_SESSIONS = {
     "untagged": ("coordinator", "own-untagged"),
     "untagged-then-tag": (None, "own-untagged-then-tag"),
     "tag-call": (None, "own-tag-call"),
+    "tag-then-untagged-record": ("coordinator", "own-tag-then-untagged-record"),
+    "tag-then-untag": ("coordinator", "own-tag-then-untag"),
+    "record-then-untag": ("coordinator", "own-record-then-untag"),
     "foreign-tag-call": ("coordinator", "foreign-tag-call"),
     "own-lane-tag-call": ("coordinator", "own-tag-call-lane"),
     "no-record": ("coordinator", None),
@@ -22662,6 +22665,12 @@ CS_TX_LINES = {
     "own-untagged-then-tag": (role_call("c1", ["cs-repo:o/r"], session=CS_PAYLOAD_SID)
                               + role_tag_call("t1", session=CS_PAYLOAD_SID)),
     "own-tag-call": role_tag_call("t1", session=CS_PAYLOAD_SID),
+    "own-tag-then-untagged-record": (role_tag_call("t1", session=CS_PAYLOAD_SID)
+                                     + role_call("c2", ["cs-repo:o/r"], session=CS_PAYLOAD_SID)),
+    "own-tag-then-untag": (role_tag_call("t1", session=CS_PAYLOAD_SID)
+                           + role_tag_call("t2", session=CS_PAYLOAD_SID, key="remove")),
+    "own-record-then-untag": (role_call("c1", COORD_TAGS, session=CS_PAYLOAD_SID)
+                              + role_tag_call("t1", session=CS_PAYLOAD_SID, key="remove")),
     "own-tag-call-lane": role_tag_call("t1", session=CS_PAYLOAD_SID, tag="cs-build:lane"),
     "foreign-coordinator": role_call("c1", COORD_TAGS, session=CS_OTHER_RECORD),
     "foreign-tag-call": role_tag_call("t1", session=CS_OTHER_RECORD),
@@ -22869,6 +22878,17 @@ cs_write("own_set_session_tags_lane_passes, a coordinator role file beside it", 
 cs_write("role_file_coordinator_untagged_record_passes (e)", "allow", CS_CODE, "Edit", role="untagged")
 cs_write("role_file_coordinator_no_record_passes", "allow", CS_CODE, "Edit", role="no-record")
 cs_write("batch_runner_record_passes, a coordinator role file beside it", "allow", CS_CODE, "Edit", role="batch-runner")
+# (f) an own set_session_tags call adds cs-build:coordinator, then a newer own get_session record has no such tag: no longer a
+# coordinator. The record replaces the set, so the call passes.
+cs_write("own_set_session_tags_then_untagged_record_passes, a coordinator role file beside it (f)", "allow", CS_CODE, "Edit",
+         role="tag-then-untagged-record")
+# (g) an own set_session_tags call adds cs-build:coordinator, then an own call removes it: no longer a coordinator, so it passes.
+cs_write("own_set_session_tags_then_own_remove_passes, a coordinator role file beside it (g)", "allow", CS_CODE, "Edit",
+         role="tag-then-untag")
+# (h) an own get_session record is tagged cs-build:coordinator, then an own set_session_tags call removes that tag: the session
+# is no longer a coordinator, so the call passes. A remove that only cancels the set's own adds keeps the record tag: it fails.
+cs_write("own_coordinator_record_then_own_remove_passes, a coordinator role file beside it (h)", "allow", CS_CODE, "Edit",
+         role="record-then-untag")
 # Controls: each holds on the guard before the change too, so a pass here shows the rule was never the cause.
 cs_write("control_no_role_file_no_record_passes", "allow", CS_CODE, "Edit", role="none")
 cs_write("control_transcript_naming_no_file_passes", "allow", CS_CODE, "Edit", role="missing-transcript")
@@ -23163,7 +23183,8 @@ def cs_override_call(config, session, seconds):
 # 6. Cost (rule outcomes-mechanize-rules). The rule reads a session's record only when its gates pass: remote, not an agent,
 # a write or shell tool, and a target outside the record homes. So a call whose gate shuts (a local session, an agent's call)
 # opens no layout, no config CLAUDE.md and no record. A candidate call opens its record at most once, and never the role
-# file, which the guard does not read. A write to a record home opens no record. The probe's `opens` seam counts the opens
+# file, which the guard does not read. A call the rule would not refuse opens no record: a write to a record home, or a call
+# that names no repo path. The probe's `opens` seam counts the opens
 # (LB_PROBE). The rule's own opens are the call's less those of the same call with CLAUDE_CODE_REMOTE "false", where the rule
 # leaves at its first gate; other rules' own opens cancel out. The control row shows the spy sees a read, so a pass is no
 # blind spy's.
@@ -23198,20 +23219,23 @@ def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None, transcri
 
 
 def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
-    """(decision, reason, every open, the opens only the rule makes) of one call."""
+    """(decision, reason, every open, the opens only the rule makes, the rule's opens of `transcript`) of one call. The
+    rule's own opens are the call's less those of the same call with CLAUDE_CODE_REMOTE "false", so another rule's opens of
+    the transcript cancel out."""
     env = dict(CS_REMOTE if env is None else env)
     got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id, transcript)
     _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id, transcript)
-    return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off]
+    own_record = opened.count(os.path.abspath(transcript)) - off.count(os.path.abspath(transcript)) if transcript else 0
+    return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off], own_record
 
 
 def cs_cost_check(role, tool, tool_input, cwd, env=None, agent_id=None, shut=False, home=False):
     """A check that the call is allowed and what the rule opened of its own. `shut`: a gate closes first, so the rule opens no
-    layout, no config CLAUDE.md and no record. `home`: the call writes a record home, so the record is not opened. Otherwise
-    the record is opened at most once. In every case the role file is never opened."""
+    layout, no config CLAUDE.md and no record. `home`: the call opens no record, as a write to a record home or a call the rule
+    would not refuse does. Otherwise the record is opened at most once. In every case the role file is never opened."""
     def check():
         config, record = cs_pair(role)
-        got, reason, opened, rule_opens = cs_rule_opens(config, tool, tool_input, cwd, env, agent_id, record)
+        got, reason, opened, rule_opens, times = cs_rule_opens(config, tool, tool_input, cwd, env, agent_id, record)
         if got != "allow":
             return False, "the call was %s, want allow: %s" % (got, reason[:90])
         role_file = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
@@ -23219,9 +23243,8 @@ def cs_cost_check(role, tool, tool_input, cwd, env=None, agent_id=None, shut=Fal
         problems = []
         if role_file in rule_opens:
             problems.append("it opened the role file, which the guard never reads")
-        times = opened.count(os.path.abspath(record)) if record else 0
         if home and times:
-            problems.append("it opened the record %d times, a write to a record home opens none" % times)
+            problems.append("it opened the record %d times, want none" % times)
         elif times > 1:
             problems.append("it opened the record %d times, want at most once" % times)
         if shut:
@@ -23284,8 +23307,8 @@ for _what, _tool, _input, _cwd in (   # a coordinator's call that names no repo 
         ("git status in a repo", "Bash", {"command": VCS + " status"}, GITMAIN),
         ("git log in a repo", "Bash", {"command": VCS + " log --oneline -3"}, GITMAIN),
         ("echo in a repo", "Bash", {"command": "echo hi"}, GITMAIN)):
-    CS_CHECKS.append(("coordinator-scope cost: a coordinator call that names no repo path (%s) opens its record at most once" % _what,
-                      cs_cost_check("coordinator", _tool, _input, _cwd)))
+    CS_CHECKS.append(("coordinator-scope cost: a coordinator call that names no repo path (%s) opens no record" % _what,
+                      cs_cost_check("coordinator", _tool, _input, _cwd, home=True)))
 CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused Write of product code shows the layout open "
                   "and its record once", cs_cost_control_check))
 
