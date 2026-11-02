@@ -13,19 +13,18 @@ Lane kind: informed. No mockup: no visible text changes (items 2 and 4).
 | same, no repo name | Questions | "Queue" | "Cockpit" |
 | same, no repo name | Status | "Queue · Status" | "Cockpit" |
 | same, static `<title>` (line 2) | none | "Queue" | "Cockpit" |
-| `skills/roadmap/page/index.html` | all | "claude-settings Roadmap" | no change (item 3) |
+| `skills/roadmap/page/index.html` (the roadmap viewer) | all | "claude-settings Roadmap" | no change, keeps its title (item 3) |
 
 ## Design choices
 
 1. Live pages take the new name at their next republish. The gallery name is the page's static
-   `<title>`. `splice.carry` (with `title_span`) copies the live page's title into each republish,
-   byte for byte. So a change to `page.html` line 2 alone never reaches a repo that has a page:
-   its card stays "<repo> Queue". `setTitle()` fixes only the browser tab, after the script runs.
-   Spec: after one republish, a live title "Queue" or "<name> Queue" reads "Cockpit" or
-   "<name> Cockpit". Any other live title carries as today. The builder picks the mechanism, for
-   example a rewrite in `splice.carry`, or `stale_pages.py --write` setting it from `identity.name`.
+   `<title>`. `splice.carry` copies the live page's title into each republish, and renames an old
+   form by slicing (`splice.renamed_title`, `PAGE_NAME`): "Queue", "<X> Queue", "<X> Queue · Status",
+   "Roadmap" and "<X> Roadmap" become "Cockpit" or "<X> Cockpit". Any other live title carries byte
+   for byte. `stale_pages.carries_data` reads a live title through the same rename, so an untouched
+   live page titled "Queue" with empty blocks is still refused. `setTitle()` sets the browser tab
+   after the script runs.
    Gain: every repo renames with no hand step. Loss: one more title rule in the carry path.
-   Pick: this outcome.
 2. `page.html`: no visible text changes. No visible text names the page "Queue". The header h1
    (line 778, `<h1 class="repo" id="repoName">Questions</h1>`) shows the repo name, or the tab's
    part name for a screen reader (line 974, `$("repoName").textContent = name || part;`). The tab
@@ -34,12 +33,14 @@ Lane kind: informed. No mockup: no visible text changes (items 2 and 4).
    session through `notifyClaude` or a copied ask. They use the glossary term "waiting page".
    Gain: sessions keep one term. Loss: none for the owner, who does not read these as a page name.
    Pick: keep.
-3. `skills/roadmap/page/index.html`: no change. It is not the artifact. The roadmap skill publishes
-   no page, the old URL retires, and "Nothing publishes it" (`skills/roadmap/SKILL.md`, intro and
-   `--block`). Its title and `--repo-name` hard-code `claude-settings`, so no repo builds it per
-   repo. Its one visible page name is line 337, `<div class="brand"><b></b><span>roadmap</span></div>`.
+3. `skills/roadmap/page/index.html`: no change (coordinator ruling, 2026-11-02 12:10 CST). It is the
+   roadmap viewer, not the cockpit. The roadmap skill publishes no page, the old URL retires, and
+   "Nothing publishes it" (`skills/roadmap/SKILL.md`, intro and `--block`). Its title and `--repo-name`
+   hard-code `claude-settings`, so no repo builds it per repo. Its one visible page name is line 337,
+   `<div class="brand"><b></b><span>roadmap</span></div>`.
    Gain: no second page named "Cockpit" that is not the cockpit. Loss: the retired read-only page
-   keeps the old name. Pick: keep.
+   keeps the old name. Carry still renames a live "<X> Roadmap" title on the waiting page, because
+   a waiting page once held that title. Pick: keep.
 4. One title on every tab, with no part suffix. Gain: one name, as the ruling says. Loss: the
    browser tab no longer says which part is open; the tab row still does. Pick: one title.
 
