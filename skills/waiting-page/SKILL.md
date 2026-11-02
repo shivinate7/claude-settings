@@ -47,7 +47,14 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
-    ranked items, oldest first. A group sits together at its best member's `rank`.
+    ranked items, oldest first. A group sits together at its best member's `rank`. Inside a tier,
+    new items come first, then seen ones, each part in that order. Seen: the item is open, has no
+    `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
+    `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
+    never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
+    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
+    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
+    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts

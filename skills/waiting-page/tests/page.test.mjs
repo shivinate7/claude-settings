@@ -35,6 +35,8 @@ const TASK = {
 };
 const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, ...over });
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
+// Later than the sends these cases use (the latest is LA_AT, 2026-10-29T19:05Z). An item added then is new, not seen, so its parts stay unfolded.
+const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
@@ -53,6 +55,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  // Pushes one item through the items listener, as a session adding an item after the page loaded would.
+  window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
   const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
@@ -1212,7 +1216,7 @@ test("when the store refuses a write, the answer line can be copied", async (t) 
 const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count();
 
 test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
   assert.equal(await clearCount(page), 0);
   await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
   assert.equal(await clearCount(page), 0);
@@ -1289,10 +1293,10 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
 });
 
-// The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
-test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
-  const FRESH = mk("fresh-decision", 29);
-  const page = await open(t, { items: [DECISION, FRESH, TASK], answers: SAVED_A }); if (!page) return;
+// The note box is open on every unseen open card, with no Add a note button. A sent card has no box; a card under Change is open.
+test("the note box is open on every unseen open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
+  const FRESH = mk("fresh-decision", 29, { added: ASKED_AFTER_SEND });
+  const page = await open(t, { items: [DECISION, FRESH, { ...TASK, added: ASKED_AFTER_SEND }], answers: SAVED_A }); if (!page) return;
   assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
   for (const it of [FRESH, TASK]) {
     assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
@@ -1395,7 +1399,7 @@ test("the Copy line names a note-only task as note, not done", async (t) => {
 });
 
 test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
   await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
   await addNote(page, TASK, "   ");
@@ -1809,6 +1813,178 @@ test("SKILL.md answers a comment by rewriting the item, never in a comment threa
   assert.doesNotMatch(skill, /reply in the comment thread/i);
   assert.match(skill, /never reply in a comment thread/i);
   assert.match(skill, /rewrite that item/i);
+});
+
+// ---------------------------------------------------------------- seen items sink
+
+// A seen item is open, has no answer, and was added before the last send. Inside its tier it sinks
+// below the new items and folds until the owner unfolds it. lastSend here is a closed item's last answer.
+const SENT_AT = at(10);
+const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { choice: "a", at: SENT_AT, note: "" } });
+const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
+const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
+const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
+
+test("a seen decision sinks under a new one in Whenever, and its options fold until the owner unfolds it", async (t) => {
+  const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
+  assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
+  const unfold = card(page, seen).locator("button.unfold");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
+  assert.equal(await optsShown(page, seen), false, "a seen item's options show before the owner unfolds it");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
+  assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+});
+
+test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+  const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
+  const unfold = card(page, seen).locator("button.unfold");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+});
+
+test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+  const seen = mk("seen-answered", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const c = card(page, seen), unfold = c.locator("button.unfold");
+  assert.equal(await seenOf(page, seen), "true", "the card is not seen");
+  await unfold.click();
+  await choose(page, seen, "a");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
+  await unfold.click({ force: true }); // a press on the locked control must not close it
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+});
+
+test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
+  const a = mk("grp-a", 1, { group: "pair", added: at(5) }), b = mk("grp-b", 2, { group: "pair", added: at(5) });
+  const page = await open(t, { items: [a, b, mk("solo-seen", 3, { added: at(5) }), sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, a), "true", "the group is not seen at load");
+  const late = mk("grp-c", 4, { group: "pair", added: at(20) });
+  await page.evaluate((it) => window.__putItem(it), late);
+  await card(page, late).waitFor();
+  for (const it of [a, b, late]) assert.notEqual(await seenOf(page, it), "true", `${it.id} is still seen after its group gained a new member`);
+  const ids = await page.evaluate(() => [...document.querySelectorAll("article.card, #seen-div")].map((e) => e.id));
+  const divider = ids.indexOf("seen-div");
+  assert.ok(divider >= 0, "no seen divider on the page");
+  for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
+});
+
+// Fold ids come from the number, so two open items that share a number must still get their own.
+test("two open items with the same number get unique fold ids", async (t) => {
+  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
+  for (const it of items) {
+    const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
+    const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
+    assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
+  }
+});
+
+// A push of an unrelated item re-renders the page; the note box the owner is typing in must keep its caret.
+test("typing in a note box keeps the caret when an unrelated item arrives", async (t) => {
+  const page = await open(t); if (!page) return;
+  const ta = page.locator(`#n-${DECISION.id}`), other = mk("caret-other", 9);
+  await ta.fill("hello world");
+  await ta.evaluate((el) => { el.focus(); el.setSelectionRange(5, 5); window.__ta = el; });
+  await page.evaluate((it) => window.__putItem(it), other);
+  await card(page, other).waitFor();
+  const after = await page.evaluate((id) => { const el = document.getElementById("n-" + id); return { same: el === window.__ta, value: el.value, start: el.selectionStart, focused: document.activeElement === el }; }, DECISION.id);
+  assert.equal(after.same, true, "the note box was rebuilt by an unrelated push");
+  assert.equal(after.value, "hello world", "the note text changed");
+  assert.equal(after.start, 5, `the caret moved to ${after.start}`);
+  assert.equal(after.focused, true, "the note box lost focus");
+});
+
+// The seen divider's words say what is true of every seen card: asked before the last Send. An answered seen card stays below it until reload.
+test("the seen divider reads Asked before, and never claims a card is not answered", async (t) => {
+  const seen = mk("seen-divider", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const words = (await page.locator("#seen-div").textContent()).replace(/\s+/g, " ").trim();
+  assert.match(words, /Asked before/, `the divider reads "${words}"`);
+  assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
+});
+
+test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
+  const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+});
+
+test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
+  const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+});
+
+test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
+  const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
+  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
+  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+});
+
+test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
+  const seen = mk("seen-ranked", 1, { added: at(5), rank: 1 }), fresh = mk("fresh-ranked", 2, { added: at(20), rank: 2 });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["fresh-ranked", "seen-ranked"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+});
+
+test("a seen item with a draft keeps its options open and still sinks", async (t) => {
+  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = mk("draft-fresh", 2, { added: at(20) });
+  const storage = { "waiting.draft": JSON.stringify({ [seen.id]: { choice: "b" } }) };
+  const page = await open(t, { items: [seen, fresh, sentItem()], storage }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["draft-fresh", "draft-seen"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.equal(await optsShown(page, seen), true, "a seen item with a draft is folded");
+});
+
+test("a seen stood pick sinks under a new one in Pick stands, and its options stay open", async (t) => {
+  const seen = mk("stand-seen", 1, { added: at(5), stands: true }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true });
+  const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "stands"), ["stand-fresh", "stand-seen"]);
+  assert.equal(await seenOf(page, seen), "true", "the seen stood pick is not marked seen");
+  assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
+});
+
+test("with no answer anywhere, nothing is seen and Whenever stays oldest first", async (t) => {
+  const older = mk("no-send-old", 1, { added: at(5) }), newer = mk("no-send-new", 2, { added: at(20) });
+  const page = await open(t, { items: [older, newer] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["no-send-old", "no-send-new"]);
+  for (const it of [older, newer]) {
+    assert.notEqual(await seenOf(page, it), "true", `${it.id} is marked seen with no lastSend`);
+    assert.equal(await optsShown(page, it), true, `${it.id} folds with no lastSend`);
+  }
+});
+
+test("a group with one new member is new as a whole, so a seen item in its tier sinks under it", async (t) => {
+  const solo = mk("g-solo", 1, { added: at(3) });
+  const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
+  const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), ["g-old", "g-new", "g-solo"]);
+  assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
+  assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
+  assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
 });
 
 // ---------------------------------------------------------------- round 2 looks
@@ -4065,7 +4241,7 @@ test("a lane shows 'waits on lane <slug>' as one text run in the top row, after 
 });
 
 test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
-  const it = mk("pl-1a", 1, { holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const it = mk("pl-1a", 1, { added: ASKED_AFTER_SEND, holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const page = await open(t, { items: [it] }); if (!page) return;
   const c = card(page, it);
   await laText(page, it);
