@@ -1,6 +1,6 @@
 # A Workflow agent body chosen at run time is not read
 
-**What.** Guard rule `coordinator-scope` judges a Workflow script by the options objects it reads in each `agent()` call. A body chosen when the script runs, such as a ternary between two bodies held in variables, shows the guard no `agentType`, so a build or review agent can pass in a coordinator.
+**What.** Guard rule `coordinator-scope` judges a Workflow script by the options objects it reads in each `agent()` call. A body chosen at run time, such as a ternary between two variables, shows no `agentType`. A build or review agent can then pass in a coordinator.
 
 **Where.** `hooks/guard.py` (`script_agent_calls`, `coordinator_act_hit`). The guard reads text, and cannot run the script.
 
