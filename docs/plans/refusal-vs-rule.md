@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-140 rows: exact 85, looser 9, stricter 12, uncited 33, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+140 rows: exact 86, looser 9, stricter 11, uncited 33, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -123,7 +123,7 @@ Notes: lint/rule_mechanisms.json calls roles-sonnet-is-the-ceiling unmechanized,
 | `task-names-check` | task-names-its-check | "A waiting-page task carries a line in `context` that starts `Why yours:`." | exact | exact | false check text passes; the decision accepts that limit | - |
 | `option-letter-keys` | option-keys-are-letters | "The key of each option is that letter in lowercase." | exact | exact | only the decision says it; no CLAUDE.md or style line does | rule rewrite: add one key-letter line to the waiting-page skill |
 | `rework-off-page` | rework-leaves-page | "A session never writes an open item that says it is being reworked." | exact | exact | the stricter cases (history text) are limits the decision accepts | - |
-| `question-departs` | port-keeps-behaviour | "a change that differs from main, never 'none', 'stays' or 'as today'." | stricter | exact | "Departs from: main — adds a guard so nothing merges during batch CI" is refused for the word "nothing" | tool fix: match a no-change word only when it is the whole change side |
+| `question-departs` | port-keeps-behaviour | "It also refuses a no-change word in the first clause of the change side." | exact | exact | "Departs from: main — adds a guard so nothing merges" is refused for "nothing", as the decision's word list says; the style rule names only three words | - |
 | `item-field-rendered` | item-field-rendered | "refuses an ArtifactData write to items that names a top-level field outside the list." | exact | exact | the list is read from page.html itemFields | - |
 | `page-stale` | page-stale-publish | "Every republish of a waiting page is main's page.html with the live designData and roadmap blocks kept." | looser | exact | a republish of main's raw page with empty designData and roadmap blocks passes, and the live data is lost | tool fix: deny a republish whose designData block equals main's empty template, unless it is a first publish |
 | `gh-login-switch` | act-in-place | "A gh command block opens, after its `cd`, with `gh auth switch -u shivinate7`" | stricter | exact | a str_replace of "gh pr view 3" to "gh pr view 4" is refused, though the stored command keeps its switch | tool fix: on str_replace, judge the whole command after the edit |
@@ -232,7 +232,7 @@ Notes: every Stop ends "No override lifts this refusal" (2488), false for red-ba
 Each stricter or looser row becomes one step. Triage owns the steps. This record changes no guard.
 
 - **Stricter, tool fix:** `merge-checks:batch` and `merge:batch-refusal` (step overlapping-batches),
-  `command-in-item`, `question-departs`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
+  `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
   `impeccable-review-only`, `builder-test-edit`, `records-page`, `destructive-delete` (heredoc text),
   `merge:preview-base-run`, the "no override" text.
 - **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`), `session-home`,
