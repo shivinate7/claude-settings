@@ -38,6 +38,12 @@ Each agent runs `git diff --cached --stat` before each commit. The list names on
 
 No hook or check enforces this yet. The agent files and the brief template carry it.
 
+- The orchestrator never `cd`s into an agent's worktree. It reads that tree with `git -C <path>`.
+- The cloud platform's Stop hook (`~/.claude/stop-hook-git-check.sh`) is written by the platform, not this repo. It checks git in the shell's current folder. A `cd` by the main session persists.
+- Incident: the hook read a worktree of base copies. It asked to commit and push them. That push would have undone a merged PR.
+- Orchestrator's call, 2026-11-01 23:39 CST: no patch to the platform's script.
+- Orchestrator's call, same time: a tree that holds only base copies can be removed. See the worktree-removal decision, `when-a-worktree-may-be-removed`.
+
 Risk kind: incident, 2026-11-01 22:41 CST, worktree of lane `merge-lock-record-drift`.
 
 Kind: build
