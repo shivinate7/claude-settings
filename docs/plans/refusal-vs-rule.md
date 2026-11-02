@@ -237,8 +237,16 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
   `merge:preview-base-run`, the "no override" text.
 - **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`), `session-home`,
   `agent-model-floor`, `port-question`, `question-form`, `page-stale`.
-- **Owner rules first:** `press-link`, `silent-write` and `agent-model-cap`. Each has a tool fix
-  and a rule rewrite, and only the owner picks between them.
+- **Fit the tool to the rule** (process-only, coordinator 2026-11-01 21:14 CST). The rule stays,
+  and the tool moves to fit it:
+  - `agent-model-cap`: a fix step. A plain Explore on Opus asks, as for any spawn above its table
+    model. The `Audit:` marker adds no exception.
+  - `press-link`: a fix step. The rule covers a press the owner makes. The check stops asking for a
+    link on a press the session makes.
+  - `silent-write`: no step. The guard holds part of its rule, and CLAUDE.md holds the rest. See note
+    silent-write-git-only.
+  - `load-brake` and `create_session`: no step. A cloud session adds no load to this machine. See note
+    load-brake-skips-create-session.
 - **Uncited, rule rewrite:** the merge-lock decision, `pointer-head`, `env-file`, `config-edit`,
   `ln-over-directory`, `role-diff-main-checkout`, `role-diff-unresolved`, `merge:pinned-mismatch`,
   `merge:wait-base-changed`, `merge:blocked-or-behind`, `merge:claim-off-default-base`.
