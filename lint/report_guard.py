@@ -31,12 +31,14 @@ check does not wait for a git write: the reply's labels are what it reads. Cost:
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
-After a compaction, each report also holds a `Recovered:` line, or `Recovered: none`, anywhere in
-the report blockquote, until one lands (`compaction-carry`, item 11 of the precompact-handoff
-record). A compaction is the newest `compact_boundary` system record. Any main-session reply after
-it that holds the line satisfies the demand; the current reply counts by its blockquote. The demand
-holds on landed turns and unlanded turns whose reply has the report shape, and in the rewrite after
-a missing-report block when the rewrite has the report shape. Cost: a scan of the records main()
+After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
+may say `none`), anywhere in the report blockquote, until one lands (`compaction-carry`, item 11 of
+the precompact-handoff record). A compaction is the newest `compact_boundary` system record. Each
+line is tracked alone: any main-session reply after it that holds the line satisfies that demand;
+the current reply counts by its blockquote. Each item of a current Recovered line (split on ";")
+names a whole-word source: git, page or digest. The demand holds on landed turns and unlanded turns
+whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
+has the report shape. Cost: a scan of the records main()
 already loaded (the rewrite reads the transcript once, as before); no file, log or process.
 """
 import json
@@ -83,8 +85,8 @@ LANDING_TOOLS = {
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
-# "**Recovered:**" is the compaction-carry line below; neither is a report label.
-LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered))(.+?)\*\*")
+# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below; none is a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -488,15 +490,20 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
-# compaction-carry: after a compaction the session says what it recovered, in a `Recovered:` line,
-# until one lands. Bold passes, as it does for "Departs from"; no word may end in "recovered:"
-# ahead of it ("Unrecovered:").
-RECOVERED_RE = re.compile(r"(?<!\w)recovered(?:\*\*)?:", re.I)
-RECOVERED_REASON = (
-    "Recovered guard: a compaction came before this report and no Recovered line has landed since. "
-    "Under Deviations, add a line `Recovered: <rulings or facts recovered from git or the page>`, "
-    "or `Recovered: none`, inside the report blockquote."
+# compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
+# from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
+# did not), each until one lands. Bold passes, as it does for "Departs from"; no word may end in
+# the label ahead of it ("Unrecovered:").
+CARRY_LINES = (
+    ("Recovered", re.compile(r"(?<!\w)recovered(?:\*\*)?:", re.I)),
+    ("Handoff gave", re.compile(r"(?<!\w)handoff gave(?:\*\*)?:", re.I)),
 )
+CARRY_FORMS = {
+    "Recovered": "`Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`",
+    "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
+                    "or `Handoff gave: none`",
+}
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 
 
 def _reply_text(rec):
@@ -510,12 +517,35 @@ def _reply_text(rec):
     return "\n".join(parts) if parts else None
 
 
+def unsourced_recovered_item(block):
+    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    The line's text runs to the end of its line, or to a Handoff gave label on the same line. Items
+    split on ";". `none` needs no source."""
+    handoff = CARRY_LINES[1][1]
+    for line in block.splitlines():
+        m = CARRY_LINES[0][1].search(line)
+        if not m:
+            continue
+        rest = line[m.end():]
+        cut = handoff.search(rest)
+        rest = rest[:cut.start()] if cut else rest
+        rest = rest.strip().lstrip("*").strip()
+        if rest.rstrip(". ").lower() == "none":
+            continue
+        for item in rest.split(";"):
+            item = item.strip(" .*")
+            if item and not SOURCE_RE.search(item):
+                return item[:60]
+    return ""
+
+
 def recovered_problem(records, text):
-    """RECOVERED_REASON when a compaction came before `text` and no Recovered line has landed
-    since, else ''. The newest `compact_boundary` record anywhere in `records` marks the
-    compaction (its subtype alone is read). Any main-session reply after it that holds a Recovered
-    line, anywhere in its text, satisfies the demand. The last reply record may be the current one,
-    so it counts by its report blockquote only, like `text` itself."""
+    """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
+    since, or a Recovered item of `text` names no source, else ''. The newest `compact_boundary`
+    record anywhere in `records` marks the compaction (its subtype alone is read). Each line is
+    tracked alone: a main-session reply after the boundary that holds it, anywhere in its text,
+    satisfies it, and that reply is not judged for sources. The current reply (the last reply record,
+    when its report block equals `text`'s) counts by its blockquote and is judged for sources."""
     boundary = None
     last_text = None
     for i, rec in enumerate(records):
@@ -525,15 +555,29 @@ def recovered_problem(records, text):
             last_text = i
     if boundary is None:
         return ""
+    block = block_text(text)
+    pending = {name: rx for name, rx in CARRY_LINES}
     for i in range(boundary + 1, len(records)):
         reply = _reply_text(records[i])
         if reply is None:
             continue
-        if RECOVERED_RE.search(block_text(reply) if i == last_text else reply):
-            return ""
-    if RECOVERED_RE.search(block_text(text)):
-        return ""
-    return RECOVERED_REASON
+        if i == last_text:
+            if block_text(reply) == block:
+                continue
+            reply = block_text(reply)
+        for name in [n for n, rx in pending.items() if rx.search(reply)]:
+            del pending[name]
+    missing = [name for name, rx in pending.items() if not rx.search(block)]
+    reasons = []
+    if missing:
+        reasons.append("a compaction came before this report and no %s line has landed since. "
+                       "Under Deviations, add %s, inside the report blockquote." %
+                       (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
+    bad = unsourced_recovered_item(block)
+    if bad:
+        reasons.append("the Recovered item %r names no source. End each item with git, page or "
+                       "digest; items split on \";\"." % bad)
+    return "Recovered guard: " + " ".join(reasons) if reasons else ""
 
 
 def repo_root(cwd):
