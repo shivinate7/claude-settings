@@ -1,0 +1,9 @@
+{
+ "title": "claude-settings keeps only live branches",
+ "phase": "now",
+ "status": "doing",
+ "order": 484.100002,
+ "why": "Owner ask in chat, Nov 2 10:41 CST (inbox fb-1041-3): clean up branches (240 heads at 10:41 CST), stop worktree agents pushing branches, and count branches in the pace numbers.",
+ "note": "Lane branch-cleanup (session_013NEJL3uZAsA15jmb5o2vuD), started 10:43 CST by the coordinator. Deletes need a session on the owner's Mac: the cloud proxy refuses ref deletes (HTTP 403, 06:40 CST), and no Mac folder is connected (10:42 CST). Owner task: page item 164. The lane puts the delete command in its PR.",
+ "updatedAt": "2026-11-02T16:46:00Z"
+}

@@ -1,0 +1,9 @@
+{
+ "title": "Builders never undo earlier lane work, and the silent-undo scan catches it",
+ "phase": "now",
+ "status": "doing",
+ "order": 484.1,
+ "why": "Owner ruling in chat, Nov 2 10:41 CST (inbox fb-1041-1): builders never undo earlier lane work; extend the silent-undo scan.",
+ "note": "Home: decision silent-undo-check-design. Lane no-undo-lane-commits (session_013NEJL1u37uQd9keyjLx7eM), started 10:43 CST by the coordinator. Port: yes, the scan is shared.",
+ "updatedAt": "2026-11-02T16:46:00Z"
+}
