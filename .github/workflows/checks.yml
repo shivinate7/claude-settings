@@ -295,8 +295,8 @@ jobs:
       - name: Red-run trailer
         if: ${{ github.event_name == 'pull_request' }}
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 lint/check_red_run.py
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
