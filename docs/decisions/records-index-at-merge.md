@@ -15,11 +15,18 @@ record numbers. It takes no merge lock. A PR that turns draft after the first re
 under the lock that confirm already took, and releases it.
 The same two allow rules cover both steps, so no new rule is needed.
 
-`--confirm` on a ready PR rebuilds the page and claims record numbers under the merge lock. A page that is
-current makes no commit. A stale page (no draft step, or the base gained a record since) gets the rebuild commit, and
-that commit needs a second CI run. A claim stays at confirm, so its numbers are free on the base tip under
-the lock, as before. A batch that claims numbers still runs CI twice (unmeasured in other repos; none in
-this repo, Oct 24 to 31). When only the page conflicts with the base, the tool rebuilds it on the merged tree.
+Take a ready PR on the default branch with no record number to claim or resume. When its rebuilt page would
+change the tree, `--confirm` refuses before any wait, claim or push. The refusal and the preview name
+the remedy: return the PR to draft (GraphQL only, so a session on the owner's computer does it), run
+`merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
+Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
+claim head. A current page makes no
+commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
+claim commit carries the rebuilt page, so the claim and the page share one commit. That batch still runs
+CI twice (unmeasured in other repos; none in this repo, Oct 24 to 31). The draft step refuses a claim head,
+so the claim cannot move earlier. A resumed claim with a stale page still pushes the page, for the same
+reason. When only the page conflicts with the base, the tool rebuilds it on the merged tree. That heal is
+unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST.
 
 A lane never commits a change to `docs/records.md`, not even one made by `lint/hook_catalog.py`. PR CI
 already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR run). The guard `records-page`
