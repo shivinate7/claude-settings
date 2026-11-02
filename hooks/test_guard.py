@@ -13254,6 +13254,22 @@ for how in ("The session merges PR #374.",
             "The session merges PR #374 so CI reruns."):
     pl("a session clause with no press, %r, with no link, is allowed" % how, "allow",
        pl_item(options=[pl_opt("Merge PR #374", how), PL_KEEP_OPT]))
+# A split cuts a mark-ready press under the label "Go": refused. A page-button press or a past act under the
+# label "Merge the PR" asks the owner for no web press: allowed.
+for how in ("The session merges it after your pick. Mark the PR (#12) ready for review.",
+            "The session merges it after your pick. Mark PR #12: ready for review.",
+            "The session merges it after your pick. Mark PR #12 - ready for review.",
+            "The session merges it after your pick. Mark PR #12, ready for review.",
+            "The session merges it after your pick. Mark the draft PR and ready on GitHub."):
+    pl("a split that cuts a mark-ready press, %r, with no link, is refused" % how, "deny",
+       pl_item(options=[pl_opt("Go", how), PL_KEEP_OPT]))
+for how in ("The session merges it after Shivam hits Take my pick.",
+            "The session merges it after he hits Send.",
+            "The session merges it after Shivam approves this item.",
+            "The session merges it after he has merged the base PR.",
+            "The session merges it after the owner approved the plan."):
+    pl("a page-button press or a past act, %r, with no link, is allowed" % how, "allow",
+       pl_item(options=[pl_opt("Merge the PR", how), PL_KEEP_OPT]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command

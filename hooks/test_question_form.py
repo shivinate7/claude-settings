@@ -502,6 +502,22 @@ SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merg
                 "The session merges PR #374 as he asked.",
                 "The session merges PR #374 after Shivam's OK.",
                 "The session merges PR #374 so CI reruns."]
+# The how-text of an option labelled "Go": a split cuts the mark-ready press, so it is refused. The waiting
+# page's own button, or a past act, asks the owner for no web press: each passes, with the label "Merge the PR".
+GO_SPLIT_PRESS = [
+    "The session merges it after your pick. Mark the PR (#12) ready for review.",
+    "The session merges it after your pick. Mark PR #12: ready for review.",
+    "The session merges it after your pick. Mark PR #12 - ready for review.",
+    "The session merges it after your pick. Mark PR #12, ready for review.",
+    "The session merges it after your pick. Mark the draft PR and ready on GitHub.",
+]
+PAGE_BUTTON_OR_PAST_ACT = [
+    "The session merges it after Shivam hits Take my pick.",
+    "The session merges it after he hits Send.",
+    "The session merges it after Shivam approves this item.",
+    "The session merges it after he has merged the base PR.",
+    "The session merges it after the owner approved the plan.",
+]
 
 
 def case_session_press_needs_no_link():
@@ -551,6 +567,16 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
         chat("a session clause with no press, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in GO_SPLIT_PRESS:
+        page("a split that cuts a mark-ready press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, label="Go", how=how), keep])), ("press-link", None))
+        chat("a split that cuts a mark-ready press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, label="Go", how=how)), chat_of(keep)]), ("press-link", None))
+    for how in PAGE_BUTTON_OR_PAST_ACT:
+        page("a page-button press or a past act, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
+        chat("a page-button press or a past act, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
 
 
 # ------------------------------------------------------------------ a press in the how-text only
