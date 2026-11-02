@@ -42,6 +42,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
+from guard_env import names_env_file  # noqa: E402  the one predicate every form of the env rule reads
 
 VCS = "g" + "it"
 IDENT = ["-c", "user.email=session-end-cases@example.invalid", "-c", "user.name=session-end-cases"]
@@ -419,34 +420,35 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
             self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
         )
 
-# The environment-file names the permission deny list must hold, for Read and for Edit. The rule is
-# every basename that starts with `.env`, except the example file, at the root or in a folder.
-ENV_DENY_NAMES = (".env", ".env.local", ".envrc", ".environment")
-ENV_DENY_EXAMPLE = ".env.example"
+# Candidate basenames for the permission deny list, for Read and for Edit. Each one is checked at the
+# root and in a folder. The expected verdict is the guard's own predicate, so a name is denied exactly
+# when the guard holds it. The candidates are samples: the predicate decides, not this list.
+ENV_DENY_CANDIDATES = (
+    ".env", ".env.local", ".envrc", ".environment", ".envrc.example", ".env.example",
+    ".env.example.bak", ".gitignore", "env", "config.env",
+)
 
 
 def _denied_by(entries, tool, path):
     """True when the permission entries deny `tool` on `path`, a file that may sit in a folder.
 
-    The entries read as the repo writes them. `Tool(glob)` denies, and `Tool(!glob)` lifts a denial
-    for the files it names. A bare glob names a root file only, and a `**/` glob names the file at any
-    depth, so a folder path is matched by its basename under `**/` alone.
+    The entries are read in order, and the last entry that matches decides. `Tool(glob)` denies, and
+    `Tool(!glob)` lifts a denial, so a carve-out written ahead of its deny does not lift it. A glob
+    with no slash, bare or under `**/`, matches the basename at any depth. A glob with a slash
+    matches the whole path.
     """
-    denied = lifted = False
+    denied = False
     for entry in entries:
         found = re.fullmatch(r"(\w+)\((!?)(.+)\)", entry)
         if not found or found.group(1) != tool:
             continue
         glob = found.group(3)
-        anywhere = glob.startswith("**/")
-        if "/" in path and not anywhere:
-            continue
-        if fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], glob[3:] if anywhere else glob):
-            if found.group(2):
-                lifted = True
-            else:
-                denied = True
-    return denied and not lifted
+        if glob.startswith("**/"):
+            glob = glob[3:]
+        target = path if "/" in glob else path.rsplit("/", 1)[-1]
+        if fnmatch.fnmatchcase(target, glob):
+            denied = not found.group(2)
+    return denied
 
 
 class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
@@ -480,27 +482,25 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
         """The reader under the env cases below must read the entry forms settings.json uses, or
         those cases prove nothing."""
         self.assertTrue(_denied_by(["Read(.env)"], "Read", ".env"))
-        self.assertFalse(_denied_by(["Read(.env)"], "Read", "config/.env"))
+        self.assertTrue(_denied_by(["Read(.env)"], "Read", "config/.env"))  # a bare glob is any depth
         self.assertTrue(_denied_by(["Read(**/.env)"], "Read", "config/.env"))
         self.assertTrue(_denied_by(["Read(.env.*)"], "Read", ".env.local"))
         self.assertFalse(_denied_by(["Read(.env.*)", "Read(!.env.example)"], "Read", ".env.example"))
+        self.assertTrue(_denied_by(["Read(!.env.example)", "Read(.env.*)"], "Read", ".env.example"))
         self.assertFalse(_denied_by(["Edit(.env)"], "Read", ".env"))
 
-    def test_read_and_edit_deny_hold_every_env_name_and_lift_only_the_example(self):
-        """Every basename that starts with `.env` is denied for Read and for Edit, at the root and in
-        a folder. The example file stays open, and no other name is exempted."""
+    def test_read_and_edit_deny_match_the_guard_predicate_at_any_depth(self):
+        """For each candidate basename, the deny list denies Read and Edit exactly when the guard's own
+        predicate holds it, at the root and in a folder. A name the guard does not hold stays open."""
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
             deny = json.load(handle)["permissions"]["deny"]
         for tool in ("Read", "Edit"):
-            for name in ENV_DENY_NAMES:
+            for name in ENV_DENY_CANDIDATES:
+                held = names_env_file(name)
                 for path in (name, "config/" + name):
                     with self.subTest(tool=tool, path=path):
-                        self.assertTrue(_denied_by(deny, tool, path),
-                                        "%s(%s) is not denied by permissions.deny" % (tool, path))
-            for path in (ENV_DENY_EXAMPLE, "config/" + ENV_DENY_EXAMPLE):
-                with self.subTest(tool=tool, path=path):
-                    self.assertFalse(_denied_by(deny, tool, path),
-                                     "%s(%s) is denied, the example file must stay open" % (tool, path))
+                        self.assertEqual(_denied_by(deny, tool, path), held,
+                                         "%s(%s): the guard holds it %s" % (tool, path, held))
 
     def guard_launcher(self):
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:

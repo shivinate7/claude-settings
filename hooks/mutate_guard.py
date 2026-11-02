@@ -521,7 +521,7 @@ MUTATIONS = [
     ("env-file: a glob names an env file only by a fixed suffix",
      '        if names_env_file(sample):', '        if sample.startswith(".env.local"):', "guard",
      'env: normalized, glob, heredoc or depth, cat .env.bak*'),
-    ("env-file: the example glob is held",
+    ("env-file: the example exemption is a prefix, not the whole name",
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name.startswith(ENV_PREFIX) and not name.startswith(ENV_ALLOWED)', "guard",
      'env: a glob that could name a covered backup, cat .env.example*'),
