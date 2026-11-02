@@ -7918,6 +7918,15 @@ sh("merge-checks: the merge tool is judged by its own wait, not here",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: reading a pending pull request is untouched", "gh pr view 12 --json state",
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# The shared merge reader also reads a repo flag before `pr`, so merge-checks judges these spellings as it judges `gh pr merge`.
+sh("merge-checks: gh -R names the repo, and a pending head denies", "gh -R y/x pr merge 12 --squash", "deny", "merge-checks",
+   carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: gh --repo names the repo, and a pending head denies", "gh --repo y/x pr merge 12 --squash", "deny",
+   "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# Pin (rule coordinator-scope adds the enable tool to the coordinator refusal only): merge-checks does not newly fire on it.
+add("merge-checks: the enable tool of the host is not judged by merge-checks, so a pending head still allows", "allow",
+    silent=True, tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12 --squash"',
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a heredoc body that names a merge is data",
@@ -8115,6 +8124,9 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # The coordinator-scope tier fallback (no role file): a foreign coordinator record, and a stale untagged read then a coordinator.
+    "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
+    "untagged-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", COORD_TAGS),
 }
 
 
@@ -19134,7 +19146,12 @@ CS_CONFIG = {
     "other-session": cs_config("other-session", "coordinator", CS_OTHER_SID),
     "payload-id": cs_config("payload-id", "coordinator", CS_PAYLOAD_SID),
     "none": cs_config("none"),
+    # Role files that name the session id of ROLE_ENV, so the own record of the merge-role fixtures is this session's.
+    "lane-own": cs_config("lane-own", "lane", ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"]),
+    "coordinator-own": cs_config("coordinator-own", "coordinator", ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"]),
 }
+# The env of a case whose own record is one of the merge-role fixtures (role_path): the id the record names.
+TAG_ENV = dict(CS_REMOTE, CLAUDE_CODE_REMOTE_SESSION_ID=ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"])
 
 
 def cs_layout():
@@ -19512,14 +19529,16 @@ cs("coordinator_plan_spawn_allowed", "allow", tool="Agent", subagent_type="Plan"
 cs("coordinator_explore_spawn_allowed", "allow", tool="Agent", subagent_type="Explore", prompt="Read the repo.", cwd=NOGIT)
 cs("coordinator_guide_spawn_allowed", "allow", tool="Agent", subagent_type="claude-code-guide",
    prompt="How do hooks work?", cwd=NOGIT)
-cs("coordinator_explore_casing_spawn_allowed", "allow", tool="Agent", subagent_type="explore", prompt="Read the repo.",
-   cwd=NOGIT)
+# Exact type only, since the host's case rule is unknown: a lowercase `explore` or `plan` is refused.
+cs("coordinator_explore_casing_spawn_denied", "deny", tool="Agent", subagent_type="explore", **CS_SPAWN)
+cs("coordinator_plan_casing_spawn_denied", "deny", tool="Agent", subagent_type="plan", **CS_SPAWN)
 cs("coordinator_create_session_allowed", "allow", tool=CS_CREATE_SESSION, prompt="do the task", cwd=NOGIT)
 cs("coordinator_start_session_allowed", "allow", tool=CS_START_SESSION, prompt="do the task", cwd=NOGIT)
 cs("batch_runner_builder_spawn_allowed", "allow", role="batch-runner", tool="Agent", subagent_type="builder",
    prompt="Build the change.", cwd=NOGIT)
-cs("no_role_file_spawn_allowed", "allow", role="none", tool="Agent", subagent_type="builder", prompt="Build the change.",
-   cwd=NOGIT)
+# Holds only with no cs-build tag in the own record either: a coordinator tag there makes the missing file a coordinator.
+cs("no_role_file_spawn_allowed", "allow", role="none", env=TAG_ENV, transcript=role_path("untagged"), tool="Agent",
+   subagent_type="builder", prompt="Build the change.", cwd=NOGIT)
 cs("local_spawn_allowed", "allow", env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None), tool="Agent", subagent_type="builder",
    prompt="Build the change.", cwd=NOGIT)
 cs("other_session_role_spawn_allowed", "allow", role="other-session", tool="Agent", subagent_type="builder",
@@ -19548,6 +19567,42 @@ add("coordinator-scope: solo_gh_pr_merge_still_asks, a session with no role file
     "ask", BARE_MERGE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
     config=CS_CONFIG["none"], carries=BARE_SAYS, env_path=GREEN_ON)
 CASES[-1]["env"] = dict(CS_REMOTE)
+
+# Merge spellings a coordinator is refused, read by the shared reader (merge_call_of, merge_confirm_of): a repo flag before `pr`,
+# and a subshell. `--disable-auto` turns auto-merge off and merges nothing, so it passes. The host's enable tool is refused for a
+# coordinator; MERGE_TOOLS and the merge-checks verdicts stay as they are (see the merge-checks pins).
+CS_MCP_ENABLE_TOOL = "mcp__github__enable_pr_auto_merge"
+cs("coordinator_gh_repo_flag_pr_merge_denied", "deny", tool="Bash", command="gh -R o/r pr merge 4321", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_repo_long_flag_pr_merge_denied", "deny", tool="Bash", command="gh --repo o/r pr merge 4321", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_subshell_denied", "deny", tool="Bash", command="(merge 4321 --confirm)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_cd_subshell_denied", "deny", tool="Bash", command="cd x && (merge 4321 --confirm)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_pr_merge_subshell_denied", "deny", tool="Bash", command="(gh pr merge 4321 --squash)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_pr_merge_disable_auto_allowed", "allow", tool="Bash", command="gh pr merge 4321 --disable-auto", cwd=NOGIT,
+   env_path=GREEN_ON, silent=True)
+cs("coordinator_enable_pr_auto_merge_denied", "deny", tool=CS_MCP_ENABLE_TOOL, owner="acme", repo="widgets", pullNumber=4321,
+   cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+
+# ---- the tier when the role file is missing (rule coordinator-scope). The tier falls back to the session's own cs-build tag,
+# read from the newest get_session record that names the session's id, as merge-role-proof reads it. A role file that is there
+# decides alone. The fixtures are the merge-role records (role_path), and TAG_ENV is the env they name.
+cs_write("no_role_file_tag_coordinator_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("coordinator"))
+cs("no_role_file_tag_coordinator_spawn_denied", "deny", role="none", env=TAG_ENV, transcript=role_path("coordinator"),
+   tool="Agent", subagent_type="builder", **CS_SPAWN)
+cs_write("no_role_file_tag_lane_passes", "allow", CS_CODE, role="none", env=TAG_ENV, transcript=role_path("lane"))
+cs_write("no_role_file_no_tag_passes", "allow", CS_CODE, role="none", env=TAG_ENV, transcript=role_path("untagged"))
+cs_write("no_role_file_other_session_tag_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("other-coordinator"))
+cs_write("no_role_file_newest_own_coordinator_tag_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("untagged-then-coordinator"))
+cs_write("role_file_wins_over_tag", "allow", CS_CODE, role="lane-own", env=TAG_ENV, transcript=role_path("coordinator"))
+cs_write("role_file_wins_over_tag_coordinator_file", "deny", CS_CODE, role="coordinator-own", env=TAG_ENV,
+         transcript=role_path("lane"))
 
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
@@ -19675,18 +19730,19 @@ def cs_override_call(config, session, seconds, tool="Edit", tool_input=None, cwd
 CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
 
 
-def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None, env_path=None):
+def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None, env_path=None, transcript=None):
     """(decision, reason, the probe's report) of one guard call, made as `cs` makes one. The report holds `opens` (each
     path the call opens), `open_modes` (each open as [path, mode]), `children` (each subprocess the call starts) and
     `log_children` (per guard.log write, the subprocesses that write starts). The report is {} when the probe wrote none.
-    `env_path` is the PATH the guard run gets, so a fake `gh` can answer a merge check."""
+    `env_path` is the PATH the guard run gets, so a fake `gh` can answer a merge check. `transcript` is the payload's
+    transcript_path, when the call names one."""
     os.makedirs(CS_OPENS_DIR, exist_ok=True)
     handle, side = tempfile.mkstemp(dir=CS_OPENS_DIR, suffix=".json")
     os.close(handle)
     got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": env_path,
                           "config": config, "agent_id": agent_id, "agent_type": "builder" if agent_id else None,
                           "env": dict(CS_REMOTE if env is None else env), "tool_input": tool_input,
-                          "probe_side": side,
+                          "transcript": transcript, "probe_side": side,
                           "probe_spec": {"mode": "judge", "opens": True, "log_children": True}})
     try:
         with open(side, encoding="utf-8") as done:
@@ -19695,19 +19751,19 @@ def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None, env_
         return got, reason, {}
 
 
-def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None):
+def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
     """(decision, reason, the absolute path of each open) of one guard call, made as `cs` makes one."""
-    got, reason, report = cs_probe_report(config, tool, tool_input, cwd, env, agent_id)
+    got, reason, report = cs_probe_report(config, tool, tool_input, cwd, env, agent_id, transcript=transcript)
     if "opens" not in report:
         return "error", "the probe wrote no opens: %s" % reason[:90], []
     return got, reason, report["opens"]
 
 
-def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None):
+def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
     """(decision, reason, every open, the opens only the rule makes) of one call."""
     env = dict(CS_REMOTE if env is None else env)
-    got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id)
-    _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id)
+    got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id, transcript)
+    _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id, transcript)
     return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off]
 
 
@@ -19778,6 +19834,31 @@ for _what, _tool, _input, _cwd in (   # a coordinator's call that names no repo 
                       cs_cost_check("coordinator", _tool, _input, _cwd)))
 CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused Write of product code shows the layout open",
                   cs_cost_control_check))
+
+
+def cs_tag_cost_check(want, reads, config_role, tool, tool_input, transcript, cwd=GITMAIN, env=None):
+    """A check that the call gets the `want` verdict, and that the own record (the transcript) is opened `reads` times: once
+    per call while the role file is missing, however many rules read the tier, and never while a role file is there."""
+    def check():
+        config = CS_CONFIG[config_role]
+        got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env or TAG_ENV, transcript=transcript)
+        problems = []
+        if got != want:
+            problems.append("the call was %s, want %s: %s" % (got, want, reason[:90]))
+        count = opened.count(os.path.abspath(transcript))
+        if count != reads:
+            problems.append("it opened the own record %d time(s), want %d" % (count, reads))
+        return not problems, "; ".join(problems) or "the own record opened %d time(s)" % reads
+    return check
+
+
+CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own record once, for a coordinator's Write of product code",
+                  cs_tag_cost_check("deny", 1, "none", "Write", CS_COST_CODE, role_path("coordinator"))))
+CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own record once, for a coordinator's merge that two rules judge",
+                  cs_tag_cost_check("deny", 1, "none", "Bash", {"command": "gh pr merge 4321"}, role_path("coordinator"),
+                                    cwd=NOGIT)))
+CS_CHECKS.append(("coordinator-scope tag_cost: a role file that is there is judged alone, and the own record is not opened",
+                  cs_tag_cost_check("deny", 0, "coordinator-own", "Write", CS_COST_CODE, role_path("lane"))))
 
 
 # 7. guard.log (owner ruling, waiting-page item 112 a, 2026-11-01 16:45 CST): each coordinator-scope refusal appends
