@@ -33,6 +33,7 @@ import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists fi
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run; its sweep is proved in test_find_copies.py)
 LONG = "a" * 33 + ".md"  # a slug over 32 characters
 EXTRAS = ".claude/layout-extras.json"
+UNKNOWN_LINE = "caution: unknown, the level could not be read"  # the first line of `layout.py caution` when the level is unread
 
 
 def load(name, path):
@@ -601,6 +602,7 @@ class RepoKindAndCaution(Tree):
     """A repo names its app kind and its caution level in its extras file. Devices come from the kind,
     caution from the level, and the level defaults by visibility (steps c113 and c115)."""
     BYPASS = ("ignore", "bypass", "skip", "disregard", "override", "waive", "turn off", "disable", "no need to")
+    UNREAD = ("unread", "not read", "could not be read", "unknown")  # a fact that says visibility was not read
 
     def setUp(self):
         super().setUp()
@@ -612,17 +614,54 @@ class RepoKindAndCaution(Tree):
     def cmd(self, verb):
         return run([os.path.join(LINT, "layout.py"), verb, self.tree], self.tree)
 
-    def test_a_repo_with_no_extras_file_resolves_by_visibility_not_an_error(self):
-        self.assertEqual(self.layout.caution(self.tree)["level"], "public")
+    def caution_for(self, **keys):
+        self.extras(**keys)
+        return self.layout.caution(self.tree)
+
+    def test_a_repo_with_no_extras_file_is_unknown_not_an_error(self):
+        self.assertEqual(self.layout.caution(self.tree)["level"], "unknown")
         self.assertIsNone(self.layout.devices(self.tree))
-        self.assertEqual(self.cmd("caution")[0], 0)
+        rc, out = self.cmd("caution")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines()[0], UNKNOWN_LINE)
         self.assertEqual(self.cmd("devices"), (0, "unknown\n"))
 
-    def test_unknown_visibility_resolves_to_public(self):
-        for keys in ({}, {"visibility": "secret-ish"}, {"visibility": None}):
+    def test_unset_or_unreadable_visibility_resolves_to_unknown_never_public(self):
+        for keys in ({}, {"visibility": None}, {"visibility": 3}, {"visibility": ["private"]},
+                     {"visibility": "default"}, {"visibility": "secret-ish"}):
             with self.subTest(keys=keys):
-                self.extras(**keys)
-                self.assertEqual(self.layout.caution(self.tree)["level"], "public")
+                self.assertEqual(self.caution_for(**keys)["level"], "unknown")
+
+    def test_public_visibility_resolves_to_public(self):
+        self.assertEqual(self.caution_for(visibility="public")["level"], "public")
+
+    def test_the_command_for_unknown_prints_its_line_then_only_fact_and_act_lines(self):
+        self.extras()
+        rc, out = self.cmd("caution")
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], UNKNOWN_LINE)
+        rest = lines[1:]
+        for line in rest:
+            self.assertTrue(line.startswith(("fact: ", "act: ")), line)
+        self.assertTrue(any(line.startswith("fact: ") for line in rest), out)
+        self.assertTrue(any(line.startswith("act: ") for line in rest), out)
+
+    def test_the_unknown_level_keeps_every_act_of_the_public_level(self):
+        unknown = self.caution_for()
+        self.assertEqual(unknown["level"], "unknown")
+        public = self.caution_for(visibility="public")
+        self.assertEqual(public["level"], "public")
+        for act in public["acts"]:
+            with self.subTest(act=act):
+                self.assertIn(act, unknown["acts"])
+
+    def test_the_unknown_level_has_a_fact_that_visibility_is_unread(self):
+        unknown = self.caution_for()
+        self.assertEqual(unknown["level"], "unknown")
+        said = [f for f in unknown["facts"] if "visibility" in f.lower()]
+        self.assertTrue(said, unknown["facts"])
+        self.assertTrue(any(word in said[0].lower() for word in self.UNREAD), said)
 
     def test_private_visibility_resolves_to_private_solo(self):
         self.extras(visibility="private")
@@ -662,10 +701,11 @@ class RepoKindAndCaution(Tree):
                 self.assertTrue(size is None or (isinstance(size, dict) and size.get("source")), device)
 
     def test_every_level_holds_facts_and_acts_and_no_bypass_phrase(self):
-        for level in ("public", "private-solo"):
-            with self.subTest(level=level):
-                self.extras(caution=level)
-                found = self.layout.caution(self.tree)
+        for keys, level in (({"caution": "public"}, "public"), ({"caution": "private-solo"}, "private-solo"),
+                            ({}, "unknown")):
+            with self.subTest(keys=keys):
+                found = self.caution_for(**keys)
+                self.assertEqual(found["level"], level)
                 self.assertTrue(found["facts"] and found["acts"])
                 text = " ".join(found["facts"] + found["acts"]).lower()
                 for phrase in self.BYPASS:
