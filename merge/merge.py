@@ -7,6 +7,9 @@
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge <pr> --review-record --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
+                          print the review record for the PR's live head. Posts nothing: the lane posts it as a PR comment.
+  merge --reviewed        one line per open PR whose newest review record parses, with its state and its live CI; then the PRs with no record.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -708,6 +711,16 @@ class Host:
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or ""}
 
+    def review_comments(self, since):
+        """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
+        when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
+        found = {}
+        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
+            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+            if m and body.splitlines()[:1] == [REVIEW_MARKER]:
+                found.setdefault(int(m.group(1)), []).append(body)
+        return found
+
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
         which would say no PR is open. A head with two open PRs (a backport, or a fork's branch of the same name) gets base None under
@@ -1012,10 +1025,11 @@ class Host:
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
 
-    def head_state(self, n):
-        """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits."""
+    def head_state(self, n, sha=None):
+        """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits.
+        `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read."""
         try:
-            got = self.checks(n, warn=False)
+            got = self.checks(n, warn=False, sha=sha)
             red, pending, ignored = self.classify(got, self.required_names(), self.ignore)
         except Stop as e:
             return f"unknown ({e})"
@@ -2395,6 +2409,102 @@ def default_lock(root):
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
 
+# The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
+REVIEW_MARKER = "<!-- review-record -->"
+REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state
+REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
+REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
+REVIEW_NETS = ("not owed", "zero", "positive", "negative")
+REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
+
+def review_body(n, head, kind, guard, rounds, net):
+    """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict)."""
+    return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
+                      *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
+                      f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+
+def parse_review(text):
+    """-> {n, head, kind, guard, rounds, net}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
+    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. Trailing blank lines are allowed."""
+    lines = text.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
+        return None
+    pats = (r"PR: #(\d+)", r"Head: ([0-9a-f]{40})", r"Kind: (\S+)", r"Guard or check: (\S+)")
+    fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
+    net = re.fullmatch(r"Net value: (.+)", lines[-2])
+    if not all(fields) or not net:
+        return None
+    n, head, kind, guard = (m.group(1) for m in fields)
+    if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
+        return None
+    rounds, last = [], 0
+    for line in lines[5:-2]:
+        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
+        if not m:
+            return None
+        i = int(m.group(1))
+        if i not in (last, last + 1) or i < 1 or i > REVIEW_LAST_ROUND:
+            return None
+        rounds.append((i, *m.group(2, 3, 4)))
+        last = i
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1)}
+
+def review_state(rec, head):
+    """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
+    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS; or round 3 is done and Guard or check
+    is no; or round 3 is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only and round 1 is done; or Kind is
+    docs-only with no round. Net value negative holds the change."""
+    if rec is None:
+        return "bad", "the newest record does not parse"
+    if rec["head"] != head:
+        return "stale", f"the record is for head {rec['head'][:9]}"
+    if rec["net"] == "negative":
+        return "held", "net value is negative"
+    rounds = rec["rounds"]
+    top = max((i for i, *_ in rounds), default=0)
+    if top and all(v == "PASS" for i, _, _, v in rounds if i == top):
+        return "done", f"round {top} passed"
+    if top >= REVIEW_LAST_ROUND:
+        if rec["guard"] == "no":
+            return "done", "round 3 is done, no guard or check changed"
+        if rec["net"] in ("zero", "positive"):
+            return "done", f"round 3 is done, net value {rec['net']}"
+        return "open", "round 3 is done on a guard or check change, and its net value is owed"
+    if rec["kind"] == "delete-only" and top >= 1:
+        return "done", "delete-only change, round 1 is done"
+    if rec["kind"] == "docs-only" and not rounds:
+        return "done", "docs-only change, no round owed"
+    return "open", f"round {top} is not passed" if top else "no round is recorded"
+
+def reviewed_lines(h):
+    """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
+    repo's comments since the oldest one) and one check read for each ready pull request that has a record."""
+    pulls = h.pages("pulls", fields={"state": "open"})
+    if not pulls:
+        return ["no open pull requests."]
+    records = h.review_comments(min(d["created_at"] for d in pulls))
+    lines, bare = [], []
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
+        if not bodies:
+            bare.append(f"#{n}")
+            continue
+        rec = parse_review(bodies[-1])
+        state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
+        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
+    return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
+
+def round_arg(text):
+    """argparse type of --round N:ROLE:MODEL:VERDICT -> (N, role, model, verdict)."""
+    m = re.fullmatch(rf"(\d+):({'|'.join(REVIEW_ROLES)}):({REVIEW_MODEL}):({'|'.join(REVIEW_VERDICTS)})", text, re.ASCII)
+    if not m:
+        raise argparse.ArgumentTypeError(f"{text!r} is not N:ROLE:MODEL:VERDICT, with ROLE {'|'.join(REVIEW_ROLES)} and VERDICT {'|'.join(REVIEW_VERDICTS)}")
+    return (int(m.group(1)), *m.group(2, 3, 4))
+
 MERGE_ROLES = {"coordinator", "batch-runner"}  # the tiers that may run `merge <pr> --confirm` in a cloud session
 
 def role_path():
@@ -2423,7 +2533,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set.")
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Post the review record on the pull request; the batch runner finds it.")  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -2445,20 +2555,40 @@ def main(argv, host=None, lock=None):
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
+    p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
+    p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
+    p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
+    p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
+    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
+    if (a.kind or a.guard or a.round or a.net_value != "not owed") and not a.review_record:
+        p.error("--kind, --guard, --round and --net-value go with --review-record")
     if a.role is not None:
-        if a.pr is not None or a.confirm or a.unlock is not None:
+        if a.pr is not None or a.confirm or a.unlock is not None or a.reviewed or a.review_record:
             p.error("--role stands alone")
+    elif a.reviewed:
+        if a.pr is not None or a.confirm or a.unlock is not None or a.review_record:
+            p.error("--reviewed stands alone")
+    elif a.review_record:
+        if a.pr is None:
+            p.error("--review-record needs a pull request number")
+        if a.confirm or a.unlock is not None:
+            p.error("--review-record takes no --confirm and no --unlock")
+        if a.kind is None or a.guard is None:
+            p.error("--review-record needs --kind and --guard")
+        if parse_review(review_body(a.pr, "0" * 40, a.kind, a.guard, a.round, a.net_value)) is None:
+            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
-        p.error("give a pull request number, --unlock, or --role TIER")
+        p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
+            raise Stop("this session may not merge. Post the review record on the pull request; the batch runner finds it.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -2470,8 +2600,22 @@ def main(argv, host=None, lock=None):
                 b = head.split("/", 1)[1] if not c and "/" in head else host_default_branch(root)
             say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
+        if a.reviewed:
+            h = host or Host()
+            if not host:
+                cfg = load_config(root, h.base, a.config)
+                h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
+                h.refuse_pinned_mismatch()
+            say(*reviewed_lines(h))
+            return 0
         h = host or Host()
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+        if a.review_record:
+            if info["state"] != "OPEN":
+                raise Stop(f"the pull request is {info['state']}")
+            say(review_body(a.pr, info["head"], a.kind, a.guard, a.round, a.net_value).rstrip("\n"))
+            print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
+            return 0
         refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
         cfg = load_config(root, info["base"], a.config)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
