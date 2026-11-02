@@ -33,7 +33,7 @@ the desktop app has none.
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
-  the top, then the top = room - 50k; limit = window_limit(model of the last such entry): env
+  the top, then the top = room - margin; limit = window_limit(model of the last such entry): env
   CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
   autoCompactWindow in <config dir>/settings.json, default 500,000; compact_threshold is
   the lowest threshold Claude Code compacts at: (limit - 20k) * (1 - summary fraction 0.2),
@@ -494,8 +494,8 @@ def _run_reorient(payload):
 def checkpoints(room):
     """Nudge message sizes for `room` tokens of messages before compaction. The top is
     room - margin, with margin = min(NUDGE_MARGIN, room // 2), so a small room keeps a
-    positive top. Below the top: 200k, then +150k while below the top. A step within
-    NUDGE_STEP // 2 of the top is dropped, the 200k floor included: two rewrites that
+    positive top. Below the top: 200k, then +150k while below the top. A step under
+    NUDGE_STEP // 2 below the top is dropped, the 200k floor included: two rewrites that
     close are one too many (room 384k: 200k, 334k; room 299k: 249k). When top <= 200k, only
     the top. For room <= 0, only room - NUDGE_MARGIN, whatever its sign."""
     margin = min(NUDGE_MARGIN, room // 2) if room > 0 else NUDGE_MARGIN
@@ -516,7 +516,7 @@ def _model_key(name):
 
 
 def compact_threshold(limit):
-    """The context size at which Claude Code compacts a window of `limit` tokens."""
+    """The lowest context size at which Claude Code compacts a window of `limit` tokens."""
     return int((limit - OUTPUT_RESERVE) * (1 - SUMMARY_FRACTION))
 
 

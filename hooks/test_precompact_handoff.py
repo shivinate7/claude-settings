@@ -596,7 +596,7 @@ def case_nudge_limit_checkpoints():
 def case_nudge_reads_messages_not_total():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # margin = min(50k, room/2): room -16k puts the top below zero, so any message count blocks.
+    # room <= 0 keeps margin 50k: room -16k puts the top below zero, so any message count blocks.
     c = Case("nmsg1")
     try:
         set_limit(c, 200000)
@@ -774,7 +774,7 @@ def case_nudge_top_checkpoint_at_threshold():
 
 
 def case_checkpoint_ladder():
-    """checkpoints(room) on its own. The 200k floor goes when a step sits within 75k of the top
+    """checkpoints(room) on its own. The 200k floor goes when a step sits under 75k below the top
     (item 2 of precompact-handoff), and the top sits margin = min(50k, room/2) under the room."""
     for room, want in (
             (299000, [249000]),  # item 2 (75k drop): the 200k floor is 49k under the top
