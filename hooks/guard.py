@@ -2912,9 +2912,12 @@ IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
 # The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
 # SKILL.md, Routing); it asks once when two commands fit. So a `;` starts no second command, and a part
-# after it passes only when it opens with a review verb or `focus`. `|`, `&&` and a newline always chain.
+# after it is refused only when it opens with a command verb other than a review: the Commands table
+# of that SKILL.md is the list, read when a review carries a `;`. `|`, `&&` and a newline always chain.
 IMPECCABLE_CHAIN = re.compile(r"[|\n]|&&")
-IMPECCABLE_FOLLOWUPS = IMPECCABLE_REVIEWS + ("focus",)
+IMPECCABLE_JOINERS = ("then", "and")
+IMPECCABLE_SKILL_FILE = os.path.join(_HERE, "..", "skills", "impeccable", "SKILL.md")
+IMPECCABLE_VERB_ROW = re.compile(r"^\| `([a-z]+)[^`]*` \| [A-Z][a-z]+ \|", re.M)
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
 PACKAGE_FLAGS = ("-p", "--package")
 
@@ -2925,6 +2928,17 @@ def impeccable_name(token: str) -> str:
     return name.rsplit(".", 1)[0]
 
 
+def impeccable_command_verbs():
+    """The command verbs in the Commands table of the impeccable SKILL.md, or None when the file or
+    the table cannot be read. Unread, every part after a `;` is refused, as it was before the table."""
+    try:
+        with open(IMPECCABLE_SKILL_FILE, encoding="utf-8") as handle:
+            table = re.split(r"(?m)^## ", handle.read().split("\n## Commands", 1)[1], 1)[0]
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+    return set(IMPECCABLE_VERB_ROW.findall(table)) or None
+
+
 def impeccable_skill_hit(tool_input) -> str:
     skill, args = tool_input.get("skill"), tool_input.get("args") or ""
     if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
@@ -2933,7 +2947,12 @@ def impeccable_skill_hit(tool_input) -> str:
     text = args.strip() if isinstance(args, str) else ""
     if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(text):
         parts = [part.split() for part in text.split(";")[1:]]
-        if all(part[0] in IMPECCABLE_FOLLOWUPS for part in parts if part):
+        for part in parts:   # "then polish" opens with polish: read past a joining word
+            while part and part[0] in IMPECCABLE_JOINERS:
+                part.pop(0)
+        verbs = impeccable_command_verbs() if any(parts) else set()
+        if verbs is not None and not any(part[0] in verbs - set(IMPECCABLE_REVIEWS)
+                                         for part in parts if part):
             return ""
     return ("skill %s %s" % (skill, args))[:100]
 
