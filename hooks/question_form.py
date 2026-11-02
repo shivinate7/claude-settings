@@ -386,7 +386,7 @@ def _owner_press_text(label, how) -> tuple:
     """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
     text. `press_text` is the label and the how without each clause of the how that the session
     presses (SESSION_PRESS). The label stays a press when it asks for one, unless every press verb in
-    it is a verb that such a clause also holds: "Merge PR #374" beside "The session merges PR #374
+    it is a verb that such a clause also holds: "Merge it" beside "The session merges it
     after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
