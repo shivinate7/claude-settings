@@ -16021,27 +16021,38 @@ def worktree_home_cd_then_write_case():
 
 
 def worktree_home_cd_after_untracked_case():
-    """Rule 0, other-checkout, a later cd is judged from where the shell really is. After a move the
-    guard cannot read (`"$HOME"`, `-`) an absolute cd into another checkout is still refused. After a
-    failed cd the shell stays where it was, so a relative cd climbs from there, and a cd into another
-    checkout is refused. From a lane."""
+    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move the guard
+    cannot read (`"$HOME"`, `-`), or after a cd to a folder that is missing, an absolute cd into another
+    checkout is still refused. A cd whose target is missing makes the folder unknown again, so a
+    relative cd after it is not judged. That is a declared limit, and it keeps ordinary work from a
+    worktree root (a folder made, entered and left) allowed. From a lane."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
     ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
-    rows = (
+    deny = (
         'cd "$HOME" && cd TARGET && make',
         "cd - ; cd TARGET",
         "cd GHOST ; cd TARGET",
+    )
+    allow = (
+        # Declared limit: after a missing-target cd the folder is unknown, so this relative cd is not judged.
         "cd GHOST ; cd ../lane-b && make",
+        # Ordinary work from the worktree root, with each folder missing when its cd is checked.
+        "mkdir -p newdir && cd newdir && touch a && cd ..",
+        "mkdir -p x; cd x; cd ..",
+        "cd newdir; cd ..",
     )
     problems = []
-    for template in rows:
+    for template in deny:
         command = template.replace("TARGET", slash(lane_b)).replace("GHOST", slash(ghost))
         got, reason = _decide_full("Bash", lane_a, command=command)
         problems += _other_checkout_problems(command, got, reason,
                                              (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    for template in allow:
+        command = template.replace("GHOST", slash(ghost))
+        _expect_call(problems, command, "allow", "Bash", lane_a, None, command)
     if problems:
         return False, "; ".join(problems)
-    return True, "an absolute cd after an untracked move, and a relative cd after a failed cd, are refused"
+    return True, "an absolute cd after an untracked move or a missing folder is refused; ordinary work allows"
 
 
 def worktree_home_pushd_case():
@@ -16472,8 +16483,8 @@ LOG_CHECKS = (
     ("worktree-home: any session's write into another checkout is refused after a cd the cd act "
      "passes, when the write resolves against that cd's folder", worktree_home_cd_then_write_case),
     ("worktree-home: an absolute cd into another checkout is refused after an untracked move, a cd - "
-     "or a failed cd, and a relative cd after a failed cd is read from where the shell stayed",
-     worktree_home_cd_after_untracked_case),
+     "or a missing folder; a relative cd after a missing folder is a declared limit, and ordinary work "
+     "from a worktree root allows", worktree_home_cd_after_untracked_case),
     ("worktree-home: pushd into another checkout is refused, bare or chained; a pushd within the "
      "cwd's own checkout, or outside the clone, passes", worktree_home_pushd_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
