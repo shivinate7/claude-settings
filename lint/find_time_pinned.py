@@ -30,7 +30,9 @@ closes on the same line, so JSX text such as `<p>Don't</p>` stays text. The Swif
 
 Blind spots of the patterns: a delay held in a variable (`setTimeout(r, ms)`) is not a literal, so
 it is not listed. A clock name is tainted by a `const`/`let`/`var` (JS) or `let`/`var` (Swift)
-declaration only, and it holds inside the `{...}` block of that declaration. Clock reads inside a Swift interpolation hole are masked.
+declaration only, and it holds inside the `{...}` block of that declaration. A function value (an arrow,
+a closure) taints nothing, and neither does a clock handed to a call that only passes it on, because
+decision test-strategy-reset endorses an injected clock. An assert's message argument is not read.Clock reads inside a Swift interpolation hole are masked.
 
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
@@ -80,19 +82,25 @@ def kind_of(rel):
 
 
 def list_files(root):
-    """Tracked files when root is a git tree, else every file outside WALK_SKIP. None when git fails."""
+    """(files, unlisted folders). Tracked files when root is a git tree, else every file outside WALK_SKIP.
+    The files are None when git fails. A folder the walk cannot list is returned, never skipped silently."""
     dotgit = os.path.join(root, ".git")
     if os.path.isfile(dotgit) or os.path.exists(os.path.join(dotgit, "HEAD")):  # an empty `.git` folder is no repo
         proc = _nowindow.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
         if proc.returncode != 0:
-            return None  # a walk would add untracked files, so the result is unknown
-        return sorted(p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p)
-    out = []
-    for dirpath, dirnames, filenames in os.walk(root):
+            return None, []  # a walk would add untracked files, so the result is unknown
+        return sorted(p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p), []
+    out, unlisted = [], []
+
+    def note(err):
+        unlisted.append({"path": os.path.relpath(err.filename or root, root).replace(os.sep, "/"),
+                         "reason": f"cannot be listed: {err.strerror or err}"})
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=note):
         dirnames[:] = [d for d in dirnames if d not in WALK_SKIP]
         for name in filenames:
             out.append(os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/"))
-    return sorted(out)
+    return sorted(out), unlisted
 
 
 # ---- numbers and brackets, shared by the JS and Swift scanners -------------------------------------
@@ -278,7 +286,7 @@ def reads_tainted(m, a, b, tainted, pass_through=None):
     return False
 
 
-def clock_taint(m, decl_re, clock_re, pass_through):
+def clock_taint(m, decl_re, clock_re, pass_through, function_value):
     """{name: [(block start, block end, declaration position)]} for names whose initializer holds a clock
     reading or a tainted name, repeated until nothing changes."""
     decls = declarations(m, decl_re)
@@ -287,8 +295,8 @@ def clock_taint(m, decl_re, clock_re, pass_through):
     while changed:
         changed = False
         for idx, (name, pos, start, end) in enumerate(decls):
-            if idx in done:
-                continue
+            if idx in done or function_value(m, start, end):
+                continue  # a function value only holds a clock; calling it measures nothing
             clocked = any(not inside_foreign_call(m, start, hit.start(), pass_through)
                           for hit in clock_re.finditer(m, start, end))
             if clocked or reads_tainted(m, start, end, tainted, pass_through):
@@ -298,8 +306,21 @@ def clock_taint(m, decl_re, clock_re, pass_through):
     return tainted
 
 
-def reads_clock(m, a, b, clock_re, tainted):
-    return clock_re.search(m, a, b) is not None or reads_tainted(m, a, b, tainted)
+def reads_clock(m, a, b, clock_re, tainted, pass_through):
+    """True when the asserted value m[a:b] reads a clock or a tainted name. A clock inside the arguments of a
+    call that is not a pass-through is an injected input, which decision test-strategy-reset endorses."""
+    if any(not inside_foreign_call(m, a, hit.start(), pass_through) for hit in clock_re.finditer(m, a, b)):
+        return True
+    return reads_tainted(m, a, b, tainted, pass_through)
+
+
+def asserted_range(m, open_idx, close):
+    """(start, end) of an assert call's arguments without a trailing message: a last argument that is a
+    string or template literal, after at least one other argument, is the message."""
+    spans = split_args(m, open_idx + 1, close)
+    if len(spans) > 1 and m[spans[-1][0]:spans[-1][1]].lstrip()[:1] in ("'", '"', "`"):
+        return open_idx + 1, spans[-2][1]
+    return open_idx + 1, close
 
 
 class Hits:
@@ -356,7 +377,7 @@ def target_names(t):
 
 
 def walk_scope(root):
-    """Every node under the module root, not entering a function, so a function's names stay in its own scope."""
+    """Every node of root's own scope, not entering a nested function, so a name stays in its own scope."""
     todo = [root]
     while todo:
         node = todo.pop()
@@ -365,6 +386,22 @@ def walk_scope(root):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             todo.append(child)
+
+
+# The positional arguments a unittest assert compares. The one after them is its message.
+PY_COMPARED = {"assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNotNone": 1,
+               **{n: 2 for n in ("assertEqual", "assertNotEqual", "assertLess", "assertLessEqual", "assertGreater",
+                                 "assertGreaterEqual", "assertIs", "assertIsNot", "assertIn", "assertNotIn",
+                                 "assertIsInstance", "assertNotIsInstance", "assertCountEqual", "assertRegex",
+                                 "assertNotRegex", "assertListEqual", "assertDictEqual", "assertSetEqual",
+                                 "assertTupleEqual", "assertSequenceEqual", "assertMultiLineEqual")}}
+
+
+def assert_parts(call, name):
+    """The nodes of an assert call that hold the asserted value: no message argument, no `msg=`."""
+    count = PY_COMPARED.get(name)
+    args = call.args if count is None else call.args[:count]
+    return [call.func] + args + [k.value for k in call.keywords if k.arg != "msg"]
 
 
 def scan_python(text):
@@ -392,6 +429,8 @@ def scan_python(text):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
     def holds_clock(node, tainted, pass_through_only=False):
+        if isinstance(node, ast.Lambda):
+            return False  # a lambda only holds a clock; calling it measures nothing
         """True when node reads a clock call or a tainted name. With the flag on, the arguments of a call
         count only when that call is a pass-through."""
         if isinstance(node, ast.Call):
@@ -427,7 +466,7 @@ def scan_python(text):
 
     roots = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     for root in roots:
-        nodes = list(walk_scope(root)) if isinstance(root, ast.Module) else list(ast.walk(root))
+        nodes = list(walk_scope(root))
         assigns = []
         for n in nodes:
             if isinstance(n, ast.Assign):
@@ -446,11 +485,11 @@ def scan_python(text):
                     tainted.update(targets)
                     changed = True
         for n in nodes:
-            if isinstance(n, ast.Assert) and holds_clock(n.test, tainted):
+            if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-                if name.startswith("assert") and holds_clock(n, tainted):
+                if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
     return found
 
@@ -598,12 +637,18 @@ JS_CLOCK = re.compile(r"(?<![\w$])(?:Date\.now|performance\.now)\s*\(|(?<![\w$])
                       r"|(?<![\w$])new\s+Date\s*\(\s*\)")
 JS_PASS_THROUGH = {"round", "floor", "ceil", "trunc", "abs", "max", "min", "Number", "parseInt", "parseFloat",
                    "BigInt", "hrtime"}
+JS_FUNCTION_VALUE = re.compile(r"\s*(?:async\s+)?(?:function\b|\([^()]*\)\s*(?::[^=]+)?=>|[\w$]+\s*=>)")
 JS_DECL = re.compile(r"(?<![\w$.])(?:const|let|var)\s+(?=[A-Za-z_$])")
 JS_ASSERT = re.compile(r"(?<![\w$.])(?:expect|assert)(?:\s*\.\s*[A-Za-z_$][\w$]*)*\s*\(")
 JS_TEST_HEAD = re.compile(r"(?<![\w$.])(?:it|test|describe)\b")
 JS_TEST_MODS = {"only", "skip", "concurrent", "fails", "todo", "sequential", "serial", "failing", "each"}
 JS_MOD = re.compile(r"\.\s*([A-Za-z_$][\w$]*)")
 JS_TIMEOUT_KEY = re.compile(r"(?<![\w$])timeout\s*:")
+
+
+def js_function_value(m, start, end):
+    """True when the initializer m[start:end] is an arrow or function expression, not a call of one."""
+    return JS_FUNCTION_VALUE.match(m, start, end) is not None
 
 
 def parse_test_head(m, i):
@@ -664,16 +709,22 @@ def scan_js(text):
             got = args_of(mm.end() - 1)
             if got and is_num(m[got[1][0][0]:got[1][0][1]], True):
                 hits.add(mm.start(), "sleep")
+        for mm in re.finditer(r"(?<![\w$])waitForTimeout\s*\(", m):
+            got = args_of(mm.end() - 1)
+            if got and is_num(m[got[1][0][0]:got[1][0][1]], True):
+                hits.add(mm.start(), "sleep")
         for mm in re.finditer(r"(?<![\w$])Atomics\s*\.\s*wait\s*\(", m):
             got = args_of(mm.end() - 1)
             if got and is_num(m[got[1][-1][0]:got[1][-1][1]], True):
                 hits.add(mm.start(), "sleep")
 
-    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH)
+    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_value)
     for mm in JS_ASSERT.finditer(m):
         got = args_of(mm.end() - 1)
-        if got and reads_clock(m, mm.end(), got[0], JS_CLOCK, tainted):
-            hits.add(mm.start(), "elapsed-assert")
+        if got:
+            a, b = asserted_range(m, mm.end() - 1, got[0])
+            if reads_clock(m, a, b, JS_CLOCK, tainted, JS_PASS_THROUGH):
+                hits.add(mm.start(), "elapsed-assert")
 
     for mm in re.finditer(r"(?<![\w$])jest\s*\.\s*setTimeout\s*\(|(?<![\w$])this\s*\.\s*timeout\s*\(", m):
         hits.add(mm.start(), "test-cap")
@@ -810,6 +861,14 @@ def mask_swift(src):
     return "".join(out)
 
 
+def swift_function_value(m, start, end):
+    """True when the initializer m[start:end] is a closure literal that nothing calls on the spot."""
+    open_idx = start
+    while open_idx < end and m[open_idx] in " \t\r\n":
+        open_idx += 1
+    return open_idx < end and m[open_idx] == "{" and m[find_close(m, open_idx) + 1:end].strip() == ""
+
+
 def scan_swift(text):
     m = mask_swift(text)
     hits = Hits(m)
@@ -825,11 +884,13 @@ def scan_swift(text):
         if not declared(mm.start()):
             hits.add(mm.start(), "sleep")
 
-    tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH)
+    tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH, swift_function_value)
     for mm in SWIFT_ASSERT.finditer(m):
         close = find_close(m, mm.end() - 1)
-        if close >= 0 and reads_clock(m, mm.end(), close, SWIFT_CLOCK, tainted):
-            hits.add(mm.start(), "elapsed-assert")
+        if close >= 0:
+            a, b = asserted_range(m, mm.end() - 1, close)
+            if reads_clock(m, a, b, SWIFT_CLOCK, tainted, SWIFT_PASS_THROUGH):
+                hits.add(mm.start(), "elapsed-assert")
 
     for mm in re.finditer(r"(?<![\w.])measure\s*[({]|(?<![\w])self\s*\.\s*measure\s*[({]|executionTimeAllowance"
                           r"|\.timeLimit\s*\(", m):
@@ -882,11 +943,11 @@ def main(argv=None):
     if not os.path.isdir(root):
         print(f"unknown: the folder {root} cannot be read")
         return 2
-    files = list_files(root)
+    files, unread = list_files(root)
     if files is None:
         print(f"unknown: git ls-files failed in {root}")
         return 2
-    findings, unread = [], []
+    findings = []
     for rel in files:
         kind = kind_of(rel)
         if kind is None:

@@ -15,19 +15,19 @@ Each count is a candidate, not a verdict. A sample read found false alarms in el
 
 ## Counts
 
-Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a shallow clone of the repo's default branch at the commit shown, on 2026-11-01. Re-run that command to check a number.
+Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a shallow clone of the repo's default branch at the commit shown, on 2026-11-02. Re-run that command to check a number.
 
 | Repo | Commit | sleep | elapsed-assert | test-cap | wait-cap | Total | Files | Unread | Target (sleep, elapsed, cap) |
 |---|---|---|---|---|---|---|---|---|---|
-| q_max | `e8f99027` | 59 | 98 | 127 | 115 | 399 | 63 | 1 | 0, 0, 0, each wait-cap judged |
-| banchi | `2e46c112` | 45 | 2 | 0 | 236 | 283 | 47 | 0 | 0, 0, 0, each wait-cap judged |
-| degen | `af1d95ac` | 214 | 22 | 0 | 1075 | 1311 | 214 | 0 | 0, 0, 0, each wait-cap judged |
+| q_max | `e8f99027` | 64 | 18 | 127 | 115 | 324 | 57 | 1 | 0, 0, 0, each wait-cap judged |
+| banchi | `2e46c112` | 119 | 2 | 0 | 236 | 357 | 54 | 0 | 0, 0, 0, each wait-cap judged |
+| degen | `af1d95ac` | 251 | 15 | 0 | 1075 | 1341 | 218 | 0 | 0, 0, 0, each wait-cap judged |
 | joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, 0, each wait-cap judged |
-| mailaudit | `9efe1bb0` | 108 | 1 | 0 | 178 | 287 | 30 | 0 | 0, 0, 0, each wait-cap judged |
+| mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, 0, each wait-cap judged |
 | ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, 0, each wait-cap judged |
 
 - home: not scanned. Its lane is held.
-- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 17492e58 the finder lists 221 here (sleep 35, elapsed-assert 12, wait-cap 174, in 52 files, 1 unread). That list goes to a later claude-settings lane.
+- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 84a56038 the finder lists 207 here (sleep 51, elapsed-assert 7, test-cap 0, wait-cap 149, in 49 files, 1 unread). That list goes to a later claude-settings lane.
 
 ## Files
 
@@ -35,20 +35,17 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 
 - `harness/tests/ai-calls-picture.test.mjs`: wait-cap 1
 - `harness/tests/ai-usage.test.mjs`: wait-cap 1
-- `harness/tests/approval-export-route.test.mjs`: elapsed-assert 2
 - `harness/tests/bid-leveling.test.mjs`: elapsed-assert 1
 - `harness/tests/bid-package.test.mjs`: elapsed-assert 3
-- `harness/tests/campus-import.test.mjs`: sleep 1, elapsed-assert 6, test-cap 19, wait-cap 9
+- `harness/tests/campus-import.test.mjs`: sleep 1, elapsed-assert 3, test-cap 19, wait-cap 9
 - `harness/tests/ci-changes.test.mjs`: sleep 1
-- `harness/tests/coded-export-route.test.mjs`: elapsed-assert 3
 - `harness/tests/dashboard-outcome-sent.test.mjs`: sleep 5, wait-cap 5
 - `harness/tests/decision-refs.test.mjs`: test-cap 9
-- `harness/tests/deleted-chat-send.test.mjs`: sleep 1, elapsed-assert 55, wait-cap 31
+- `harness/tests/deleted-chat-send.test.mjs`: sleep 1, wait-cap 31
 - `harness/tests/escalate-to-date.test.mjs`: sleep 1
 - `harness/tests/family-rates.test.mjs`: elapsed-assert 1
 - `harness/tests/filter-model.test.mjs`: wait-cap 2
 - `harness/tests/gap-estimates.test.mjs`: wait-cap 1
-- `harness/tests/handbook-export-route.test.mjs`: elapsed-assert 2
 - `harness/tests/itb-bid-comparison.test.mjs`: sleep 3
 - `harness/tests/job-cancellation.test.mjs`: sleep 5, elapsed-assert 2
 - `harness/tests/job-resume.test.mjs`: sleep 1
@@ -63,8 +60,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `harness/tests/meaning-real-run.test.mjs`: wait-cap 1
 - `harness/tests/model-smoke.test.mjs`: wait-cap 2
 - `harness/tests/name-on-write-screens.test.mjs`: sleep 1, wait-cap 14
-- `harness/tests/object-store-s3.test.mjs`: sleep 9, elapsed-assert 5, test-cap 41
-- `harness/tests/observation-export-route.test.mjs`: elapsed-assert 5
+- `harness/tests/object-store-s3.test.mjs`: sleep 9, elapsed-assert 1, test-cap 41
 - `harness/tests/package-drop.test.mjs`: elapsed-assert 1
 - `harness/tests/pdf-triage.test.mjs`: sleep 1
 - `harness/tests/pick-split.test.mjs`: wait-cap 1
@@ -73,16 +69,14 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `harness/tests/pqq-round.test.mjs`: sleep 1
 - `harness/tests/probe-exit-codes.test.mjs`: wait-cap 1
 - `harness/tests/probe-exit-flush.test.mjs`: wait-cap 2
-- `harness/tests/proposal-export-route.test.mjs`: elapsed-assert 3
 - `harness/tests/q-standin.test.mjs`: wait-cap 3
-- `harness/tests/races-plant.test.mjs`: elapsed-assert 3
+- `harness/tests/races-plant.test.mjs`: elapsed-assert 1
 - `harness/tests/resilience.test.mjs`: sleep 1
 - `harness/tests/rfp-direct-upload.test.mjs`: sleep 1
 - `harness/tests/rfp-dropzone.test.mjs`: sleep 6, elapsed-assert 1
-- `harness/tests/rfp-files.test.mjs`: elapsed-assert 1
 - `harness/tests/rfp-link.test.mjs`: sleep 1
 - `harness/tests/rfp-poll-visibility.test.mjs`: sleep 1, wait-cap 6
-- `harness/tests/rfp-route.test.mjs`: sleep 5, wait-cap 13
+- `harness/tests/rfp-route.test.mjs`: sleep 10, wait-cap 13
 - `harness/tests/rfp-uppy-client.test.mjs`: sleep 1, elapsed-assert 1
 - `harness/tests/run-tests.test.mjs`: wait-cap 1
 - `harness/tests/same-outputs.test.mjs`: wait-cap 2
@@ -100,36 +94,43 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 
 ### banchi
 
-- `app/tests/boxmap.spec.ts`: wait-cap 1
+- `app/tests/boxmap.spec.ts`: sleep 1, wait-cap 1
+- `app/tests/brand.spec.ts`: sleep 1
 - `app/tests/button-stack.spec.ts`: wait-cap 1
 - `app/tests/capture-claims.spec.ts`: wait-cap 2
-- `app/tests/capture-freeze.spec.ts`: wait-cap 19
+- `app/tests/capture-freeze.spec.ts`: sleep 2, wait-cap 19
 - `app/tests/capture-section.spec.ts`: wait-cap 14
 - `app/tests/capture-undo.spec.ts`: wait-cap 4
+- `app/tests/card-variants.spec.ts`: sleep 1
 - `app/tests/copy-checks.spec.ts`: sleep 1
 - `app/tests/cursor.spec.ts`: wait-cap 1
 - `app/tests/demo-coverage.spec.ts`: wait-cap 3
-- `app/tests/dispenser.spec.ts`: wait-cap 42
+- `app/tests/dispenser.spec.ts`: sleep 11, wait-cap 42
 - `app/tests/dispenserRig.ts`: sleep 1, wait-cap 5
 - `app/tests/empty-section.spec.ts`: wait-cap 2
 - `app/tests/fulfillment.spec.ts`: sleep 1, wait-cap 7
 - `app/tests/gallery.spec.ts`: wait-cap 1
-- `app/tests/inventory.spec.ts`: sleep 5, wait-cap 8
+- `app/tests/icon-button.spec.ts`: sleep 2
+- `app/tests/inventory.spec.ts`: sleep 12, wait-cap 8
 - `app/tests/live-reconcile.spec.ts`: sleep 1
 - `app/tests/match.spec.ts`: elapsed-assert 2
 - `app/tests/motion-live.spec.ts`: wait-cap 6
 - `app/tests/motion-theme-flash.spec.ts`: sleep 1
-- `app/tests/orders.spec.ts`: sleep 1, wait-cap 3
+- `app/tests/motionSettled.ts`: sleep 1
+- `app/tests/nav.spec.ts`: sleep 1
+- `app/tests/order-walk.spec.ts`: sleep 1
+- `app/tests/orders.spec.ts`: sleep 5, wait-cap 3
 - `app/tests/pricing-markdown.spec.ts`: sleep 2, wait-cap 1
-- `app/tests/pricing.spec.ts`: wait-cap 4
+- `app/tests/pricing.spec.ts`: sleep 4, wait-cap 4
+- `app/tests/product-history.spec.ts`: sleep 2
 - `app/tests/request-budget.spec.ts`: wait-cap 1
-- `app/tests/revenue.spec.ts`: sleep 1
-- `app/tests/review.spec.ts`: sleep 2, wait-cap 7
-- `app/tests/run-panel.spec.ts`: wait-cap 2
+- `app/tests/revenue.spec.ts`: sleep 8
+- `app/tests/review.spec.ts`: sleep 17, wait-cap 7
+- `app/tests/run-panel.spec.ts`: sleep 3, wait-cap 2
 - `app/tests/scaffold.spec.ts`: sleep 1, wait-cap 1
 - `app/tests/section-ruler.spec.ts`: wait-cap 1
-- `app/tests/slabs.spec.ts`: wait-cap 6
-- `app/tests/stability.spec.ts`: sleep 1, wait-cap 8
+- `app/tests/slabs.spec.ts`: sleep 1, wait-cap 6
+- `app/tests/stability.spec.ts`: sleep 11, wait-cap 8
 - `harness/tests/t7/backup.py`: wait-cap 1
 - `harness/tests/t7/common.py`: wait-cap 1
 - `harness/tests/t7/emit_pricing.py`: wait-cap 5
@@ -154,27 +155,32 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `app/tests/archive-delete.spec.ts`: wait-cap 1
 - `app/tests/design-review.spec.ts`: wait-cap 2
 - `app/tests/edge-back.spec.ts`: wait-cap 7
-- `app/tests/fast-scroll-bar.spec.ts`: wait-cap 1
+- `app/tests/fast-scroll-bar.spec.ts`: sleep 1, wait-cap 1
+- `app/tests/grid-cells.spec.ts`: sleep 2
 - `app/tests/item-list.spec.ts`: wait-cap 1
-- `app/tests/l2.spec.ts`: sleep 1, wait-cap 2
+- `app/tests/l2.spec.ts`: sleep 3, wait-cap 2
 - `app/tests/l3.spec.ts`: sleep 1, wait-cap 3
-- `app/tests/l4.spec.ts`: wait-cap 1
+- `app/tests/l4.spec.ts`: sleep 1, wait-cap 1
 - `app/tests/l5.spec.ts`: wait-cap 2
 - `app/tests/media-sweep.spec.ts`: sleep 1
-- `app/tests/media.spec.ts`: wait-cap 2
+- `app/tests/media.spec.ts`: sleep 2, wait-cap 2
+- `app/tests/offline-label-screens.spec.ts`: sleep 1
+- `app/tests/offline/gated-lists-cache.spec.ts`: sleep 1
 - `app/tests/offline/offline-fallback.spec.ts`: sleep 1, wait-cap 2
+- `app/tests/offline/offline-icon.spec.ts`: sleep 1
 - `app/tests/offline/offline.config.ts`: wait-cap 3
-- `app/tests/pull-refresh.spec.ts`: wait-cap 1
+- `app/tests/pull-refresh.spec.ts`: sleep 6, wait-cap 1
 - `app/tests/pwa-update.spec.ts`: sleep 1, wait-cap 2
 - `app/tests/quote-popover-drag.spec.ts`: sleep 1, wait-cap 3
-- `app/tests/seen.spec.ts`: wait-cap 3
+- `app/tests/seen.spec.ts`: sleep 1, wait-cap 3
 - `app/tests/served/served-build.spec.ts`: wait-cap 2
 - `app/tests/served/served.config.ts`: wait-cap 3
 - `app/tests/settings-disk-low.spec.ts`: wait-cap 1
+- `app/tests/settings-viewing.spec.ts`: sleep 1
 - `app/tests/sheet-swipe.spec.ts`: wait-cap 3
 - `app/tests/thread-pending-controls.spec.ts`: wait-cap 6
 - `app/tests/viewer-retry.spec.ts`: wait-cap 6
-- `app/tests/viewer.spec.ts`: sleep 1, wait-cap 1
+- `app/tests/viewer.spec.ts`: sleep 19, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ArchiveRuleRulesFirstTests.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/ArchiveRuleStatusTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/BothPullReviewTests.swift`: sleep 2
@@ -186,13 +192,12 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/DegenKit/Tests/DegenKitTests/FeedCancelledFillTests.swift`: sleep 6, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/FeedOnlyNewPagingTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/FeedTgChatTopicTests.swift`: sleep 1
-- `native/DegenKit/Tests/DegenKitTests/FreeSpaceCountSafetyTests.swift`: elapsed-assert 3
 - `native/DegenKit/Tests/DegenKitTests/GridToggleModelTests.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/IgDmReadClientTests.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/IgDmRulesModelTests.swift`: sleep 1, wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ImageTimingEntryTests.swift`: wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ImageTimingInFlightTests.swift`: wait-cap 2
-- `native/DegenKit/Tests/DegenKitTests/ImageTimingSupport.swift`: elapsed-assert 2, wait-cap 1
+- `native/DegenKit/Tests/DegenKitTests/ImageTimingSupport.swift`: wait-cap 1
 - `native/DegenKit/Tests/DegenKitTests/ItemListModelTests.swift`: sleep 4
 - `native/DegenKit/Tests/DegenKitTests/JdHubSendTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/JdQueueCancelTests.swift`: sleep 2
@@ -200,7 +205,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/DegenKit/Tests/DegenKitTests/JdSendOutboxTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/LaunchScansSupport.swift`: sleep 1
 - `native/DegenKit/Tests/DegenKitTests/LaunchScansTests.swift`: sleep 2, elapsed-assert 2
-- `native/DegenKit/Tests/DegenKitTests/LaunchTraceBufferTests.swift`: sleep 2, elapsed-assert 2
+- `native/DegenKit/Tests/DegenKitTests/LaunchTraceBufferTests.swift`: sleep 2
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionFakeTests.swift`: sleep 6
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionHandChunkTests.swift`: sleep 3
 - `native/DegenKit/Tests/DegenKitTests/MediaDownloadSessionSupport.swift`: sleep 2
@@ -400,7 +405,7 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 - `native/ManifestUITests/VersionsUITests.swift`: wait-cap 4
 - `test/app.test.mjs`: sleep 80
 - `test/harness.mjs`: sleep 1
-- `test/screens.mjs`: wait-cap 20
+- `test/screens.mjs`: sleep 32, wait-cap 20
 - `test/send-key.test.mjs`: sleep 1, wait-cap 1
 
 ### ios-adblock
