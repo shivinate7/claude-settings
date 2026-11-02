@@ -2409,6 +2409,21 @@ sh("per-file deny: checkout --force main in the shared checkout", VCS + " checko
 sh("per-file ask: checkout --force main in a worktree still asks",
    VCS + " checkout --force main", "ask", "shared-tree", cwd=GITWT)
 
+# THE SWITCH FORMS OF A FORCED BRANCH SWITCH. `git switch -f`, `--force`
+# and `--discard-changes` throw the local changes away as `checkout -f` does, so each takes the same
+# verdict: deny in the shared checkout, ask in a worktree. A plain switch and a new branch discard
+# nothing, so they pass in both checkouts.
+for _flag in ("-f", "--force", "--discard-changes"):
+    sh("looser-git-acts: switch %s main is denied in the shared checkout" % _flag,
+       VCS + " switch %s main" % _flag, "deny", "shared-tree", cwd=GITMAIN)
+    sh("looser-git-acts: switch %s main still asks in a worktree" % _flag,
+       VCS + " switch %s main" % _flag, "ask", "shared-tree", cwd=GITWT)
+for _command in ("switch main", "switch -c newbranch"):
+    sh("looser-git-acts: %s is allowed in the shared checkout" % _command, VCS + " " + _command,
+       "allow", cwd=GITMAIN)
+    sh("looser-git-acts: %s is allowed in a worktree" % _command, VCS + " " + _command,
+       "allow", cwd=GITWT)
+
 # A FOLDER WITH NO `--`. Git reads a bare name as a path, so a folder is a whole-folder discard.
 sh("per-file deny: checkout of a folder with no -- in the shared checkout",
    VCS + " checkout hooks", "deny", "shared-tree", cwd=GITMAIN)
@@ -6379,6 +6394,22 @@ for _name, _command in (
     ("everything in the working directory as ./*", "rm -rf ./*"),
 ):
     sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
+# THE SHELL SPELLINGS OF THE WORKING FOLDER. `$(pwd)` names the working folder, so a recursive
+# delete of everything in it is the `./*` delete and gets its verdict. A named folder through
+# `$(pwd)` or `$PWD` is the `./build` delete and passes. `$PWD` belongs to the variable rule
+# (rm-var-unguarded), which refuses `$PWD/*` today and keeps it, so that row expects its rule.
+# `"$PWD"/*` is pinned by the rm-var cases above, so it is not repeated here.
+for _name, _command in (
+    ("quoted $(pwd) before a glob", 'rm -rf "$(pwd)"/*'),
+    ("unquoted $(pwd) before a glob", "rm -rf $(pwd)/*"),
+):
+    sh("looser-git-acts: delete: everything in the working folder, " + _name + ", is denied",
+       _command, "deny", "destructive-delete", cwd=NOGIT)
+sh("looser-git-acts: delete: everything in the working folder, unquoted $PWD before a glob, is denied",
+   "rm -rf $PWD/*", "deny", "rm-var-unguarded", cwd=NOGIT)
+for _command in ('rm -rf "$(pwd)"/build', "rm -rf $(pwd)/build", 'rm -rf "$PWD"/dist', "rm -rf $PWD/dist"):
+    sh("looser-git-acts: delete: a named folder as " + _command + " is allowed", _command,
+       "allow", cwd=NOGIT)
 # FALSE ALARMS: the text of the command sits inside a quoted argument of another command
 # (a note, a commit message, a grep pattern). The cmd.exe forms above are already read by token.
 for _name, _command in (
@@ -15003,6 +15034,10 @@ add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
 add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
     tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
     model="haiku", subagent_type="reviewer")
+# A round line on line three steps up too: the step-up reads every line that starts with the marker.
+add("floor step-up: reviewer Round 2 of 3 on line three on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.",
+    model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)", "ask",
@@ -15230,6 +15265,9 @@ for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jum
 add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
     prompt="round 1 of 3: check Round 2 of 3 logic")
+add("first-line marker: builder on sonnet with ROUND 2 OF 3 first and a later Round 3 of 3 gets no step-up refusal",
+    "allow", tool="Agent", model="sonnet", subagent_type="builder",
+    prompt="ROUND 2 OF 3 and Round 3 of 3")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
@@ -15274,6 +15312,17 @@ add("floor: start_session naming the full haiku id is denied", "deny", "agent-mo
     model="claude-haiku-5-5")
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
+# create_session starts a session on a named model, so the floor judges it as start_session does
+# (decision agent-model-cap, the floor). Failure classes: a false allow (a haiku session slips
+# through because only start_session was judged), a false deny (sonnet, opus or no model refused).
+CREATE_SESSION_CALL = "mcp__claude-code-remote__create_session"
+for _model in ("haiku", "claude-haiku-5-5", "Claude-HAIKU-5-5", ["haiku"]):
+    add("floor: create_session naming %r is denied" % (_model,), "deny", "agent-model-floor",
+        tool=CREATE_SESSION_CALL, prompt="x", model=_model)
+for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
+    add("floor: create_session naming %s is allowed" % (_model,), "allow",
+        tool=CREATE_SESSION_CALL, prompt="x", model=_model)
+add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
@@ -17387,6 +17436,53 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+def session_home_clean_refuses_case():
+    """Rule session-home: while the record is lost, `git clean -fd` in the primary checkout is
+    refused, as `git reset --hard` is. The primary tree is clean, so the refusal is
+    session-home's alone, not the shared-tree rule's."""
+    primary = sh_new_primary("cleanrefuse")
+    lane, branch = sh_add_lane(primary, "lane-cleanrefuse")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    command = VCS + " clean -fd"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -fd in the primary is refused, naming session-home and EnterWorktree"
+
+
+def session_home_clean_reads_case():
+    """Rule session-home: while the record is lost, `git clean -n` (a dry run that writes nothing)
+    and `git status` in the primary checkout pass. The rule refuses a clean
+    that deletes, so a list entry for clean must not refuse the dry run."""
+    primary = sh_new_primary("cleanreads")
+    lane, branch = sh_add_lane(primary, "lane-cleanreads")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in (VCS + " clean -n", VCS + " status"):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -n and git status in the primary pass while the record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -fd in the primary is refused, "
+                         "naming session-home and EnterWorktree", session_home_clean_refuses_case))
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -n and git status in the primary "
+                         "pass", session_home_clean_reads_case))
 
 
 def session_home_agent_tree_inspect_case():
@@ -21395,6 +21491,9 @@ role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is all
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
            "Round 3 of 3. Re-check the diff.")
+# The row reads a round line on line three too: the same scan the step-up reads.
+role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line three is allowed", "reviewer", "sonnet",
+           "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.")
 role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
 role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
@@ -21678,6 +21777,158 @@ for _label, _check in (
     FIXTURELESS_CHECKS.add(_check)
 
 
+# ---- B3: one brief-marker table and one scanner. The table is shared_names.BRIEF_MARKERS, rows of (kind, regex text,
+# position). The scanner is guard.marker_hits(brief), a set of (kind, n). Both names are new, so every read happens
+# inside its check: a guard without them fails that check with its reason, and the run goes on.
+def _marker_hits_fn():
+    """guard.marker_hits from the guard under test, or None while the name is absent."""
+    return getattr(_load_guard_module(), "marker_hits", None)
+
+
+def _shared_names_under_test():
+    """shared_names.py beside the guard under test, loaded under its own name so no cached copy answers."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "shared_names_under_test", os.path.join(os.path.dirname(GUARD), "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def brief_marker_table_check():
+    """Each row is (kind, regex text, position). The kinds round, try and audit each have a row, and an audit row holds
+    EXPLORE_AUDIT_MARKER, read from the constant."""
+    try:
+        names = _shared_names_under_test()
+    except Exception as exc:
+        return False, "shared_names.py does not load: %r" % (exc,)
+    rows = getattr(names, "BRIEF_MARKERS", None)
+    if rows is None:
+        return False, "shared_names has no BRIEF_MARKERS yet"
+    if not isinstance(rows, tuple):
+        return False, "BRIEF_MARKERS is a %s, want a tuple of rows" % type(rows).__name__
+    problems, kinds, audit_texts = [], set(), []
+    for row in rows:
+        if not (isinstance(row, tuple) and len(row) == 3 and all(isinstance(f, str) for f in row)):
+            problems.append("row %r is not (kind, regex text, position) of strings" % (row,))
+            continue
+        kind, text, position = row
+        kinds.add(kind)
+        if position not in ("line-start", "first-line"):
+            problems.append("%s row has position %r" % (kind, position))
+        try:
+            re.compile(text)
+        except re.error as exc:
+            problems.append("%s row does not compile: %s" % (kind, exc))
+        if kind == "audit":
+            audit_texts.append(text)
+    problems += ["no %s row" % kind for kind in ("round", "try", "audit") if kind not in kinds]
+    marker = getattr(names, "EXPLORE_AUDIT_MARKER", "")
+    if not marker or not any(marker in text for text in audit_texts):
+        problems.append("no audit row holds EXPLORE_AUDIT_MARKER")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "BRIEF_MARKERS has round, try and audit rows, each positioned; the audit row holds the constant"
+
+
+def marker_rows_check(*rows):
+    """Each row is (brief, kind, n, holds): marker_hits(brief) holds (kind, n) when holds is True, and lacks it when
+    False. The note names each row that is wrong."""
+    def check():
+        marker_hits = _marker_hits_fn()
+        if marker_hits is None:
+            return False, "guard.py has no marker_hits(brief) yet"
+        wrong = []
+        for brief, kind, n, holds in rows:
+            try:
+                got = marker_hits(brief)
+            except Exception as exc:
+                return False, "marker_hits(%r) raised %r" % (brief, exc)
+            if not isinstance(got, set):
+                return False, "marker_hits(%r) returned a %s, want a set" % (brief, type(got).__name__)
+            if ((kind, n) in got) != holds:
+                wrong.append("marker_hits(%r) %s (%s, %r)" % (brief, "lacks" if holds else "holds", kind, n))
+        if wrong:
+            return False, "; ".join(wrong)
+        return True, "%d marker_hits rows as ruled" % len(rows)
+    return check
+
+
+def marker_none_check():
+    marker_hits = _marker_hits_fn()
+    if marker_hits is None:
+        return False, "guard.py has no marker_hits(brief) yet"
+    try:
+        got = marker_hits(None)
+    except Exception as exc:
+        return False, "marker_hits(None) raised %r" % (exc,)
+    if not isinstance(got, set) or got:
+        return False, "marker_hits(None) is %r, want an empty set" % (got,)
+    return True, "marker_hits(None) is an empty set"
+
+
+def brief_markers_order_check():
+    """brief_markers(brief) keeps the markers in the order the brief lists them. step_up_reason acts on the first
+    one it meets, so that order picks the refusal text a reviewer on haiku gets. The brief lists the later-numbered
+    marker first; a reversed scan would give the reviewer the other refusal."""
+    guard = _load_guard_module()
+    brief_markers = getattr(guard, "brief_markers", None)
+    step_up_reason = getattr(guard, "step_up_reason", None)
+    if brief_markers is None or step_up_reason is None:
+        return False, "guard.py has no brief_markers(brief) or step_up_reason(prompt, role, model) yet"
+    brief = "Round 3 of 3\nRound 2 of 3"
+    try:
+        got = [(kind.lower(), n) for kind, n in brief_markers(brief)]
+        reason = step_up_reason(brief, "reviewer", "haiku")
+    except Exception as exc:
+        return False, "brief_markers or step_up_reason raised %r" % (exc,)
+    wrong = []
+    if got != [("round", "3"), ("round", "2")]:
+        wrong.append("brief_markers gives %r, want the Round 3 marker then the Round 2 one" % (got,))
+    if not reason.startswith("Reviewer round 3 runs on Sonnet or Opus"):
+        wrong.append("a reviewer on haiku gets %r, want the Round 3 refusal" % (reason,))
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, "brief_markers keeps line order; a reviewer on haiku gets the Round 3 refusal"
+
+
+_BRIEF_MARKER_CHECKS = (
+    ("brief markers: BRIEF_MARKERS has round, try and audit rows, each positioned, and the audit row holds "
+     "EXPLORE_AUDIT_MARKER", brief_marker_table_check),
+    ("brief markers: a Round line on line two counts as round 2",
+     marker_rows_check(("Find X.\nRound 2 of 3", "round", "2", True))),
+    ("brief markers: Audit: on the first line counts as audit, with no n",
+     marker_rows_check(("Audit: check", "audit", None, True))),
+    ("brief markers: Audit: on line two does not count as audit",
+     marker_rows_check(("Find X.\nAudit: y", "audit", None, False))),
+    ("brief markers: Audit: after prose on the first line counts as audit",
+     marker_rows_check(("Please read the Audit: docs", "audit", None, True))),
+    ("brief markers: a lowercase audit: does not count as audit (case-sensitive)",
+     marker_rows_check(("audit: x", "audit", None, False))),
+    ("brief markers: marker_hits(None) is an empty set", marker_none_check),
+    ("brief markers: a lone quote in the prose ahead does not hide a Round line on line two",
+     marker_rows_check(("Don't skip the check.\nRound 2 of 3.", "round", "2", True))),
+    ("brief markers: a markdown heading or a // line ahead does not hide a Round line on line two",
+     marker_rows_check(("## Lane c204\nRound 2 of 3.", "round", "2", True),
+                       ("// lane c204\nRound 2 of 3.", "round", "2", True))),
+    ("brief markers: a backtick span open across lines does not hide a Round line that starts a line",
+     marker_rows_check(("Check `a\nRound 2 of 3` now.", "round", "2", True))),
+    ("brief markers: first-line Round counts with a role word ahead, first-line Try does not, "
+     "a Try line at line start counts",
+     marker_rows_check(("Builder, Round 3 of 3. Fix.", "round", "3", True),
+                       ("Builder, Try 3 of 3. Fix.", "try", "3", False),
+                       ("Find X.\nTry 3 of 3.", "try", "3", True))),
+    ("brief markers: a first line that starts with a marker in any case keeps the first-line rule off",
+     marker_rows_check(("ROUND 1 OF 3 then Round 2 of 3", "round", "2", False),
+                       ("Round 2 Of 3 and Round 3 of 3", "round", "3", False))),
+    ("brief markers: brief_markers keeps line order, and a reviewer on haiku gets the Round 3 refusal from it",
+     brief_markers_order_check),
+)
+for _label, _check in _BRIEF_MARKER_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
@@ -21715,8 +21966,9 @@ WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_c
 # --------------------------------------------------------------------------- the simulator boot rules
 FAMILY = "simulator"
 #
-# Owner rulings 2026-10-10. A boot is `xcrun simctl boot`, an `xcodebuild -destination` that names a
-# shut-down simulator, or the simulator MCP control tool's `launch` naming a shut-down device.
+# Owner rulings. A boot is an `xcodebuild -destination` that names a shut-down simulator, or the
+# simulator MCP control tool's `launch` naming a shut-down device. The cap and twin rules judge only
+# those. A raw `xcrun simctl boot` is refused by simulator-boot-bypass before either is read.
 #   simulator-boot-cap   refuses a boot while two simulators are already booted, naming both.
 #   simulator-boot-twin  refuses a boot while an IDLE booted device of the same deviceTypeIdentifier
 #                        and runtime exists, naming its UDID. "Idle" is the shutdown tier's own
@@ -21753,6 +22005,12 @@ LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Ver
 
 def sim_iso(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
+
+
+# Step sim-machine-lock (one lock per Mac, roadmap 55264090): a raw simctl boot is refused.
+def sim_boot_by_destination(udid):
+    """An xcodebuild destination that boots `udid`, so the cap and twin rules judge the boot."""
+    return "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + udid + "'"
 
 
 def make_fake_xcrun(folder, rows):
@@ -21871,9 +22129,10 @@ def register_simulator_boot_cases():
     twin_path, twin_cfg = on("twin")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
-    sh("boot a third simulator with two booted: bash simctl boot",
-       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
-       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
+    sh("boot a third simulator with two booted: bash simctl boot, bypass first",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
+       env_path=cap_path, config=cap_cfg, carries="sim-test")
     sh("boot a third simulator with two booted: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
        "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg,
@@ -21896,9 +22155,9 @@ def register_simulator_boot_cases():
     add("boot a third simulator with two booted: MCP launch, lowercase udid",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid",
-       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-cap",
-       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid, bypass first",
+       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-bypass",
+       env_path=cap_path, config=cap_cfg, carries="sim-test")
     # A booted device whose name is the shut-down target's UDID must not skip the boot check.
     udid_name_path, udid_name_cfg = on("cap_udid_name")
     add("boot a shut-down device by udid, a booted device is named like that udid: MCP launch",
@@ -21946,8 +22205,11 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot is allowed",
-       "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
+    sh("control: one booted, a second boot by destination is allowed",
+       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    sh("boot a second simulator with one booted: bash simctl boot, bypass first",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
     sh("control: a read of the device list is not a boot",
        "xcrun simctl list devices", "allow", env_path=cap_path, config=cap_cfg)
     # Owner ruling 2026-10-10: the cap counts every booted device. One is recorded and idle, the
@@ -21957,12 +22219,12 @@ def register_simulator_boot_cases():
     write_sim_records(mixed_cap_cfg, [sim_boot_record(SIM_UA, "Alpha Pro", SIM_TYPE_PRO, SIM_RT,
                                                       2 * 3600)])
     sh("boot a third simulator: a recorded idle device and an owner-booted one both count",
-       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
+       sim_boot_by_destination(SIM_UC), "deny", rule="simulator-boot-cap",
        env_path=cap_path, config=mixed_cap_cfg, carries=(SIM_UA, SIM_UB))
 
     # Rule simulator-boot-twin. The reason names the idle twin's UDID.
-    sh("boot a device with an idle booted twin: bash simctl boot",
-       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+    sh("boot a device with an idle booted twin: xcodebuild destination by udid",
+       sim_boot_by_destination(SIM_UT1), "deny", rule="simulator-boot-twin",
        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     add("boot a device with an idle booted twin: simulator MCP launch",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", device=SIM_UT1,
@@ -21971,19 +22233,19 @@ def register_simulator_boot_cases():
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     sh("control: the twin booted 10 minutes ago is not idle",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_recent"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
        config=cfgs["twin_recent"][1])
     sh("control: an unrecorded booted twin is not idle",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_unrecorded"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
        config=cfgs["twin_unrecorded"][1])
     sh("control: an idle twin on another runtime does not match",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_runtime"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
        config=cfgs["twin_other_runtime"][1])
     sh("control: an idle twin of another device type does not match",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_type"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
        config=cfgs["twin_other_type"][1])
     sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_rebooted"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
        config=cfgs["twin_rebooted"][1])
 
 
@@ -22044,7 +22306,7 @@ def register_simulator_hold_cases():
         return path + os.pathsep + PY_PATH
 
     sh("boot a device with an idle twin: the twin's own launchd_sim is not a holder",
-       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+       sim_boot_by_destination(SIM_UT1), "deny", rule="simulator-boot-twin",
        env_path=env_for("hold_own", quiet), config=cfg, carries=(SIM_UT0,))
     holds = [
         ("a twin held by a process outside its tree is not idle", quiet + [
@@ -22057,11 +22319,89 @@ def register_simulator_hold_cases():
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, "xcrun simctl boot " + SIM_UT1, "allow",
+        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
            env_path=env_for("hold_%d" % index, rows), config=cfg)
     sh("control: a twin is not idle when the process table cannot be read",
-       "xcrun simctl boot " + SIM_UT1, "allow",
+       sim_boot_by_destination(SIM_UT1), "allow",
        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+
+
+def register_simulator_bypass_cases():
+    """Rule simulator-boot-bypass (step sim-machine-lock): a boot that sim-test did not make is refused
+    on the command text alone, before any simctl list. So these cases set no fake xcrun, and each deny
+    names sim-test. The controls only read, print or quote a boot, and are allowed."""
+    raw = "xcrun simctl boot " + SIM_UC
+    denied = (
+        ("xcrun simctl boot", raw),
+        ("bare simctl boot", "simctl boot " + SIM_UC),
+        ("open -a Simulator", "open -a Simulator"),
+        ("open -a Simulator.app", "open -a Simulator.app"),
+        ("open -a quoted Simulator", 'open -a "Simulator"'),
+        ("open of the Simulator.app path", "open /Applications/Simulator.app"),
+        ("open -b the simulator bundle id", "open -b com.apple.iphonesimulator"),
+        ("bash -c wraps the boot", "bash -c '" + raw + "'"),
+        ("a cd before the boot", "cd x && " + raw),
+        ("a comment opener in a string before the boot", 'echo "# note" && ' + raw),
+        ("a lone quote in text before a bare boot", 'echo "it\'s up" && simctl boot ' + SIM_UC),
+        ("xargs of a list into a boot", "xcrun simctl list | grep X | xargs xcrun simctl boot"),
+        ("xargs of an echo into a boot", "echo " + SIM_UC + " | xargs xcrun simctl boot"),
+        ("open -ga Simulator", "open -ga Simulator"),
+        ("open -na Simulator", "open -na Simulator"),
+        ("open -an Simulator", "open -an Simulator"),
+        # A regression guard: a boot in a command substitution, refused now.
+        ("a boot in a command substitution", "echo $(xcrun simctl boot " + SIM_UC + ")"),
+    )
+    for name, command in denied:
+        sh("simulator-boot-bypass: " + name, command, "deny", rule="simulator-boot-bypass",
+           cwd=NOGIT, carries="sim-test")
+    allowed = (
+        ("sim-test with a scheme", "sim-test -scheme X"),
+        ("simctl shutdown", "xcrun simctl shutdown " + SIM_UC),
+        ("simctl list devices", "xcrun simctl list devices"),
+        ("grep for the boot text", "grep 'simctl boot' f"),
+        ("echo of the boot text", 'echo "simctl boot"'),
+        ("open -a Safari", "open -a Safari"),
+        ("open a README", "open README.md"),
+        ("open -n a README", "open -n README.md"),
+        ("open -g a URL", "open -g https://x"),
+        ("simctl bootstatus", "xcrun simctl bootstatus " + SIM_UC),
+        ("a heredoc body that holds the boot", "cat > notes.md <<'EOF'\n" + raw + "\nEOF"),
+        ("a multi-line quoted string whose middle line is the boot",
+         'echo "first line\n' + raw + '\nlast line"'),
+    )
+    for name, command in allowed:
+        sh("control: " + name, command, "allow", cwd=NOGIT)
+
+
+def sim_bypass_override_check(timed):
+    """The owner override lifts simulator-boot-bypass. With no override a raw boot is refused. A timed
+    override (`override 15m`) lets it through until it ends. A one-act override lets it through once."""
+    def check():
+        kind = "timed" if timed else "once"
+        config, session = ov_config("sim-bypass-" + kind), "ov-sim-bypass-" + kind
+        rule = "simulator-boot-bypass"
+
+        def call(seconds):
+            return lambda: ov_call("Bash", {"command": "xcrun simctl boot " + SIM_UC}, NOGIT,
+                                   config, session, seconds)
+
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first call", call(60), "allow", rule),
+                     ("call just before the end", call(OV_TIMED_SECONDS - 1), "allow", rule),
+                     ("call at the end instant", call(OV_TIMED_SECONDS), "deny", rule)]
+        else:
+            steps = [("first call", call(60), "allow", rule),
+                     ("second call, override spent", call(120), "deny", rule)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "denied with no override, then allowed %s" % (
+            "until the end" if timed else "once")
+    return check
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
@@ -22070,8 +22410,16 @@ FAMILY = "simulator"
 if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
+    register_simulator_bypass_cases()
+    # LOG_CHECKS_EXTRA joined LOG_CHECKS above this section, so the override checks join LOG_CHECKS here.
+    for sim_timed in (False, True):
+        sim_label = ("simulator: an owner override lifts a raw boot until it ends (a timed override)"
+                     if sim_timed else
+                     "simulator: an owner override lifts a raw boot once (a one-act override)")
+        LOG_FAMILY[sim_label] = FAMILY
+        LOG_CHECKS = LOG_CHECKS + ((sim_label, sim_bypass_override_check(sim_timed)),)
 else:
-    skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
+    skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
 
 
