@@ -1,0 +1,9 @@
+{
+ "title": "Merge lock and env-file records match the code",
+ "phase": "next",
+ "status": "todo",
+ "order": 473,
+ "why": "Lane refusal-uncited-rewrites' record-writer found four places where a record or usage line says one thing and the code does another.",
+ "note": "(a) The merge lock's take expiry is not capped by its max hold. (b) The env-file write refusal for .envrc differs from the shell form. (c) decision standing-merge-grant cites a 600 s lock cap the code does not have. (d) The --unlock usage line says it reads no lock state, but it does. The lane reads which side its decision protects; the owner is asked only where no record says. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T04:10:00Z"
+}
