@@ -16,7 +16,9 @@ Three incidents, all on 2026-11-01:
 
 `lint/check_glossary.py` reads added paths and lines, the glossary table and the rule files. It never reads what the owner types.
 
-`lint/rule_mechanisms.json` maps this rule to check_glossary.py, which holds the write half only; the read half is a judgment read.
+`lint/rule_mechanisms.json` maps this rule to check_glossary.py, which holds the Not-name slice of the write half: Not names in added paths, identifiers, anchors, slugs and hook messages. Prose is a reviewer read. The read half is a judgment read.
+
+The rule has copies: the style file serves replies, and the GLOSSARY.md header serves table readers.
 
 Why: the owner should not have to learn the vocabulary. The glossary stays one name per thing.
 
