@@ -1,0 +1,9 @@
+{
+ "title": "The merge tool judges each check by the newest run on the head",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.2101,
+ "why": "The shared merge tool refused q_max PR #1003 on a duplicate run that concurrency cancelled when the PR went ready (run 41368432206), although the newer run on the same head passed (41368432483). It will recur on every child-repo integration PR opened as a draft and then marked ready.",
+ "note": "Fix: bin/merge reads each check by its newest run on the PR head and ignores runs a later run on the same head superseded. Red first: a fixture with a cancelled older run and a green newer run on one head merges; a head whose newest run is cancelled or red is refused. Workaround used Nov 1: re-ran the cancelled run. Basis: named incident (q_max #1003, Nov 1 19:18 CST, coordinator). Port: yes, the merge tool is shared. Ready.",
+ "updatedAt": "2026-11-02T01:19:00Z"
+}
