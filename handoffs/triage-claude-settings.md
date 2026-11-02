@@ -222,3 +222,6 @@ Ten lanes wound down at 12:31 CST went back to todo (13:10 CST); each lane's bra
 - c121: mark per repo as each roll-out visit closes.
 - Roadmap build upkeep left at 13:10 CST (run `python3 ~/.claude/skills/roadmap/build.py --repo <roadmap checkout> --live live.json --block --out block.html`): 12 page rulings not on their step, 6 draft PRs over 12 h with no live lane, 17 notes over 250 words, 3 new top-5 steps with no placement line, 3 Step trailers naming no step (stale-note-recheck).
 - Archive order (coordinator, Nov 2 12:49 CST): triage stays live and is archived last, with batch runner 7.
+- Item 166 context gained a note, Nov 2 12:58 CST: banchi #1003 has no merger (runner 8 archived); the next session merges it after item 166 and the nightly.
+- Trial lg's report-guard question not filed on the page: the Nov 1 16:23 CST ruling answers it (extend the guard). Note in roadmap/outbox/triage.md.
+- Steps filed after the wind-down, from the owner's direct reports Nov 2 12:54-12:55 CST: option-key-guard-gap, ask-reaches-writer.
