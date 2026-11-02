@@ -8371,9 +8371,10 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 # =========================================================================== 5g. archive of a lane
 FAMILY = "lane-closes-after-records"
 #
-# Rule lane-closes-after-records. Incident 2026-11-01: a home-repo lane was archived before its records pull
-# request landed. The close act is archive_session on a lane. The guard reads the target's newest get_session
-# record in this session's own transcript, as merge-role-proof and trust-card-in-build read theirs:
+# Rule lane-closes-after-records. The cases pin when archive_session of a lane is refused and when it is allowed.
+# A lane must not close while its records pull request is open, or those records are lost. The guard reads
+# the target's newest get_session record in this session's own transcript, as merge-role-proof and
+# trust-card-in-build read theirs:
 #   - the record has no cs-build:lane tag: allow, the target is not a lane;
 #   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
