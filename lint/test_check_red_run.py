@@ -13,8 +13,9 @@ path is one that hooks/guard.py is_test_rel judges. A commit whose parent tree h
 lint/check_red_run.py predates the check, so it is not judged.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit, then
-change commits on top. The check runs as the copy at lint/check_red_run.py in that repo.
-CHECK_RED_RUN_UNDER_TEST overrides the module path, which a stub run uses.
+change commits on top. The check runs as the copy at lint/check_red_run.py in that repo. The cwd and
+--root cases run the module by its path, from another directory. CHECK_RED_RUN_UNDER_TEST overrides the
+module path, which a stub run uses.
 """
 import os
 import shutil
@@ -27,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-MODULE = os.environ.get("CHECK_RED_RUN_UNDER_TEST") or os.path.join(HERE, "check_red_run.py")
+MODULE = os.path.abspath(os.environ.get("CHECK_RED_RUN_UNDER_TEST") or os.path.join(HERE, "check_red_run.py"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -119,11 +120,13 @@ class Fixture(unittest.TestCase):
         self.git("merge", "-q", "--no-ff", "-m", "Merge " + branch, branch)
         return self.git("rev-parse", "HEAD")
 
-    def lint(self, args=None, env=None):
-        """Run the check's copy in the fixture repo. Returns (exit code, stdout and stderr)."""
+    def lint(self, args=None, env=None, script=None, cwd=None):
+        """Run the check in the fixture repo: the copy by default, or `script` by path from `cwd`.
+        Returns (exit code, stdout and stderr)."""
         argv = ["--base", self.base_sha] if args is None else args
-        done = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_red_run.py"), *argv],
-                              cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        script = script or os.path.join(self.tree, "lint", "check_red_run.py")
+        done = subprocess.run([sys.executable, script, *argv],
+                              cwd=cwd or self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
                               env=dict(GIT_ENV, **(env or {})))
         return done.returncode, done.stdout + done.stderr
 
@@ -292,6 +295,59 @@ class CheckCase(Fixture):
         rc, out = self.lint([], {"BASE_SHA": self.base_sha})
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", rel)
+
+    def test_check_reads_the_repo_it_is_run_in(self):
+        """The repo comes from the current directory, not from the checkout that holds the script."""
+        self.base()
+        rel = self.new_test_path()
+        sha = self.commit("add widget tests", {rel: TEST_TEXT})
+        rc, out = self.lint(script=MODULE, cwd=self.tree)
+        self.assertEqual(rc, 1, "the check must read the repo it runs in, not its own checkout:\n" + out)
+        self.assertGap(out, sha, "add widget tests", rel)
+
+    def test_root_flag_names_the_repo_to_read(self):
+        """--root picks the repo whatever the current directory is. The cwd here is outside any repo."""
+        self.base()
+        rel = self.new_test_path()
+        sha = self.commit("add widget tests", {rel: TEST_TEXT})
+        cwd = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="cwd_")
+        self.addCleanup(tracked_tree.rm_tree, cwd)
+        rc, out = self.lint(["--root", self.tree, "--base", self.base_sha], script=MODULE, cwd=cwd)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("usage", out, out)
+        self.assertGap(out, sha, "add widget tests", rel)
+
+    def test_revert_of_a_test_deletion_is_not_judged(self):
+        """A revert re-adds the lines it undoes. Its message carries the This reverts commit line, not a trailer."""
+        rel = "lint/test_trim.py"
+        self.base({rel: "def test_a():\n    assert 1\n    assert 2\n"})
+        trim = self.commit("trim widget asserts", {rel: "def test_a():\n    assert 1\n"})
+        self.git("revert", "--no-edit", trim)
+        self.assertIn("This reverts commit ", self.git("log", "-1", "--format=%B"))  # the case is a revert
+        self.assertClean()
+
+    def test_reapply_of_a_revert_is_not_judged(self):
+        """A revert of a revert re-adds the test file. It carries the This reverts commit line, not a trailer."""
+        rel = self.new_test_path()
+        self.base()
+        added = self.commit("add widget tests", {rel: TEST_TEXT}, red=GOOD)
+        self.git("revert", "--no-edit", added)
+        self.git("revert", "--no-edit", "HEAD")  # the reapply: it re-adds the test file
+        self.assertIn("This reverts commit ", self.git("log", "-1", "--format=%B"))  # the case is a reapply
+        self.assertTrue(self.has_file("HEAD", rel))
+        self.assertClean()
+
+    def test_normal_untrailered_commit_after_a_revert_is_still_flagged(self):
+        """The revert exemption covers the revert commit alone. A normal test commit after it is still a gap."""
+        rel = "lint/test_trim.py"
+        self.base({rel: "def test_a():\n    assert 1\n    assert 2\n"})
+        trim = self.commit("trim widget asserts", {rel: "def test_a():\n    assert 1\n"})
+        self.git("revert", "--no-edit", trim)
+        normal = self.new_test_path()
+        sha = self.commit("add widget tests", {normal: TEST_TEXT})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertGap(out, sha, "add widget tests", normal)
 
 
 if __name__ == "__main__":
