@@ -368,11 +368,33 @@ def _flat_text(value) -> str:
     return ""
 
 
-def _press_field_ok(text, links, context="") -> bool:
+# A sentence whose subject is the session ("The session merges PR #374 after your pick.") and that
+# names no `you`: the session makes that press, so the owner presses nothing. "you" in the sentence
+# (the session opens it and you press Merge) keeps the press.
+SESSION_PRESS = re.compile(r"^\s*(?:(?:then|and|after\s+your\s+pick),?\s+)?(?:the|a|this)\s+session\b", re.I)
+_SENTENCE_BREAK = re.compile(r"(?<=[.;!?])\s+|\n")
+OWNER_YOU = re.compile(r"\byou\b", re.I)
+
+
+def _owner_press_text(label, how) -> tuple:
+    """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
+    text. When the how holds a sentence that the session presses (SESSION_PRESS), `press_text` leaves
+    that sentence out, and the label too, since the label names the act the session makes. Otherwise
+    the two are the same."""
+    text = label + ". " + how
+    sentences = [x for x in _SENTENCE_BREAK.split(how) if x.strip()]
+    session = [x for x in sentences if SESSION_PRESS.search(x) and not OWNER_YOU.search(x)]
+    if not session:
+        return text, text
+    return text, " ".join(x for x in sentences if x not in session)
+
+
+def _press_field_ok(text, links, context="", press_text=None) -> bool:
     """True when this field asks for no web press, or `links` holds a link to the exact page. The
-    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
+    press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
+    session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text):
+    if not PRESS_VERB.search(text if press_text is None else press_text):
         return True
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
@@ -396,8 +418,8 @@ def press_link_hit(op, data) -> str:
             if not isinstance(o, dict):
                 continue
             # label and how are one text: the ref may sit in one and the press in the other
-            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
-            if not _press_field_ok(text, o.get("links")):
+            text, press_text = _owner_press_text(_flat_text(o.get("label")), _flat_text(o.get("how")))
+            if not _press_field_ok(text, o.get("links"), press_text=press_text):
                 return "option presses in a web app with no link to the page"
     if isinstance(steps, list) and (op == "set" or "links" in data):
         # the steps are one text, as command-in-item reads them: the page may sit in one step and
@@ -1092,7 +1114,8 @@ def _chat_question_hit(question, options):
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
-        if not _press_field_ok(label + ". " + EFFECT_TEXT.sub("", desc), links):
+        text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
+        if not _press_field_ok(text, links, press_text=press_text):
             return "press-link", "option presses in a web app with no url to the page"
     text = str(question.get("question") or "")
     hit = _lines_hit(text)
