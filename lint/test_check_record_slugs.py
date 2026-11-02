@@ -44,6 +44,10 @@ PLAIN_TEXT = "# Stale link\n\nA plain debt.\n"
 BULLET_DEBT = "debts/bullet-jank.md"  # a bullet-form feel-fix with no device check
 BULLET_CHECKED = "debts/bullet-tap.md"  # a bullet-form feel-fix with a device check
 MID_LINE = "debts/mid-line.md"  # a Feel marker that is not at a line start
+DEBT_README = "debts/README.md"  # the folder's README: it describes the markers, it is not a debt
+DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt either
+README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
+NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -312,6 +316,43 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertIn("check_record_slugs: UNKNOWN", out, out)
         self.assertEqual(rc, 0, out)  # locally an unknown is not red; CI reads it as red
         self.assertNotIn("feel-fix debt deleted", out)
+
+    def test_debt_readme_edited_to_drop_a_feel_line_passes(self):
+        self.put(DEBT_README, README_FEEL_TEXT)
+        self.commit_base()
+        self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")  # drops the marker line
+        self.commit_change()
+        self.assert_passes()
+
+    def test_debt_readme_reworded_away_from_a_feel_line_passes(self):
+        self.put(DEBT_README, README_FEEL_TEXT)
+        self.commit_base()
+        self.put(DEBT_README, README_FEEL_TEXT.replace("**Feel.**", "**Feel:**"))  # rewords the marker
+        self.commit_change()
+        self.assert_passes()
+
+    def test_debt_notes_deleted_with_a_feel_line_passes(self):
+        self.put(DEBT_NOTES, NOTES_FEEL_TEXT)
+        self.commit_base()
+        self.delete(DEBT_NOTES)
+        self.commit_change()
+        self.assert_passes()
+
+    def test_readme_and_notes_are_not_read_with_git_show(self):
+        # With their blobs removed, git show fails on either file. No UNKNOWN means neither file was read.
+        self.put(DEBT_README, README_FEEL_TEXT)
+        self.put(DEBT_NOTES, NOTES_FEEL_TEXT)
+        self.commit_base()
+        for rel in (DEBT_README, DEBT_NOTES):
+            loose = self.loose_blob(rel)
+            self.assertTrue(os.path.isfile(loose), loose)
+            os.remove(loose)
+        self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")
+        self.delete(DEBT_NOTES)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertNotIn("UNKNOWN", out)
+        self.assertEqual(rc, 0, out)
 
 
 class ImportTests(unittest.TestCase):
