@@ -14073,10 +14073,12 @@ add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-fl
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# Explore on opus passes: a standing grant covers an audit Explore, and the guard cannot tell an
-# audit from a plain search. The Opus ceiling block below asks for the rest.
-add("floor: Agent Explore with model opus is allowed (owner grant)", "allow",
-    tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
+# An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker (owner ruling,
+# item 137 pick a, Nov 1 18:38 CST). Without it the Opus ceiling refuses it, and an owner override lifts it.
+add("floor: Agent Explore with model opus and no Audit: marker is denied (item 137)", "deny",
+    "agent-model-cap", tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
+add("floor: Agent Explore with model opus and Audit: on line one is allowed (item 137)", "allow",
+    tool="Agent", prompt="Audit: check the glossary for meaning drift.", model="opus", subagent_type="Explore")
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
 # near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
 for _tool in ("Agent",):
@@ -14091,8 +14093,8 @@ for _tool in ("Agent",):
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
 # same form steps a builder up: the third needs opus, the first two stay on sonnet. The old
 # builder form "Try N of 3" still counts until note try-marker-sunset.
-# A reviewer on the last step-up ("Round N of 3" with N = 3) may run opus: the step-up allows it
-# and the Opus ceiling below asks. The middle step-up stays sonnet only.
+# A reviewer on the last step-up ("Round N of 3" with N = 3) passes the step-up on opus, and the Opus ceiling
+# below refuses it unless an owner override lifts it (item 127 pick a, Nov 1 17:25 CST). The middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
 # so the floor allows it. Step-up still denies a reviewer round 2 that does not name sonnet, and
@@ -14101,6 +14103,10 @@ STEP_UP ="roles-third-round-steps-up"
 add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
+# The remedy names Sonnet only: Opus is refused above the reviewer's row, so it is no remedy (item 127 pick a).
+add("floor step-up: reviewer Round 3 of 3 on haiku names sonnet, and not Sonnet or Opus", "deny", STEP_UP,
+    carries=("Reviewer round 3 runs on Sonnet.",), lacks=("Sonnet or Opus",),
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 on opus is denied (ceiling)", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
@@ -14118,7 +14124,7 @@ add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
-add("floor step-up: builder Try 1 of 3 on opus asks (only try 3 is a standing grant)", "ask",
+add("floor step-up: builder Try 1 of 3 on opus is denied (only try 3 is a standing grant)", "deny",
     "agent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
@@ -14135,7 +14141,7 @@ add("floor step-up: reviewer Round 2 of 3 on line three on haiku is denied", "de
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
-add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)", "ask",
+add("floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
@@ -14150,7 +14156,7 @@ add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
 add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Round 1 of 3 on opus asks (only round 3 is a standing grant)", "ask",
+add("floor step-up: builder Round 1 of 3 on opus is denied (only round 3 is a standing grant)", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 # A Workflow agent() call steps up the same way, read statically. The prompt is the first argument
@@ -14240,24 +14246,25 @@ for _name, _verdict, _script in (
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
-# Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant
-# covers it: Plan, a builder's third-round marker line, and Explore (the class-level grant, pinned above).
-# A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
-# so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
+# Task spawn that sets model opus is refused under `agent-model-cap` (owner ruling, item 127 pick a, Nov 1 17:25
+# CST), unless a standing grant covers it: Plan, the designer, the design reviewer, a builder's third-round marker
+# line, and an Explore whose brief carries the Audit: marker (item 137 pick a, Nov 1 18:38 CST). An owner override
+# lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
+# deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
-# the role does not own earns the grant), a false ask (a standing grant, a Sonnet spawn, or text that
-# only names opus asks).
+# the role does not own earns the grant), a false refusal (a standing grant, a Sonnet spawn, or text that
+# only names opus is refused).
 CEILING = "agent-model-cap"
-add("ceiling: Agent with model opus and no role asks", "ask", CEILING, tool="Agent", prompt="x",
+add("ceiling: Agent with model opus and no role is denied", "deny", CEILING, tool="Agent", prompt="x",
     model="opus", carries=(("opus", "Opus"),))
-add("ceiling: Task with model opus asks", "ask", CEILING, tool="Task", prompt="x", model="opus")
+add("ceiling: Task with model opus is denied", "deny", CEILING, tool="Task", prompt="x", model="opus")
 for _spelling in ("claude-opus-5-5", "Claude-OPUS-5-5", ["opus"]):
-    add("ceiling: Agent with the model spelled %r asks" % (_spelling,), "ask", CEILING,
+    add("ceiling: Agent with the model spelled %r is denied" % (_spelling,), "deny", CEILING,
         tool="Agent", prompt="x", model=_spelling)
 for _role in ("claude", "general-purpose", "builder", "reviewer", "test-author", "record-writer",
               "Planner"):
-    add("ceiling: Agent %s with model opus and no standing grant asks" % _role, "ask", CEILING,
+    add("ceiling: Agent %s with model opus and no standing grant is denied" % _role, "deny", CEILING,
         tool="Agent", prompt="do it", model="opus", subagent_type=_role)
 add("ceiling: Agent Plan with model opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
@@ -14270,7 +14277,7 @@ for _role in ("designer", "design-reviewer"):
         add("ceiling: %s %s on %s is allowed (standing grant)" % (_tool, _role, _model), "allow",
             tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type=_role)
 for _role in ("design", "designers", "design-review", "Designer"):
-    add("ceiling: Agent %s on opus asks (no standing grant)" % _role, "ask", CEILING,
+    add("ceiling: Agent %s on opus is denied (no standing grant)" % _role, "deny", CEILING,
         tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
 add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
@@ -14293,11 +14300,11 @@ for _role, _brief in (
         ("builder", "Try 2 of 3. Finish the fix."),
         ("builder", "This is not try 3 of 3, only the first pass."),
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
-    add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
+    add("ceiling: Agent %s on opus with the brief %r is denied" % (_role, _brief[:24]), "deny", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
 # A brief may open with a role word before the marker, or wrap the marker in markup. The first
 # non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
-# when it starts with the marker. Failure classes: a false ask (a third-try builder on opus asks
+# when it starts with the marker. Failure classes: a false refusal (a third-try builder on opus is refused
 # because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
 # like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
 # its step-up).
@@ -14317,19 +14324,19 @@ for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
 add("first-line marker: builder on opus with the marker on its own line two is allowed", "allow",
     tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
     model="opus", subagent_type="builder")
-add("first-line marker: builder on opus with Round 2 of 3 on line one asks", "ask", CEILING,
+add("first-line marker: builder on opus with Round 2 of 3 on line one is denied", "deny", CEILING,
     tool="Agent", prompt="Builder, Round 2 of 3. Lane c204 continue the fix.", model="opus",
     subagent_type="builder")
-add("first-line marker: builder on opus with Round 3 of 3 only in later prose asks", "ask", CEILING,
+add("first-line marker: builder on opus with Round 3 of 3 only in later prose is denied", "deny", CEILING,
     tool="Agent", model="opus", subagent_type="builder",
     prompt="Builder, lane c204: fix the marker scan.\nFiles: hooks/guard.py.\n"
            "Notes: the review said Round 3 of 3 is next, after this pass.")
 for _label, _first in (("a longer total", "Builder, Round 3 of 30. Lane c204 fix the marker scan."),
                        ("a longer word before it", "Builder, Subround 3 of 3. Lane c204 fix the marker scan.")):
-    add("first-line marker: builder on opus with %s on line one asks" % _label, "ask", CEILING,
+    add("first-line marker: builder on opus with %s on line one is denied" % _label, "deny", CEILING,
         tool="Agent", prompt=_first, model="opus", subagent_type="builder")
-add("first-line marker: builder on opus with no marker in the brief asks, and says what was missing",
-    "ask", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
+add("first-line marker: builder on opus with no marker in the brief is denied, and says what was missing",
+    "deny", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
     model="opus", subagent_type="builder",
     carries=("Round 3 of 3", ("first line", "first non-blank line")))
 add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
@@ -14339,12 +14346,12 @@ add("first-line marker: reviewer with no model and Round 2 of 3 after a role wor
 # about another step, so it never earns the grant, never adds a step-up deny, and never hides the
 # leftmost one.
 TWO_MARKERS = "Builder, Round 2 of 3. Do not jump to Round 3 of 3 yet."
-add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 asks", "ask",
+add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 is denied", "deny",
     CEILING, tool="Agent", prompt=TWO_MARKERS, model="opus", subagent_type="builder")
 add("first-line marker: the same brief on sonnet is allowed", "allow", tool="Agent",
     prompt=TWO_MARKERS, model="sonnet", subagent_type="builder")
-add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later asks, no step-up deny",
-    "ask", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
+add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later is denied, no step-up deny",
+    "deny", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
     prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
 add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
@@ -14355,7 +14362,7 @@ add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 o
 for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jump to Round 3 of 3 yet."),
                        ("lowercase at the start", "round 2 of 3. Do not jump to Round 3 of 3 yet."),
                        ("the old spelling after a role word", "Builder, Try 2 of 3. Round 3 of 3 later.")):
-    add("first-line marker: builder on opus with %s and a later Round 3 of 3 asks" % _label, "ask", CEILING,
+    add("first-line marker: builder on opus with %s and a later Round 3 of 3 is denied" % _label, "deny", CEILING,
         tool="Agent", prompt=_first, model="opus", subagent_type="builder")
 add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
@@ -17950,12 +17957,12 @@ def ov_home(name):
 
 def ov_offer_check(kind):
     """A liftable refusal ends with the override line: the main session names `override` and `override 15m`,
-    an agent's call names `override 15m`, and the Opus spawn ask names `opus 2h`."""
+    an agent's call names `override 15m`, and the Opus spawn refusal names `opus 2h`."""
     def check():
         config, session = ov_config("offer-" + kind), "ov-offer-" + kind
         if kind == "opus":
             got, reason = ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, 0)
-            want, rule, words = "ask", "agent-model-cap", ("opus 2h",)
+            want, rule, words = "deny", "agent-model-cap", ("opus 2h",)
             expected = ov_home("offer")
             expected = expected(rule, spawn_role="general-purpose") if expected else None
         else:
@@ -18053,16 +18060,16 @@ def settings_denies_no_name_kill():
 LOG_CHECKS_EXTRA.append(("override: settings.json denies neither pkill nor killall", settings_denies_no_name_kill))
 
 
-# The ask on an Opus spawn is liftable (an override lifts it like any other ask), while the
-# same rule's ask on a settings write stays outside every override (ov_role_acts and ov_cap_shell_acts
-# below). Each story first wants the ask with no override.
+# The refusal of an Opus spawn above its row is liftable (an override lifts it like any other refusal of
+# agent-model-cap), while the same rule's ask on a settings write stays outside every override (ov_role_acts
+# and ov_cap_shell_acts below). Each story first wants the refusal with no override.
 OV_OPUS_SPAWN = {"prompt": "Review the diff for typos.", "model": "opus",
                  "subagent_type": "general-purpose"}
 
 
 def ov_opus_spawn_check(timed):
-    """A one-act override lets an Opus spawn through once, then it asks again. A timed override lets it through
-    every time until the override ends, and the call at the end instant asks."""
+    """A one-act override lets an Opus spawn through once, then it is refused again. A timed override lets it through
+    every time until the override ends, and the call at the end instant is refused."""
     kind = "timed" if timed else "once"
     rule = "agent-model-cap"
 
@@ -18072,21 +18079,21 @@ def ov_opus_spawn_check(timed):
         def call(seconds):
             return lambda: ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, seconds)
 
-        ok, why = ov_story([("with no override", call(0), "ask", rule)])
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
         if not ok:
             return False, why
         note = ov_type(config, session, "override 15m" if timed else "override")
         if timed:
             steps = [("first spawn", call(60), "allow", rule),
                      ("spawn just before the end", call(OV_TIMED_SECONDS - 1), "allow", rule),
-                     ("spawn at the end instant", call(OV_TIMED_SECONDS), "ask", rule)]
+                     ("spawn at the end instant", call(OV_TIMED_SECONDS), "deny", rule)]
         else:
             steps = [("first spawn", call(60), "allow", rule),
-                     ("second spawn, override spent", call(120), "ask", rule)]
+                     ("second spawn, override spent", call(120), "deny", rule)]
         ok, why = ov_story(steps, note)
         if not ok:
             return False, why
-        return True, "an Opus spawn asked with no override, then went through %s" % (
+        return True, "an Opus spawn was refused with no override, then went through %s" % (
             "until the end" if timed else "once")
     return check
 
@@ -18094,7 +18101,7 @@ def ov_opus_spawn_check(timed):
 for _is_timed in (False, True):
     LOG_CHECKS_EXTRA.append(
         ("override: a timed override lets an Opus spawn through until it ends" if _is_timed
-         else "override: a one-act override lets an Opus spawn through once, then it asks again",
+         else "override: a one-act override lets an Opus spawn through once, then it is refused again",
          ov_opus_spawn_check(_is_timed)))
 
 
@@ -18117,10 +18124,10 @@ def op_spawn(config, session, seconds, spawn=None, agent_id=None, cwd=NOGIT, env
 
 
 def op_timed_check():
-    """`opus 2h`: an Opus spawn asks with no override, then goes through for the session and its agents
-    until the override ends, and asks again at the end instant."""
+    """`opus 2h`: an Opus spawn is refused with no override, then goes through for the session and its agents
+    until the override ends, and is refused again at the end instant."""
     config, session, rule = ov_config("opus-timed"), "op-timed", "agent-model-cap"
-    ok, why = ov_story([("with no override", lambda: op_spawn(config, session, 0), "ask", rule)])
+    ok, why = ov_story([("with no override", lambda: op_spawn(config, session, 0), "deny", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "opus 2h")
@@ -18129,11 +18136,11 @@ def op_timed_check():
         ("an agent's spawn", lambda: op_spawn(config, session, 120, agent_id=OV_AGENT), "allow", rule),
         ("second spawn", lambda: op_spawn(config, session, 180), "allow", rule),
         ("spawn just before the end", lambda: op_spawn(config, session, OP_SECONDS - 1), "allow", rule),
-        ("spawn at the end instant", lambda: op_spawn(config, session, OP_SECONDS), "ask", rule),
+        ("spawn at the end instant", lambda: op_spawn(config, session, OP_SECONDS), "deny", rule),
     ], note)
     if not ok:
         return False, why
-    return True, "asked with no override, went through for the session and an agent until the end"
+    return True, "refused with no override, went through for the session and an agent until the end"
 
 
 def op_minutes_check():
@@ -18142,7 +18149,7 @@ def op_minutes_check():
     note = ov_type(config, session, "opus 15m")
     ok, why = ov_story([
         ("spawn just before the end", lambda: op_spawn(config, session, OV_TIMED_SECONDS - 1), "allow", rule),
-        ("spawn at the end instant", lambda: op_spawn(config, session, OV_TIMED_SECONDS), "ask", rule),
+        ("spawn at the end instant", lambda: op_spawn(config, session, OV_TIMED_SECONDS), "deny", rule),
     ], note)
     if not ok:
         return False, why
@@ -18153,27 +18160,27 @@ def op_minutes_check():
         return False, why
     note = ov_type(config, session, "opus off", OV_TIMED_SECONDS + 120) or note
     ok, why = ov_story([("after `opus off`", lambda: op_spawn(config, session, OV_TIMED_SECONDS + 150),
-                         "ask", rule)], note)
+                         "deny", rule)], note)
     if not ok:
         return False, why
     return True, "15 minutes to the second, any case, and `opus off` ended it"
 
 
 def op_role_check():
-    """`opus builders 2h` lifts only builder spawns. A spawn of any other role still asks."""
+    """`opus builders 2h` lifts only builder spawns. A spawn of any other role is still refused."""
     config, session, rule = ov_config("opus-role"), "op-role", "agent-model-cap"
     ok, why = ov_story([("a builder with no override", lambda: op_spawn(config, session, 0, OP_BUILDER),
-                         "ask", rule)])
+                         "deny", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "opus builders 2h")
     ok, why = ov_story([
         ("a builder", lambda: op_spawn(config, session, 60, OP_BUILDER), "allow", rule),
         ("an agent's builder", lambda: op_spawn(config, session, 90, OP_BUILDER, OV_AGENT), "allow", rule),
-        ("a general-purpose spawn", lambda: op_spawn(config, session, 120), "ask", rule),
-        ("a reviewer", lambda: op_spawn(config, session, 150, OP_REVIEWER), "ask", rule),
+        ("a general-purpose spawn", lambda: op_spawn(config, session, 120), "deny", rule),
+        ("a reviewer", lambda: op_spawn(config, session, 150, OP_REVIEWER), "deny", rule),
         ("a spawn with no role", lambda: op_spawn(config, session, 180, {"prompt": "x", "model": "opus"}),
-         "ask", rule),
+         "deny", rule),
     ], note)
     if not ok:
         return False, why
@@ -18182,14 +18189,14 @@ def op_role_check():
         ("a reviewer after `opus reviewer 2h`", lambda: op_spawn(config, session, 270, OP_REVIEWER),
          "allow", rule),
         ("a builder after the new override replaced the old", lambda: op_spawn(config, session, 300, OP_BUILDER),
-         "ask", rule),
+         "deny", rule),
     ], note)
     if not ok:
         return False, why
     return True, "the role override lifted only its own role, plural or singular"
 
 
-# Each prompt is ambiguous or not the word, so it grants nothing: the spawn still asks.
+# Each prompt is ambiguous or not the word, so it grants nothing: the spawn is still refused.
 OP_NOT_THE_WORD = (
     "opus 2",                 # a bare number may name a model, so the unit is required
     "opus 4.5",
@@ -18212,7 +18219,7 @@ def op_not_the_word_check():
     for n, prompt in enumerate(OP_NOT_THE_WORD):
         session = "op-not-word-%d" % n
         note = ov_type(config, session, prompt)
-        problem = ov_want(*op_spawn(config, session, 60), "ask", rule)
+        problem = ov_want(*op_spawn(config, session, 60), "deny", rule)
         if problem:
             return False, "after %r: %s; %s" % (prompt, problem, note or "typed")
         if os.path.exists(op_pass_path(config, session)):
@@ -18225,13 +18232,13 @@ def op_scope_check():
     config, rule = ov_config("opus-scope"), "agent-model-cap"
     note = ov_type(config, "op-scope-a", "opus 2h")
     ok, why = ov_story([
-        ("another session", lambda: op_spawn(config, "op-scope-b", 60), "ask", rule),
-        ("no session id", lambda: op_spawn(config, None, 90), "ask", rule),
+        ("another session", lambda: op_spawn(config, "op-scope-b", 60), "deny", rule),
+        ("no session id", lambda: op_spawn(config, None, 90), "deny", rule),
         ("the typing session", lambda: op_spawn(config, "op-scope-a", 120), "allow", rule),
     ], note)
     if not ok:
         return False, why
-    return True, "another session and an unnamed one asked, the typing session went through"
+    return True, "another session and an unnamed one were refused, the typing session went through"
 
 
 def op_other_acts(config, session):
@@ -18294,10 +18301,10 @@ def op_corrupt_check():
             ("number-role", '{"kind": "opus", "until": "%s", "role": 7}' % later)):
         session = "op-corrupt-" + name
         write(op_pass_path(config, session), body)
-        problem = ov_want(*op_spawn(config, session, 60), "ask", rule)
+        problem = ov_want(*op_spawn(config, session, 60), "deny", rule)
         if problem:
             return False, "a %s Opus override file: %s" % (name, problem)
-    return True, "seven unreadable or misshapen Opus override files, each asked"
+    return True, "seven unreadable or misshapen Opus override files, each refused"
 
 
 def op_log_check():
@@ -18434,15 +18441,15 @@ def gs_lift_check():
 
 
 def gs_unread_log_check():
-    """A bound step the guard cannot parse asks, and guard.log gets a step-grant-unread line for it."""
+    """A bound step the guard cannot parse is refused, and guard.log gets a step-grant-unread line for it."""
     repo = gs_repo("unread-log", dict([GS_BAD]))
     config, session = ov_config("grant-unread-log"), "gs-payload-unread-log"
-    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "ask", "agent-model-cap")
+    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "deny", "agent-model-cap")
     if problem:
         return False, problem
     if not [line for line in gs_log_lines(config) if "\tstep-grant-unread\t" in line]:
         return False, "guard.log has no step-grant-unread line for the bound step"
-    return True, "asked, and the unreadable bound step is logged as step-grant-unread"
+    return True, "refused, and the unreadable bound step is logged as step-grant-unread"
 
 
 def gs_cost_check():
@@ -18469,83 +18476,83 @@ def gs_cost_check():
 
 def gs_runner_id_check():
     """The runner's own lane id would bind a case that sets none to a lane. The runner drops it, so a reviewer
-    spawn on a step bound to that id, with a reviewer grant, still asks. The id is set in this process only,
+    spawn on a step bound to that id, with a reviewer grant, is still refused. The id is set in this process only,
     and restored after the call."""
     repo = gs_repo("runner-id", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
     config, session = ov_config("grant-runner-id"), "gs-payload-runner-id"
     saved = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = "cse_" + GS_LANE
     try:
-        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER, env=None), "ask", "agent-model-cap")
+        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER, env=None), "deny", "agent-model-cap")
     finally:
         if saved is None:
             os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         else:
             os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = saved
-    return (not problem), (problem or "asked: the runner's own lane id did not reach the case")
+    return (not problem), (problem or "refused: the runner's own lane id did not reach the case")
 
 
-# Each ask case below has a control: the same fixture with its one defect repaired, which must be allowed.
-# A control that asks would mean the reader never ran, so the ask case would pass for the wrong reason.
+# Each refusal case below has a control: the same fixture with its one defect repaired, which must be allowed.
+# A control that is refused would mean the reader never ran, so the refusal case would pass for the wrong reason.
 GS_CHECKS = (
     ("step grant: a reviewer spawn on the lane's step is allowed by a grant for reviewers, and logged",
      gs_lift_check),
-    ("step grant: a step with no grant asks an Opus spawn",
-     gs_verdict_check("no-grant", dict([gs_step(GS_STEP, GS_LANE)]), OP_REVIEWER, "ask")),
+    ("step grant: a step with no grant refuses an Opus spawn",
+     gs_verdict_check("no-grant", dict([gs_step(GS_STEP, GS_LANE)]), OP_REVIEWER, "deny")),
     ("step grant: control for no grant, the step with a reviewer grant is allowed",
      gs_verdict_check("ctl-no-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
                       OP_REVIEWER, "allow")),
     ("step grant: a grant on another lane's step does not lift this lane's Opus spawn",
      gs_verdict_check("other-step", dict([gs_step(GS_STEP, GS_LANE),
                                           gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
-                      OP_REVIEWER, "ask")),
+                      OP_REVIEWER, "deny")),
     ("step grant: control for another lane's step, this lane's own step with a grant is allowed",
      gs_verdict_check("ctl-other-step", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")]),
                                               gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
                       OP_REVIEWER, "allow")),
     ("step grant: a grant for builders does not lift a reviewer spawn",
      gs_verdict_check("builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("builder")])]),
-                      OP_REVIEWER, "ask")),
+                      OP_REVIEWER, "deny")),
     ("step grant: control for a builder grant, a reviewer grant for a reviewer is allowed",
      gs_verdict_check("ctl-builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
                       OP_REVIEWER, "allow")),
-    ("step grant: a bound step that cannot be parsed asks an Opus spawn",
-     gs_verdict_check("bad-json", dict([GS_BAD]), OP_REVIEWER, "ask")),
+    ("step grant: a bound step that cannot be parsed refuses an Opus spawn",
+     gs_verdict_check("bad-json", dict([GS_BAD]), OP_REVIEWER, "deny")),
     ("step grant: control for an unparseable step, the same step parsed with a reviewer grant is allowed",
      gs_verdict_check("ctl-bad-json", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
                       OP_REVIEWER, "allow")),
-    ("step grant: a grant with an unknown role asks, even for a spawn of that role",
+    ("step grant: a grant with an unknown role refuses, even for a spawn of that role",
      gs_verdict_check("unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("wizard")])]),
-                      GS_WIZARD, "ask")),
+                      GS_WIZARD, "deny")),
     ("step grant: control for an unknown role, a reviewer grant for a reviewer is allowed",
      gs_verdict_check("ctl-unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
                       OP_REVIEWER, "allow")),
-    ("step grant: a grant with no role key asks an Opus spawn",
+    ("step grant: a grant with no role key refuses an Opus spawn",
      gs_verdict_check("no-role-key", dict([gs_step(GS_STEP, GS_LANE,
                                                    grants=[gs_grant("reviewer", drop_role=True)])]),
-                      OP_REVIEWER, "ask")),
+                      OP_REVIEWER, "deny")),
     ("step grant: control for no role key, the same grant with its role is allowed",
      gs_verdict_check("ctl-no-role-key", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
                       OP_REVIEWER, "allow")),
     ("step grant: a grant with role null allows a builder spawn",
      gs_verdict_check("null-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_BUILDER, "allow")),
-    ("step grant: a step with status done asks an Opus spawn, even with a grant",
+    ("step grant: a step with status done refuses an Opus spawn, even with a grant",
      gs_verdict_check("done", dict([gs_step(GS_STEP, GS_LANE, status="done", grants=[gs_grant(None)])]),
-                      OP_REVIEWER, "ask")),
+                      OP_REVIEWER, "deny")),
     ("step grant: control for done, the same step not done is allowed",
      gs_verdict_check("ctl-done", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_REVIEWER, "allow")),
-    ("step grant: a repository with no origin/roadmap ref asks an Opus spawn",
+    ("step grant: a repository with no origin/roadmap ref refuses an Opus spawn",
      gs_verdict_check("no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
-                      OP_REVIEWER, "ask", ref=False)),
+                      OP_REVIEWER, "deny", ref=False)),
     ("step grant: control for no ref, the same step on the ref is allowed",
      gs_verdict_check("ctl-no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_REVIEWER, "allow")),
-    ("step grant: two steps bound to this lane ask an Opus spawn, even with a grant on one",
+    ("step grant: two steps bound to this lane refuse an Opus spawn, even with a grant on one",
      gs_verdict_check("two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)]),
                                          gs_step("step-c", GS_LANE)]),
-                      OP_REVIEWER, "ask")),
+                      OP_REVIEWER, "deny")),
     ("step grant: control for two steps, one step bound to this lane with the grant is allowed",
      gs_verdict_check("ctl-two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_REVIEWER, "allow")),
@@ -19917,7 +19924,7 @@ FIXTURELESS_CHECKS.add(shard_split_check)
 #      unread line.
 # The pointer is the checkout the owner's global rules name. The cases that judge the owner's rows
 # name the real checkout (REPO), so they judge the rows the owner set. Opus is never this rule's
-# deny: an Opus spawn above a sonnet row stays the agent-model-cap ask (rule 9d).
+# deny: an Opus spawn above its row is refused under agent-model-cap (rule 9d, item 127 pick a).
 FAMILY = "role-model"
 ROLE_RULE = "agent-role-model"
 ROLE_REMEDY = "drop the model field, or name the role's model"
@@ -20028,8 +20035,10 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
     add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
 
 
-def role_ask(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
-    add(name, "ask", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
+def role_opus_deny(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
+    """An Opus spawn above its row is refused under agent-model-cap, not this rule (owner ruling, item 127 pick a,
+    Nov 1 17:25 CST). An owner override lifts it, so the case is not never-lifted."""
+    add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
         **role_input(role, model, prompt))
 
 
@@ -20086,7 +20095,7 @@ role_model_refuse("role-model: Explore on sonnet with lowercase audit: on line 1
 role_model_refuse("role-model: Explore on fable with Audit: on line 1 is denied, reason names no marker",
           "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
 
-# ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
+# ---- C: at or below the row passes. An Opus spawn above its row is refused under agent-model-cap (rule 9d).
 # An Explore on Sonnet passes when the first `Audit:` on the brief's first non-blank line counts, with any text ahead
 # of it. An Explore on Haiku or Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
 role_model_allow("role-model: Explore on sonnet with Audit: on line 1 is allowed", "Explore", "sonnet",
@@ -20097,8 +20106,11 @@ role_model_allow("role-model: Explore on sonnet with prose ahead of Audit: on li
            "Please read the Audit: docs section.")
 role_model_allow("role-model: Explore on haiku is allowed, with no marker", "Explore", "haiku",
            "Find where X is defined.")
-role_model_allow("role-model: Explore on opus is allowed, with no marker (standing grant, unchanged)", "Explore", "opus",
-           "Find where X is defined.")
+# An Explore on Opus is refused with no Audit: marker; the marker is its standing grant (item 137 pick a).
+role_opus_deny("role-model: Explore on opus with no marker is denied under agent-model-cap (item 137)", "Explore", "opus",
+               "Find where X is defined.")
+role_model_allow("role-model: Explore on opus with Audit: on line one is allowed (item 137)", "Explore", "opus",
+           "Audit: check the glossary for meaning drift.")
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
@@ -20120,12 +20132,23 @@ role_model_allow("role-model: general-purpose on sonnet is allowed", "general-pu
 role_model_allow("role-model: claude on sonnet is allowed", "claude", "sonnet", "Find the file.")
 role_model_allow("role-model: claude-code-guide on haiku is allowed", "claude-code-guide", "haiku",
            "How do the hooks load?")
-role_ask("role-model: builder on opus with no round line asks, and is not this rule's deny",
-         "builder", "opus", "Fix the failing case.")
-role_ask("role-model: general-purpose on opus asks, and is not this rule's deny",
-         "general-purpose", "opus", "Find the file.")
-role_ask("role-model: test-author on opus asks, and is not this rule's deny",
-         "test-author", "opus", "Write the failing cases.")
+role_opus_deny("role-model: builder on opus with no round line is denied under agent-model-cap, not this rule",
+               "builder", "opus", "Fix the failing case.")
+role_opus_deny("role-model: general-purpose on opus is denied under agent-model-cap, not this rule",
+               "general-purpose", "opus", "Find the file.")
+role_opus_deny("role-model: test-author on opus is denied under agent-model-cap, not this rule",
+               "test-author", "opus", "Write the failing cases.")
+# A role with no row has no grant, so the Opus ceiling refuses it, and says so rather than asking (item 127 pick a).
+role_opus_deny("role-model: a role with no row on opus is denied under agent-model-cap, not asked (item 127)",
+               "scout", "opus", "Look around.")
+role_opus_deny("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
+               "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
+# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
+role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
+role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
+                 "Review the mockup.")
+role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
+                 "Round 3 of 3. Finish the fix.")
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
@@ -20159,6 +20182,108 @@ role_model_allow("role-model: no pointer line fails open for test-author on sonn
            "test-author", "sonnet", "Write the failing cases.", config=CFG)
 role_model_allow("role-model: a missing decision file never denies a builder with no model",
            "builder", None, "Fix the failing case.", config=ROLE_MISSING_CFG, env=UNSET_DEFAULT)
+
+
+# ---- F: the owner's override and the role row (item 127 pick a, Nov 1 17:25 CST; item 137 pick a, Nov 1 18:38 CST).
+# A refusal of a spawn above its row is liftable by the general override. The no-model refusal stays never-lifted, so
+# it spends no override. An Explore on Opus and a test-author on Opus are lifted by their own opus grants.
+ROLE_OV_TEST_AUTHOR = role_input("test-author", "sonnet", "Write the failing cases.")
+ROLE_OV_NO_MODEL = role_input("builder", None, "Fix the failing case.")
+ROLE_OV_UNSET = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
+
+
+def role_override_lift_check():
+    """A test-author on sonnet is refused by its row. One override lifts that refusal once, then it refuses again."""
+    config, session = role_config("ov-lift", REPO), "role-ov-lift"
+
+    def call(seconds):
+        return ov_call("Agent", dict(ROLE_OV_TEST_AUTHOR), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", ROLE_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("the first spawn, under the override", lambda: call(60), "allow", ROLE_RULE),
+        ("the next spawn, override spent", lambda: call(120), "deny", ROLE_RULE),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "refused by its row, lifted by one override, refused again once it was spent"
+
+
+def role_override_no_model_check():
+    """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
+    override that follows still lifts a test-author on sonnet."""
+    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
+
+    def call(seconds, spawn, env=None):
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
+
+    ok, why = ov_story([("no model, no override", lambda: call(0, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("no model, under the override", lambda: call(60, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE),
+        ("test-author on sonnet, the override not spent by the no-model refusal",
+         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "the no-model refusal stayed under the override, which then lifted a test-author on sonnet"
+
+
+def role_opus_explore_lift_check():
+    """`opus 2h` lifts an Explore on Opus with no Audit: marker. The refusal is the Opus ceiling's (item 137 pick a)."""
+    config, session = ov_config("role-opus-explore"), "role-opus-explore"
+    spawn = {"prompt": "Find where X is defined.", "model": "opus", "subagent_type": "Explore"}
+
+    def call(seconds):
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus 2h")
+    ok, why = ov_story([("under opus 2h", lambda: call(60), "allow", "agent-model-cap")], note)
+    if not ok:
+        return False, why
+    return True, "refused with no marker, lifted by opus 2h"
+
+
+def role_opus_role_lift_check():
+    """`opus test-authors 2h` lifts a test-author on Opus and no other role: a builder on Opus is still refused."""
+    config, session = ov_config("role-opus-role"), "role-opus-role"
+    author = {"prompt": "Write the failing cases.", "model": "opus", "subagent_type": "test-author"}
+    builder = {"prompt": "Round 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
+
+    def call(seconds, spawn):
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("test-author on opus, no override", lambda: call(0, author), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus test-authors 2h")
+    ok, why = ov_story([
+        ("test-author on opus, under the grant", lambda: call(60, author), "allow", "agent-model-cap"),
+        ("builder on opus, not covered by a test-author grant", lambda: call(120, builder), "deny", "agent-model-cap"),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "the test-author grant lifted a test-author on opus, and not a builder on opus"
+
+
+ROLE_OVERRIDE_CHECKS = (
+    ("role-model: an owner override lifts a test-author on sonnet once, then refuses again",
+     role_override_lift_check),
+    ("role-model: the no-model refusal stays under an owner override, and spends none",
+     role_override_no_model_check),
+    ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
+    ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
+)
+for _label, _check in ROLE_OVERRIDE_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
 
 
 def role_model_reader():
@@ -20496,8 +20621,10 @@ def brief_markers_order_check():
     wrong = []
     if got != [("round", "3"), ("round", "2")]:
         wrong.append("brief_markers gives %r, want the Round 3 marker then the Round 2 one" % (got,))
-    if not reason.startswith("Reviewer round 3 runs on Sonnet or Opus"):
+    if not reason.startswith("Reviewer round 3 runs on Sonnet."):
         wrong.append("a reviewer on haiku gets %r, want the Round 3 refusal" % (reason,))
+    if "Sonnet or Opus" in reason:
+        wrong.append("a reviewer's round 3 remedy names Opus, want Sonnet only: %r" % (reason,))
     if wrong:
         return False, "; ".join(wrong)
     return True, "brief_markers keeps line order; a reviewer on haiku gets the Round 3 refusal"
