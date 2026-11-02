@@ -11062,6 +11062,9 @@ BUILDER_SHELL_TEST_WRITES = (
      "node -e \"const g='src/*.js'; require('fs').writeFileSync('web/a.test.js', g)\""),
     ("a # inside a python string on the write line hides no test write",
      "python3 - <<'EOF'\ns = \"#\"; open(\"tests/test_x.py\", \"w\").write(s)\nEOF\n"),
+    ("sed --in-place rewrites a test path", "sed --in-place 's/a/b/' tests/test_x.py"),
+    ("sed -Ei rewrites a test path", "sed -Ei 's/a/b/' tests/test_x.py"),
+    ("sed -i.bak rewrites a test path", "sed -i.bak 's/a/b/' tests/test_x.py"),
 )
 BUILDER_SHELL_NON_TEST = (
     ("cat reads a test", "cat src/test_app.py"),
@@ -11081,6 +11084,10 @@ BUILDER_SHELL_NON_TEST = (
      "node -e 'const s = `\nsaid \"hi\n`; require(\"fs\").writeFileSync(\"src/app.js\", s)'"),
     ("a commented-out test write in a python heredoc",
      "python3 - <<'EOF'\n# open(\"tests/test_x.py\", \"w\")\nprint(1)\nEOF\n"),
+    ("sed -n reads a line that holds -i", "sed -n '/-i/p' tests/test_x.py"),
+    ("sed -n prints a substitution that holds -i", "sed -n 's/-i/x/p' tests/test_x.py"),
+    ("rm -rf clears a test cache folder", "rm -rf tests/__pycache__"),
+    ("rm -rf clears the test and pytest caches", "rm -rf .pytest_cache tests/__pycache__"),
 )
 for _label, _cmd in BUILDER_SHELL_TEST_WRITES:
     sh("builder-test shell: " + _label, _cmd, "deny", rule=BT, **BG)
@@ -11091,6 +11098,11 @@ sh("test-author shell: the Nov 1 incident form writes a test file and is allowed
 sh("test-author shell: echo x > tests/test_x.py is allowed", "echo x > tests/test_x.py", "allow", **A)
 sh("builder-test shell: main session echo x > src/test_app.py is allowed", "echo x > src/test_app.py",
    "allow", cwd=GITMAIN)
+# Pins the verdict the base commit gives today, from a main session. The long sed option is allowed on
+# the global settings file, and the short -i form is denied. This pins that verdict only. A fix that
+# denies the long form must flip this case to deny.
+sh("frozen-path gap: sed --in-place on the global settings.json is allowed as it is today",
+   "sed --in-place x ~/.claude/settings.json", "allow", cwd=NOGIT)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
