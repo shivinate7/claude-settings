@@ -1499,8 +1499,9 @@ class PickSendTests(unittest.TestCase):
         with open(self.pick_file(), encoding="utf-8") as handle:
             state = json.load(handle)
         self.ask_at = time.time() - seconds
-        for entry in state.values():
-            entry["asked"] = self.ask_at
+        for key, entry in state.items():
+            if key != "sent":  # the sent key maps pick keys to send epochs, not to picks
+                entry["asked"] = self.ask_at
         with open(self.pick_file(), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
@@ -1533,6 +1534,17 @@ class PickSendTests(unittest.TestCase):
         own = self.own_record() if own is None else own
         return own + [peer_msg("Pick the fold or the hook?")] + list(middle) + [assistant_text(self.LANE_PICK)]
 
+    def picks_in_file(self):
+        """The pick entries in the state file, without the sent key."""
+        with open(self.pick_file(), encoding="utf-8") as handle:
+            state = json.load(handle)
+        return {k: v for k, v in state.items() if k != "sent"}
+
+    def sent_turn(self):
+        """The owner turn that asked the pick, then a send of it to the writer after the ask."""
+        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
+        return self.owner_turn([(300, send), (301, tool_result_msg())])
+
     # Failure class 1: a reply that only mentions a past question records nothing and never blocks.
     def test_c1_mention_of_a_past_question_records_nothing(self):
         rows = ("> **Done** OTHER asked A (my pick) or B last week; no answer yet\n> **Input Needed** none\n> **Next** wait",
@@ -1556,8 +1568,7 @@ class PickSendTests(unittest.TestCase):
     def test_c3_sent_pick_never_reblocks_even_when_repeated(self):
         self.record_pick()
         self.age_picks(self.STALE)
-        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
-        out = self.stop(self.owner_turn([(300, send), (301, tool_result_msg())]))
+        out = self.stop(self.sent_turn())
         self.assertIsNone(out, "a sent pick blocked again when the next reply repeated it: %s" % out)
 
     # Failure class 4: a repo with no waiting page never blocks on the pick-send check, and says so.
@@ -1705,6 +1716,82 @@ class PickSendTests(unittest.TestCase):
                 else:
                     self.assertIsNone(out, "%s: an owner-facing pick blocked on its first Stop: %s" % (label, out))
                     self.assertTrue(os.path.exists(self.pick_file()), "%s: an owner-facing pick was not recorded" % label)
+
+    def test_r2_f2_repeat_after_a_send_is_never_asked_again(self):
+        # Catches: a send that settled a pick dropped its key, so the reply after the send, repeating the pick, asked it again.
+        self.record_pick()
+        self.age_picks(self.STALE)
+        records = self.sent_turn()
+        self.assertIsNone(self.stop(records))
+        self.assertIsNone(self.stop(records))
+        self.assertTrue(os.path.exists(self.pick_file()), "the sent key was not kept")
+        self.assertEqual(self.picks_in_file(), {}, "a settled pick was asked again")
+
+    def test_r2_f2_sent_key_older_than_a_day_is_pruned(self):
+        # Catches: a sent key kept past its day, so the state file outlived the pick it settled.
+        self.record_pick()
+        self.age_picks(self.STALE)
+        self.assertIsNone(self.stop(self.sent_turn()))
+        self.assertTrue(os.path.exists(self.pick_file()), "no sent key was kept")
+        with open(self.pick_file(), encoding="utf-8") as handle:
+            state = json.load(handle)
+        self.assertTrue(state.get("sent"), "no sent key was kept")
+        state["sent"] = {k: time.time() - 25 * 3600 for k in state["sent"]}
+        with open(self.pick_file(), "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
+        self.assertIsNone(self.stop([human("decide"), assistant_text("Nothing to ask.")]))
+        self.assertFalse(os.path.exists(self.pick_file()), "a day-old sent key stayed")
+
+    def test_r2_f3_send_in_the_asking_turn_counts(self):
+        # Catches: a send in the turn that asked the pick was not counted, so the pick blocked six minutes on.
+        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
+        records = [human("decide"), send, tool_result_msg(), assistant_text(self.PICK)]
+        self.assertIsNone(self.stop(records))
+        if os.path.exists(self.pick_file()):
+            self.age_picks(360)
+        out = self.stop(records)
+        self.assertIsNone(out, "a pick sent in its asking turn blocked 6 minutes on: %s" % out)
+
+    def test_r2_f7_unparseable_state_file_is_removed(self):
+        # Catches: a state file that does not parse, or is not an object, stayed on disk and broke later Stops.
+        # The "a pick" row: the broken file is replaced by a readable one that holds the new pick.
+        rows = (("no pick", "{not json", "Nothing to ask.", False),
+                ("a pick", "[1, 2]", self.PICK, True))
+        for label, body, reply, offers_pick in rows:
+            with self.subTest(label):
+                self.clear_state()
+                os.makedirs(os.path.dirname(self.pick_file()))
+                with open(self.pick_file(), "w", encoding="utf-8") as handle:
+                    handle.write(body)
+                out = self.stop([human("decide"), assistant_text(reply)])
+                self.assertFalse(out and out.get("decision") == "block", out)
+                if not offers_pick:
+                    self.assertFalse(os.path.exists(self.pick_file()), "the unreadable state file was kept")
+                else:
+                    with open(self.pick_file(), encoding="utf-8") as handle:
+                        state = json.load(handle)
+                    self.assertIsInstance(state, dict, "the unreadable state file was kept")
+                    self.assertIn("fold the guard", json.dumps(state), "the new pick was not recorded")
+
+    def test_r2_owner_message_clears_and_a_repeat_is_recorded_with_a_fresh_clock(self):
+        # Catches: an owner message after the ask left the pick open, or a repeat of it was not recorded again on a fresh clock.
+        self.record_pick()
+        self.age_picks(self.STALE)
+        out = self.stop(self.owner_turn([(300, human("Fold it, A."))]))
+        self.assertIsNone(out, "the owner message did not clear the pick: %s" % out)
+        fresh = self.picks_in_file()
+        self.assertEqual(len(fresh), 1, "the repeated pick was not recorded again")
+        self.assertGreater(next(iter(fresh.values()))["asked"], self.ask_at + 300, "the repeat kept the old clock")
+        now = time.time()
+        for entry in fresh.values():
+            entry["asked"] = now - 400
+        with open(self.pick_file(), "w", encoding="utf-8") as handle:
+            json.dump(fresh, handle)
+        records = [self.stamp(human("decide"), now - 700), self.stamp(assistant_text(self.PICK), now - 650),
+                   self.stamp(human("Fold it, A."), now - 500), self.stamp(assistant_text(self.PICK), now)]
+        out = self.stop(records)
+        self.assertIsNotNone(out, "the re-recorded pick never blocked")
+        self.assertIn("fold the guard", out["reason"])
 
 
 class ConfigReportTests(unittest.TestCase):
