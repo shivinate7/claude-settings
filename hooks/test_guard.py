@@ -486,6 +486,13 @@ PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
 # to main is only a repair when HEAD is not already on it.
 PTROFFCFG = os.path.join(ROOT, "ptroffcfg")
 PTROFF = os.path.join(ROOT, "ptroffmain")
+# The reset of main onto origin/main is judged against origin/main, so each pointer checkout states
+# its own. PTRMAIN and PTROFF have local main equal to origin/main (an ancestor: the reset passes).
+# PTRAHEAD has one local commit that origin/main lacks. PTRNOORIGIN has no origin/main at all.
+PTRAHEADCFG = os.path.join(ROOT, "ptraheadcfg")
+PTRAHEAD = os.path.join(ROOT, "ptraheadmain")
+PTRNOORIGINCFG = os.path.join(ROOT, "ptrnoorigincfg")
+PTRNOORIGIN = os.path.join(ROOT, "ptrnooriginmain")
 
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
@@ -1340,6 +1347,13 @@ def _build_privrepo():
     write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
     _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
 
+def _set_origin_main(where, rev):
+    """Point refs/remotes/origin/main at `rev` in `where`. The guard reads that ref, and no remote is needed."""
+    result = run_vcs(where, "update-ref", "refs/remotes/origin/main", rev)
+    if result.returncode != 0:
+        sys.exit("fixture setup failed: origin/main in %r. stderr: %s" % (where, result.stderr.strip()))
+
+
 def _build_pointer():
     """The pointer checkout (PTRMAIN, PTRWT), its config folders, and the blind git."""
     # THE POINTER CHECKOUT, built with git itself. The rule compares TOP LEVELS read from git, so
@@ -1357,13 +1371,29 @@ def _build_pointer():
     run_vcs(PTRMAIN, "worktree", "add", "-q", PTRWT, "-b", "ptrlane")
     _require_clean(PTRWT)
     _require_pointer_branch(PTRMAIN, "main")
+    _set_origin_main(PTRMAIN, "HEAD")
     # The pointer line has the same shape the installer writes and the shell readers parse.
     write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
     # The off-main pointer checkout: a second repository whose HEAD is on `feat`.
     make_repo(PTROFF, {"f.txt": "base\n"})
     run_vcs(PTROFF, "checkout", "-b", "feat")
     _require_pointer_branch(PTROFF, "feat")
+    _set_origin_main(PTROFF, "main")
     write(os.path.join(PTROFFCFG, "CLAUDE.md"), "@" + slash(PTROFF) + "/CLAUDE.md\n")
+    # Local main one commit ahead of origin/main: a reset of main onto origin/main would drop that commit.
+    make_repo(PTRAHEAD, {"f.txt": "base\n"})
+    _set_origin_main(PTRAHEAD, "main")
+    write(os.path.join(PTRAHEAD, "f.txt"), "local only\n")
+    run_vcs(PTRAHEAD, "add", "-A")
+    ahead = run_vcs(PTRAHEAD, *IDENT, "commit", "-q", "-m", "local only")
+    if ahead.returncode != 0:
+        sys.exit("fixture setup failed: the local commit in PTRAHEAD. stderr: %s" % ahead.stderr.strip())
+    _require_pointer_branch(PTRAHEAD, "main")
+    write(os.path.join(PTRAHEADCFG, "CLAUDE.md"), "@" + slash(PTRAHEAD) + "/CLAUDE.md\n")
+    # No origin/main at all: the pointer checkout on main, with no remote-tracking ref.
+    make_repo(PTRNOORIGIN, {"f.txt": "base\n"})
+    _require_pointer_branch(PTRNOORIGIN, "main")
+    write(os.path.join(PTRNOORIGINCFG, "CLAUDE.md"), "@" + slash(PTRNOORIGIN) + "/CLAUDE.md\n")
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
@@ -1782,8 +1812,8 @@ lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
-lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND],
-             _build_pointer)
+lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
+              PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2939,6 +2969,19 @@ sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --
    "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
    "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+# The reset is a move to main only when it drops nothing, and only origin/main can say so. Local main
+# one commit ahead of origin/main: the reset would drop that commit, so it is refused.
+sh("pointer: switch -C main onto origin/main is refused when local main holds a commit origin/main lacks",
+   VCS + " switch -C main origin/main", "deny", "pointer-head", cwd=PTRAHEAD, config=PTRAHEADCFG)
+sh("pointer: checkout -B main onto origin/main is refused when local main holds a commit origin/main lacks",
+   VCS + " checkout -B main origin/main", "deny", "pointer-head", cwd=PTRAHEAD, config=PTRAHEADCFG)
+# No origin/main at all: nothing shows the reset drops no commit, so it is refused.
+sh("pointer: switch -C main onto origin/main is refused when origin/main does not exist",
+   VCS + " switch -C main origin/main", "deny", "pointer-head", cwd=PTRNOORIGIN,
+   config=PTRNOORIGINCFG)
+sh("pointer: checkout -B main onto origin/main is refused when origin/main does not exist",
+   VCS + " checkout -B main origin/main", "deny", "pointer-head", cwd=PTRNOORIGIN,
+   config=PTRNOORIGINCFG)
 
 # READS NEVER FIRE.
 sh("pointer: listing branches only reads", VCS + " branch --list", "allow", cwd=PTRMAIN,
