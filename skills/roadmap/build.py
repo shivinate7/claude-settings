@@ -78,12 +78,13 @@ SCANNED, and writes no page.
 Cost per build: about six git processes, one read of each scanned file, one page written. No
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
-fields (id, session_status, tags) per session in the live file it already writes. The red line and the two
-stale-ready rows add no process, file, timer or log: they read the live file the build already reads. The publisher
-adds one field (createdAt) per pull row, from the GitHub list call it already makes. The page-ruling row adds
+fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
+The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
+build already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
+already makes.
 """
 import argparse
 import datetime
@@ -576,8 +577,8 @@ def live_work(path, steps, slug=None):
             why.append("unknown (the live file was read %d minutes ago; read it again)" % minutes)
         elif minutes < -FUTURE_MINUTES:
             why.append("unknown (the live file's readAt is in the future)")
-    read_why = why[0] if why else None  # the red pair line and the page-ruling row read readAt only, never sessions
-    pull_why = read_why
+    read_why = why[0] if why else None  # the page-ruling row takes the readAt reasons only, never the sessions ones
+    pull_why = read_why  # the red pair line reads readAt and pulls only, never sessions
     if not isinstance(raw.get("sessions"), list):
         why.append("unknown (the live file has no sessions list)")
     elif not slug:

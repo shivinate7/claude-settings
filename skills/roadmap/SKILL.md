@@ -193,12 +193,12 @@ After each build the builder prints the upkeep list for the triage thread. It na
 About six git processes and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
-fields per session in the file. The builder adds no git process, file, timer or log for it.
-The red line and the two stale-ready rows read the live file the build already reads, and add no
-process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
-list call it already makes. The page-ruling row adds one `ArtifactData list items` read (every
+fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The builder adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
+The red line and the two stale-ready rows read the live file the build already reads, and add no
+process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
+list call it already makes.
 No watcher, no timer, no log.
 
 ## Tests
