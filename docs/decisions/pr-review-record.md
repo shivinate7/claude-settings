@@ -34,6 +34,7 @@ CI: read live by merge --reviewed
 - The comment never stores CI state. The merge tool reads CI live.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
+- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses.
 - The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
@@ -41,20 +42,26 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- its last round is PASS;
+- round 1 or 2 is its last round, and that round is PASS;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
-- Kind is `delete-only`, and round 1 is done;
+- Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
 - Kind is `docs-only`, with zero rounds (record `docs-only-prs-skip-review`).
 
-A round 3 verdict does not decide done. Net value does, when Guard or check is `yes`: `negative` holds the change (record `hold-unsafe-after-round-3`).
+- A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 ## The cost
 
-- `merge --reviewed`: two list reads per call. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR. It adds one check read for each ready PR on the list.
+Counted as real `gh` calls, one call per list read however many pages it pages.
+
+- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. It writes nothing.
-- No new process, file or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads.
+- No new process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
+- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
 ## The limits
 
