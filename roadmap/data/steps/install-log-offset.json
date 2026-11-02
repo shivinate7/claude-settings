@@ -1,9 +1,9 @@
 {
  "title": "install.sh and install.ps1 write log times with their UTC offset",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.21004,
  "why": "The install logs write local wall time with no offset. The owner's PC runs Eastern, so an 18:40 CST run logged 19:40 (PC session, Nov 1 18:40 CST). A reader cannot tell which zone a line is in. Same defect as guard.log (PR #974).",
- "note": "Fix: install.sh (near line 282, date +%Y-%m-%dT%H:%M:%S) and install.ps1 (near line 73) write ISO time with offset: Linux date +%Y-%m-%dT%H:%M:%S%:z, macOS %z with a colon added, Windows Get-Date -Format o. Update any reader of these logs. Done when a test shows each writer emits an offset. Asked by the coordinator, Nov 1 18:42 CST. Ready. Port: yes, install runs on every machine.",
- "updatedAt": "2026-11-02T00:46:00Z"
+ "note": "Fix: install.sh (near line 282, date +%Y-%m-%dT%H:%M:%S) and install.ps1 (near line 73) write ISO time with offset: Linux date +%Y-%m-%dT%H:%M:%S%:z, macOS %z with a colon added, Windows Get-Date -Format o. Update any reader of these logs. Done when a test shows each writer emits an offset. Asked by the coordinator, Nov 1 18:42 CST. Ready. Port: yes, install runs on every machine. Built as draft PR #1000, with batch runner 7 at Nov 1 19:20 CST. Scope grew: install_from_main.sh, the settings.json SessionStart hook and the install.ps1 post-merge hook wrote the same log with no offset; all five writers fixed. Untested: install.ps1 invariant-culture fix under a non-Gregorian locale (th-TH); no pwsh in the cloud, so it needs a Windows run.",
+ "updatedAt": "2026-11-02T01:21:00Z"
 }
