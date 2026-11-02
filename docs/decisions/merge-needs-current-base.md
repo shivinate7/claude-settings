@@ -15,7 +15,7 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
     - A node or bash suite is hit when its source names any of those words.
     - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
-- Main's commits since the merge base change no path: the green run stands with no lint or suite run, because the merge of the head and the tip is the head's tree. This is the next batch after the merge commit of the batch it was built on (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs).
+- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
 
