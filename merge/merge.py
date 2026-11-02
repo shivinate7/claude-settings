@@ -56,6 +56,9 @@ class Dropped(Stop):
 class Held(Stop):
     pass
 
+class ReasonStop(Stop):
+    """A refusal that a reason flag lifts: main does not say that no override does."""
+
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -2095,6 +2098,17 @@ def lane_head_and_base(root, target, base):
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}")
+    if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")  # a name that is no branch on origin fails here, and is judged below
+        c, pushed = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{target}^{{commit}}")
+        local = git(root, "rev-parse", "--verify", "-q", f"refs/heads/{target}^{{commit}}")
+        if not local[0] and c:
+            raise Stop(f"{target} exists only as a local branch, and the batch runner can join only a pushed head. Push {target}, or pass its sha.")
+        if not local[0] and local[1] != pushed:
+            raise Stop(f"local {target} is {local[1][:9]} but origin/{target} is {pushed[:9]}, so the lint cannot say which head the batch runner would join. "
+                       f"Push {target}, or pass the sha to lint (or origin/{target}).")
+        if not c:
+            return pushed, base
     want = f"{target}^{{commit}}"
     c, head = git(root, "rev-parse", "--verify", "-q", want)
     if c:
@@ -2116,7 +2130,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
-    try:
+    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
         try:
             c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS)
@@ -2125,7 +2139,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     finally:
         drop_worktree(root, tmp, wt)
     lines = out.splitlines()
-    log = [l for l in lines[-1:] if l.startswith("log=")]
+    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too, but a heartbeat can follow it
     fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
     unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
     short = head[:9]
@@ -2138,7 +2152,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         if unknown_ok.strip():
             say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknown, *log)
             return 0
-        raise Stop("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
+        raise ReasonStop("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
@@ -2469,7 +2483,7 @@ def role_path():
 
 def read_merge_role():
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
-    Every failure is None, so the gate fails closed. An absent id never equals an absent record."""
+    Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
         return None
@@ -2535,7 +2549,8 @@ def main(argv, host=None, lock=None):
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:
                 raise Stop("not in a git checkout")
-            return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role gate and any lock: it merges and pushes nothing
+            with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
@@ -2569,7 +2584,7 @@ def main(argv, host=None, lock=None):
                 return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
-        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard.", file=sys.stderr)
+        print(f"merge: {e}" + ("" if isinstance(e, ReasonStop) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
         return 1
 
 if __name__ == "__main__":
