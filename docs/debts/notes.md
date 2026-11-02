@@ -1138,3 +1138,5 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- page-stale-title-space: `stale_pages.carries_data` renames the live title before it collapses white space, so an untouched page titled "Queue " (with a trailing space, a newline or NBSP) and empty blocks passes `page-stale`. A copy of page.html has the exact title, so normal work does not hit it. Decision: page-stale-publish
+- page-stale-old-main: until a checkout fetches this merge, its origin/main template is still titled "Queue", and an untouched "Queue" page passes `page-stale`. It ends at the fetch. Decision: page-stale-publish
