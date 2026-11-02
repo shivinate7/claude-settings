@@ -11872,6 +11872,128 @@ def _product_conflict_merge(w):
     _must(w, *IDENT, "commit", "-q", "--no-edit")
 
 
+MAIN_FIRST = "def test_main_first():\n    assert 9\n\n"
+
+
+def _push_main(w):
+    """Publish the main checkout's main to the worktree's origin, so the builder can fetch and rebase onto it."""
+    _must(w + "-main", "push", "-q", "origin", "main")
+
+
+def _c1_mid_merge(w):
+    """Cut at main. The builder commits product work. Main then changes a test file and the product file the
+    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
+    builder resolves the product file and stops before the commit."""
+    main = w + "-main"
+    _origin(w)
+    _push_main(w)
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    write(os.path.join(main, "src/app.py"), "x = 10\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
+    _push_main(w)
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, "src/app.py"), "x = 12\n")
+    _must(w, "add", "-A")
+
+
+def _c1_committed(w):
+    _c1_mid_merge(w)
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _g_lane_and_product(w):
+    """Cut from a lane tip that adds a test case at the end of the test file. The builder commits product work
+    on that tip. Main then prepends a test case to the same file, a different hunk, and is published."""
+    main = w + "-main"
+    _origin(w)
+    _test_author_lane(w, TEST_A, LANE_TEXT)
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main prepends a case")
+    _push_main(w)
+
+
+def _g2_rebase(w):
+    _g_lane_and_product(w)
+    _must(w, "fetch", "-q", "origin")
+    _must(w, *IDENT, "rebase", "origin/main")
+
+
+def _g3_pull_rebase(w):
+    _g_lane_and_product(w)
+    _must(w, *IDENT, "pull", "--rebase", "origin", "main")
+
+
+def _h1r_restore(w):
+    """After a clean rebase onto main, the builder writes main's bytes back over the test file, which drops the
+    test-author's case. The write follows a rebase, so it is logged and not refused."""
+    _g2_rebase(w)
+    write(os.path.join(w, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+
+
+def _b1_cherry(w):
+    """Cut at main. The builder cherry-picks a test-author's commit, which adds a test case. The pick commits."""
+    main = w + "-main"
+    _test_author_lane(w)
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    _must(w, *IDENT, "cherry-pick", pick)
+
+
+def _b1b_cherry_staged(w):
+    """Cut at main. The builder cherry-picks a test-author's commit with --no-commit and stops before the commit."""
+    main = w + "-main"
+    _test_author_lane(w)
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    _must(w, *IDENT, "cherry-pick", "-n", pick)
+
+
+def _b1b_cherry_committed(w):
+    _b1b_cherry_staged(w)
+    _must(w, *IDENT, "commit", "-q", "-m", "cherry-picked test-author cases")
+
+
+def _j1_squash(w):
+    """Cut at main. The builder squash-merges a test-author's lane, which adds a test file, and commits the result."""
+    _test_author_lane(w, NEW_TEST, "def test_lane_new():\n    assert 1\n")
+    _must(w, *IDENT, "merge", "--squash", "lane")
+    _must(w, *IDENT, "commit", "-q", "-m", "squashed test-author case")
+
+
+def _i1_rebase_ours(w):
+    """A test-author's lane changes a line of the test file, and main changes the same line. The builder rebases
+    its product commit onto main. The rebase stops in the test file, and the builder keeps the upstream side
+    (`--ours` in a rebase). The replayed case is then empty, so the builder skips it."""
+    main = w + "-main"
+    _origin(w)
+    _test_author_lane(w, TEST_A, "def test_a():\n    assert 1 == 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), "def test_a():\n    assert 2 == 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes the case")
+    _push_main(w)
+    _must(w, "fetch", "-q", "origin")
+    stopped = run_vcs(w, *IDENT, "rebase", "origin/main")
+    if stopped.returncode == 0:
+        sys.exit("fixture setup failed: the rebase in %r did not stop in the test file" % w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2 == 2\n")
+    _must(w, "add", "-A")
+    cont = run_vcs(w, "-c", "core.editor=true", *IDENT, "rebase", "--continue")
+    if cont.returncode != 0:
+        _must(w, "rebase", "--skip")
+
+
+def _u2_new_test(w):
+    """The builder adds a test file that no base holds."""
+    write(os.path.join(w, "tests/test_new.py"), "def test_new():\n    assert 5\n")
+
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
@@ -12057,6 +12179,71 @@ def author_conflict_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing",
                          author_conflict_case))
+
+
+def logged_builder_case(label):
+    """Log-only: nothing is refused at commit, push or stop, and at least one builder-diff line is written."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1")
+        hits = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == BDIFF]
+        if out:
+            return False, "expected no refusal, got %r" % out[:60]
+        if not hits:
+            return False, "expected a builder-diff line, found none"
+        return True, "not refused at commit, push or stop; %d builder-diff line(s)" % len(hits)
+    return case
+
+
+# Allow: a merge result, a replayed or cherry-picked test-author commit, and a squash are git's, not the builder's.
+# The commit check runs in the state the builder stops in; push and stop run after the commit.
+_bd_c1_pre = diff_repo("bd-c1-pre", _c1_mid_merge)
+sh("builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit",
+   COMMIT, "allow", cwd=_bd_c1_pre, agent_id="bld1", agent_type="builder")
+diff_repo("bd-c1-post", _c1_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a merge of main with a product-file conflict, while main changed a test "
+                         "file, is allowed at push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-c1-post")))
+diff_repo("bd-g2-rebase", _g2_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase onto main where a test-author's commit and main change the same "
+                         "test file in different hunks is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-g2-rebase")))
+diff_repo("bd-g3-pull", _g3_pull_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a pull --rebase onto main where a test-author's commit and main change the "
+                         "same test file in different hunks is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-g3-pull")))
+diff_repo("bd-b1-cherry", _b1_cherry)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-author's commit is allowed and logs no "
+                         "builder-diff line", clean_builder_case("bd-b1-cherry")))
+_bd_b1b = diff_repo("bd-b1b-staged", _b1b_cherry_staged)
+sh("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit",
+   COMMIT, "allow", cwd=_bd_b1b, agent_id="bld1", agent_type="builder")
+diff_repo("bd-b1b-committed", _b1b_cherry_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit, then a "
+                         "commit, is allowed at push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-b1b-committed")))
+# Squash: git writes .git/SQUASH_MSG until the commit, and removes it after. After the commit the guard can read no
+# marker, so the squash commit is logged only, not refused.
+diff_repo("bd-j1-squash", _j1_squash)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is logged only, never refused",
+                         logged_builder_case("bd-j1-squash")))
+
+# Log-only: a rebase pick, and a write after a rebase, change a test file, and the guard logs them for the reviewer.
+diff_repo("bd-h1r-restore", _h1r_restore)
+LOG_CHECKS_EXTRA.append(("builder-refuse: after a rebase, main's bytes written back over a test file are logged only",
+                         logged_builder_case("bd-h1r-restore")))
+diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
+                         logged_builder_case("bd-i1-rebase-ours")))
+
+# Undo route: a new test file is refused, and the reason says to delete it and names no test path.
+_bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
+sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_new"), carries=("delete",))
+sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_new"), carries=("delete",))
 
 
 def stop_pair_case():
