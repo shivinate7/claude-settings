@@ -77,6 +77,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
+  roadmap-one-writer   deny. A `git push` whose destination is the checkout's record branch (lint/layout.py
+                       record_branch, else "roadmap"), unless the session's own get_session record (read
+                       from the transcript) shows the tag cs-build:triage with no set_session_tags after
+                       it. No record, no transcript or no env id is a refusal. An override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
@@ -271,8 +275,9 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
+            merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, trust_card_hit,
+            undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1977,15 +1982,31 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
+def _layout_module():
+    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout
+
+
+def record_branch_of(root):
+    """The record branch of the checkout at `root`: lint/layout.py record_branch, else "roadmap" when the
+    layout cannot be read."""
+    try:
+        layout = _layout_module()
+        return layout.record_branch(root)
+    except Exception:
+        return DEFAULT_RECORD_BRANCH
+
+
 def role_model_table(pointer_root):
     """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
     record is missing, not text, or holds no row. The one reader of the table."""
     if not pointer_root:
         return None
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
+    layout = _layout_module()
     try:
         folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
         with open(os.path.join(pointer_root, *folder.split("/"), ROLE_TABLE_FILE), encoding="utf-8") as handle:
@@ -2690,6 +2711,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = role_proof_hit(stripped, transcript)
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
+
+    # 6a2. A push to the record branch from a session its own record does not prove triage (rule
+    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
+    # transcript read only when the push reaches the record branch.
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of)
+    if matched:
+        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

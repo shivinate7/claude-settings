@@ -28,6 +28,12 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Owner, 15:03: "triage should always be a standing session that if anything is the first thing a coordinator spawns before it spawns any other orchestrator sessions".
   - Triage may run agents (owner, about 14:55).
   - Triage is the only writer of the roadmap and the waiting page (owner, 2026-10-28, time not given).
+  - Guard rule `roadmap-one-writer` (the guard rule that denies a push to the record branch from any session but triage) enforces the roadmap half. Risk kind: incident. Lane commit 87a9d9c9 pushed step c203 to the roadmap branch on 2026-11-01, about 17:30 CST. Landed 2026-11-02.
+    - A `git push` whose destination is the checkout's record branch (`lint/layout.py` `record_branch()`, else `roadmap`) is denied, unless the session's own newest `get_session` record shows the tag `cs-build:triage` with no `set_session_tags` call after it. It reads the tags as `merge-role-proof` does. A refspec, `HEAD`, `--delete`, `:dst`, `git -C` and a bare push are read. Quoted text, a heredoc body and a comment are no push.
+    - No session id, no transcript or no record is a denial. An owner override lifts it.
+    - Steer: the session sends the step change to the triage session (tag `cs-build:triage`, same `cs-repo`).
+    - Cost: one `git rev-parse` and one small file read per `git push`, one transcript read only when the push reaches the record branch. No new process, timer or log.
+    - Not covered: `git push --all`, `--mirror` and `push.default matching` reach the branch with no refspec naming it, and the GitHub MCP file tools write it with no `git push`.
 - **A fork's own page and record branch** (owner, 2026-10-31 15:00 CDT, in chat to triage, pick a; roadmap step `fork-own-page`, a fork gets its own page).
   - A semi-fork is a worktree whose work never reaches main. It makes its own waiting page, with its own `waiting-page` key in `.claude/layout-extras.json`. It never reuses main's key.
   - It names its own record branch, such as `roadmap-<fork>`, in the extras key `record-branch`. The default is `roadmap`. `lint/layout.py` `record_branch()` reads the key, and `skills/roadmap/build.py` reads it when `--record-branch` is not given.

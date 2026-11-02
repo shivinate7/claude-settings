@@ -9,10 +9,13 @@ import os
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    inline_script, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
+)
+from guard_push_delete import (
+    push_destinations, push_target, push_text,
 )
 
 
@@ -572,6 +575,53 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         except Exception:
             pass
         return "merge role " + tier
+    return ""
+
+
+# ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
+RECORD_WRITER_TIER = "triage"
+DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
+    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
+    "own turn, then retry."
+)
+
+
+def _own_tier_proved(transcript: str, tier: str) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+    except Exception:
+        pass
+    return False
+
+
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of) -> str:
+    """Return the matched push when a segment pushes to the checkout's record branch and the own record
+    does not prove the triage tier, else ''. `record_branch_of(root)` reads the branch (lint/layout.py); a
+    read error means the default. The proof is read only after a push reaches the branch, so a push
+    elsewhere costs one `git rev-parse` and one small file read."""
+    for segment in split_segments(stripped):
+        for subcommand, args in git_calls(push_text(segment)):
+            if subcommand != "push":
+                continue
+            where, overrides = push_target(segment, stripped, cwd)
+            top = _git(where, "rev-parse", "--show-toplevel") if where else None
+            root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else where
+            try:
+                record = record_branch_of(root)
+            except Exception:
+                record = DEFAULT_RECORD_BRANCH
+            if record in push_destinations(args, where, overrides) and not _own_tier_proved(
+                    transcript, RECORD_WRITER_TIER):
+                return "git push to the record branch"
     return ""
 
 
