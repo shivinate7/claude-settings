@@ -86,6 +86,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
+  agent-branch-push    deny. A push whose destination is an agent's own worktree branch. A delete
+                       and a fetch pass. (agent-branch-never-pushed)
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -306,8 +308,8 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
-            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
+            AGENT_PUSH_REASON, AGENT_PUSH_RULE, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON,
+            PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
             push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -3067,7 +3069,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
-            if verdict == "ask":
+            if verdict == AGENT_PUSH_RULE:
+                refuse(tool, "deny", AGENT_PUSH_RULE, AGENT_PUSH_REASON, "git push " + " ".join(args))
+            elif verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
