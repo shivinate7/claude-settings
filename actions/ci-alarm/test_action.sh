@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Red run with a fake `gh`. Each (workflow, event group) judges its newest run: a red group opens the
-# issue, unless a newer completed run of the other group passed every job the red run ran (`gh run view`
-# gives the jobs). Runs of an event not in events.json, and of a deleted or absent workflow, are not
-# judged. A failed read or write prints `unknown` and exits 0.
+# issue, unless a newer completed run of the other group passed every job the red run ran (`gh api
+# --paginate` gives the jobs, one JSON document per page). Runs of an event not in events.json, and of a
+# deleted or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -11,21 +11,29 @@ work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_
 [ -n "$work" ] || { echo "FAIL - run folder: lint/_test_temp.py made no run folder"; exit 1; }
 trap 'rm -rf "$work"' EXIT
 tmp="$work/case"; mkdir -p "$tmp/bin"
-# Fake gh. FAIL is a glob over "$1 $2"; a call that matches it exits 1. EMPTY is a glob too; a call
-# that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for,
-# as gh does; unparsable runs are echoed raw. `run view` prints the jobs fixture of the run id it is given.
+# Fake gh. FAIL is a glob over "$1 $2" or over the whole command line; a call that matches it exits 1. EMPTY
+# is a glob too, matched the same way; a call that matches it exits 0 with no output. `run list` keeps only
+# the --json fields it is asked for, as gh does; unparsable runs are echoed raw. The jobs of a run come from
+# `api .../actions/runs/<id>/jobs`, every page of the fixture. The fake's `run view`, the old jobs read, prints
+# page one only: a case whose passing job sits on page two fails on that read for that reason alone.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
-if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
-if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
+if [ -n "${FAIL:-}" ] && { [[ "$1 $2" == $FAIL ]] || [[ "$*" == $FAIL ]]; }; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
+if [ -n "${EMPTY:-}" ] && { [[ "$1 $2" == $EMPTY ]] || [[ "$*" == $EMPTY ]]; }; then exit 0; fi
 case "$1 $2" in
   "run list")
     want="$(printf '%s\n' "$@" | sed -n '/^--json$/{n;p;}')"
     jq --arg want "$want" '[.[] | with_entries(select(.key as $k | $want | split(",") | any(. == $k)))]' "$RUNS" 2>/dev/null || cat "$RUNS" ;;
-  api*) cat "$WORKFLOWS" ;;
+  api*)
+    case "$*" in
+      *"actions/runs/"*"/jobs"*)
+        rid="$(printf '%s\n' "$@" | sed -n 's#.*actions/runs/\([0-9]*\)/jobs.*#\1#p' | head -1)"
+        cat "$JOBS/$rid.json" 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
+      *) cat "$WORKFLOWS" ;;
+    esac ;;
   "run view")
     rid="$(printf '%s\n' "$@" | grep -m1 -E '^[0-9]+$')"
-    cat "$JOBS/$rid.json" 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
+    jq -c -s '.[0]' "$JOBS/$rid.json" 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
   "issue list") echo "${OPEN:-}" ;;
   "issue create") echo "ISSUE $*" >> "$LOG" ;;
   "issue comment") echo "COMMENT $*" >> "$LOG" ;;
@@ -46,12 +54,18 @@ gh_run() {
 }
 # A new set of runs drops the jobs of the last case, so a fixture cannot leak into the next one.
 runs_are() { rm -rf "$tmp/jobs"; printf '%s\n' "$@" | jq -s . > "$tmp/runs"; }
-# The jobs of one run, as `gh run view <id> --json jobs` prints them. Args: the run's url tag, then one
+# The jobs of one run, as `gh api --paginate` prints them: one JSON document per page, `{"total_count": N, "jobs": [...]}`.
+# Args: optionally `--per-page K` (K jobs to a page; one page when absent), then the run's url tag, then one
 # name:conclusion per job.
 jobs_of() {
+  local per=0
+  if [ "${1:-}" = --per-page ]; then per="$2"; shift 2; fi
   local tag="$1"; shift
   mkdir -p "$tmp/jobs"
-  jq -n -c --args '{jobs: [$ARGS.positional[] | split(":") | {name: .[0], conclusion: .[1], status: "completed"}]}' "$@" > "$tmp/jobs/$(run_id "$tag").json"
+  jq -n -c --argjson per "$per" --args '
+    [$ARGS.positional[] | split(":") | {name: .[0], conclusion: .[1], status: "completed"}] as $all
+    | (if $per > 0 then [range(0; $all | length; $per) as $i | $all[$i:$i + $per]] else [$all] end)
+    | .[] | {total_count: ($all | length), jobs: .}' "$@" > "$tmp/jobs/$(run_id "$tag").json"
 }
 # The workflows list as `gh api --paginate` prints it: one JSON document per page.
 cat > "$tmp/workflows" <<'JSON'
@@ -149,11 +163,41 @@ runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-
 jobs_of u0 checks:failure
 jobs_of u1 checks:success checks:failure
 t red red-schedule-is-not-cleared-by-a-newer-push-with-a-failed-duplicate-job
+# A red run with no non-skipped job clears nothing: the newer green push is not enough (clears.py, an empty job set).
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci startup_failure 2026-01-01 u0 schedule)"
+jobs_of u0
+jobs_of u1 checks:success
+t red red-run-with-no-job-is-not-cleared-by-a-newer-green-push
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:skipped
+jobs_of u1 checks:success
+t red red-run-with-only-skipped-jobs-is-not-cleared-by-a-newer-green-push
+# The newer push run's passing job is on page two of its jobs: the read must take every page to clear the red run.
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of --per-page 2 u1 lint:success scope:success checks:success
+t green newer-push-with-its-passing-job-on-page-two-clears-the-red-run
+# A jobs list over 128 KB is still judged: Linux caps one argv string at 128 KB, and clears.py takes each job list as one.
+long=(checks:success)
+for i in $(seq 1 2000); do long+=("long-job-$(printf '%04d' "$i")-$(printf '%0100d' 0):success"); done
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 "${long[@]}"
+if [ "$(wc -c < "$tmp/jobs/$(run_id u1).json")" -gt 131072 ]; then echo "ok   the 2000-job fixture is over 128 KB"
+else echo "FAIL the 2000-job fixture is not over 128 KB"; bad=1; fi
+t green newer-push-with-a-jobs-list-over-128-kb-is-judged
+# Two workflows: the read of one candidate fails. The other red run, with no candidate, still opens the issue.
+runs_are "$(gh_run ci failure 2026-01-02 u1 push)" "$(gh_run deploy failure 2026-01-01 u2 schedule)" "$(gh_run deploy success 2026-01-02 u3 push)"
+jobs_of u2 checks:failure
+t red failed-jobs-read-of-one-candidate-does-not-hide-another-red-run "api *actions/runs/103/jobs*"
+if grep -q 'ci (failure): u1' "$tmp/log"; then echo "ok   the open issue names the red run that has no candidate"
+else echo "FAIL the open issue does not name the red run that has no candidate"; bad=1; fi
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 jobs_of u0 readme-links:failure checks:success
 jobs_of u1 readme-links:success checks:success
-t unknown jobs-read-fails-is-unknown "run view"
-t unknown jobs-read-with-empty-stdout-is-unknown "" "run view"
+# "*jobs*" matches a jobs read on either route: the api pages the alarm reads now, and the old `run view`.
+t unknown jobs-read-fails-is-unknown "*jobs*"
+t unknown jobs-read-with-empty-stdout-is-unknown "" "*jobs*"
 runs_are "$(gh_run pages failure 2026-01-02 u1 dynamic)"
 t green failed-pages-build-is-not-judged
 runs_are "$(gh_run old failure 2026-01-02 u1 push)"

@@ -9010,15 +9010,17 @@ class RedMainBrake(Env):
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
         self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
-    def test_a_green_schedule_run_does_not_clear_an_older_red_push_run(self):
-        # runs are grouped by workflow and event (roadmap step ci-alarm-reads-by-event): this schedule run ran other jobs, so it clears nothing
+    def test_a_green_schedule_run_with_a_different_job_set_does_not_clear_an_older_red_push_run(self):
+        # runs are grouped by workflow and event (roadmap step ci-alarm-reads-by-event). The cross-group clear (no-merge-onto-red-main, 2026-11-02)
+        # needs the newer run to hold every job of the red run. This schedule run lacks `checks`, so it clears nothing: the job sets decide it.
         jobs = {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]}
         rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")], jobs)
         self.refused(rc, out, before)
         self.assertIn("run 914", out)
 
-    def test_a_green_push_run_does_not_clear_an_older_red_schedule_run(self):
-        # a schedule run is judged in its own group: a newer green push never hides it
+    def test_a_green_push_run_with_a_different_job_set_does_not_clear_an_older_red_schedule_run(self):
+        # a schedule run is judged in its own group. The cross-group clear (no-merge-onto-red-main, 2026-11-02) needs the newer run to hold
+        # every job of the red run. This push run lacks `checks`, so it clears nothing: the job sets decide it.
         jobs = {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success")]}  # a push and a nightly run different jobs
         rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")], jobs)
         self.refused(rc, out, before)
@@ -9028,13 +9030,14 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
-    def pair(self, red_event, newer_event, red_jobs, newer_jobs, newer_conclusion="success", newer_status="completed"):
-        """A red run (id 930, `red_event`) and a newer run of the other event group (id 931) on the same file. A job list is
+    def pair(self, red_event, newer_event, red_jobs, newer_jobs, newer_conclusion="success", newer_status="completed", red_conclusion="failure"):
+        """A red run (id 930, `red_event`, concluded `red_conclusion`) and a newer run of the other event group (id 931) on the same file. A job list is
         (name, conclusion) pairs. The newer run's jobs are read only when it is completed: a run in progress is never read."""
         jobs = {930: [main_job(name, conclusion) for name, conclusion in red_jobs]}
         if newer_status == "completed":
             jobs[931] = [main_job(name, conclusion) for name, conclusion in newer_jobs]
-        return self.go([main_run(931, newer_conclusion, status=newer_status, event=newer_event), main_run(930, "failure", event=red_event)], jobs)
+        return self.go([main_run(931, newer_conclusion, status=newer_status, event=newer_event),
+                        main_run(930, red_conclusion, event=red_event)], jobs)
 
     def test_a_green_dispatch_with_the_same_jobs_clears_a_red_schedule_run(self):
         # the Nov 2 incident: the dispatch ran the schedule run's jobs, and every one of them passed
@@ -9059,6 +9062,16 @@ class RedMainBrake(Env):
         rc, out, before = self.pair("schedule", "push", [("checks", "failure"), ("checks-macos", "cancelled")], [("checks", "success")])
         self.refused(rc, out, before)
         self.assertIn("run 930", out)
+
+    def test_a_red_run_with_no_job_to_judge_stays_red_under_a_newer_green_run_of_another_group(self):
+        # no non-skipped job in the red run: an empty job set clears nothing (clears.py), in either group pairing
+        for red_event, newer_event in (("schedule", "push"), ("push", "schedule")):
+            for conclusion, red_jobs in (("startup_failure", []), ("failure", [("checks", "skipped")])):
+                with self.subTest(red_event=red_event, conclusion=conclusion, red_jobs=len(red_jobs)):
+                    rc, out, before = self.pair(red_event, newer_event, red_jobs, [("checks", "success")], red_conclusion=conclusion)
+                    self.refused(rc, out, before)
+                    self.assertIn("run 930", out)
+                    self.assertIn(conclusion, out)
 
     def test_a_job_missing_from_the_newer_run_does_not_clear_the_red_run(self):
         rc, out, before = self.pair("schedule", "push", [("checks", "success"), ("nightly", "failure")], [("checks", "success")])
