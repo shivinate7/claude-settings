@@ -115,9 +115,10 @@ Other tools, in `judge` order:
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
                        other than the one holding its cwd. A nested worktree owns its own files.
                        A target in no checkout, or in the clone's `.git`, passes; so does a
-                       worktree in this session's own scratchpad, for a call with no `agent_id`.
-                       Unreadable git passes. The shell form reads the targets frozen-path reads, after a
-                       leading `cd`. An override lifts it.
+                       linked checkout in this session's own scratchpad, for a call with no
+                       `agent_id` and a valid session id. Unreadable git passes. The shell form
+                       reads the targets frozen-path reads, after a leading `cd`. An override
+                       lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -3214,9 +3215,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
                        has_agent: bool = True) -> str:
     """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. A
-    worktree in this session's own scratchpad passes for a call with no `agent_id` and a valid
-    `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    linked checkout in this session's own scratchpad passes for a call with no `agent_id` and a
+    valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
+    state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
+    Liftable by an owner override, unlike `worktree_home_hit`
     (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)

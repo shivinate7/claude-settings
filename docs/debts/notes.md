@@ -943,3 +943,4 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- other-checkout-agent-flag: `has_agent` in `judge` reads only `agent_id` (hooks/guard.py, the `other_checkout_hit` call), while the agent flag passed to `judge_shell` (hooks/guard.py, ~3630) reads `agent_id` or `agent_type`. No measured payload differs, since agents carry both (hooks/guard.py:785). Decision: an-agent-outside-its-home-tree-must-stop.
