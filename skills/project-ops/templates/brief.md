@@ -30,6 +30,8 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane joi
 `bin/ci-job checks --lint --base origin/main` once and report its verdict. It runs the fast lint steps
 of the checks job, the STE lint among them, and no full suite.
 
+A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
+
 ## Report
 
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
