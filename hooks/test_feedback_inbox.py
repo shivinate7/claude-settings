@@ -122,8 +122,10 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
-    the session's own. Each part matches `[A-Za-z0-9._-]+`. Any other home blocks as a malformed repo
-    home. A repo item is checked like a page item: in every block that holds one, burst or not, unless
+    the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
+    off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
+    matches `[A-Za-z0-9._-]+`. Any other home blocks as a malformed repo home. A repo item is checked
+    like a page item: in every block that holds one, burst or not, unless
     its line ends with `[closed]`. A block passes only with a send_message or SendMessage whose
     `message` names `<owner>/<name>` as a whole token, compared without case, after the owner record
     that anchors the block. Other tools never count. A missing transcript passes with a systemMessage,
