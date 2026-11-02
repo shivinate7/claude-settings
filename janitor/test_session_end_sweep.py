@@ -17,6 +17,7 @@ janitor/test_sweep.py's own fixtures are: a fake or mocked git would prove nothi
 """
 import atexit
 import contextlib
+import fnmatch
 import io
 import json
 import os
@@ -418,6 +419,36 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
             self.mod.SESSION_END_TIMEOUT_MIN_HEADROOM_SECONDS,
         )
 
+# The environment-file names the permission deny list must hold, for Read and for Edit. The rule is
+# every basename that starts with `.env`, except the example file, at the root or in a folder.
+ENV_DENY_NAMES = (".env", ".env.local", ".envrc", ".environment")
+ENV_DENY_EXAMPLE = ".env.example"
+
+
+def _denied_by(entries, tool, path):
+    """True when the permission entries deny `tool` on `path`, a file that may sit in a folder.
+
+    The entries read as the repo writes them. `Tool(glob)` denies, and `Tool(!glob)` lifts a denial
+    for the files it names. A bare glob names a root file only, and a `**/` glob names the file at any
+    depth, so a folder path is matched by its basename under `**/` alone.
+    """
+    denied = lifted = False
+    for entry in entries:
+        found = re.fullmatch(r"(\w+)\((!?)(.+)\)", entry)
+        if not found or found.group(1) != tool:
+            continue
+        glob = found.group(3)
+        anywhere = glob.startswith("**/")
+        if "/" in path and not anywhere:
+            continue
+        if fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], glob[3:] if anywhere else glob):
+            if found.group(2):
+                lifted = True
+            else:
+                denied = True
+    return denied and not lifted
+
+
 class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
     """The second permissions.deny layer must keep every entry it shipped with, so a missing
     interpreter still blocks .env* and the frozen config paths (see settings.json, "permissions.deny").
@@ -444,6 +475,32 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
             deny = json.load(handle)["permissions"]["deny"]
         held = [e for e in deny if e.startswith(("Bash(pkill", "Bash(killall"))]
         self.assertEqual(held, [], "an owner override cannot lift a deny entry")
+
+    def test_the_deny_reader_reads_the_forms_the_repo_writes(self):
+        """The reader under the env cases below must read the entry forms settings.json uses, or
+        those cases prove nothing."""
+        self.assertTrue(_denied_by(["Read(.env)"], "Read", ".env"))
+        self.assertFalse(_denied_by(["Read(.env)"], "Read", "config/.env"))
+        self.assertTrue(_denied_by(["Read(**/.env)"], "Read", "config/.env"))
+        self.assertTrue(_denied_by(["Read(.env.*)"], "Read", ".env.local"))
+        self.assertFalse(_denied_by(["Read(.env.*)", "Read(!.env.example)"], "Read", ".env.example"))
+        self.assertFalse(_denied_by(["Edit(.env)"], "Read", ".env"))
+
+    def test_read_and_edit_deny_hold_every_env_name_and_lift_only_the_example(self):
+        """Every basename that starts with `.env` is denied for Read and for Edit, at the root and in
+        a folder. The example file stays open, and no other name is exempted."""
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+            deny = json.load(handle)["permissions"]["deny"]
+        for tool in ("Read", "Edit"):
+            for name in ENV_DENY_NAMES:
+                for path in (name, "config/" + name):
+                    with self.subTest(tool=tool, path=path):
+                        self.assertTrue(_denied_by(deny, tool, path),
+                                        "%s(%s) is not denied by permissions.deny" % (tool, path))
+            for path in (ENV_DENY_EXAMPLE, "config/" + ENV_DENY_EXAMPLE):
+                with self.subTest(tool=tool, path=path):
+                    self.assertFalse(_denied_by(deny, tool, path),
+                                     "%s(%s) is denied, the example file must stay open" % (tool, path))
 
     def guard_launcher(self):
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:

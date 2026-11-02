@@ -6972,6 +6972,29 @@ sh("trim: env: the same assignment ahead of a non-runner still denies",
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 
+# The family holds every basename that starts with `.env`, except the whole name `.env.example`. One
+# predicate decides it in each form: a write or an edit, a shell name, and a glob that could name one.
+# `.envrc` and `.environment` are the names a rule that reads only `.env` and `.env.<suffix>` lets by.
+ENVRC = ENV + "rc"
+ENVIRONMENT = ENV + "ironment"
+add("env: Write of an envrc file", "deny", "env-file", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVRC)))
+add("env: Edit of an envrc file", "deny", "env-file", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVRC)))
+add("env: Write of a name that starts with env", "deny", "env-file", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVIRONMENT)))
+for held in (
+    "cat " + ENVRC, "cat " + ENVIRONMENT, "cat " + ENVRC + ".example",
+    "echo KEY=1 > " + ENVRC, 'ENVF=' + ENVRC + '; cat "$ENVF"',
+    "cat " + ENV + "r?", "cat " + ENV + "r*", "cat " + ENV + "[a-z]",
+):
+    sh("env: an envrc or env-prefixed name, " + held[:30], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "ls -la " + ENVRC, "ls -la " + ENVIRONMENT, "[ -f " + ENVRC + " ] && echo present",
+    "node --env-file=" + ENVRC + " app.js",
+):
+    sh("env: an envrc name in a listing or a runner, " + text[:30], text, "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
