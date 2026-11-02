@@ -35,6 +35,8 @@ const TASK = {
 };
 const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, ...over });
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
+// Later than the sends these cases use (the latest is LA_AT, 2026-10-29T19:05Z). An item added then is new, not seen, so its parts stay unfolded.
+const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
@@ -1212,7 +1214,7 @@ test("when the store refuses a write, the answer line can be copied", async (t) 
 const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count();
 
 test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
   assert.equal(await clearCount(page), 0);
   await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
   assert.equal(await clearCount(page), 0);
@@ -1291,8 +1293,8 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
 
 // The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
 test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
-  const FRESH = mk("fresh-decision", 29);
-  const page = await open(t, { items: [DECISION, FRESH, TASK], answers: SAVED_A }); if (!page) return;
+  const FRESH = mk("fresh-decision", 29, { added: ASKED_AFTER_SEND });
+  const page = await open(t, { items: [DECISION, FRESH, { ...TASK, added: ASKED_AFTER_SEND }], answers: SAVED_A }); if (!page) return;
   assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
   for (const it of [FRESH, TASK]) {
     assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
@@ -1395,7 +1397,7 @@ test("the Copy line names a note-only task as note, not done", async (t) => {
 });
 
 test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
-  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
   await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
   await addNote(page, TASK, "   ");
@@ -1834,6 +1836,20 @@ test("a seen decision sinks under a new one in Whenever, and its options fold un
   await unfold.click();
   assert.equal(await unfold.getAttribute("aria-expanded"), "true");
   assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+});
+
+test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+  const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
+  const unfold = card(page, seen).locator("button.unfold");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
 });
 
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
@@ -4134,7 +4150,7 @@ test("a lane shows 'waits on lane <slug>' as one text run in the top row, after 
 });
 
 test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
-  const it = mk("pl-1a", 1, { holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const it = mk("pl-1a", 1, { added: ASKED_AFTER_SEND, holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const page = await open(t, { items: [it] }); if (!page) return;
   const c = card(page, it);
   await laText(page, it);
