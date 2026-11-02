@@ -1681,6 +1681,50 @@ class QuestionReachesPageTests(unittest.TestCase):
         out = self.stop([peer_msg("status?"), assistant_text(self.reply(self.PICK))])
         self.assert_blocked(out, "Pick guard")
 
+    def test_qm_red_question_mark_before_markup_blocks(self):
+        # Catches: a "?" followed by bold, a closing bracket, a dash or a closing curly quote read as no question.
+        for body in ("**Merge #5 now?**", "(merge it now?)", "Merge it now?—", "Merge it now?”"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_url_query_alone_is_no_question(self):
+        # Catches: a "?" inside a URL read as a question. A "?" counts only before whitespace or the end.
+        out = self.stop([human("decide"), assistant_text(self.reply(["https://x.y/a?b=1"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_lone_quote_does_not_hide_a_question(self):
+        # Catches: a lone double quote paired with a later one, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(['Set 5" rack, merge it? Pick "main".']))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
+        # Catches: a session with no own record whose question goes to its parent, refused as if it had no route.
+        for label, send in (("@parent", self.send(session_id="@parent")), ("to parent", self.send(to="parent"))):
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    FRESH_QUESTION_CODE = (
+        "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
+        "print(json.dumps(list(report_guard.question_problem(data['records'], data['records'], data['text'], "
+        "data['hook']))))" % HERE)
+
+    def test_qm_question_problem_works_on_a_fresh_import(self):
+        # Catches: question_problem reaching for hooks/ modules that only pending_refusals puts on sys.path, so a
+        # caller that imports report_guard and asks straight away fails with ImportError.
+        records = [human("decide"), assistant_text(self.reply(self.QUESTION))]
+        hook = {"hook_event_name": "Stop", "transcript_path": write_transcript(records, self.run_dir),
+                "stop_hook_active": False, "cwd": self.repo}
+        payload = json.dumps({"records": records, "text": self.reply(self.QUESTION), "hook": hook})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        run = subprocess.run([sys.executable, "-c", self.FRESH_QUESTION_CODE], input=payload, capture_output=True,
+                             text=True, timeout=15, cwd=self.run_dir, env=env)
+        self.assertEqual(run.returncode, 0, "question_problem raised on a fresh import: %s" % run.stderr[-400:])
+        refusal, _note = json.loads(run.stdout)
+        self.assertIn("Pick guard", refusal)
+
     # Lane turn.
 
     def test_ln_green_send_to_parent_in_the_turn_passes(self):
@@ -2898,6 +2942,7 @@ class PendingRefusalTests(unittest.TestCase):
     SID = "pd-sid-1"
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     ADD_REPO = "mcp__claude-code-remote__add_repo"
+    PAGE = "https://claude.ai/artifact/waitpage3"
     PROSE = "Nothing landed. The state is unchanged."
     LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
                         "> **Input Needed** allow `mcp__github__update_pull_request`?\n> **Next** wait")
@@ -2909,6 +2954,12 @@ class PendingRefusalTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.scratch, True)
         self.cfg = os.path.join(self.scratch, "cfg")
         os.makedirs(self.cfg)
+        # A repo with a waiting page: an owner question in it is judged, not handed the no-page note.
+        self.repo = os.path.join(self.scratch, "repo")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as handle:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE}, handle)
 
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
@@ -2928,14 +2979,14 @@ class PendingRefusalTests(unittest.TestCase):
         except FileNotFoundError:
             return []
 
-    def stop(self, reply, landed=False, active=False, sid=SID):
+    def stop(self, reply, landed=False, active=False, sid=SID, cwd=None):
         records = [human("do the task")]
         if landed:
             records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         records += [tool_use_msg(self.ARCHIVE), tool_result_msg(), assistant_text(reply)]
         path = write_transcript(records, self.scratch)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
-                "session_id": sid, "cwd": self.scratch}
+                "session_id": sid, "cwd": cwd or self.scratch}
         run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
         self.assertEqual(run.returncode, 0, run.stderr)
         return run
@@ -2959,25 +3010,32 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
-    def test_e_named_under_input_needed_passes_and_clears_the_entry(self):
-        styles = (("backticks", "> **Input Needed** allow `%s`?"),
-                  ("plain", "> **Input Needed** allow %s?"))
-        for label, line in styles:
+    def test_e_allow_line_with_no_send_blocks_as_a_question(self):
+        # An "allow <tool>?" line is a question for the owner (spec v2.1), so it blocks until the question is
+        # sent. Naming the refused tool still clears its entry: the owner was asked about that refusal.
+        styles = (("backticks", "Bash", "> **Input Needed** allow `Bash`?"),
+                  ("should I", "Bash", "> **Input Needed** Should I allow `Bash`?"),
+                  ("plain MCP name", self.ARCHIVE, "> **Input Needed** allow %s?" % self.ARCHIVE))
+        for label, tool, line in styles:
             with self.subTest(label):
-                self.write_refusals([self.ARCHIVE])
-                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait"
-                         % (line % self.ARCHIVE))
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a named refusal still blocked: %s" % run.stdout)
-                self.assertNotIn(self.ARCHIVE, self.pending_tools(), "the passing reply did not clear the entry")
+                self.write_refusals([tool])
+                reply = "> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait" % line
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "an allow line with no send passed as the answer")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("Pick guard", out["reason"])
+                self.assertNotIn("Refusal guard", out["reason"], "the named refusal was raised again")
+                self.assertNotIn(tool, self.pending_tools(), "the reply did not clear the entry")
 
-    def test_e2_every_pending_tool_named_passes_and_clears_all(self):
+    def test_e2_every_pending_tool_named_clears_all_and_the_question_still_blocks(self):
         self.write_refusals([self.ARCHIVE, self.ADD_REPO])
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                  "> **Input Needed** allow `%s` and `%s`?\n> **Next** wait" % (self.ARCHIVE, self.ADD_REPO))
-        run = self.stop(reply)
-        self.assertEqual(run.stdout.strip(), "", "a reply that names both refusals still blocked: %s" % run.stdout)
-        self.assertEqual(self.pending_tools(), [], "the passing reply left an entry in the file")
+        out = self.blocked(self.stop(reply, cwd=self.repo))
+        self.assertIsNotNone(out, "a reply that asks about two refusals with no send passed")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Pick guard", out["reason"])
+        self.assertEqual(self.pending_tools(), [], "the reply left an entry in the file")
 
     def test_e3_a_name_outside_input_needed_is_no_answer(self):
         self.write_refusals([self.ARCHIVE])
@@ -3004,14 +3062,18 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(self.pending_tools(), [tool], "a plain mention cleared the entry")
 
     def test_k2_a_backticked_built_in_tool_name_clears_it(self):
+        # The named refusal clears and is not raised again. The allow line is a question (spec v2.1), so the
+        # reply still blocks until the question is sent.
         for tool in ("Edit", "Bash"):
             with self.subTest(tool):
                 self.write_refusals([tool])
                 reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                          "> **Input Needed** allow `%s`?\n> **Next** wait" % tool)
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a backticked %s still blocked: %s" % (tool, run.stdout))
-                self.assertEqual(self.pending_tools(), [], "the passing reply left %s in the file" % tool)
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "a backticked %s allow line with no send passed" % tool)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertNotIn("Refusal guard", out["reason"], "a backticked %s was raised again" % tool)
+                self.assertEqual(self.pending_tools(), [], "the reply left %s in the file" % tool)
 
     def test_k3_a_short_mcp_name_does_not_clear_the_full_name(self):
         self.write_refusals([self.ARCHIVE])
