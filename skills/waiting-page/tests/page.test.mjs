@@ -4489,3 +4489,54 @@ test("Change then clear on a sent park line, then Send, deletes answers/park.<id
   await page.waitForFunction((k) => !(k in window.__answers()), parkKey(PARK_A));
   assert.deepEqual(await parkWrites(page), [["delete", "answers", parkKey(PARK_A)]], "Withdraw did not delete answers/park.<id> once");
 });
+
+test("at 1280 wide, sending a park act does not move the parked lines below it", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_B, PARK_X] }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  const rows = () => page.evaluate(() => [...document.querySelectorAll(".parked .pk-list .pk")].map((el) => ({ text: el.textContent, top: el.getBoundingClientRect().top })));
+  const before = await rows();
+  await send(page);
+  await page.locator("#sent").waitFor({ state: "visible", timeout: 3000 }).catch(() => {}); // the Sent panel shows after any Send, whatever the key
+  const after = await rows();
+  const acted = before.findIndex((r) => r.text.includes(PARK_A.ref));
+  assert.ok(acted >= 0 && before.length === 3 && after.length === 3, "expected three parked lines, got " + before.length + " before and " + after.length + " after");
+  for (let i = acted + 1; i < before.length; i++) {
+    assert.ok(after[i].text.includes(before[i].text.slice(0, 20)), "parked lines changed order on Send");
+    assert.ok(Math.abs(after[i].top - before[i].top) <= 0.5, "the line below the sent park act moved by " + (after[i].top - before[i].top).toFixed(2) + "px: " + before[i].text.slice(0, 40));
+  }
+});
+
+// The meta listener runs keepRouted(was, now) and then renders. These cases make the same two calls, so the list change
+// goes through the same code the writer's update does.
+const changeMeta = (page, parked) => page.evaluate((list) => { const was = state.meta; state.meta = { writer: "triage", parked: list }; keepRouted(was, state.meta); render(); }, parked);
+
+test("a sent park line whose entry leaves the list while in view shows the filled badge and keeps its height", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  const line = parkLine(page, PARK_A);
+  await line.scrollIntoViewIfNeeded();
+  const sentBox = await line.boundingBox();
+  assert.ok(sentBox && sentBox.y >= 0 && sentBox.y < 900, "the line is not in view before its entry leaves");
+  await changeMeta(page, [PARK_B]); // the writer drops PARK_A while its line is in view
+  await need(line, "the line left the page when its entry left the list");
+  await need(line.locator(".ans.filed", { hasText: "Unparked" }), "the line shows no filled Unparked badge");
+  const routedBox = await line.boundingBox();
+  assert.ok(Math.abs(routedBox.height - sentBox.height) <= 0.5, "the line changed height from " + sentBox.height + " to " + routedBox.height);
+});
+
+test("a stored park draft whose entry is gone is pruned on load, and a later entry with the same id is not pre-staged", async (t) => {
+  const storage = { "waiting.draft": JSON.stringify({ [parkKey(PARK_A)]: { act: "unpark" } }) };
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_B] }, storage }); if (!page) return;
+  await parkLoaded(page);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("waiting.draft") || "{}"));
+  assert.equal(parkKey(PARK_A) in stored, false, "the draft of a gone entry is still in waiting.draft: " + JSON.stringify(stored));
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on the draft of a gone entry");
+  await changeMeta(page, [PARK_A, PARK_B]); // a later entry with the same id
+  await need(parkLine(page, PARK_A), "the later entry with the same id is not on the page");
+  assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
+});
