@@ -7473,6 +7473,97 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
            "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
 
 
+# The two incident commands, verbatim. The env word is written as @DOTENV@ and rebuilt from ENV, so
+# no Bash call that writes this file carries it (see ENV at the top of the file).
+INCIDENT_CAT_WRITE = r"""D=/tmp/claude-0/-home-user/4a3e5715-0a07-53a0-b65e-c228cc13d462/scratchpad/trial/shadow; cat > $D/brief-env-heredoc-false-alarm.md <<'EOF'
+Lane brief: env-heredoc-false-alarm. You are a lane session (one lane, Opus). Coordinator: session_013NEJL2pASwRjgJDnsvnpNe. Batch runner 7: session_013NEJKyjt96cx7d1uCdtb8U.
+
+Read the step: `git fetch origin roadmap && git show origin/roadmap:roadmap/data/steps/env-heredoc-false-alarm.json`.
+Incident (Nov 1 23:41 CST): main's env-file guard refused triage 5's Bash command that only wrote a roadmap JSON note, because the note's text named an env folder inside a python heredoc string. No env file was read or written.
+Base: branch lane/env-file-scope at 9743a815 (PR #1057, draft, stacked on #1046). It rewrote the env predicate (names_env_file). Branch from it; your PR stacks on #1057 and merges after it.
+Task: 1) Turn note env-file-rule-false-alarms (docs/debts/notes.md) into a debt record in docs/debts, citing this incident and decision env-file-stays-unread. 2) Change the guard's verdict so env-file words inside a heredoc body that only writes a file (no read of an env file, no command that runs the body against one) pass. Find the refusal (env_heredoc_refusal) and its scanner; reuse the shell tokenizer the guard already has (rule building-scanner-respects-strings).
+Governing: env-file-stays-unread, guard-guards-mistakes-only, building-guard-needs-incident (named incident, date it), verification-trust-guard-after-red, roles-review-cap-three (guard verdict change: net-value test after round 3).
+Failure classes: a heredoc piped into a shell or interpreter that then reads @DOTENV@ (`bash <<EOF ... cat @DOTENV@`, `python - <<EOF open('@DOTENV@')`) must still refuse; `cat @DOTENV@ > x` outside a heredoc still refuses; a heredoc whose body is data written by `cat > file <<EOF` passes; a lone quote or `#` inside the body does not break the scan.
+Done check: test-author writes red cases first (the 23:41 command's form among them) and shows them red at 9743a815; builder makes them green; lane lint green: `~/.claude/bin/verdict ~/.claude/bin/ci-job checks --lint` and `python3 lint/check_silent_undo.py --upstream origin/main --head HEAD --strict`.
+Models per agent-model-cap. No EnterWorktree, confirm_repository_trust, request_computer_folder or create_session. Never write the roadmap. Every owner question leaves by send_message to me in the turn you ask it (owner ruling 23:31 CST). Open a draft PR based on lane/env-file-scope; send its number and head to batch runner 7 (note: after #1057) and to me. Report cap 20 lines, plus one Lessons line.
+EOF
+wc -c $D/brief-env-heredoc-false-alarm.md""".replace("@DOTENV@", ENV)
+
+INCIDENT_PYTHON_WRITE = r"""cd /tmp/s; W=$PWD/rmwt; git -C $W pull origin roadmap 2>&1|tail -1; python3 - "$W" <<'EOF'
+import json,sys
+p=sys.argv[1]+'/roadmap/data/steps/refusal-uncited-rewrites.json';d=json.load(open(p))
+d['note']=d['note'].rstrip()+' Nov 1 23:40 CST: #1046 new head 7f8fd512, in batch 63. Follow-up draft PR #1057 (env-file one scope, per the coordinator\'s @DOTENV@rc pick b) stacks on it at head 9743a815; round 3 net positive. Note env-file-rule-false-alarms now carries the @DOTENV@ folder and @DOTENV@-prefix word classes, and points at decision env-file-stays-unread.'
+d['updatedAt']='2026-11-02T05:40:00Z';json.dump(d,open(p,'w'),indent=1,ensure_ascii=False);open(p,'a').write('\n')
+EOF
+git -C $W commit -am "Triage 5: notes
+
+Co-Authored-By: x" 2>&1|tail -1; git -C $W push origin roadmap 2>&1|tail -1; git -C $W log --oneline -1""".replace("@DOTENV@", ENV)
+
+
+# A heredoc body that no shell or interpreter runs is data, even when it names an env file. Incident
+# (Nov 1 2026, 23:37 CST, coordinator session): the body of a `cat > file <<'EOF'` write held `bash <<EOF`
+# and an env read, so the write was refused, though nothing ran it. Incident (Nov 1 2026, 23:41 CST,
+# triage 5): a `python3 -` write whose body had an escaped quote, then prose naming an env folder, was
+# refused the same way. The escape closed the quote the reader had open, so the prose read as shell words.
+sh("env: heredoc-allow: the incident cat write, a body with bash <<EOF and an env read, is allowed",
+   INCIDENT_CAT_WRITE, "allow", cwd=NOGIT)
+sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
+   INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT)
+for _runner in ("python3 -", "node -", "ruby -"):
+    sh("env: heredoc-allow: a %s body with an escaped quote and an env word, is allowed" % _runner.split()[0],
+       _runner + " <<'EOF'\nx = 'it\\'s " + ENV + " here'\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-allow: a cat write, a minimal body with bash <<EOF and an env read, is allowed",
+   "cat > /tmp/b.md <<'EOF'\nbash <<EOF cat " + ENV + "\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-allow: a cat write, the same body with an unquoted delimiter, is allowed",
+   "cat > /tmp/b.md <<EOF\nbash <<EOF cat " + ENV + "\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-allow: a cat write, the same body with a bash <<X inner word, is allowed",
+   "cat > /tmp/b.md <<'EOF'\nbash <<X cat " + ENV + "\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-allow: a cat write, the same body with a lone apostrophe and a hash, is allowed",
+   "cat > /tmp/b.md <<'EOF'\nDon't stop here\nbash <<EOF cat " + ENV + "\n# a note\nEOF", "allow", cwd=NOGIT)
+
+# A body that a shell or an interpreter runs stays in view, and its env read still refuses.
+sh("env: heredoc-refuse: a bash heredoc with a quoted delimiter and an env read in the body, denies",
+   "bash <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a cat heredoc piped to sh with an env read in the body, denies",
+   "cat <<'EOF' | sh\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a data heredoc naming bash <<X, then a real bash <<'B' with an env read, denies",
+   "cat > /tmp/n.md <<'EOF'\nuse bash <<X to run it\nEOF\nbash <<'B'\ncat " + ENV + "\nB",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: an eval of a quoted heredoc with an env read in the body, denies",
+   'eval "$(cat <<\'EOF\'\ncat ' + ENV + '\nEOF\n)"', "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: an unclosed data heredoc naming bash <<B, then an env read, denies",
+   "cat > /tmp/n.md <<'EOF'\nbash <<B\ncat " + ENV, "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a plain cat of an env file, denies",
+   "cat " + ENV, "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a ruby body with a backtick env read, denies",
+   "ruby - <<'EOF'\nx = `cat " + ENV + "`\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a perl body with a backtick env read, denies",
+   "perl - <<'EOF'\nmy $x = `cat " + ENV + "`;\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a perl body with a qx env read, denies",
+   "perl - <<'EOF'\nprint qx(cat " + ENV + ");\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a ruby body with a %x env read, denies",
+   "ruby - <<'EOF'\nputs %x(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-refuse: a python body with an env read in a substitution, unquoted delimiter, denies",
+   'python3 - <<EOF\nx = "$(cat ' + ENV + ')"\nEOF', "deny", "env-file", cwd=NOGIT)
+
+
+def incident_write_strip_case():
+    """strip_heredoc_bodies keeps no body line of the incident cat write.
+
+    The interpreter test reads the whole command, so the body's own `bash <<EOF` line made every
+    body line stay in view, and the env layer read the `cat` of the body as if a shell ran it. Only
+    the header line and the line after the closer are left.
+    """
+    guard = _load_guard_module()
+    lines = INCIDENT_CAT_WRITE.split("\n")
+    got = guard.strip_heredoc_bodies(INCIDENT_CAT_WRITE).split("\n")
+    want = [lines[0], lines[-1]]
+    if got != want:
+        return False, ("the incident write kept %d of its %d lines, want the header and the last line"
+                       % (len(got), len(lines)))
+    return True, "the incident write keeps its header line and the line after the closer, and no body line"
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
@@ -16827,6 +16918,8 @@ LOG_CHECKS = (
      pointer_remedy_names_enter_worktree_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
+    ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
+     incident_write_strip_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -22187,6 +22280,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the config-edit rule reads", "worktree-home"),
     ("worktree-home: the agent cap rule reads", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
+    ("env: heredoc-allow-strip", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
