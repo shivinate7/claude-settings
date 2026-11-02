@@ -5,13 +5,13 @@
 The red-main check: the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job. The preview prints the same verdict on its `<base> run:` line.
 
 - Judged: per workflow file and per event group, on the base branch. The groups are in one file, `actions/ci-alarm/events.json`, which the CI alarm reads too. Its keys are the judged events. Its values are the groups. `push` and `workflow_dispatch` (`gh workflow run`, the tool's own remedy) form one group. `schedule` is its own group. For each file and group, the newest completed run decides. So a green push or dispatch run clears an older red push or dispatch run, and a newer schedule run clears an older red schedule run. A newer run still in progress waits its turn. A run of any other event, such as a Pages build, is not judged. Runs are keyed by workflow file, not by name, so a rename inside the file keeps one verdict. A run whose workflow file is gone from the base is not judged, because no new run will ever replace it. One page of 50 runs is read. A group with no run on that page is not judged.
-  - A red run R is cleared by a run N of another group of the same workflow file only when all of these hold:
+  - A failed run R with at least one red job is cleared by a run N of another group of the same workflow file. All of these must hold:
     - N is newer than R.
     - N is the newest completed run of its own group.
     - N's conclusion is `success`.
     - Every job name in R appears in N, compared exactly, with conclusion `success`. A skipped job in N is not a pass.
-  - Otherwise the groups stay separate. A green run of one group never hides a red run of another. Reason (roadmap step `ci-alarm-reads-by-event`): two events can run different job sets, so a green nightly must not clear a red push whose jobs it did not run.
-  - R with no jobs (`startup_failure`) is never cleared across groups. A cancelled N, or one in progress, clears nothing. An UNKNOWN R stays UNKNOWN.
+  - Otherwise the groups stay separate. A green run of one group never hides a failed run of another. Reason (roadmap step `ci-alarm-reads-by-event`): two events can run different job sets, so a green nightly must not clear a red push whose jobs it did not run.
+  - Only a run with a red job is cleared across groups. A run that ended `failure` with no red job stays red, as the "did not succeed" bullet below says: no jobs (`startup_failure`), jobs that all passed, or only cancelled or skipped jobs. A cancelled N, or one in progress, clears nothing. An UNKNOWN R stays UNKNOWN.
   - The CI alarm (`actions/ci-alarm/alarm.sh`) follows the same rule, so it opens no issue for a run the merge tool calls clear.
 - Red: a job whose conclusion is `failure`, or any value GitHub adds later (`Host.classify`). A job cancelled at its cap (timed out), a cancelled job and a skipped job are not red.
 - A run that did not succeed and has no red job: a timed-out job explains it, so it is not red. A cancelled run is UNKNOWN. It is never swapped for an older run: on the base, `judge_runs`'s twin rule would reach across commits. Any other conclusion is red, such as `startup_failure` from a broken workflow file that runs no job. The tool sees a failed run and no reason for it, so it treats the run as red.
@@ -25,7 +25,7 @@ Why: Oct 13 to 14, 14 main runs in a row were red, and batch merges kept landing
 - Risk: named incident, 2026-11-02, joyous #68. Joyous `links.yml` schedule run 40323547948 (Oct 26, on old main `eb7800528`, job `readme-links`: failure) blocked every joyous merge, although dispatch run 41397308885 on current main `53b50465e` ran the same job, `readme-links`, and passed.
 - The owner's `override` prompt does not reach this check. The override check has one home, `refuse()` in `hooks/guard_core.py`. The merge tool runs after the guard, and decision owner-override lists the `bin/merge` shim as outside every override. The tool also cannot tell a session's run from its agent's, and a one-act override must not reach an agent.
 - Check: `merge/test_merge.py`, class `RedMainBrake` and `GhHalf.test_a_red_main_run_read_through_gh_refuses_the_merge`. The CI alarm's groups: `actions/ci-alarm/test_action.sh`.
-- Cost: at each `--confirm` and each preview, one `git ls-tree` of the base, one `actions/runs` read (one page of 50), and one jobs read for each judged run that did not succeed. A cross-group clear adds one jobs read for N, made only when R is red and a candidate N exists. The CI alarm adds one jobs read each for R and N per red group. No process starts, no file written, no timer.
+- Cost: at each `--confirm` and each preview, one `git ls-tree` of the base, one `actions/runs` read (one page of 50), and one jobs read for each judged run that did not succeed. A cross-group clear adds one jobs read for N, made only when R has a red job and a candidate N exists. The CI alarm adds one jobs read each for R and N per failed group that has a candidate N. No process starts, no file written, no timer.
 
 Kind: process
 Home: merge/merge.py

@@ -948,12 +948,12 @@ class Host:
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A dispatch clears an older red push (one group). A red run R is
-        cleared by a run N of the same file and another group only when N is newer than R, is the newest completed run of its own group,
-        concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a skipped job
-        is no pass). So a green nightly that ran other jobs never clears a red push. R with no jobs is never cleared across groups; an
-        unknown R stays unknown. N's jobs are read only when R is red and such an N exists (one read each, cached); a failed read is
-        unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
+        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
+        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
+        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
+        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
@@ -974,7 +974,7 @@ class Host:
             age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
 
             def cleared(r):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r."""
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
                 names = {j["name"] for j in jobs_of(r)}
                 for n in newest.values():
                     if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
@@ -1000,7 +1000,7 @@ class Host:
                     continue
                 elif r["conclusion"] == "cancelled":
                     unknown.append(f"{where} was cancelled with no red job")
-                elif not cleared(r):
+                else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
             return "unknown", " ".join(str(e).split())
