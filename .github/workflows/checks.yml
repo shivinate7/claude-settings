@@ -702,6 +702,9 @@ jobs:
       - name: sim-test fixture suite (bash on PATH)
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: bash lint/test_sim_test.sh
+      - name: sim-lease fixture suite
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_sim_lease.py
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the checks
   # and checks-windows jobs above proved itself only on Linux and Windows, never on a real

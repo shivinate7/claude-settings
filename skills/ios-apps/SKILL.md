@@ -46,6 +46,8 @@ this repo (the `compliance-check` skill runs it). A row checked by hand is read 
 (artemnovichkov/hinge at commit `abd539d6`, at `~/.local/bin/hinge`, owner choice 2026-10-25). It
 opens no window. Never drive Device Hub to fold.
 
+Before you boot, fold or test on the Duo, run `sim-lease take WHO` (decision `sim-lease`).
+
 - `hinge -d <udid> open|close|half|<degrees>|get|posture`. Run it outside the sandbox. When
   `-t 6` times out, read `posture`: the angle may be set already.
 - Name the screen in each screenshot: `simctl io <udid> screenshot --display=LCD` for the outer
