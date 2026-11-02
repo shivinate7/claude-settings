@@ -318,7 +318,7 @@ while True:
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            playwright_command_hit, playwright_install_hit,
+            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -1482,8 +1482,25 @@ def is_test_rel(rel: str) -> bool:
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
         or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
-        or any(p.lower() in TEST_DIRS for p in parts)
+        or _in_test_dir(parts)
     )
+
+
+# `spec` is a test folder for code (`spec/foo_spec.rb`) and for its fixtures, but a Markdown or text
+# file there is a document (`docs/spec/api.md`), not a test.
+SPEC_DOC_EXTENSIONS = {".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc"}
+
+
+def _in_test_dir(parts) -> bool:
+    for index, part in enumerate(parts):
+        name = part.lower()
+        if name not in TEST_DIRS:
+            continue
+        if (name == "spec" and index < len(parts) - 1
+                and os.path.splitext(parts[-1])[1].lower() in SPEC_DOC_EXTENSIONS):
+            continue
+        return True
+    return False
 
 
 def is_test_config_rel(rel: str) -> bool:
@@ -1528,6 +1545,12 @@ def designer_path_ok(rel: str) -> bool:
     return "/".join(parts).startswith(folder + "/")
 
 
+def drive_form_cwd(cwd: str) -> str:
+    """A Git Bash `/c/Users/...` cwd in drive form (`C:/Users/...`) on Windows, else `cwd` as given.
+    Off Windows `/c/` is a real folder. `_expanded` is the one reader of the drive spelling."""
+    return _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+
+
 def repo_rel(path: str, cwd: str, outside: bool = True):
     """The path relative to its repository root (the nearest parent holding `.git`), posix, or the
     full path when it sits in no repository (`outside` False: None there). None when it cannot be
@@ -1568,6 +1591,14 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
+    # From a call that runs in a repository, a path in no repository is no test of it, as for the author
+    # above. From a call in no repository nothing says which paths are outside, so the shape decides.
+    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
+    # read but not from the probe, and the target would then count as outside.
+    where = drive_form_cwd(cwd)
+    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
+            and repo_rel(target, where, outside=False) is None):
+        return ""
     if is_test_rel(rel):
         return target
     if is_test_config_rel(rel) and any(
@@ -2745,6 +2776,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
     previous = None
+    call_tokens = []
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -2752,6 +2784,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if tokens is None:
             previous = None
             continue
+        call_tokens.append(tokens)
         matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
         previous = tokens
         if matched:
@@ -2760,6 +2793,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
+    matched = lsof_pids_reach_kill(call_tokens)
+    if matched:
+        refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
@@ -3130,7 +3167,14 @@ IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review o
                      "screens; make any change to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
-IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
+# The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
+# SKILL.md, Routing); it asks once when two commands fit. So a `;` starts no second command, and a part
+# after it is refused only when it opens with a command verb other than a review: the Commands table
+# of that SKILL.md is the list, read when a review carries a `;`. `|`, `&&` and a newline always chain.
+IMPECCABLE_CHAIN = re.compile(r"[|\n]|&&")
+IMPECCABLE_JOINERS = ("then", "and")
+IMPECCABLE_SKILL_FILE = os.path.join(_HERE, "..", "skills", "impeccable", "SKILL.md")
+IMPECCABLE_VERB_ROW = re.compile(r"^\| `([a-z]+)[^`]*` \| [A-Z][a-z]+ \|", re.M)
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
 PACKAGE_FLAGS = ("-p", "--package")
 
@@ -3141,13 +3185,32 @@ def impeccable_name(token: str) -> str:
     return name.rsplit(".", 1)[0]
 
 
+def impeccable_command_verbs():
+    """The command verbs in the Commands table of the impeccable SKILL.md, or None when the file or
+    the table cannot be read. Unread, every part after a `;` is refused, as it was before the table."""
+    try:
+        with open(IMPECCABLE_SKILL_FILE, encoding="utf-8") as handle:
+            table = re.split(r"(?m)^## ", handle.read().split("\n## Commands", 1)[1], 1)[0]
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+    return set(IMPECCABLE_VERB_ROW.findall(table)) or None
+
+
 def impeccable_skill_hit(tool_input) -> str:
     skill, args = tool_input.get("skill"), tool_input.get("args") or ""
     if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
         return ""
-    words = args.split() if isinstance(args, str) else []
-    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
-        return ""
+    words = args.split(";")[0].split() if isinstance(args, str) else []
+    text = args.strip() if isinstance(args, str) else ""
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(text):
+        parts = [part.split() for part in text.split(";")[1:]]
+        for part in parts:   # "then polish" opens with polish: read past a joining word
+            while part and part[0] in IMPECCABLE_JOINERS:
+                part.pop(0)
+        verbs = impeccable_command_verbs() if any(parts) else set()
+        if verbs is not None and not any(part[0] in verbs - set(IMPECCABLE_REVIEWS)
+                                         for part in parts if part):
+            return ""
     return ("skill %s %s" % (skill, args))[:100]
 
 
@@ -3339,7 +3402,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
-    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    home_cwd = drive_form_cwd(cwd)
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""

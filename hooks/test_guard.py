@@ -497,6 +497,17 @@ PTRWT = os.path.join(ROOT, "ptrlane")
 PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
 PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
 PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
+# A pointer checkout that is OFF main: HEAD is on `feat`. The recovery cases run here, because a move back
+# to main is only a repair when HEAD is not already on it.
+PTROFFCFG = os.path.join(ROOT, "ptroffcfg")
+PTROFF = os.path.join(ROOT, "ptroffmain")
+# The reset of main onto origin/main is judged against origin/main, so each pointer checkout states
+# its own. PTRMAIN and PTROFF have local main equal to origin/main (an ancestor: the reset passes).
+# PTRAHEAD has one local commit that origin/main lacks. PTRNOORIGIN has no origin/main at all.
+PTRAHEADCFG = os.path.join(ROOT, "ptraheadcfg")
+PTRAHEAD = os.path.join(ROOT, "ptraheadmain")
+PTRNOORIGINCFG = os.path.join(ROOT, "ptrnoorigincfg")
+PTRNOORIGIN = os.path.join(ROOT, "ptrnooriginmain")
 
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
@@ -1379,6 +1390,13 @@ def _build_privrepo():
     write(os.path.join(PRIVREPO, "new.txt"), "untracked\n")
     _require_dirty(PRIVREPO, "f.txt", "new.txt", "keep.txt")
 
+def _set_origin_main(where, rev):
+    """Point refs/remotes/origin/main at `rev` in `where`. The guard reads that ref, and no remote is needed."""
+    result = run_vcs(where, "update-ref", "refs/remotes/origin/main", rev)
+    if result.returncode != 0:
+        sys.exit("fixture setup failed: origin/main in %r. stderr: %s" % (where, result.stderr.strip()))
+
+
 def _build_pointer():
     """The pointer checkout (PTRMAIN, PTRWT), its config folders, and the blind git."""
     # THE POINTER CHECKOUT, built with git itself. The rule compares TOP LEVELS read from git, so
@@ -1396,8 +1414,29 @@ def _build_pointer():
     run_vcs(PTRMAIN, "worktree", "add", "-q", PTRWT, "-b", "ptrlane")
     _require_clean(PTRWT)
     _require_pointer_branch(PTRMAIN, "main")
+    _set_origin_main(PTRMAIN, "HEAD")
     # The pointer line has the same shape the installer writes and the shell readers parse.
     write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
+    # The off-main pointer checkout: a second repository whose HEAD is on `feat`.
+    make_repo(PTROFF, {"f.txt": "base\n"})
+    run_vcs(PTROFF, "checkout", "-b", "feat")
+    _require_pointer_branch(PTROFF, "feat")
+    _set_origin_main(PTROFF, "main")
+    write(os.path.join(PTROFFCFG, "CLAUDE.md"), "@" + slash(PTROFF) + "/CLAUDE.md\n")
+    # Local main one commit ahead of origin/main: a reset of main onto origin/main would drop that commit.
+    make_repo(PTRAHEAD, {"f.txt": "base\n"})
+    _set_origin_main(PTRAHEAD, "main")
+    write(os.path.join(PTRAHEAD, "f.txt"), "local only\n")
+    run_vcs(PTRAHEAD, "add", "-A")
+    ahead = run_vcs(PTRAHEAD, *IDENT, "commit", "-q", "-m", "local only")
+    if ahead.returncode != 0:
+        sys.exit("fixture setup failed: the local commit in PTRAHEAD. stderr: %s" % ahead.stderr.strip())
+    _require_pointer_branch(PTRAHEAD, "main")
+    write(os.path.join(PTRAHEADCFG, "CLAUDE.md"), "@" + slash(PTRAHEAD) + "/CLAUDE.md\n")
+    # No origin/main at all: the pointer checkout on main, with no remote-tracking ref.
+    make_repo(PTRNOORIGIN, {"f.txt": "base\n"})
+    _require_pointer_branch(PTRNOORIGIN, "main")
+    write(os.path.join(PTRNOORIGINCFG, "CLAUDE.md"), "@" + slash(PTRNOORIGIN) + "/CLAUDE.md\n")
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
@@ -1816,7 +1855,8 @@ lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
-lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
+lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
+              PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2972,6 +3012,34 @@ sh("pointer: a move back to main restores the invariant and passes",
    VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch main passes for the same reason",
    VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
+# refusal-vs-rule (pointer-head, recovery-independent-of-state): a move TO main is the recovery act and
+# passes. A reset of main onto origin/main is a move to main too. The pin runs both on main and in a
+# checkout that is off main, so the verdict cannot rest on HEAD already naming main.
+sh("pointer: switch -C main onto origin/main passes, from a checkout on main",
+   VCS + " switch -C main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout -B main onto origin/main passes, from a checkout on main",
+   VCS + " checkout -B main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -C main onto origin/main passes, from a checkout off main",
+   VCS + " switch -C main origin/main", "allow", cwd=PTROFF, config=PTROFFCFG)
+# Near misses, refused: a detach names no branch, so the exemption for main does not reach it, and a
+# reset onto any other branch is a new branch.
+sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --detach main", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
+   "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+# The reset is a move to main only when it drops nothing, and only origin/main can say so. Local main
+# one commit ahead of origin/main: the reset would drop that commit, so it is refused.
+sh("pointer: switch -C main onto origin/main is refused when local main holds a commit origin/main lacks",
+   VCS + " switch -C main origin/main", "deny", "pointer-head", cwd=PTRAHEAD, config=PTRAHEADCFG)
+sh("pointer: checkout -B main onto origin/main is refused when local main holds a commit origin/main lacks",
+   VCS + " checkout -B main origin/main", "deny", "pointer-head", cwd=PTRAHEAD, config=PTRAHEADCFG)
+# No origin/main at all: nothing shows the reset drops no commit, so it is refused.
+sh("pointer: switch -C main onto origin/main is refused when origin/main does not exist",
+   VCS + " switch -C main origin/main", "deny", "pointer-head", cwd=PTRNOORIGIN,
+   config=PTRNOORIGINCFG)
+sh("pointer: checkout -B main onto origin/main is refused when origin/main does not exist",
+   VCS + " checkout -B main origin/main", "deny", "pointer-head", cwd=PTRNOORIGIN,
+   config=PTRNOORIGINCFG)
 
 # READS NEVER FIRE.
 sh("pointer: listing branches only reads", VCS + " branch --list", "allow", cwd=PTRMAIN,
@@ -3206,8 +3274,25 @@ sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wid
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: killall by name", "killall node", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill: lsof -t feeds a kill list", "lsof -t -i :3000", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill: the same flag bundled", "lsof -ti :3000", "deny", "machine-wide-kill", cwd=NOGIT)
+# Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): a list
+# of pids kills nothing, so `lsof -t` alone passes. Its kill is refused where it feeds one, below.
+sh("kill: lsof -t lists the pids on a port, kills nothing", "lsof -t -i :3000", "allow", cwd=NOGIT)
+sh("kill: the same flag bundled lists the pids, kills nothing", "lsof -ti :3000", "allow", cwd=NOGIT)
+sh("kill: lsof -ti piped into xargs kill is the pid list of a kill", "lsof -ti :3000 | xargs kill",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pid list from lsof -ti substituted into kill is refused", "kill $(lsof -ti :3000)",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+# THE CALL KILLS, NOT ONLY THE SEGMENT. A pid list from `lsof -t` reaches a kill across a filter, a
+# loop, a file, or a loop header. `lsof -t` passes only when nothing in the call kills (rule
+# shared-trees-no-machine-wide-kill).
+sh("kill: lsof -t through head into xargs kill is refused", "lsof -ti:3000 | head -1 | xargs kill -9",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t read by a while loop that kills is refused",
+   "lsof -ti:3000 | while read p; do kill $p; done", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t written to a file, then killed from it, is refused",
+   "lsof -ti:3000 > f; kill $(cat f)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: lsof -t in a for header, killed in the loop body, is refused",
+   "for p in $(lsof -ti:3000); do kill $p; done", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: taskkill by image name", "taskkill /IM node.exe /F", "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: taskkill by image name, dash spelling", "taskkill -im node.exe", "deny",
@@ -3230,6 +3315,28 @@ sh("kill: a signal flag and a pid this session started", "kill -9 %d" % OWNED.pi
 sh("kill: a pid nothing is running under", "kill 4194303", "allow", cwd=NOGIT)
 sh("kill: a pid held in a variable cannot be read, so it passes", "kill $!", "allow", cwd=NOGIT)
 sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
+# Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): `pkill -P`
+# names the children of ONE parent pid, so a parent this session owns passes, as `kill` does.
+sh("kill: pkill -P of the shell's own pid passes", "pkill -P $$", "allow", cwd=NOGIT)
+# Ruling (lane orchestrator, process-only, under shared-trees-no-machine-wide-kill, "Kill only yours"):
+# a parent that the guard cannot read is no pid this session holds, so only `$$` and `$!` pass.
+sh("kill: pkill -P of the last background job's pid passes", "pkill -P $!", "allow", cwd=NOGIT)
+sh("kill: pkill -P of a command substitution is refused", "pkill -P $(pgrep -f vite)", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill -P of PPID is refused", "pkill -P $PPID", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill -P of a variable is refused", "pkill -P $SOME_VAR", "deny", "machine-wide-kill",
+   cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: pkill -P of a parent this session started passes", "pkill -P %d" % OWNED.pid,
+       "allow", cwd=NOGIT)
+    sh("kill: pkill -P of a parent this session did not start is refused", "pkill -P %d" % FOREIGN,
+       "deny", "machine-wide-kill", cwd=NOGIT)
+    # pid 1 is init. foreign_pid_kill judges 0, 1 and -1 with no root, so it stays refused whatever ps says.
+    sh("kill: pkill -P of init is refused", "pkill -P 1", "deny", "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: pkill -P of a parent this session started passes", NO_PS)
+    skip_case("kill: pkill -P of a parent this session did not start is refused", NO_PS)
+    skip_case("kill: pkill -P of init is refused", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
@@ -4345,8 +4452,30 @@ sh("detached: the same shape, spaced",
    "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: nohup survives a session close, with a background job",
    "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
-sh("detached: nohup alone, no background job, still detaches from the session",
-   "nohup npm run build", "deny", "detached-launch", cwd=NOGIT)
+# Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup with no trailing `&`
+# runs in the foreground, so it detaches nothing. The rule refuses only the detached forms.
+sh("detached: nohup alone, no background job, runs in the foreground",
+   "nohup npm run build", "allow", cwd=NOGIT)
+sh("detached: nohup of make test, run in the foreground, is allowed", "nohup make test", "allow",
+   cwd=NOGIT)
+sh("detached: setsid -w waits for its child, so it runs in the foreground",
+   "setsid -w make test", "allow", cwd=NOGIT)
+sh("detached: nohup with a trailing background job is still refused", "nohup make test &", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: nohup with a redirect and a trailing background job is still refused",
+   "nohup make test >log 2>&1 &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: setsid with no -w starts its own session", "setsid make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -f forks, so the child outlives the call", "setsid -f make test", "deny",
+   "detached-launch", cwd=NOGIT)
+# A wrapper inside another wrapper detaches the same way: nohup passes its own command on, so the
+# setsid it wraps is read too.
+sh("detached: setsid with no -w, wrapped in nohup, is refused", "nohup setsid make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -f, wrapped in nohup, is refused", "nohup setsid -f make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -w with a trailing background job is still refused", "setsid -w make test &",
+   "deny", "detached-launch", cwd=NOGIT)
 sh("detached: setsid starts its own session",
    "setsid python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown right after a background job",
@@ -4371,8 +4500,10 @@ sh("detached: a background job inside sh -c",
    "sh -c 'python3 -m http.server 8782 &'", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: a background job inside bash -lc, then another line",
    "bash -lc 'python3 server.py &\necho started'", "deny", "detached-launch", cwd=NOGIT)
-sh("detached: nohup inside sh -c",
-   "sh -c 'nohup python3 server.py'", "deny", "detached-launch", cwd=NOGIT)
+# Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup inside sh -c, with no
+# background job, runs in the foreground and exits with the process.
+sh("detached: nohup inside sh -c runs in the foreground", "sh -c 'nohup python3 server.py'",
+   "allow", cwd=NOGIT)
 sh("detached: sh -c with no background job runs and exits",
    "sh -c 'echo hi; ls'", "allow", cwd=NOGIT)
 sh("detached: sh -c that prints the pid of its job",
@@ -6343,6 +6474,26 @@ sh("delete: cmd.exe /c rmdir /s /q $env:USERPROFILE", "cmd.exe /c rmdir /s /q $e
 sh("delete: del /s /q C:\\*, Bash", "del /s /q C:\\*", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: del /s /q C:\\*, PowerShell", "del /s /q C:\\*", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
+
+# refusal-vs-rule (destructive-delete, heredoc text): a quoted heredoc writes its body to a file, so a
+# body that names a delete deletes nothing. The body is literal text for the three scanner shapes too: a
+# comment opener, a multi-line backtick span, and a lone apostrophe. The forms that run the body refuse:
+# a shell reads it. NOT PINNED HERE, and allowed on main: an unquoted heredoc's backticks and `$(...)`,
+# and a python heredoc's rmtree. They are looser gaps, reported, not stricter refusals.
+sh("delete: a quoted heredoc writes text that names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\nrm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a comment opener names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\n# clean up with rm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a multi-line backtick span names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\n`first\nrm -rf ./*\nlast`\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a lone apostrophe names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\nit's the note: rm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a heredoc body piped to sh runs the delete", "cat <<EOF | sh\nrm -rf ./*\nEOF",
+   "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a heredoc body given to bash runs the delete", "bash <<EOF\nrm -rf ./*\nEOF",
+   "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a lone apostrophe in a quoted heredoc body does not hide a delete after it",
+   "cat <<'EOF' > notes.md\nit's the note\nEOF\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
 
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
@@ -10929,7 +11080,10 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
 
 BT = "builder-test-edit"
 TA = "test-author-scope"
-B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# Re-pointed in place (rule builders-cannot-edit-tests, refusal-vs-rule row builder-test-edit): a
+# test path OUTSIDE every repository is no test of this repo, so these refusals run in a real linked
+# worktree, as audit-high did for A below. The same shape checks then judge the same paths in-repo.
+B = dict(agent_id="bld1", agent_type="builder", cwd=GITWT)
 # audit-high (owner ruling 2026-10-13): product code is product code IN a repository. The cases
 # below used to run in NOGIT, which is a temp folder in no repository, so their refusals pinned the
 # outside-repo defect. Run in a real checkout, the same refusals hold on either reading of that rule.
@@ -10956,6 +11110,24 @@ for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.
     add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
         new_string="x = 1", **B)
 add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
+# refusal-vs-rule (builder-test-edit): a builder may write outside every repository (its own scratchpad,
+# beside PRIVREPO) and a doc in a `spec` folder. A `spec` folder holds code too, so code there still
+# refuses, and so does a guard test in either checkout.
+PROBE = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "test_probe.py")
+add("builder-test: Write of a probe in its own scratchpad, outside every repository, is allowed",
+    "allow", tool="Write", file_path=PROBE, **B)
+add("builder-test: Write of a doc in a spec folder is allowed", "allow", tool="Write",
+    file_path=os.path.join(GITWT, "docs", "spec", "api.md"), **B)
+add("builder-test: Write of the guard's test file in its own worktree is refused", "deny", rule=BT,
+    tool="Write", file_path=os.path.join(GITWT, "hooks", "test_guard.py"), **B)
+# Rule 0, other-checkout, refuses this write before the builder rule runs. The pin names that rule.
+add("builder-test: Write of the guard's test file in the main checkout, from a worktree, is refused",
+    "deny", rule="other-checkout", tool="Write", file_path=os.path.join(GITMAIN, "hooks", "test_guard.py"),
+    **B)
+add("builder-test: Write of code in a spec folder is refused", "deny", rule=BT, tool="Write",
+    file_path=os.path.join(GITWT, "spec", "foo_spec.rb"), **B)
+add("builder-test: Write of a spec-named TypeScript file is refused", "deny", rule=BT, tool="Write",
+    file_path=os.path.join(GITWT, "src", "x.spec.ts"), **B)
 add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
     tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), **B)
 add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
@@ -10966,6 +11138,11 @@ add("builder-test: reviewer may edit a test", "allow", tool="Edit", file_path="s
     agent_id="rev1", agent_type="reviewer", cwd=NOGIT)
 add("builder-test: a session run with --agent builder (no agent_id) is not judged", "allow",
     tool="Edit", file_path="src/test_app.py", agent_type="builder", cwd=NOGIT)
+# A builder call in no repository has no diff to read, so the path's shape alone decides it: a test file
+# is refused, as it is in a checkout.
+add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
+    rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
+    agent_id="bld1", agent_type="builder", cwd=NOGIT)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -11994,6 +12171,47 @@ add("impeccable: audit then polish in one args string is denied", "deny", "impec
     tool="Skill", skill=IMP, args="audit; polish")
 add("impeccable: bare name with polish is denied", "deny", "impeccable-review-only", tool="Skill",
     skill="impeccable", args="polish")
+# refusal-vs-rule (impeccable-review-only, design-skills): the skill reads the FIRST word as its command
+# and the rest as target text. A `;` inside that target starts no second command, so a review with a
+# focus after the `;` loads. A non-review first word stays refused. A non-review verb after the `;` also
+# stays refused: the skill asks once when two commands fit, and the gate cannot tell that ask from a run.
+add("impeccable: audit with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit the page; focus on a11y")
+add("impeccable: critique with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="critique the page; focus on contrast")
+add("impeccable: audit then polish after the semicolon is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill=IMP, args="audit the page; then polish")
+add("impeccable: audit then polish with no then after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="audit the page; polish")
+add("impeccable: a focus first word with an audit after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="focus the page on a11y; audit")
+add("impeccable: shape with a review target is denied", "deny", "impeccable-review-only", tool="Skill",
+    skill=IMP, args="shape the page; audit")
+# After a `;`, a part is a second command only when it opens with a command verb. The verbs are the
+# Commands table of the skill itself, read here so this file holds no copy of the list. A word that is
+# no command verb, such as `check`, is target text and passes.
+def impeccable_command_verbs():
+    """The command verbs in the Commands table of skills/impeccable/SKILL.md, in table order."""
+    with open(os.path.join(REPO, "skills", "impeccable", "SKILL.md"), encoding="utf-8") as fh:
+        table = fh.read()
+    verbs = re.findall(r"^\| `([a-z]+)[^`]*` \| (?:Build|Evaluate|Refine|Enhance|Fix|Iterate) \|",
+                       table, re.M)
+    if "polish" not in verbs or "animate" not in verbs or len(verbs) < 20:
+        sys.exit("impeccable verbs: the Commands table of the skill did not parse (%d verbs)" % len(verbs))
+    return verbs
+
+
+add("impeccable: audit with a check after the semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit the header; check the contrast on mobile")
+add("impeccable: audit then polish with no target after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="audit; polish")
+add("impeccable: critique then animate after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="critique; animate the hero")
+for _verb in impeccable_command_verbs():
+    if _verb in ("audit", "critique"):   # the two reviews, which a `;` may follow
+        continue
+    add("impeccable: audit then a %s command verb after the semicolon is denied" % _verb, "deny",
+        "impeccable-review-only", tool="Skill", skill=IMP, args="audit the page; %s the page" % _verb)
 
 add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
     args="polish")
@@ -17082,6 +17300,81 @@ def worktree_home_cwd_cap_case():
     return True, "a /c/ cwd gives the agent cap rule the verdict main gives: ask"
 
 
+# The builder cases below run off Windows. They read a `/c/` cwd through the loaded guard's own
+# `_expanded`, with only the drive map changed: `/c/` reads under the run folder, and a relative
+# target is joined onto the cwd as given, so a `/c/` cwd stays raw in that join, as on Windows.
+# os.name reads as Windows for the one call. On Windows the real drive reader runs in the case
+# above.
+C_FORM_ON_WINDOWS = "on Windows the real drive reader runs, in the builder case above"
+
+
+def _slash_c_expanded(real, root):
+    """The guard's `_expanded`, with a `/c/` path read under `root`. Every other path, and the join
+    of a relative path onto its cwd, goes to the real reader as given."""
+    def expanded(path, cwd):
+        bare = path.strip("'\"")
+        if bare.startswith("/c/"):
+            bare = os.path.join(root, bare[3:])
+        return real(bare, cwd)
+    return expanded
+
+
+def _slash_c_builder_hit(name, target):
+    """role_write_hit for a builder write to `target`, from a `/c/` cwd in the repository that
+    `_c_form_fixture(name)` builds. Returns the hit: non-empty when the write is refused."""
+    primary = _c_form_fixture(name)
+    cwd = "/c/" + os.path.basename(primary)
+    guard = _load_guard_module()
+    real_expanded, real_name = guard._expanded, os.name
+    guard._expanded = _slash_c_expanded(real_expanded, ROOT)
+    os.name = "nt"
+    try:
+        return guard.role_write_hit("builder", {"content": "x"}, target, cwd, "")
+    finally:
+        os.name = real_name
+        guard._expanded = real_expanded
+
+
+def worktree_home_cwd_builder_refuse_case():
+    """A builder's write to a test file, from a `/c/` cwd in a repository, is refused. The probe and
+    the target both read the cwd in drive form. Read raw, the target counts as outside every
+    checkout and the write is allowed (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if not _slash_c_builder_hit("builder-deny", "tests/test_app.py"):
+        return False, "/c/ cwd in a repository, builder write to tests/test_app.py: " \
+                      "expected refuse, got allow"
+    return True, "a builder write to a test file from a /c/ cwd in a repository is refused"
+
+
+def worktree_home_cwd_builder_src_case():
+    """A builder's write to product code, from the same `/c/` cwd, is allowed. The drive read must
+    not widen the test rule to product paths (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if _slash_c_builder_hit("builder-src", "src/app.py"):
+        return False, "/c/ cwd in a repository, builder write to src/app.py: " \
+                      "expected allow, got deny"
+    return True, "a builder write to product code from a /c/ cwd in a repository is allowed"
+
+
+def worktree_home_cwd_builder_scratch_case():
+    """A builder's write to a path in no repository, from a `/c/` cwd in one, is allowed. The target
+    is outside every checkout, so no test rule reaches it (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if _slash_c_builder_hit("builder-scratch", "/c/scratch-out/probe.py"):
+        return False, "/c/ cwd in a repository, builder write to /c/scratch-out/probe.py: " \
+                      "expected allow, got deny"
+    return True, "a builder write to a path in no repository from a /c/ cwd is allowed"
+
+
+# Each builds its own repository and calls no lazy fixture, so a filtered run skips that build.
+FIXTURELESS_CHECKS.update((
+    worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
+    worktree_home_cwd_builder_scratch_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -17182,6 +17475,12 @@ LOG_CHECKS = (
     ("worktree-home: the config-edit rule reads a /c/ cwd as main does",
      worktree_home_cwd_config_case),
     ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
+    ("worktree-home: a builder write to a test file from a /c/ cwd in a repository is refused "
+     "off Windows", worktree_home_cwd_builder_refuse_case),
+    ("worktree-home: a builder write to product code from a /c/ cwd in a repository is allowed "
+     "off Windows", worktree_home_cwd_builder_src_case),
+    ("worktree-home: a builder write to a path in no repository from a /c/ cwd is allowed "
+     "off Windows", worktree_home_cwd_builder_scratch_case),
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -23124,6 +23423,9 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the frozen-path rule reads", "worktree-home"),
     ("worktree-home: the config-edit rule reads", "worktree-home"),
     ("worktree-home: the agent cap rule reads", "worktree-home"),
+    ("worktree-home: a builder write to a test file from a /c/ cwd", "worktree-home"),
+    ("worktree-home: a builder write to product code from a /c/ cwd", "worktree-home"),
+    ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
