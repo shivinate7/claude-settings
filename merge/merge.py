@@ -38,7 +38,13 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
-from clears import clears  # noqa: E402  when a newer run clears a red run (actions/ci-alarm/clears.py); one home, the CI alarm calls it too
+try:
+    from clears import candidate, clears  # noqa: E402  which newer run may clear a red run, and when it does (actions/ci-alarm/clears.py); one home, the CI alarm calls it too
+except Exception as e:  # a missing or broken module: one line, no traceback when run; an ImportError when imported
+    _why = "merge: cannot load the clearing rule, module clears (actions/ci-alarm/clears.py): " + " ".join(f"{type(e).__name__}: {e}".split())
+    if __name__ == "__main__":
+        sys.exit(_why)
+    raise ImportError(_why) from e
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -950,14 +956,15 @@ class Host:
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A green push or dispatch never hides a red schedule run; a dispatch
-        clears an older red push. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        not in it is never judged), the newest completed run on `base`. A red run of one group stands beside a green run of another unless
+        that green run ran every job the red run ran (`clears`, below), so a green push hides a red schedule run only when the job sets
+        match. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        A red run R is cleared when the newest completed run of another group of the same file is newer than R (created_at), succeeded, and
-        ran every job R ran, each with conclusion success (`clears`: R's job set is its non-skipped jobs, an empty set clears nothing). A newer
-        run that is cancelled, red or still going clears nothing, and its jobs are never read.
+        A red run R is cleared by a candidate run: the newest completed run of another group of the same file, newer than R (created_at), succeeded
+        (`candidate`), that ran every job R ran, each with conclusion success (`clears`: R's job set is its non-skipped jobs, an empty set clears
+        nothing). A newer run that is cancelled, red or still going is no candidate, and its jobs are never read.
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read; a red one costs one
         more for each newer successful run of another group (read once per run). A failed read is unknown."""
         try:
@@ -967,6 +974,7 @@ class Host:
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
+            done = [{**r, "wf": r["path"]} for r in done]  # the shape `candidate` reads
             latest = list({(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.items())
             for (path, group), r in latest:
                 if r["conclusion"] in ("success", "skipped", "neutral"):
@@ -986,20 +994,16 @@ class Host:
                     continue
                 else:
                     why = f"{where} ended {r['conclusion']} with no red job"
-                if not self.cleared(r, path, group, latest, read):
+                if not self.cleared(r, done, read):
                     red.append(why)
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
-    def cleared(self, red_run, path, group, latest, read):
-        """True when a newer successful run of another event group of the same workflow file passed every job `red_run` ran (see base_state).
-        `latest` is base_state's newest run per (file, group); `read` caches each run's jobs by run id, so a run is read once. A failed read is a Stop."""
-        for (p, g), n in latest:
-            if p != path or g == group or n["conclusion"] != "success":
-                continue
-            if not (red_run.get("created_at") and n.get("created_at") and n["created_at"] > red_run["created_at"]):
-                continue
+    def cleared(self, red_run, runs, read):
+        """True when a candidate run of `red_run` passed every job it ran (see base_state; `runs` are base_state's judged runs, `read` caches
+        each run's jobs by run id, so a run is read once). A failed read is a Stop."""
+        for n in candidate(red_run, runs, self.BASE_EVENTS):
             if n["id"] not in read:
                 read[n["id"]] = self.pages(f"actions/runs/{n['id']}/jobs", "jobs")
             if clears(read[red_run["id"]], read[n["id"]]):
