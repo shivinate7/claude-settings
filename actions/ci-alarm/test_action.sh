@@ -160,6 +160,19 @@ runs_are "$(gh_run ci startup_failure 2026-01-02 https://runs/red-1 push 1)" "$(
 jobs_of 1
 jobs_of 2 checks:success
 t red red-run-with-no-jobs-is-not-cleared-across-groups "" "" https://runs/red-1
+# A failed run with no red job (its only job passed, was cancelled short, or was skipped) is not cleared across groups.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 schedule 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:success
+jobs_of 2 checks:success
+t red failed-run-whose-only-job-passed-is-not-cleared-across-groups "" "" https://runs/red-1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 schedule 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:cancelled
+jobs_of 2 checks:success
+t red failed-run-whose-only-job-was-cancelled-is-not-cleared-across-groups "" "" https://runs/red-1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 schedule 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:skipped
+jobs_of 2 checks:success
+t red failed-run-whose-only-job-was-skipped-is-not-cleared-across-groups "" "" https://runs/red-1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
 jobs_of 1 checks:failure
 jobs_of 2 checks:success
@@ -190,6 +203,8 @@ t unknown run-list-fails-is-unknown "run list"
 t unknown run-list-with-empty-stdout-is-unknown "" "run list"
 printf 'not json' > "$tmp/runs"
 t unknown run-list-that-is-not-json-is-unknown
+printf '[1]' > "$tmp/runs"  # an array passes the list check, but its element is no run: the jq that reads the runs fails
+t unknown run-list-of-non-runs-is-unknown
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)"
 t unknown workflow-list-fails-is-unknown "api *actions/workflows*"
 t unknown workflow-list-with-empty-stdout-is-unknown "" "api *actions/workflows*"
