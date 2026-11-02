@@ -29,7 +29,7 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` log l
   - `perl -pi` on a test path.
   - `rm` and `mv` of a test path.
   - A heredoc header that redirects to a test path.
-  - A heredoc run by a shell (`bash <<EOF`).
+  - A heredoc run by a shell (`bash <<EOF`) that writes a test path.
   - An interpreter (python, node) that opens a test path for writing. The code is a heredoc body, or follows `-c` or `-e`.
   - A literal join that builds a test path: `os.path.join`, `+`, or an f-string with no fields.
   - A write target that is a glob. The glob expands in the repo.
@@ -58,7 +58,7 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` log l
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`: the model cap per role).
 - Each refusal, write tool or shell, names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`: a remedy never names the forbidden target).
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).
-- A refusal is final: an agent never writes a refused path another way. The guard denies the shell forms above. Every other route is prose only (owner), in `agents/builder.md` and `agents/test-author.md`. Debt `refusal-route-around-guard` (an agent redoes a refused edit with Bash and Python) holds the forced-guard option.
+- A refusal is final: an agent never writes a refused path another way. The guard denies the shell forms that the shell early warning judges. Every other route is prose only (owner), in `agents/builder.md` and `agents/test-author.md`. Debt `refusal-route-around-guard` (an agent redoes a refused edit with Bash and Python) holds the forced-guard option.
 
 **Test paths and test config.** `is_test_rel` in `hooks/guard.py` decides a test path. The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them.
 
