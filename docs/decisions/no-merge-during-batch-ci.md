@@ -4,7 +4,7 @@
 
 No one merges to main while a batch's CI runs, unless the running batch's head already contains the merging PR's head. That includes the owner (ruled Oct 28 at 13:36 CDT).
 
-The rule keeps main from moving under a running batch. It does not forbid testing batch N+1 on top of batch N. A merge of N moves main to a tree that N+1's head already holds, so N+1's run still tests what lands.
+The owner's reading, Nov 1 20:54 CST: the rule keeps main from moving under a running batch. It does not forbid testing batch N+1 on top of batch N. A merge of N moves main to a tree that N+1's head already holds, so N+1's run still tests what lands.
 
 - Mechanism: the merge tool (`merge <pr> --confirm`) and the merge guard refuse to merge a PR while another open, non-draft PR on the same base is busy. The refusal stands only when that PR's head does not contain this PR's head.
 - Contains: GitHub's compare of this PR's head to the other head (`compare/<this>...<other>`) reads `ahead` or `identical`. The tool reads it only for a busy PR. A failed read refuses.
