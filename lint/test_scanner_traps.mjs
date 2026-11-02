@@ -7,9 +7,8 @@
 // The decision-watch mod test imports machinePaths and codeNouns from this file.
 import "./_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { check, loadConfig } from "../actions/stamp/stamp.mjs";
@@ -94,8 +93,18 @@ const STAMP_RECORD = {
   text: "---\nid: D1\nslug: one\nkind: decision\nstatus: open\ndate: 2026-01-01\n---\n\nBody.\n",
 };
 const git = (root, ...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+// The run folder comes from the one Python temp home (lint/_test_temp.py), so this suite follows the test-temp
+// standard. It is made on first use, so importing this file makes no folder, and it is removed at the end of a run.
+let runFolderPath = null;
+function runFolder() {
+  if (!runFolderPath) {
+    const make = "import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())";
+    runFolderPath = execFileSync("python3", ["-I", "-c", make, join(ROOT, "lint")], { encoding: "utf8" }).trim();
+  }
+  return runFolderPath;
+}
 function withTempDir(fn) {
-  const dir = mkdtempSync(join(tmpdir(), "scanner-traps-"));
+  const dir = mkdtempSync(join(runFolder(), "scanner-traps-"));
   try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 function writeRel(root, rel, content) {
@@ -139,6 +148,21 @@ const iosCodes = (html) => {
   catch (e) { throw new Error(String(e.stderr || e.message).trim().split("\n").pop()); }
 };
 
+// ---- scanner 6, time-pinned finder (lint/find_time_pinned.py). The text goes into one x.test.js in a git-less
+// folder, and the --json findings decide. Exit 1 means findings, so spawnSync, not execFileSync. Any other exit,
+// or output that is not JSON, throws, so an unknown result never reads as clean.
+const TIME_PINNED = join(ROOT, "lint", "find_time_pinned.py");
+function timePinnedFindings(text) {
+  return withTempDir((dir) => {
+    writeRel(dir, "x.test.js", text);
+    const run = spawnSync("python3", [TIME_PINNED, dir, "--json"], { encoding: "utf8" });
+    if (run.status !== 0 && run.status !== 1) {
+      throw new Error(`finder gave no result (exit ${run.status}): ${String(run.stderr).trim().split("\n").pop()}`);
+    }
+    return JSON.parse(run.stdout).findings;
+  });
+}
+
 // ---- the registry. A new scanner joins here with one entry: its name, its defect, and a flags(text) check.
 const SCANNERS = [
   { name: "decision-watch machinePaths", defect: 'const p = "D:/work/x"', flags: (t) => machinePaths(t).length > 0 },
@@ -146,6 +170,7 @@ const SCANNERS = [
   { name: "stamp near-miss", defect: "D`one`, a gloss.", flags: (t) => stampNearMiss(t).length > 0 },
   { name: "plain-diff looksSecret", defect: 'const k = "' + GHP + '"', flags: secretFlagged },
   { name: "ios-mockup duo frames", defect: '<div data-device="iphone-duo-unfolded"></div>', flags: (t) => iosCodes(iosPage(t)).length > 0 },
+  { name: "time-pinned finder", defect: "await new Promise((r) => setTimeout(r, 500));", flags: (t) => timePinnedFindings(t).length > 0 },
 ];
 
 // ---- the shared table: every scanner, every trap. A trap alone is clean; a trap then the defect is flagged.
@@ -207,6 +232,7 @@ if (isMain) {
       console.log(`FAIL ${name}: ${String(e && e.message ? e.message : e).split("\n")[0]}`);
     }
   }
+  if (runFolderPath) rmSync(runFolderPath, { recursive: true, force: true });
   console.log(`${tests.length - fail} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 }
