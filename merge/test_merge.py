@@ -518,6 +518,46 @@ class Flow(Env):
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
+
+class ShallowMain(unittest.TestCase):
+    """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
+    between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(dir=self.run_dir)
+        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
+        put(os.path.join(other, "old.txt"), "old\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
+        self.old = sh(other, "git", "rev-parse", "HEAD")
+        put(os.path.join(other, "new.txt"), "new\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "new"); sh(other, "git", "push", "-q", "origin", "main")
+        # A shallow clone of origin, then the older commit fetched at depth 1: its object is present, and the history
+        # between it and main is cut. A plain --depth 1 clone lacks the object, and then ff_main stops for another reason.
+        self.shallow = os.path.join(self.t, "shallow")
+        sh(bare, "git", "config", "uploadpack.allowAnySHA1InWant", "true")
+        sh(self.t, "git", "clone", "-q", "--depth", "1", "--no-local", bare, self.shallow)
+        sh(self.shallow, "git", "fetch", "-q", "--depth", "1", "origin", self.old)
+
+    def test_the_shallow_clone_holds_the_commit_but_cuts_its_path_to_main(self):
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(subprocess.run(["git", "cat-file", "-e", self.old + "^{commit}"], cwd=self.shallow).returncode, 0)
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", self.old, "refs/remotes/origin/main"],
+                                        cwd=self.shallow, capture_output=True).returncode, 1)
+
+    def test_ff_main_in_a_shallow_clone_does_not_say_the_commit_is_off_main(self):
+        try:
+            merge.ff_main(self.shallow, "main", self.old)
+        except merge.Stop as stop:  # the Stop may name the shallow clone; it may not claim the commit is off main
+            self.assertNotIn("is not on origin/main", str(stop))
+
+
 class ClaudeMdFlag(Env):
     """A CLAUDE.md change is flagged and only reported (decision claude-md-change-is-flagged).
     After a merge, one line per changed rule file (CLAUDE.md, .claude/CLAUDE.md, each file under output-styles/). Never a hold.

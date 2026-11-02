@@ -2866,6 +2866,96 @@ if LINKS_MADE:
        VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
 
 
+# --------------------------------------------------------------------------- git_reads.branch_is_ancestor in a shallow clone
+#
+# `git merge-base --is-ancestor` exits 1 both when a branch is not an ancestor and when a shallow clone has cut the
+# history between the two. Only the first is False. A shallow clone that holds the pin but cuts the path to it is
+# unknown, so branch_is_ancestor answers None. The cases load git_reads by path: the liveness cases patch
+# sys.modules["git_reads"] and never restore it.
+def _load_git_reads():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("git_reads_by_path", os.path.join(HERE, "git_reads.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _history_repo(name):
+    """A repo under this run's folder: main with two commits, and `side`, one commit off the first and not on main.
+    Returns (path, sha of the first commit, sha of the side commit)."""
+    where = os.path.join(tempfile.mkdtemp(prefix=name + "-", dir=ROOT), "repo")
+    make_repo(where, {"a.txt": "one\n"})
+    first = run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+    write(os.path.join(where, "b.txt"), "two\n")
+    run_vcs(where, "add", "-A")
+    run_vcs(where, *IDENT, "commit", "-q", "-m", "second")
+    run_vcs(where, "checkout", "-q", "-b", "side", first)
+    write(os.path.join(where, "side.txt"), "side\n")
+    run_vcs(where, "add", "-A")
+    run_vcs(where, *IDENT, "commit", "-q", "-m", "side")
+    side = run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+    run_vcs(where, "checkout", "-q", "main")
+    return where, first, side
+
+
+def _shallow_with_pin(source, pin):
+    """A shallow clone of `source`'s HEAD at a new path, with the commit `pin` fetched at depth 1: the pin's object is
+    present and the history between it and HEAD is cut. Returns (path, error), the error "" when both git calls worked."""
+    where = os.path.join(tempfile.mkdtemp(prefix="shallow-", dir=ROOT), "clone")
+    run_vcs(source, "config", "uploadpack.allowAnySHA1InWant", "true")
+    made = run_vcs(os.path.dirname(where), "clone", "-q", "--depth", "1", "--no-local", source, where)
+    if made.returncode:
+        return where, made.stderr.strip()
+    fetched = run_vcs(where, "fetch", "-q", "--depth", "1", "origin", pin)
+    return where, fetched.stderr.strip() if fetched.returncode else ""
+
+
+def _shallow_facts(where, pin):
+    """What the shallow case reads before it claims the bug: shallow, the pin's object present, and the exit of
+    merge-base --is-ancestor, which is 1 in the bug shape."""
+    return {"shallow": run_vcs(where, "rev-parse", "--is-shallow-repository").stdout.strip() == "true",
+            "pin_present": run_vcs(where, "cat-file", "-e", pin + "^{commit}").returncode == 0,
+            "ancestor_rc": run_vcs(where, "merge-base", "--is-ancestor", pin, "HEAD").returncode}
+
+
+def git_reads_ancestor_true_case():
+    where, first, _ = _history_repo("ancestor-true")
+    got = _load_git_reads().branch_is_ancestor(where, "main", first)
+    if got is True:
+        return True, "an ancestor of main reads True"
+    return False, "branch_is_ancestor(main, first commit) reads %r, want True" % (got,)
+
+
+def git_reads_ancestor_false_case():
+    where, _, side = _history_repo("ancestor-false")
+    got = _load_git_reads().branch_is_ancestor(where, "main", side)
+    if got is False:
+        return True, "a commit off main, in a full clone, reads False"
+    return False, "branch_is_ancestor(main, side commit) in a full clone reads %r, want False" % (got,)
+
+
+def git_reads_ancestor_unknown_rev_case():
+    where, _, _ = _history_repo("ancestor-unknown")
+    got = _load_git_reads().branch_is_ancestor(where, "main", "f" * 40)
+    if got is None:
+        return True, "a revision git cannot resolve reads None"
+    return False, "branch_is_ancestor(main, unknown sha) reads %r, want None" % (got,)
+
+
+def git_reads_ancestor_shallow_case():
+    source, first, _ = _history_repo("ancestor-shallow")
+    where, error = _shallow_with_pin(source, first)
+    if error:
+        return False, "the shallow fixture could not be built: " + error
+    facts = _shallow_facts(where, first)
+    if not (facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1):
+        return False, "the fixture does not reach the bug: %r" % (facts,)
+    got = _load_git_reads().branch_is_ancestor(where, "HEAD", first)
+    if got is None:
+        return True, "a shallow clone that cuts the path to its pin reads None, unknown"
+    return False, "branch_is_ancestor(HEAD, pin) in a shallow clone reads %r, want None (unknown)" % (got,)
+
+
 # =========================================================================== 1b. the pointer HEAD
 FAMILY = "pointer"
 #
@@ -11854,6 +11944,20 @@ def run_folder_sweep_case():
 FIXTURELESS_CHECKS.add(run_folder_sweep_case)
 LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and keeps a new one",
                          run_folder_sweep_case))
+
+
+# --------------------------------------------------------------------------- git_reads.branch_is_ancestor: the registration
+# The four cases are defined in the branch-worktree section, where they belong. LOG_CHECKS_EXTRA is made further down,
+# so the cases register here, with the family that section names.
+FAMILY = "branch-worktree"
+for _label, _check in (
+        ("git_reads: branch_is_ancestor reads True for an ancestor", git_reads_ancestor_true_case),
+        ("git_reads: branch_is_ancestor reads False for a full clone's non-ancestor", git_reads_ancestor_false_case),
+        ("git_reads: branch_is_ancestor reads None for an unknown revision", git_reads_ancestor_unknown_rev_case),
+        ("git_reads: branch_is_ancestor reads None, not False, in a shallow clone that cuts the path",
+         git_reads_ancestor_shallow_case)):
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((_label, _check))
 
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
