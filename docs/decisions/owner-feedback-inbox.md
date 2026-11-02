@@ -70,22 +70,22 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   are well-formed, open items whose ids the turn state's `judged` list lacks; a state file from before
   the key counts the items already there as judged. One call per Stop covers all of them, through
   `decision_watch.invoke_model` (`claude-haiku-5-5`, 45 s, no effort; the Stop hook's timeout is 60 s).
-  Candidates, each cut to 300 characters, at most 400, roadmap first: steps at
+  Candidates are cut to 300 characters each, at most 400, roadmap first. They are: steps at
   `refs/remotes/origin/roadmap` (one `git grep`, never fetched); the layout's debt, todo and notes
-  files in the working tree; this inbox's other blocks; the blocks of the 50 newest other inboxes
-  whose sidecar `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that
-  sidecar once per session, when its cwd is in a repo (a walk up for `.git`, no process). The model
+  files in the working tree; this inbox's other blocks. They also include the blocks of the 50 newest
+  other inboxes whose sidecar `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that
+  sidecar once per session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model
   names at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox
   rewrite through a temp file) and the block reason names it, or systemMessage does when
-  `stop_hook_active`. The session merges the work or drops the mark; a dropped mark is not judged
-  again. A model error or odd answer marks nothing, adds one systemMessage line, and the items count
-  as judged, so there is no retry loop. Cost: a Stop with no new item or no candidate makes no call;
-  otherwise one call, one `git grep` and one rev-parse, and a write of the turn state and, on a hit,
-  the inbox. Capture adds one small file per session and no process. Risk kind: named incident. On
+  `stop_hook_active`. The session merges the work or drops the mark. A dropped mark is not judged
+  again. A model error or odd answer marks nothing and adds one systemMessage line. The items count
+  as judged, so there is no retry loop. Cost: a Stop with no new item or no candidate makes no call.
+  Otherwise it makes one call, one `git grep` and one rev-parse. It writes the turn state, and on a
+  hit the inbox. Capture adds one small file per session and no process. Risk kind: named incident. On
   2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and nothing
-  matched the repeat; ruling 2026-11-01 17:57 CST: a model's meaning match, no glossary. Landed
-  2026-11-02. Known gaps: inboxes from before the sidecar are not searched; a cloud container starts
-  with no old inboxes, so there the roadmap and backlog do the work; outside a repo only this
+  matched the repeat. Ruling 2026-11-01 17:57 CST: a model's meaning match, no glossary. Landed
+  2026-11-02. Known gaps: inboxes from before the sidecar are not searched. A cloud container starts
+  with no old inboxes, so there the roadmap and backlog do the work. Outside a repo only this
   inbox's blocks are candidates.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
   home holds it for good. The guard stops asking for a closed standing id in the handoff.
