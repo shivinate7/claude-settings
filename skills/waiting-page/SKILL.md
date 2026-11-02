@@ -1,6 +1,6 @@
 ---
 name: waiting-page
-description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page, or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
+description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page or parked lines on it (the page's writer), or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
 ---
 
 The waiting page is the one private page per repo or project. Its Questions tab holds every item

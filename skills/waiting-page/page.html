@@ -1006,16 +1006,18 @@ function changePark(it, sv) { state.changing[it.id] = true; edited(); state.draf
 function keepRouted(was, now) {
   const ids = (m) => ((m && Array.isArray(m.parked) ? m.parked : []).map((p) => p && p.id));
   const had = ids(was), has = new Set(ids(now));
-  let pruned = false;
   had.forEach((id, i) => {
     if (typeof id !== "string" || has.has(id)) return;
-    const key = parkKey(id), a = state.answers[key];
+    const a = state.answers[parkKey(id)];
     if (a && ACTS.includes(a.act)) state.routed[id] = { p: was.parked[i], act: a.act, i };
-    // A routed or removed line leaves no staged act or open Change behind in the draft store.
-    if (key in state.draft || key in state.changing) { delete state.draft[key]; delete state.changing[key]; pruned = true; }
   });
   Object.keys(state.routed).forEach((id) => { if (has.has(id)) delete state.routed[id]; });
-  if (pruned) saveDraft();
+  // A line the writer removed leaves no staged act or open Change in the draft store, also one saved before a reload (was is then null).
+  if (!now) return;
+  const stale = (k) => k.startsWith("park.") && !has.has(k.slice(5));
+  const gone = [...Object.keys(state.draft), ...Object.keys(state.changing)].filter(stale);
+  gone.forEach((k) => { delete state.draft[k]; delete state.changing[k]; });
+  if (gone.length) saveDraft();
 }
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
