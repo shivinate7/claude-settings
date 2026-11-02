@@ -21,15 +21,15 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
   lane undo   A non-merge commit of the branch (also one under a merge) undoes an earlier commit of
-              the same branch, by the reversal rules with the branch's own earlier commits as the
-              earlier work (a move, a rename, a re-wrap and a rewrite stay excused). Lines the
-              earlier commit only added count only on net loss: a one-line reword is an edit. Only lines
-              no earlier lane state held count as that commit's work, so a restore is no undo. On any
-              path it flags a reversal (the whole file, or a replaced hunk, put back); a net loss of
-              the commit's lines or a delete counts on a test path only (hooks/guard.py is_test_rel). Or a merge of main drops a line a
-              branch commit added (a conflict taken main's side). Only while head still lacks the
-              lines: a later commit that puts them back clears it. A branch of one commit has
-              nothing to read. The FAIL names the path, the undoing commit and the earlier one.
+              the same branch. Only lines that no earlier lane state held count as that commit's work,
+              so a restore is no undo. It flags the whole file put back to the blob before the
+              earlier commit (a move, a rename, a re-wrap and a rewrite stay excused), on any path,
+              and a net loss of the earlier commit's lines, or a delete, on a test path only
+              (hooks/guard.py is_test_rel). A hunk reversal is the upstream read's, not this one's.
+              Or a merge of main drops a line a branch commit added (a conflict taken main's side).
+              Only while head still lacks the lines: a later commit that puts them back clears it. A
+              branch of one commit has nothing to read. The FAIL names the path, the undoing commit
+              and the earlier one.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -509,8 +509,8 @@ def undone(o, n, mine, lane=False, net=True):
     beside them or not, unless the hunk re-wrote them. In the lane read (`lane`) those lines count only on net loss: the
     hunk removes more of them than it adds lines, so a one-line reword is an edit, and a changed value is a rewrite."""
     for big_o, big_n in mine:
-        if lane and not net and not o:
-            continue  # a removal of lines only added is a net loss, which the lane read counts on a test path only
+        if lane and not (net and not o):
+            continue  # the lane read counts a net loss of lines only added, on a test path only; a whole file put back is read apart
         if (big_o, big_n) == (n, o):
             return True
         if not o:
@@ -580,8 +580,8 @@ def reversals(cwd, old, new, files, earlier, lane=None):
     old->new adds to another file (a move). A file git pairs as renamed is judged on its edits across the
     rename, as it would be in place; the finding keeps the old path, the one earlier commits name.
     With lane = (head, upstream, fork base), the lane undo read: it counts only lines that no lane state held before the
-    earlier commit (a restore is no undo), and only when head still lacks them. A reversal counts on any path: the whole
-    file put back, or a hunk the earlier commit replaced. A net loss of the earlier commit's lines counts on a test path only."""
+    earlier commit (a restore is no undo), and only when head still lacks them. The whole file put back counts on any
+    path. A net loss of the earlier commit's lines, or a delete, counts on a test path only. A hunk reversal is not read."""
     head = lane[0] if lane else None
     found = []
     elsewhere = None
