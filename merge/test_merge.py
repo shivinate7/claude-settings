@@ -6768,11 +6768,14 @@ class RecordsEnv(Env):
 
     def assert_revert_remedy(self, text):
         """The remedy for a head that holds a Record-claim on a base that stamps nothing for it: revert that claim commit,
-        then the records step on the draft. The draft step refuses a claim head, so it is never named before the revert."""
+        then the records step on the draft. The draft step refuses a claim head, so `merge 7 --confirm` is never named before the revert."""
         self.assertRegex(text, r"holds a Record-claim", text)
         self.assertRegex(text, r"[Rr]evert[^.]*claim", text)
-        self.assertRegex(text, r"[Rr]evert[\s\S]*records step[\s\S]*draft", text)
-        self.assertNotIn("draft", re.split(r"[Rr]evert", text, maxsplit=1)[0], text)
+        revert = re.search(r"[Rr]evert", text)
+        before, after = text[:revert.start()], text[revert.start():]
+        self.assertNotIn("merge 7 --confirm", before, text)
+        self.assertIn("records step", after, text)
+        self.assertIn("draft", after, text)
 
     def assert_refused_on_ready(self, rc, out, refs_before):
         """A ready pull request with a stale page and nothing to claim or resume: refused before any check wait, with nothing
