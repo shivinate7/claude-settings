@@ -6766,11 +6766,23 @@ class RecordsEnv(Env):
         """The remedy in order: back to draft, `merge 7 --confirm` on the draft, then ready."""
         self.assertRegex(text, r"draft[\s\S]*merge 7 --confirm[\s\S]*ready", text)
 
+    def assert_revert_remedy(self, text):
+        """The remedy for a head that holds a Record-claim on a base that stamps nothing for it: revert that claim commit,
+        then the records step on the draft. The draft step refuses a claim head, so it is never named before the revert."""
+        self.assertRegex(text, r"holds a Record-claim", text)
+        self.assertRegex(text, r"[Rr]evert[^.]*claim", text)
+        self.assertRegex(text, r"[Rr]evert[\s\S]*records step[\s\S]*draft", text)
+        self.assertNotIn("draft", re.split(r"[Rr]evert", text, maxsplit=1)[0], text)
+
     def assert_refused_on_ready(self, rc, out, refs_before):
         """A ready pull request with a stale page and nothing to claim or resume: refused before any check wait, with nothing
-        pushed, claimed or merged, the lock freed and the worktree dropped."""
-        self.assertEqual(rc, 1, out)
+        pushed, claimed or merged, the lock freed and the worktree dropped. The remedy is back to draft."""
+        self.assert_refused_untouched(rc, out, refs_before)
         self.assert_remedy(out)
+
+    def assert_refused_untouched(self, rc, out, refs_before):
+        """A refusal before any check wait: nothing pushed, claimed or merged, the lock freed and the worktree dropped."""
+        self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "pushed or claimed on a refusal")
         self.assertEqual(self.host.waits, [], "waited on checks before refusing")
         self.assertFalse(getattr(self.host, "merged", False), out)
@@ -6808,7 +6820,9 @@ class RecordsRebuild(RecordsEnv):
       runs with or without stamp kinds (claude-settings itself has `kinds: []`).
     - A stale page on a ready pull request with no claim to make or resume is refused before any wait. Nothing is pushed
       or claimed, the lock is freed, and the refusal names the remedy: back to draft, `merge <n> --confirm` on the draft,
-      then ready. The draft step is where a stale page heals.
+      then ready. The draft step is where a stale page heals. A head that holds a Record-claim on a base with no stamp
+      kinds is refused the same way, but its remedy is the revert of that claim commit, then the records step on the draft:
+      the draft step refuses a claim head, so it is never named first. The preview's records line gives the same remedy.
     - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
       the page in the same commit. A resumed claim with a stale page: the subject "Rebuild the records page", and no
       Record-claim trailer. The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red
@@ -6853,7 +6867,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_pr_1009_ready_with_empty_stamp_kinds_refuses_a_stale_page_before_any_push(self):
         # PR #1009 (batch 60) was ready, its base config had kinds [], and its page was stale. Confirm pushed a page-only commit and
-        # CI restarted. Owner ruling: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST. A ready pull request with no claim is refused.
+        # CI restarted. Owner ask: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST. A ready pull request with no claim is refused.
         mark = stamp_marker(self)
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
@@ -6871,6 +6885,16 @@ class RecordsRebuild(RecordsEnv):
         refs_before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assert_refused_on_ready(rc, out, refs_before)
+
+    def test_a_claim_head_on_a_base_with_no_stamp_kinds_refuses_a_stale_page_and_names_the_revert(self):
+        # The base stamps nothing, so the head's Record-claim is not resumed. The draft step refuses a claim head, so the old
+        # remedy (back to draft, then --confirm on the draft) loops. The path that works is to revert that claim commit first.
+        self.kinds_off()
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs_before)
+        self.assert_revert_remedy(out)
 
     def test_a_resumed_claim_with_a_stale_page_still_pushes_the_page(self):
         # Pinned: a claim the head already holds is resumed, and its stale page rides one commit on top of it, as before the ruling.
@@ -6965,6 +6989,18 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("rebuild", line)
         self.assertIn("--confirm refuses it", line, out)
         self.assert_remedy(line)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_the_ready_preview_names_the_revert_for_a_claim_head_on_a_base_with_no_stamp_kinds(self):
+        self.kinds_off()
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        line = self.preview_line(out, "records")
+        self.assertIn("--confirm refuses it", line, out)
+        self.assert_revert_remedy(line)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
 
