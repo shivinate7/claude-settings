@@ -16362,7 +16362,7 @@ def _slash_c_builder_hit(name, target):
         guard._expanded = real_expanded
 
 
-def worktree_home_cwd_builder_deny_case():
+def worktree_home_cwd_builder_refuse_case():
     """A builder's write to a test file, from a `/c/` cwd in a repository, is refused. The probe and
     the target both read the cwd in drive form. Read raw, the target counts as outside every
     checkout and the write is allowed (decision builders-cannot-edit-tests)."""
@@ -16370,7 +16370,7 @@ def worktree_home_cwd_builder_deny_case():
         return SKIP, C_FORM_ON_WINDOWS
     if not _slash_c_builder_hit("builder-deny", "tests/test_app.py"):
         return False, "/c/ cwd in a repository, builder write to tests/test_app.py: " \
-                      "expected deny, got allow"
+                      "expected refuse, got allow"
     return True, "a builder write to a test file from a /c/ cwd in a repository is refused"
 
 
@@ -16397,8 +16397,9 @@ def worktree_home_cwd_builder_scratch_case():
 
 
 # Each builds its own repository and calls no lazy fixture, so a filtered run skips that build.
-FIXTURELESS_CHECKS.update((worktree_home_cwd_builder_deny_case, worktree_home_cwd_builder_src_case,
-                           worktree_home_cwd_builder_scratch_case))
+FIXTURELESS_CHECKS.update((
+    worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
+    worktree_home_cwd_builder_scratch_case))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
@@ -16499,7 +16500,7 @@ LOG_CHECKS = (
      worktree_home_cwd_config_case),
     ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
     ("worktree-home: a builder write to a test file from a /c/ cwd in a repository is refused "
-     "off Windows", worktree_home_cwd_builder_deny_case),
+     "off Windows", worktree_home_cwd_builder_refuse_case),
     ("worktree-home: a builder write to product code from a /c/ cwd in a repository is allowed "
      "off Windows", worktree_home_cwd_builder_src_case),
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd is allowed "
