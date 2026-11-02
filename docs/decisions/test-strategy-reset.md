@@ -23,7 +23,7 @@ A test must catch a real defect before the person meets it; a test that misses i
 P1. Assert the outcome the person meets, not a proxy (a log string, source text, a script line); after a pull, assert the stored version advances, not payload equality.
 - joyous 7f2f398 — a source-text assert replaced by a check of the built behaviour.
 - mailaudit decision testing-pull-payload-eq-void — payload equality after a pull proves nothing; assert the stored version advances.
-- degen 50149a79 — a source-text check passed while the screen showed the defect; the check was dropped.
+- degen 50149a79 — a source-text check passed while the simulator showed the cap never acted; the check was dropped.
 Applies to: every test.
 
 P2. Prove red first on a named old commit, with a green control beside it.
@@ -32,7 +32,7 @@ P2. Prove red first on a named old commit, with a green control beside it.
 - Counter: claude-settings d8c5ac166 — a check waited for a string the install never prints, so it could never go red.
 Applies to: every test that adds or changes a case.
 
-P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, the red run is a mutant of the built code that the named case catches.
+P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red.
 - claude-settings decision mutation-report-scores-suites — "A crash is not a kill."
 - mailaudit decision testing-mutant-dies-check-cause — a mutant "kill" came from an unrelated guard.
 - claude-settings 06fe84c0b — the recorded red run was 14 AttributeErrors on missing symbols: it shows the test runs, not that it tells good code from bad.
@@ -68,20 +68,20 @@ P8. Build fixtures that reach the states real use reaches, the empty and full-si
 - degen 54fc11b0 — fixture sizes taken from a copy of real use.
 Applies to: fixtures; every test that builds a store or a dataset.
 
-P9. Delete or loosen a test only with proof that coverage holds: one mutant per removed case, red on what stays, and delete a test that cannot fail.
+P9. Delete or loosen a test only with proof that coverage holds: one mutant per removed case, red on what stays, and delete a test never shown to fail.
 - q_max dafd0f11c — cases deleted, each with a mutant that turns the remaining check red.
-- mailaudit ccc1454 — a case never shown to fail was deleted.
-- Counter: joyous 29eb4e0 then da58dcf — a builder dropped a working test to fit a test count in its brief.
+- mailaudit ccc1454 — a case never shown to fail was deleted as unproven.
+- Counter: joyous 29eb4e0 then da58dcf — an agent dropped a working test to fit a test count in its brief.
 Applies to: every change that removes or loosens a test case.
 
 P10. A reviewer reads the recorded red run; if it is missing or in doubt, it makes a mutant on a scratch copy and watches the named case go red (`roles-each-layer-proves-once`).
 - q_max ac3397064 — a mutant stayed green because an earlier error response answered first.
-- q_max decision D-804 — round-2 mutants stayed green on the round-1 test file.
+- q_max decision D-804 — most round-2 mutants stayed green on the round-1 test file.
 - claude-settings decision mutation-report-scores-suites — hand-written mutants that each name their case: 367 of 367 killed; sampled ast rates are upper bounds, not gold.
 Applies to: review.
 
 P11. A check enforces its rule's outcome, not a stricter or looser reading of it, so test the check on its rule's own cases, including the cases the rule allows.
-- joyous PR 63 — the merge tool refused it while a ready batch that contained it ran CI (owner ruling 2026-11-01 20:57 CST, relayed by the coordinator).
+- joyous PR 63 — the merge tool refused it while a ready batch that contained it ran CI. The owner ruled the refusal stricter than its rule, which only keeps main still under a running batch (2026-11-01 20:57 CST, relayed by the coordinator).
 Applies to: guards and checks.
 
 ### Checks that could hold these (not built)
