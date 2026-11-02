@@ -54,6 +54,13 @@ class Dropped(Stop):
 class Held(Stop):
     pass
 
+# The cite each refusal prints, in the house form (decision <slug>, <gloss>). Message text only.
+LOCK_CITE = "(decision merge-lock, one run holds the merge lock for a bounded time and never waits on a lock that could expire)"
+PIN_CITE = "(decision main-branch-protection, the merge tool reads the check names from the protection)"
+BASE_CITE = "(decision merge-needs-current-base, a merge needs a green run that holds for the current base)"
+GRANT_CITE = "(decision standing-merge-grant, a pull request GitHub reads BLOCKED or BEHIND never merges)"
+STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the default base)"
+
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -196,7 +203,7 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
             try:
                 before_wait(wait)
             except NetStop as e:
-                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first. {e}\n{out}") from None
+                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first {LOCK_CITE}. {e}\n{out}") from None
         say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
         pause(wait)
 
@@ -280,7 +287,7 @@ def old_lock_ref(b):
 
 def refuse_old_lock(b, old, now):
     if old and old[1] > now:
-        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
+        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53. " + LOCK_CITE)
 
 def boot_stamp():
     """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
@@ -383,7 +390,7 @@ def holder_state(held):
 def refuse_or_take_over(b, held, now):
     """A live lock stops the run (Held), unless its holder's pid is dead on this host: then one line says so and the take goes on, as for an expired lock."""
     if holder_state(held) != "dead":
-        raise Held(holder_text(b, held, now))
+        raise Held(holder_text(b, held, now) + " " + LOCK_CITE)
     f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
     say(f"merge: took over the merge lock on {b}: its holder, PR #{f.get('pr', '?')} (branch {f.get('branch', '?')}), pid {f['pid']} on {f['host']}, is dead.")
 
@@ -425,17 +432,17 @@ class Lock:
             return
         now = self.now()
         if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
-            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now. Run again.")
+            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now {LOCK_CITE}. Run again.")
         need = int(now + wait + LOCK_MARGIN)
         if need <= self.until:
             return
         if need > self.began + LOCK_MAX_HOLD:
-            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take. Run again.")
+            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take {LOCK_CITE}. Run again.")
         msg = re.sub(r"^expires: \d+$", f"expires: {need}", self.message, flags=re.M)
         try:
             sha = self.swap(self.base, msg)
         except Stop as e:
-            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire. Run again. {e}") from e
+            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire {LOCK_CITE}. Run again. {e}") from e
         self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
     def release(self, b, token):
@@ -463,7 +470,7 @@ class GitLock(Lock):
         ref = ref or lock_ref(b)
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
-            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
@@ -482,13 +489,13 @@ class GitLock(Lock):
         msg = lock_message(ttl, now, self.holder)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         # --force-with-lease with an empty expect creates only. With a sha it swaps only that
         # expired lock. So two runs that break one expired lock cannot both win.
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            raise Held("another run took the merge lock first")
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -497,11 +504,11 @@ class GitLock(Lock):
         ref = lock_ref(b)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha}  # this run's before the push: a push that lands with a lost reply still leaves a lock release can delete
         c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{self.sha}", "origin", f"{sha}:{ref}")
         if c:
-            raise Stop("the lock ref moved, or the push failed: " + out)
+            raise Stop("the lock ref moved, or the push failed " + LOCK_CITE + ": " + out)
         return sha
 
     def released(self, b, lease):
@@ -532,7 +539,7 @@ class GitLock(Lock):
         if c:
             c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
             if c2:
-                raise Stop("unlock failed: " + out + "\n" + out2)
+                raise Stop("unlock failed " + LOCK_CITE + ": " + out + "\n" + out2)
         return True
 
 class GhLock(Lock):
@@ -555,13 +562,13 @@ class GhLock(Lock):
         c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
-                raise NetStop("cannot read the merge lock: " + sha)
+                raise NetStop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
-            raise Stop("cannot read the merge lock: " + sha)
+            raise Stop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
         c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
         if is_net(c, out):  # an unread expiry is no lock that never expires
-            raise NetStop("cannot read the merge lock commit: " + out)
+            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + out)
         return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
 
     def acquire(self, b, ttl):
@@ -571,23 +578,23 @@ class GhLock(Lock):
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
-                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
+                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock " + LOCK_CITE + ": " + out)
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
-            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch: " + tree)
+            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
-            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
+            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
         if c:
             if is_net(c, out):
-                raise NetStop("cannot take the merge lock: " + out)
+                raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
-                raise Stop("cannot take the merge lock: " + out)
-            raise Held("another run took the merge lock first")
+                raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -597,14 +604,14 @@ class GhLock(Lock):
         ref = f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}"
         c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=True)
         if c or cur.strip() != self.sha:
-            raise Stop("the lock is not this run's any more" if not c else "cannot read the lock: " + cur)
+            raise Stop("the lock is not this run's any more " + LOCK_CITE if not c else "cannot read the lock " + LOCK_CITE + ": " + cur)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
         c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
         if c:
-            raise Stop("cannot move the lock: " + out)
+            raise Stop("cannot move the lock " + LOCK_CITE + ": " + out)
         return sha.strip()
 
     @staticmethod
@@ -621,9 +628,9 @@ class GhLock(Lock):
         """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
-            raise NetStop("unlock failed, still failing after the retries. Run again: " + out)
+            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
         if c and not self.gone(out):
-            raise Stop("unlock failed: " + out)
+            raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return not c
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
@@ -802,7 +809,7 @@ class Host:
         if held is None:
             say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
         elif held and set(held) != set(self.required):
-            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)}. "
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
                        'Set merge.requiredChecks to "protection" so the protection list is the one source.')
 
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
@@ -911,11 +918,11 @@ class Host:
                 self.pause(self.minute)
                 continue
             if info["base"] != base:
-                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait."
+                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
-                return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
+                return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
             red, pending = self.settle(red, pending, *self.run_state(sha))
@@ -1122,7 +1129,7 @@ class Host:
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
         state_now = self.pr(n)["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
-            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base. gh's merge refuses it the same way, so no merge call was sent."
+            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
             c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
@@ -2289,7 +2296,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
-                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
+                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
             say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
         else:
             if resumed:
