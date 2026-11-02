@@ -11,6 +11,8 @@ asks for the score. The failure classes under test:
 - a crash (a throw, an import error, a hang killed at the timeout) is not a kill;
 - a suite red on the clean source is unusable, and a row with no usable suite is UNKNOWN;
 - UNKNOWN never reads as a rate or as green;
+- a mutant that a suite kills is not run on the suites after it, and a mutant that suite misses is;
+- each finished mutant prints one line before its pull request's row, so a long pull request shows progress;
 - a replay leaves the repository, the temp folders and the child processes as it found them.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
@@ -412,6 +414,63 @@ def tool_fixture():
     commit(repo, "Base")
     sha = pull_request(repo, 1, "Tool checks", {"src/tool.mjs": TOOL_SRC, "test/tool.test.mjs": TOOL_TEST})
     return repo, sha
+
+
+# The early-stop and progress cases replay one band pull request. The base holds `pass`, so the pull request
+# adds only the band function, and every mutant sits on a line it added.
+JS_PASS_ONLY_TEST = JS_HEAD + """import { pass } from '../src/band.mjs';
+
+test('pass at 60', () => {
+  assert.equal(pass(60), true);
+});
+"""
+# A counting suite appends an x to its log on each run. The wait makes it the slower suite, so the
+# quickest-first order runs the other suite first.
+COUNT_HEAD = ("import fs from 'node:fs';\n"
+              "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);\n"
+              "fs.appendFileSync(@LOG@, 'x');\n")
+
+
+def counting_suite(text, log):
+    return text.replace(JS_HEAD, JS_HEAD + COUNT_HEAD.replace("@LOG@", json.dumps(log)), 1)
+
+
+def band_pr(name, number, suites):
+    """A repository whose one merged pull request, `number`, adds the band function to src/band.mjs and the
+    suites, {path: text}. Built once per `name`. Returns (repo, sha)."""
+    key = "band-" + name
+    if key not in CACHE:
+        repo = new_repo(name)
+        put(repo, {"README.md": "base\n", "src/band.mjs": JS_PASS_SRC})
+        commit(repo, "Base")
+        files = {"src/band.mjs": JS_BAND_SRC}
+        files.update(suites)
+        CACHE[key] = (repo, pull_request(repo, number, "Band grades", files))
+    return CACHE[key]
+
+
+def runs_in(log):
+    """The runs a counting suite made: one x in its log per run."""
+    if not os.path.exists(log):
+        return 0
+    with open(log, encoding="utf-8") as handle:
+        return handle.read().count("x")
+
+
+def counted_replay(name, first, second):
+    """The replay of a band pull request with suite `first` and suite `second`, which counts its runs. Built and
+    replayed once per `name`. Returns (row, runs, mutants). The runs are read right after the replay, because a
+    later replay of the same repository appends to the log too. The mutants are the engine's own list for the
+    lines the pull request added."""
+    key = "counted-" + name
+    if key not in CACHE:
+        log = os.path.join(fresh(), "runs.txt")
+        repo, sha = band_pr(name, 40, {"test/a.test.mjs": first, "test/b.test.mjs": counting_suite(second, log)})
+        row = replay(repo, sha, JS_PROFILE)
+        runs = runs_in(log)
+        mutants = expected_mutants(repo, sha, "src/band.mjs", lines=changed(repo, sha, "src/band.mjs"))
+        CACHE[key] = (row, runs, mutants)
+    return CACHE[key]
 
 
 LATIN_NAME_SRC = b"export const NAME = 'caf\xe9';\n"  # latin-1 e-acute: not UTF-8, so no text decodes it
@@ -820,6 +879,28 @@ class PythonReplayTests(unittest.TestCase):
         self.assertEqual((row["killed"], row["crashed"], row["survived"]), (0, row["made"], 0))
 
 
+class EarlyStopTests(unittest.TestCase):
+
+    def test_once_a_suite_kills_a_mutant_the_next_suite_does_not_run_on_it(self):
+        row, runs, mutants = counted_replay("early", JS_BAND_TEST, JS_BAND_TEST)
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(row["unusable"], {}, "both suites must be green on the clean source")
+        self.assertGreater(row["made"], 0)
+        self.assertEqual(row["made"], len(mutants))
+        self.assertEqual((row["killed"], row["crashed"], row["survived"]), (row["made"], 0, 0))
+        self.assertEqual(runs, 1, "the second suite ran %d times, want 1: its clean-source run only" % runs)
+
+    def test_a_mutant_the_first_suite_misses_still_runs_the_second(self):
+        row, runs, mutants = counted_replay("weak", JS_PASS_ONLY_TEST, JS_BAND_TEST)
+        self.assertEqual(row["status"], "OK", row["reason"])
+        self.assertEqual(row["unusable"], {}, "both suites must be green on the clean source")
+        self.assertGreater(row["made"], 0)
+        self.assertEqual(row["made"], len(mutants))
+        self.assertEqual((row["killed"], row["crashed"], row["survived"]), (row["made"], 0, 0),
+                         "the second suite must kill each mutant the first one misses")
+        self.assertEqual(runs, 1 + row["made"], "the second suite must run on each mutant, plus the clean source")
+
+
 def fake_row(**changes):
     row = {"pr": 7, "sha": "a" * 40, "title": "Fake", "status": "OK", "reason": "", "made": 5,
            "killed": 4, "crashed": 1, "survived": 0, "survivors": [], "unusable": {}}
@@ -868,6 +949,23 @@ class CliTests(unittest.TestCase):
         head = out[:end]
         for n in order:
             self.assertIn(rows[n]["status"], head, "no row printed for PR %d before the table" % n)
+
+
+class ProgressTests(unittest.TestCase):
+
+    def test_each_finished_mutant_prints_a_line_naming_its_pr_before_the_pr_row(self):
+        repo, sha = band_pr("one", 41, {"test/band.test.mjs": JS_BAND_TEST})
+        row = replay(repo, sha, JS_PROFILE)
+        code, out, err = run_cli(["--replay", repo, "--profile", "fixture-js", "--prs", "1", "--limit", "50",
+                                  "--suite-timeout", "60", "--jobs", "2"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        lines = out.split("\n")
+        row_line = api("format_replay_row")(row).split("\n")[0]
+        self.assertIn(row_line, lines, "no row for PR 41 in the output")
+        progress = [line for line in lines[1:lines.index(row_line)] if re.search(r"(?<!\d)41(?!\d)", line)]
+        self.assertGreater(row["made"], 0)
+        self.assertEqual(len(progress), row["made"],
+                         "want one progress line per finished mutant for PR 41, before its row")
 
 
 class CostTests(unittest.TestCase):
