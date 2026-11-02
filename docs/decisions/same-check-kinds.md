@@ -17,7 +17,7 @@ Cites:
 ## Limits
 
 - The rollup fails a job that failed, was cancelled or was skipped. The calling job must set `needs` and `if: always()`. Without `always()`, a skipped check reads as green.
-- This repo's CI has no `all-jobs-passed` job yet. Its branch protection is not read here, so its required checks are unmeasured.
+- This repo's CI has the `all-jobs-passed` job, which calls the shared action `actions/all-jobs-passed`. Its `if` includes `always()`, and it runs on a ready pull request only. Branch protection requires that one check: the owner set it on 2026-10-31 at 14:52 CDT, and the coordinator's read-back showed it (decision `main-branch-protection`, required checks of main). This record does not read the live setting.
 
 Kind: process
 Home: actions/all-jobs-passed/action.yml
