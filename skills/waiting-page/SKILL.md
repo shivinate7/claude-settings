@@ -183,7 +183,7 @@ gives no page URL: no item exists yet.
 
 - No answer in chat after 5 minutes: send the question to the writer, who adds the item. Then
   "Add an item" step 3 tells the owner where it is.
-- No timer counts the 5 minutes. The Stop guard (`lint/report_guard.py`) keeps each Input Needed pick with its time, and blocks a Stop 5 minutes or more later until the question is sent: send_message to the `writer` from `meta/page` (read it with `ArtifactData get meta/page`), or a send naming the item id the block gives. An owner message or the box clears it too. A repo with no page fails open.
+- No timer counts the 5 minutes. The Stop guard (`lint/report_guard.py`) keeps each Input Needed pick with its time, and blocks a Stop 5 minutes or more later until the question is sent: send_message to the `writer` from `meta/page` (read it with `ArtifactData get meta/page`). The send names the item id the block gives, or the first 60 characters of the pick's first line. An owner message, the box or a page write clears it too. A pick cleared that way is remembered 24 hours in `<handoffs>/<session_id>.open-picks.json.sent`, so a re-ask does not block. A repo with no page fails open.
   Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
   question only when the owner answers or the session wakes.
 - A chat answer: still send the question and the answer, with its time, to the writer. Jot
