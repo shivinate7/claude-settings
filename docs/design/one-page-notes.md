@@ -53,9 +53,9 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
 5. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
-6. The page is named "Queue". Each part has one name, the name of its tab: "Questions" and "Status".
-   The document title is "<repo> Queue", with " · Status" on the Status tab (shiv, chat, 14:33 CDT
-   Oct 30, 2026). The tab row always shows, so the header shows the repo name only, with no "waiting
+6. The page is named "Cockpit". Each part has one name, the name of its tab: "Questions" and "Status".
+   The document title is "<repo> Cockpit" on every tab, and "Cockpit" with no repo name (owner,
+   chat, 2026-11-02 11:12 CST; `cockpit-title-notes.md`). The tab row always shows, so the header shows the repo name only, with no "waiting
    on you" line (reviewer's pick, taken by the orchestrator, round 3).
    With no repo name, the header shows the mark only, and the h1 holds the tab name for screen
    readers. Departs from: this mockup, which always shows a name.
