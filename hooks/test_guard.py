@@ -13827,6 +13827,45 @@ ol("a multi item keyed a, b and c with a list pick is allowed", "allow", ol_item
 ol("a multi item keyed e2, a and c with a list pick is denied", "deny",
    ol_item(multi=True, options=ol_keyed("e2", "a", "c"), pick=["a", "c"]))
 
+# An option's label that opens with a letter tag, such as "B: a bottom strip", must carry its own key's letter,
+# since the page shows the letter for the key's position. The incident (owner, Nov 1 16:12 CST): keys a, b, c and d
+# carried labels "B: ...", "D: ...", "A: ..." and "C: ...", so the owner's answer letter was ambiguous. The tag folds
+# case, so "A: a rail" on key a passes. A label whose first letter is not a tag, such as "A rail" or "AI-first", passes.
+INCIDENT_LABELS = ["B: a bottom strip", "D: drag sideways", "A: a rail", "C: a grab line"]
+
+
+def ol_labelled(*labels):
+    """Options keyed a, b, c, ... in position order, each labelled as given. ALPHA supplies the keys and text."""
+    return [dict(option, label=label) for option, label in zip(ALPHA, labels)]
+
+
+ol("the incident item, keys a to d with labels B:, D:, A: and C:, is denied", "deny",
+   ol_item(options=ol_labelled(*INCIDENT_LABELS)))
+ol("key a labelled B: a bottom strip is denied", "deny", ol_item(options=ol_opt(0, label="B: a bottom strip")))
+ol("key a labelled (B) a bottom strip is denied", "deny", ol_item(options=ol_opt(0, label="(B) a bottom strip")))
+ol("key a labelled Option B: a bottom strip is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B: a bottom strip")))
+ol("only key d labelled A: is denied, so every option is judged", "deny",
+   ol_item(options=ol_labelled("Keep the check in the lint job", "Move the check to the test job", "Drop the check",
+                               "A: a rail")))
+ol("key a labelled A: a rail is allowed, since the tag folds to its own key a", "allow",
+   ol_item(options=ol_opt(0, label="A: a rail")))
+ol("four options, each tag its own key's letter, A: to D:, are allowed", "allow",
+   ol_item(options=ol_labelled("A: a bottom strip", "B: drag sideways", "C: a rail", "D: a grab line")))
+ol("key b labelled A rail along the edge is allowed, since no colon follows the A", "allow",
+   ol_item(options=ol_opt(1, label="A rail along the edge")))
+ol("key c labelled I think so is allowed, since I is not a tag", "allow",
+   ol_item(options=ol_opt(2, label="I think so")))
+ol("key c labelled AI-first is allowed, since AI is not a tag", "allow", ol_item(options=ol_opt(2, label="AI-first")))
+ol("key a labelled B2B sales is allowed, since B2 is not a tag", "allow", ol_item(options=ol_opt(0, label="B2B sales")))
+ol("key b labelled E.g. a strip is allowed, since E. is not a tag", "allow",
+   ol_item(options=ol_opt(1, label="E.g. a strip")))
+ol("key d labelled A/B split is allowed, since A/ is not a tag", "allow",
+   ol_item(options=ol_labelled("Keep the check in the lint job", "Move the check to the test job", "Drop the check",
+                               "A/B split")))
+ol("a closed item with the incident labels is allowed, since a closed item is not judged", "allow",
+   ol_item(status="closed", options=ol_labelled(*INCIDENT_LABELS)))
+
 # Item text: an option named by a letter-and-digit key, after option, options, pick or key.
 ol("a context that says option e2 is safer, keys a, b and c, is denied", "deny", ol_item(context="option e2 is safer"))
 ol("a context that says Option e2 with a capital is denied", "deny",
