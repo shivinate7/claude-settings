@@ -85,5 +85,5 @@ report, stop every Monitor and background task you started with `TaskStop`, and 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, list each mockup with its path, its deep links, and the sizes and themes it draws, then the
 critique's findings and which you fixed. Under
-Input Needed, list each `Owner grant: yes` item. Write in Simplified Technical English. Report in
+Input Needed, list each `Owner grant: yes` item. Write plainly (rule output-write-in-ste). Report in
 under 25 lines unless the brief names another cap.
