@@ -20541,6 +20541,12 @@ def sim_iso(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
 
 
+# Step sim-machine-lock (one lock per Mac, roadmap 55264090): a raw simctl boot is refused.
+def sim_boot_by_destination(udid):
+    """An xcodebuild destination that boots `udid`, so the cap and twin rules judge the boot."""
+    return "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + udid + "'"
+
+
 def make_fake_xcrun(folder, rows):
     """A stand-in `xcrun` that answers every call with the device list in ROWS.
 
@@ -20657,9 +20663,10 @@ def register_simulator_boot_cases():
     twin_path, twin_cfg = on("twin")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
-    sh("boot a third simulator with two booted: bash simctl boot",
-       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
-       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
+    sh("boot a third simulator with two booted: bash simctl boot, bypass first",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
+       env_path=cap_path, config=cap_cfg, carries="sim-test")
     sh("boot a third simulator with two booted: xcodebuild destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
        "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg,
@@ -20682,9 +20689,9 @@ def register_simulator_boot_cases():
     add("boot a third simulator with two booted: MCP launch, lowercase udid",
         "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", udid=SIM_UC.lower(),
         env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
-    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid",
-       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-cap",
-       env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("boot a third simulator with two booted: bash simctl boot, lowercase udid, bypass first",
+       "xcrun simctl boot " + SIM_UC.lower(), "deny", rule="simulator-boot-bypass",
+       env_path=cap_path, config=cap_cfg, carries="sim-test")
     # A booted device whose name is the shut-down target's UDID must not skip the boot check.
     udid_name_path, udid_name_cfg = on("cap_udid_name")
     add("boot a shut-down device by udid, a booted device is named like that udid: MCP launch",
@@ -20732,8 +20739,11 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot is allowed",
-       "xcrun simctl boot " + SIM_UC, "allow", env_path=one_path, config=one_cfg)
+    sh("control: one booted, a second boot by destination is allowed",
+       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    sh("boot a second simulator with one booted: bash simctl boot, bypass first",
+       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
     sh("control: a read of the device list is not a boot",
        "xcrun simctl list devices", "allow", env_path=cap_path, config=cap_cfg)
     # Owner ruling 2026-10-10: the cap counts every booted device. One is recorded and idle, the
@@ -20743,12 +20753,12 @@ def register_simulator_boot_cases():
     write_sim_records(mixed_cap_cfg, [sim_boot_record(SIM_UA, "Alpha Pro", SIM_TYPE_PRO, SIM_RT,
                                                       2 * 3600)])
     sh("boot a third simulator: a recorded idle device and an owner-booted one both count",
-       "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-cap",
+       sim_boot_by_destination(SIM_UC), "deny", rule="simulator-boot-cap",
        env_path=cap_path, config=mixed_cap_cfg, carries=(SIM_UA, SIM_UB))
 
     # Rule simulator-boot-twin. The reason names the idle twin's UDID.
-    sh("boot a device with an idle booted twin: bash simctl boot",
-       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+    sh("boot a device with an idle booted twin: xcodebuild destination by udid",
+       sim_boot_by_destination(SIM_UT1), "deny", rule="simulator-boot-twin",
        env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     add("boot a device with an idle booted twin: simulator MCP launch",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", device=SIM_UT1,
@@ -20757,19 +20767,19 @@ def register_simulator_boot_cases():
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
     sh("control: the twin booted 10 minutes ago is not idle",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_recent"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
        config=cfgs["twin_recent"][1])
     sh("control: an unrecorded booted twin is not idle",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_unrecorded"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
        config=cfgs["twin_unrecorded"][1])
     sh("control: an idle twin on another runtime does not match",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_runtime"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
        config=cfgs["twin_other_runtime"][1])
     sh("control: an idle twin of another device type does not match",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_other_type"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
        config=cfgs["twin_other_type"][1])
     sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       "xcrun simctl boot " + SIM_UT1, "allow", env_path=folder_path("twin_rebooted"),
+       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
        config=cfgs["twin_rebooted"][1])
 
 
@@ -20830,7 +20840,7 @@ def register_simulator_hold_cases():
         return path + os.pathsep + PY_PATH
 
     sh("boot a device with an idle twin: the twin's own launchd_sim is not a holder",
-       "xcrun simctl boot " + SIM_UT1, "deny", rule="simulator-boot-twin",
+       sim_boot_by_destination(SIM_UT1), "deny", rule="simulator-boot-twin",
        env_path=env_for("hold_own", quiet), config=cfg, carries=(SIM_UT0,))
     holds = [
         ("a twin held by a process outside its tree is not idle", quiet + [
@@ -20843,11 +20853,80 @@ def register_simulator_hold_cases():
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, "xcrun simctl boot " + SIM_UT1, "allow",
+        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
            env_path=env_for("hold_%d" % index, rows), config=cfg)
     sh("control: a twin is not idle when the process table cannot be read",
-       "xcrun simctl boot " + SIM_UT1, "allow",
+       sim_boot_by_destination(SIM_UT1), "allow",
        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+
+
+def register_simulator_bypass_cases():
+    """Rule simulator-boot-bypass (step sim-machine-lock): a boot that sim-test did not make is refused
+    on the command text alone, before any simctl list. So these cases set no fake xcrun, and each deny
+    names sim-test. The controls only read, print or quote a boot, and are allowed."""
+    raw = "xcrun simctl boot " + SIM_UC
+    denied = (
+        ("xcrun simctl boot", raw),
+        ("bare simctl boot", "simctl boot " + SIM_UC),
+        ("open -a Simulator", "open -a Simulator"),
+        ("open -a Simulator.app", "open -a Simulator.app"),
+        ("open -a quoted Simulator", 'open -a "Simulator"'),
+        ("open of the Simulator.app path", "open /Applications/Simulator.app"),
+        ("open -b the simulator bundle id", "open -b com.apple.iphonesimulator"),
+        ("bash -c wraps the boot", "bash -c '" + raw + "'"),
+        ("a cd before the boot", "cd x && " + raw),
+        ("a comment opener in a string before the boot", 'echo "# note" && ' + raw),
+        ("a lone quote in text before a bare boot", 'echo "it\'s up" && simctl boot ' + SIM_UC),
+    )
+    for name, command in denied:
+        sh("simulator-boot-bypass: " + name, command, "deny", rule="simulator-boot-bypass",
+           cwd=NOGIT, carries="sim-test")
+    allowed = (
+        ("sim-test with a scheme", "sim-test -scheme X"),
+        ("simctl shutdown", "xcrun simctl shutdown " + SIM_UC),
+        ("simctl list devices", "xcrun simctl list devices"),
+        ("grep for the boot text", "grep 'simctl boot' f"),
+        ("echo of the boot text", 'echo "simctl boot"'),
+        ("open -a Safari", "open -a Safari"),
+        ("open a README", "open README.md"),
+        ("simctl bootstatus", "xcrun simctl bootstatus " + SIM_UC),
+        ("a heredoc body that holds the boot", "cat > notes.md <<'EOF'\n" + raw + "\nEOF"),
+        ("a multi-line quoted string whose middle line is the boot",
+         'echo "first line\n' + raw + '\nlast line"'),
+    )
+    for name, command in allowed:
+        sh("control: " + name, command, "allow", cwd=NOGIT)
+
+
+def sim_bypass_override_check(timed):
+    """The owner override lifts simulator-boot-bypass. With no override a raw boot is refused. A timed
+    override (`override 15m`) lets it through until it ends. A one-act override lets it through once."""
+    def check():
+        kind = "timed" if timed else "once"
+        config, session = ov_config("sim-bypass-" + kind), "ov-sim-bypass-" + kind
+        rule = "simulator-boot-bypass"
+
+        def call(seconds):
+            return lambda: ov_call("Bash", {"command": "xcrun simctl boot " + SIM_UC}, NOGIT,
+                                   config, session, seconds)
+
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first call", call(60), "allow", rule),
+                     ("call just before the end", call(OV_TIMED_SECONDS - 1), "allow", rule),
+                     ("call at the end instant", call(OV_TIMED_SECONDS), "deny", rule)]
+        else:
+            steps = [("first call", call(60), "allow", rule),
+                     ("second call, override spent", call(120), "deny", rule)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "denied with no override, then allowed %s" % (
+            "until the end" if timed else "once")
+    return check
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
@@ -20856,8 +20935,16 @@ FAMILY = "simulator"
 if os.name != "nt":
     register_simulator_boot_cases()
     register_simulator_hold_cases()
+    register_simulator_bypass_cases()
+    # LOG_CHECKS_EXTRA joined LOG_CHECKS above this section, so the override checks join LOG_CHECKS here.
+    for sim_timed in (False, True):
+        sim_label = ("simulator: an owner override lifts a raw boot until it ends (a timed override)"
+                     if sim_timed else
+                     "simulator: an owner override lifts a raw boot once (a one-act override)")
+        LOG_FAMILY[sim_label] = FAMILY
+        LOG_CHECKS = LOG_CHECKS + ((sim_label, sim_bypass_override_check(sim_timed)),)
 else:
-    skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
+    skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
 
 
