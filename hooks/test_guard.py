@@ -14406,30 +14406,94 @@ add("floor: start_session naming sonnet is allowed", "allow",
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
 # lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
+# A lane call also tags the repo it works on (rule lane-repo-tag). Each lane case names its checkout by
+# `cwd`, and carries the origin repo's tag, so this rule judges only the effort pin.
+LANE_REPO = os.path.join(ROOT, "lanerepo")      # a checkout whose origin is claude-settings on GitHub
+LANE_PROXY = os.path.join(ROOT, "laneproxy")    # the same repo, its origin behind the agent proxy's host
+LANE_GIT = os.path.join(ROOT, "lanegit")        # the same repo, its origin with a `.git` suffix
+LANE_ORIGINS = {
+    LANE_REPO: "https://github.com/shivinate7/claude-settings",
+    LANE_PROXY: "http://local_proxy@127.0.0.1:1234/git/shivinate7/claude-settings",
+    LANE_GIT: "https://github.com/shivinate7/claude-settings.git",
+}
+OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+
+
+def _build_lane_origins():
+    """Three real checkouts, each with the origin LANE_ORIGINS names. A lane case names one by `cwd`."""
+    for where, url in LANE_ORIGINS.items():
+        make_repo(where, {"README.md": "# r\n"})
+        added = run_vcs(where, "remote", "add", "origin", url)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                     % (where, added.stderr.strip()))
+
+
+lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\nbrief")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief")
 add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="do the task")
 add("lane-effort-pin: lane tag with /effort high is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort high")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort high")
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
-    tool=LANE_TOOL, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
 add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium")
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium")
 add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
-    "deny", "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
 add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\n")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane "], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["CS-BUILD:LANE"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags="cs-build:lane", prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+
+# ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
+# the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
+# stripped; the host is never read, so the proxy's URL names the same repo. A lane call with no such tag is
+# denied, whatever its other tags. Each case names its checkout by `cwd`, never the runner's own checkout.
+# The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
+# on an origin it cannot parse turns a case red.
+add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
+add("lane-repo-tag: origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"])
+add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
+add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
