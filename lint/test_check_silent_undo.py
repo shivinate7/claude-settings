@@ -1058,12 +1058,11 @@ class PinComment:
 
 
 class RenamedPinComment(PinComment, unittest.TestCase):
-    """Main edits one pinned line after the branch cut: only its trailing comment date. The branch renamed the file
-    and bumped a pin. The merge of main must carry the date to the new path. Incident (joyous, merge 1870ab6ee, refused
-    Nov 1): git paired the rename at 90 percent both ways, and the merge wrote the older date (29) where main wrote 30.
-    Kept line: green. Twin: a merge that drops the line: refused. The last case is the incident's shape, a merge that
-    writes the older date: refused by the line rule today. A comment-only change stays a drop, as on main (coordinator
-    ruling, Nov 1 17:53 CST)."""
+    """Main edits one pinned line after the branch cut: only its trailing comment date. The branch renames the file
+    and bumps a pin. The merge of main must carry the date to the new path. Git pairs the rename at 90 percent
+    similarity in both directions, which can make a merge write the older date (29) where main wrote 30. Cases: a
+    merge that carries main's date is green; a merge that drops the line is refused; a merge that writes the older
+    date is refused by the line rule. A comment-only change stays a drop, as on main."""
 
     def setUp(self):
         r = self.r = Repo()
