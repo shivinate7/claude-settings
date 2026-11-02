@@ -47,7 +47,7 @@ unknown, never clear or broken). Roadmap step `start-hook-reads-visibility` (ses
 Cost: one python start at session start and one at a designer spawn that carries a `cwd`. No network
 call. No file is written.
 
-Protected by `lint/test_layout.py` and `hooks/test_session_start.py`.
+Protected by `lint/test_layout.py`, `hooks/test_session_start.py` and `hooks/test_blind_brief.py`.
 
 Kind: process
 Home: lint/layout.json
