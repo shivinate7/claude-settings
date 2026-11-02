@@ -2,9 +2,12 @@
 
 ## The ruling
 
-The owner ruled on Oct 28 at 13:36 CDT: no one merges to main while a batch's CI runs. That includes the owner.
+No one merges to main while a batch's CI runs, unless the running batch's head already contains the merging PR's head. That includes the owner (ruled Oct 28 at 13:36 CDT).
 
-- Mechanism: the merge tool (`merge <pr> --confirm`) and the merge guard refuse to merge a PR while another open, non-draft PR on the same base is busy.
+The rule keeps main from moving under a running batch. It does not forbid testing batch N+1 on top of batch N: a merge of N moves main to a tree that N+1's head already holds, so N+1's run still tests what lands.
+
+- Mechanism: the merge tool (`merge <pr> --confirm`) and the merge guard refuse to merge a PR while another open, non-draft PR on the same base is busy and its head does not contain this PR's head.
+- Contains: GitHub's compare of this PR's head to the other head (`compare/<this>...<other>`) reads `ahead` or `identical`. The tool reads it only for a busy PR. A failed read refuses.
 - What counts as busy (orchestrator ruling, Oct 28): its head has any workflow run not completed, or a required check or status reported and pending. A running workflow counts, required or not, because a required job can wait on another job: in checks.yml, `checks` needs `scope`, so `checks` has no row while `scope` runs. Runs and checks that merge.ignoreChecks names never count.
 - The tool checks under the lock before any push. It checks again right before the merge call. So a batch that goes ready during the wait for the head's checks is refused. That second refusal reverts the claim, and the revert push starts a new run on the refused PR.
 - The preview prints a `batch:` line.
@@ -20,6 +23,7 @@ Not counted:
 - A completed check, or a pending check that is not required, on a head with no workflow run open.
 - A PR on another base.
 - The push run on main after a merge.
+- A busy ready PR whose head contains this PR's head: the next batch, built on this one.
 
 Limits:
 
@@ -31,9 +35,9 @@ Limits:
 
 Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each conflicted with batch 12 (PR #779). A merge to main under a running batch run moves the base that run tests. This rule is roadmap step c195.
 
-- Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28.
-- Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:`.
-- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list) and three reads (check runs, commit statuses, workflow runs) for each such PR. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. No process starts, no file written, no timer.
+- Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28; overlapping batches 2026-11-02.
+- Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
+- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list) and three reads (check runs, commit statuses, workflow runs) for each such PR, and one compare read for each busy one. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. No process starts, no file written, no timer.
 
 Kind: process
 Home: merge/merge.py
