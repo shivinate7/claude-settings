@@ -228,8 +228,12 @@ class EngineTests(unittest.TestCase):
         os.makedirs(os.path.dirname(os.path.join(root, LOADER)))
         shutil.copy(ENGINE, os.path.join(root, "hooks", "mutate_js.mjs"))
         shutil.copy(os.path.join(REPO, LOADER), os.path.join(root, LOADER))
+        # NODE_PATH removed: a machine that sets it to a global typescript would load the package by that
+        # route, and the case would then prove nothing about the one loader.
+        env = dict(os.environ)
+        env.pop("NODE_PATH", None)
         done = subprocess.run([NODE, os.path.join(root, "hooks", "mutate_js.mjs"), write("gate.ts", TS_SOURCE)],
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=120, env=env)
         self.assertNotEqual(done.returncode, 0, "the engine parsed without the loader's package")
         self.assertIn("cannot load the typescript package", done.stderr)
 
