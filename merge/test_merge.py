@@ -9113,6 +9113,23 @@ class RedMainBrake(Env):
         self.assertIn("run 1050", out)
         self.assertIn("startup_failure", out)
 
+    def failed_push_under_a_green_schedule(self, red_id, red_jobs):
+        # a newer schedule run passed `checks`, the one job of an older push run that ended failure with no red job: that run stays red
+        rc, out, before = self.go([main_run(red_id + 1, "success", event="schedule"), main_run(red_id, "failure")],
+                                  {red_id: red_jobs, red_id + 1: [main_job("checks", "success", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn(f"run {red_id}", out)
+
+    def test_a_failed_run_whose_only_job_passed_is_not_cleared_across_groups(self):
+        self.failed_push_under_a_green_schedule(1101, [main_job("checks", "success", 20)])
+
+    def test_a_failed_run_whose_only_job_was_cancelled_short_is_not_cleared_across_groups(self):
+        # a cancelled job short of its cap is no red job, so a failed run whose only job it is has no red job either
+        self.failed_push_under_a_green_schedule(1102, [main_job("checks", "cancelled", 2)])
+
+    def test_a_failed_run_whose_only_job_was_skipped_is_not_cleared_across_groups(self):
+        self.failed_push_under_a_green_schedule(1103, [main_job("checks", "skipped")])
+
     def test_an_unknown_run_is_not_cleared_by_a_green_run_of_another_group(self):
         rc, out, before = self.go([main_run(1061, "success", event="workflow_dispatch"), main_run(1060, "cancelled", event="schedule")],
                                   {1060: [main_job("checks", "cancelled", 2)], 1061: [main_job("checks", "success", 20)]})
