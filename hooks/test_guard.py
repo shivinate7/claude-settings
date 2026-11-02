@@ -520,6 +520,10 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
+# and its extras file names that branch as the record branch, so `roadmap` is not its record.
+RECROADMAP = os.path.join(ROOT, "recroadmap")
+RECFORK = os.path.join(ROOT, "recfork")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -1522,7 +1526,8 @@ def _build_push():
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
-                                (PUSHSAMETAG, "main", "main")):
+                                (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
+                                (RECFORK, "main", "roadmap-fork")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1535,6 +1540,10 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
+    write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
+          json.dumps({"kinds": {}, "record-branch": "roadmap-fork"}) + "\n")
 
     run_vcs(PUSHSAMETAG, "tag", "main")
     if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
@@ -1769,7 +1778,8 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+             _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -8050,6 +8060,7 @@ LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
 LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
+TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
 MERGE_SHIM = "~/.claude/bin/merge"
 
 
@@ -8114,6 +8125,14 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
+    # the newest own record in either order.
+    "triage": role_call("g1", TRIAGE_TAGS),
+    "triage-then-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1"),
+    "triage-title": role_call("g1", LANE_TAGS, title="handed to cs-build:triage"),
+    "other-triage": role_call("g1", TRIAGE_TAGS, session=ROLE_OTHER),
+    "triage-then-lane": role_call("g1", TRIAGE_TAGS) + role_call("g2", LANE_TAGS),
+    "lane-then-triage": role_call("g1", LANE_TAGS) + role_call("g2", TRIAGE_TAGS),
 }
 
 
@@ -8222,6 +8241,113 @@ role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
+# =========================================================================== 5e-2. the record branch's one writer
+#
+# Rule roadmap-one-writer, decision session-tiers. A `git push` that reaches the repo's record branch is
+# denied unless the session's own newest get_session record proves the cs-build:triage tag, and no
+# set_session_tags call follows that record. The record branch is lint/layout.py record_branch(root): the
+# extras key "record-branch", else "roadmap". The proof is read as merge-role-proof reads its tags
+# (_own_session_read, with the env id from ROLE_ENV). Incident (owner, Nov 1, about 17:30 CST): a lane
+# session committed and pushed step c203 to the roadmap branch while triage was the only writer.
+#
+# The pushes run from real checkouts, never from a folder with no repo: outside a repo the default branch is
+# unknown, so a forced push there asks instead of denying. PUSHFEAT sits on feat, RECROADMAP on roadmap,
+# RECFORK on roadmap-fork (its extras name that branch).
+RECORD_RULE = "roadmap-one-writer"
+RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+LANE_TRANSCRIPT = role_path("lane")
+TRIAGE_TRANSCRIPT = role_path("triage")
+
+
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+       transcript=transcript, env=env, cwd=cwd, **kw)
+
+
+def record_allow(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
+    """A git push the guard lets through silently."""
+    sh("roadmap-one-writer: " + name, command, "allow", silent=True, transcript=transcript, env=env,
+       cwd=cwd, **kw)
+
+
+# A lane's push that reaches roadmap is denied, in every form that names the record branch.
+record_refuse("a lane's push that names roadmap is refused", VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lane's push of HEAD into roadmap is refused", VCS + " push origin HEAD:roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push of a ref into refs/heads/roadmap is refused",
+              VCS + " push origin x:refs/heads/roadmap", LANE_TRANSCRIPT)
+record_refuse("a lane's delete of roadmap with --delete is refused", VCS + " push --delete origin roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's delete of roadmap with an empty source is refused", VCS + " push origin :roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push with git -C into the roadmap checkout is refused, judged by that checkout",
+              VCS + " -C " + slash(RECROADMAP) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
+record_refuse("a lane's bare push from the roadmap checkout is refused", VCS + " push", LANE_TRANSCRIPT,
+              cwd=RECROADMAP)
+record_refuse("a lane's HEAD push from the roadmap checkout is refused", VCS + " push origin HEAD",
+              LANE_TRANSCRIPT, cwd=RECROADMAP)
+# A fork's record branch is its own. Its extras file names roadmap-fork, so that push is refused there.
+record_refuse("a lane's push of roadmap-fork is refused in the fork that names it its record branch",
+              VCS + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=RECFORK)
+# Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
+record_refuse("a comment opener inside a string does not hide a push to roadmap",
+              'echo "# note" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a multi-line quoted string does not hide a push to roadmap after it",
+              'echo "first\nline" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lone quote inside a string does not hide a push to roadmap",
+              'echo "it\'s" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lone quote in a comment does not hide a push to roadmap on the next line",
+              "echo done # it's\n" + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+# A forced push to roadmap is denied by force-push, the earlier rule (rule 4 in guard.py). It is not pinned to a
+# rule name, so this rule may come before or after it. Either way the push is refused, with or without a proof.
+sh("roadmap-one-writer: a lane's forced push to roadmap is refused, by force-push, the earlier rule",
+   VCS + " push -f origin roadmap", "deny", transcript=LANE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+sh("roadmap-one-writer: a triage session's forced push to roadmap is still refused, the proof lifts only this rule",
+   VCS + " push -f origin roadmap", "deny", transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+# A record with no proof: no get_session, a tag set after it, no session id outside the cloud, or no transcript.
+record_refuse("a session with no get_session record is refused a push to roadmap",
+              VCS + " push origin roadmap", role_path("no-record"))
+record_refuse("a triage record with a set_session_tags call after it is refused a push to roadmap",
+              VCS + " push origin roadmap", role_path("triage-then-tags"))
+record_refuse("outside the cloud, with no session id, a push to roadmap is refused even with a triage record",
+              VCS + " push origin roadmap", TRIAGE_TRANSCRIPT, env=None)
+record_refuse("a push to roadmap with no transcript_path is refused", VCS + " push origin roadmap", None)
+record_refuse("a triage tag in a record's title is not a proof, so the push is refused",
+              VCS + " push origin roadmap", role_path("triage-title"))
+record_refuse("a triage record of another session is not a proof, so the push is refused",
+              VCS + " push origin roadmap", role_path("other-triage"))
+record_refuse("the newest own record wins: a triage record, then a lane record, is refused",
+              VCS + " push origin roadmap", role_path("triage-then-lane"))
+# The proof: a triage record allows the push to roadmap, bare or named.
+record_allow("a triage session's push to roadmap is allowed", VCS + " push origin roadmap", TRIAGE_TRANSCRIPT)
+record_allow("a triage session's bare push from the roadmap checkout is allowed", VCS + " push",
+             TRIAGE_TRANSCRIPT, cwd=RECROADMAP)
+record_allow("the newest own record wins: a lane record, then a triage record, is allowed",
+             VCS + " push origin roadmap", role_path("lane-then-triage"))
+# A lane's pushes to other branches, and the fork's own name, are not the record branch.
+record_allow("a lane's push to lane/foo is allowed", VCS + " push origin lane/foo", LANE_TRANSCRIPT)
+record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS + " push origin roadmap-notes",
+             LANE_TRANSCRIPT)
+record_allow("a lane's bare push from the feat checkout is allowed", VCS + " push", LANE_TRANSCRIPT)
+record_allow("a lane's HEAD push from the feat checkout is allowed", VCS + " push origin HEAD", LANE_TRANSCRIPT)
+record_allow("a lane's push to roadmap in the fork is allowed, since the fork's record is roadmap-fork",
+             VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
+record_allow("a lane's push with git -C into the fork is allowed, judged by the fork's record branch",
+             VCS + " -C " + slash(RECFORK) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECROADMAP)
+# Text that names the push is text, in quotes, a heredoc body, a comment and a commit message.
+record_allow("a push to roadmap named in single quotes is text", "echo '" + VCS + " push origin roadmap'",
+             LANE_TRANSCRIPT)
+record_allow("a push to roadmap named in a heredoc body is data",
+             "cat > notes.txt <<'EOF'\n" + VCS + " push origin roadmap\nEOF", LANE_TRANSCRIPT)
+record_allow("a push to roadmap named in a comment is text", "echo done # " + VCS + " push origin roadmap",
+             LANE_TRANSCRIPT)
+record_allow("a multi-line quoted string that names a push to roadmap is text",
+             'echo "first\n' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_allow("a commit message that names a push to roadmap is text",
+             VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
