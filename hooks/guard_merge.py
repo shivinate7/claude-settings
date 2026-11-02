@@ -188,8 +188,8 @@ MERGE_CHECK_REASON = (
 
 # The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
 MERGE_BATCH_REASON = (
-    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base: %s. A merge "
-    "now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
+    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base, and its head "
+    "does not contain this head: %s. A merge now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
     "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
 )
 
