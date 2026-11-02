@@ -57,16 +57,17 @@ def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
 
 
-def peer_msg(body, stamp=None):
+def peer_msg(body, stamp=None, from_session="local_fixture"):
     """A cross-session reply in the shape a real transcript stores: type user, origin.kind peer,
-    isMeta true. It lands mid-turn, so it is never the owner's last message."""
+    isMeta true. It lands mid-turn, so it is never the owner's last message. `from_session` is the
+    id of the session that sent it."""
     rec = {"type": "user", "isSidechain": False, "isMeta": True,
            "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                      "name": "peer-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                      "name": "peer-cf", "fromSession": from_session, "fromMode": "bypass",
                       "body": body},
            "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                       '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % body}}
+                       '<cross-session-message from="uds:fixture-pipe" from-session="%s" '
+                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % (from_session, body)}}
     if stamp:
         rec["timestamp"] = stamp
     return rec
@@ -1635,6 +1636,24 @@ class QuestionReachesPageTests(unittest.TestCase):
                          peer_msg("status?"), assistant_text(self.reply(self.PICK))])
         self.assert_blocked(out, "Pick guard")
 
+    def test_qm_green_ack_from_the_writer_after_a_send_keeps_the_turn(self):
+        # Catches: the writer's ack of this turn's send starting a new turn, which hides the send and blocks
+        # a question that send already covers. The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # so the reply that follows it has no send and blocks.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER),
+                         peer_msg("status?", from_session=self.WRITER),
+                         assistant_text(self.reply(["Close q_max #969?"]))])
+        self.assert_blocked(out, "Pick guard")
+
     def test_qm_red_promise_words_or_page_link_alone_block(self):
         # Catches: the 5-minute promise, or a page link, passing a question with no send (both clauses retired).
         for body in (self.PROMISE, self.LINKED):
@@ -1696,6 +1715,24 @@ class QuestionReachesPageTests(unittest.TestCase):
     def test_qm_red_lone_quote_does_not_hide_a_question(self):
         # Catches: a lone double quote paired with a later one, which hides the "?" that falls between them.
         out = self.stop([human("decide"), assistant_text(self.reply(['Set 5" rack, merge it? Pick "main".']))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_single_quoted_past_question_is_no_question(self):
+        # Catches: a "?" inside a single-quoted past question read as a question asked now (false alarm).
+        out = self.stop([human("decide"), assistant_text(self.reply(["You asked 'merge it?' and I picked A"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_question_mark_before_a_word_or_link_markup_blocks(self):
+        # Catches: a "?" followed by a dash and a word, or by the closing bracket of link markup,
+        # read as no question.
+        for body in ("Merge it now?—yes", "[Merge #5?](https://x.y/5)"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_lone_single_quote_does_not_hide_a_question(self):
+        # Catches: a lone apostrophe paired with a later single quote, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(["Don't merge it? Pick 'main'."]))])
         self.assert_blocked(out, "Pick guard")
 
     def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
@@ -1774,6 +1811,22 @@ class QuestionReachesPageTests(unittest.TestCase):
         out = self.lane(peer_msg("first"), *self.send(session_id="@parent"), peer_msg("second"),
                         assistant_text(self.reply(self.PICK)))
         self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_green_ack_from_the_parent_after_a_send_keeps_the_turn(self):
+        # Catches: the parent's ack of a lane's send starting a new turn, which hides the send and blocks the question.
+        # The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.PARENT)
+        forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
+                 ("to parent", self.send(to="parent")))
+        for label, send in forms:
+            with self.subTest(form=label):
+                self.assertIsNone(self.lane(*send, ack, assistant_text(self.reply(["Close q_max #969?"]))))
+
+    def test_ln_red_peer_from_the_parent_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # and the reply that follows it blocks.
+        self.assert_blocked(self.lane(peer_msg("pick?", from_session=self.PARENT),
+                                      assistant_text(self.reply(["Close q_max #969?"]))), "Lane pick guard")
 
     def test_ln_landed_turn_follows_the_lane_rule(self):
         commit = self.call("Bash", {"command": "git commit -m x"})
