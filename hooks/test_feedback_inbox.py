@@ -124,12 +124,15 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     with no item lines, blocks until the transcript shows a send naming each n (the Pages proof). Prose
     that merely holds a number passes, and so does a pick in a repo with no waiting page.
   - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
-    granted, permission, authorize, authorized, go ahead; whole words, any case) blocks unless the block
-    has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
-    `[note] -> not-a-grant` item. A grant may be homed to settings.json, tracked at the repo root. The
-    reason names the message by its stamp or the start of its text.
-  - Closed notes (F88). A `[closed]` note's home must be a tracked file, `step:<slug>` where
-    roadmap/data/steps/<slug>.json is a blob on some ref, or `page:<n>`. Other kinds are as before.
+    granted, permission to, permissions to, authorize, authorized, go ahead; whole words, any case) blocks
+    unless the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or
+    a `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or
+    .claude/CLAUDE.md at the repo root, each tracked; a plain ruling there still blocks. Bare "permission"
+    is no grant word, so a pasted "Permission denied" passes. The reason names the message by its stamp or
+    the start of its text.
+  - Closed notes (F88, likely risk; F88 is the related incident, not a measured one). A `[closed]` note's
+    home must be a tracked file, `step:<slug>` where roadmap/data/steps/<slug>.json is a blob on some ref,
+    or `page:<n>`. Other kinds are as before.
   - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
     page item.
   - Another session's inbox is never read.
@@ -1251,7 +1254,8 @@ SHARED = {}  # one repo per run for each key, built the first time a case asks f
 STEP_SLUG = "inbox-close"
 GRANT_WORDS = (  # one lone message per grant word, as the owner would type it
     "I approve the merge.", "Approved.", "The approval is in.", "This is my grant.", "Granted for the lane.",
-    "Permission to merge.", "I authorize the merge.", "You are authorized to merge.", "Go ahead and merge.")
+    "Permission to merge.", "Permissions to merge.", "I authorize the merge.", "You are authorized to merge.",
+    "Go ahead and merge.")
 F47_TEXT = "YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC."
 GRANT_SCANNER = ("Approved for the merge.\n"
                  "/* a comment opener inside a string */ and // a line comment opener\n"
@@ -1272,9 +1276,11 @@ def waiting_repo():
         "waiting-page", extras=json.dumps({"kinds": {}, "waiting-page": PAGE_URL})))
 
 
-def settings_repo():
-    """A repo that tracks settings.json at its root. No layout key names it, so it is no ruling home today."""
-    return shared_repo("settings", lambda: make_repo("grant-settings", tracked=("settings.json", "decisions/a-ruling.md")))
+def grant_repo():
+    """A repo that tracks settings.json and .claude/CLAUDE.md at its root. No layout key names either path,
+    so neither is a ruling home today."""
+    return shared_repo("grant", lambda: make_repo(
+        "grant-homes", tracked=("settings.json", ".claude/CLAUDE.md", "decisions/a-ruling.md")))
 
 
 def step_repo():
@@ -1317,6 +1323,14 @@ def case_chat_pick_without_a_send_blocks():
     p = page_run(new_cfg(), "pick-wrong-number", [("143 b", ())],
                  [owner_rec("143 b"), send_rec("Ruling on page 1430: b")], cwd=repo)
     expect_numbers_named("pick answer: a send naming 1430 does not prove item 143", p, ("143",))
+
+
+def case_chat_multi_pick_partial_send_blocks():
+    """A multi-pick needs a proof for each of its numbers. A send that proves only 137 leaves 138 unproven, so
+    the block names 138. Red today: no pick check runs."""
+    p = page_run(new_cfg(), "pick-partial", [("137 a, 138 b", ())],
+                 [owner_rec("137 a, 138 b"), send_rec("Ruling on page 137: a")], cwd=waiting_repo())
+    expect_numbers_named("pick answer: a send proving only 137 leaves 138 unproven", p, ("138",))
 
 
 def case_chat_pick_with_a_send_passes():
@@ -1367,26 +1381,29 @@ def case_grant_with_a_home_passes():
     expect_silent("grant home: F47 with [page] -> page:98 and its send passes", p)
 
 
-def case_grant_settings_json_home_passes():
-    """A grant may be homed to settings.json, which the audit's proposed check names beside a CLAUDE.md
-    line (F31, F47). It must be tracked at the repo root. Red today: settings.json is no ruling home."""
-    p = homed(new_cfg(), "grant-settings", ("- fb-0958-1 [ruling] -> settings.json",), cwd=settings_repo(),
-              text=F47_TEXT)
-    expect_silent("grant home: F47 with [ruling] -> settings.json, tracked at the root, passes", p)
+def case_grant_root_home_passes():
+    """A grant's [ruling] item may name settings.json or .claude/CLAUDE.md at the repo root, each tracked. The
+    audit's proposed check names both beside a chat grant (F31, F47). Red today: neither is a ruling home."""
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "grant-root", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=grant_repo(),
+                  text=F47_TEXT)
+        expect_silent("grant home: F47 with [ruling] -> %s, tracked at the root, passes" % path, p)
 
 
 def case_grant_ruling_home_still_refused():
-    """The controls around the settings.json home: a plain ruling there is refused, an untracked
-    settings.json is refused, and a grant ruling homed to the handoff is refused as today. Each blocks today."""
-    p = homed(new_cfg(), "plain-settings", ("- fb-0958-1 [ruling] -> settings.json",), cwd=settings_repo(),
-              text="Rebase the lane on main.")
-    expect_block("grant home: a plain ruling homed to settings.json still blocks", p, named=("fb-0958-1",))
+    """The controls around the root homes: a plain ruling to either file is refused, an untracked file is
+    refused even for a grant, and a grant ruling homed to the handoff is refused as today. Each blocks today."""
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "plain-root", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=grant_repo(),
+                  text="Rebase the lane on main.")
+        expect_block("grant home: a plain ruling homed to %s still blocks" % path, p, named=("fb-0958-1",))
     untracked = shared_repo("grant-untracked", lambda: make_repo(
-        "grant-untracked", tracked=("decisions/a-ruling.md",), untracked=("settings.json",)))
-    p = homed(new_cfg(), "grant-untracked", ("- fb-0958-1 [ruling] -> settings.json",), cwd=untracked,
-              text=F47_TEXT)
-    expect_block("grant home: F47 with [ruling] -> an untracked settings.json still blocks", p,
-                 named=("fb-0958-1",))
+        "grant-untracked", tracked=("decisions/a-ruling.md",), untracked=("settings.json", ".claude/CLAUDE.md")))
+    for path in ("settings.json", ".claude/CLAUDE.md"):
+        p = homed(new_cfg(), "grant-untracked", ("- fb-0958-1 [ruling] -> %s" % path,), cwd=untracked,
+                  text=F47_TEXT)
+        expect_block("grant home: F47 with [ruling] -> an untracked %s still blocks" % path, p,
+                     named=("fb-0958-1",))
     p = homed(new_cfg(), "grant-handoff", ("- fb-0958-1 [ruling] -> handoff",), text=F47_TEXT)
     expect_block("grant home: F47 with [ruling] -> handoff still blocks, as today", p, named=("fb-0958-1",))
 
@@ -1403,8 +1420,10 @@ def case_grant_fake_item_in_the_fence_blocks():
 
 
 def case_grant_words_as_parts_of_words_pass():
-    """Whole words only: a grant word inside another word is no grant. Each passes today too."""
-    for text in ("The migrant job is done.", "The grantor field is blank.", "Rebase the lane on main."):
+    """Whole words only: a grant word inside another word is no grant. Bare "permission" is no grant word, so
+    a pasted "Permission denied" error passes. Each passes today too."""
+    for text in ("The migrant job is done.", "The grantor field is blank.", "Permission denied",
+                 "Rebase the lane on main."):
         expect_silent("grant home: %r holds no grant word, passes" % text,
                       homed(new_cfg(), "no-grant", (), text=text))
 
@@ -1412,10 +1431,11 @@ def case_grant_words_as_parts_of_words_pass():
 # Closed notes: F88. A closed note holds for good only with a tracked file, a step on some ref, or a page.
 
 def case_closed_note_without_a_home_blocks():
-    """F88 is the audit's replay id for an inbox item that closes with no step, record or answer. Its own row
-    is the grey Send button, so the line `[note] -> noted [closed]` is reconstructed from that replay. The
-    line the session wrote is unmeasured. A step with no file on any branch is no home either. Red today: no
-    check reads a closed note's home."""
+    """Risk kind: likely risk. F88 is the related incident, not a measured one. Its audit row is the grey Send
+    button. The audit's proposed checks replay F88 as an inbox item that closes with no step, record or
+    answer, so the line `[note] -> noted [closed]` is reconstructed, not measured: the line the session wrote
+    is unmeasured. A step with no file on any branch is no home either. Red today: no check reads a closed
+    note's home."""
     p = homed(new_cfg(), "close-noted", ("- fb-0958-4 [note] -> noted [closed]",), text="closed without a home")
     expect_block("close home: a closed note homed to noted blocks", p, named=("fb-0958-4",))
     p = homed(new_cfg(), "close-missing-step", ("- fb-0958-4 [note] -> step:no-such-step [closed]",),
@@ -2129,11 +2149,12 @@ CASES = (
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
     case_chat_pick_without_a_send_blocks,
+    case_chat_multi_pick_partial_send_blocks,
     case_chat_pick_with_a_send_passes,
     case_chat_prose_and_no_waiting_page_pass,
     case_grant_without_a_home_blocks,
     case_grant_with_a_home_passes,
-    case_grant_settings_json_home_passes,
+    case_grant_root_home_passes,
     case_grant_ruling_home_still_refused,
     case_grant_fake_item_in_the_fence_blocks,
     case_grant_words_as_parts_of_words_pass,
