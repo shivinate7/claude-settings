@@ -44,9 +44,7 @@ _ISOLATION = {}
 
 
 def setUpModule():
-    global RUN_FOLDER
-    _ISOLATION["dir"] = _test_temp.run_folder()  # test-temp-standard: one run folder per test run
-    RUN_FOLDER = _ISOLATION["dir"]
+    _ISOLATION["dir"] = RUN_FOLDER  # the run's one folder, made at import (test-temp-standard); teardown removes it
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
     stub = os.path.join(_ISOLATION["dir"], "stub")  # the stub lives in this run's folder
