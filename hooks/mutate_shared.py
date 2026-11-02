@@ -663,6 +663,8 @@ def format_report(rows, gold=None) -> str:
 # "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
 # test one product file (a changed suite is run on the mutants of that file only when its line is listed; a select
 # that fails, or is missing, runs every changed suite and adds a row note),
+# "suite_filter": {"paths": regex, "keep": a SUITE_FILTERS name} (optional); a changed file that "tests" matches
+# and "paths" matches is a suite only when the filter reads its text as one,
 # "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
 # each part and keeps the rows that hold something.
 
@@ -758,6 +760,38 @@ def _line_of(label: str) -> int:
 
 def _file_at(repo: str, sha: str, path: str) -> bytes:
     return _git(repo, "show", "%s:%s" % (sha, path), binary=True)
+
+
+def defines_checks(text: str) -> bool:
+    """True when the module assigns CHECKS at its top level. Read from the parse tree, so a CHECKS line in a
+    docstring, a comment or a string is not one. A module that does not parse is a suite: its run crashes, and
+    a crash is a row, where a dropped file is silence."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return True
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        else:
+            targets = [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(target, ast.Name) and target.id == "CHECKS" for target in targets):
+            return True
+    return False
+
+
+SUITE_FILTERS = {"defines_checks": defines_checks}
+
+
+def _is_suite(repo: str, sha: str, profile: dict, path: str) -> bool:
+    rule = profile.get("suite_filter")
+    if not rule or not re.search(rule["paths"], path):
+        return True
+    try:
+        text = _file_at(repo, sha, path).decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    return SUITE_FILTERS[rule["keep"]](text)
 
 
 def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
@@ -864,6 +898,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         return row
     code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
     suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
+    suites = [p for p in suites if _is_suite(repo, sha, profile, p)]
     if not code:
         row["status"] = "NO_PRODUCT"
         return row

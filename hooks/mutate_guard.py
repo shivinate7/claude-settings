@@ -1835,15 +1835,24 @@ def report_main(argv) -> int:
 # banchi: the TypeScript tier runs through the Playwright unit config (the `unit` script of app/package.json),
 # one file as a path argument. Its Python harness (harness/run.py) has no per-module runner of its own, so
 # the runner below imports one harness/tests/tN_*.py and calls its `run()` under `isolated_home()`, as
-# run.py does. A module is a suite only when it is green on a clean checkout: T6 needs demo-assets/ and T7
-# is minutes long, so both read unusable.
+# run.py does. A module is a suite only when it is green on a clean checkout: T6 needs demo-assets/ (its
+# photos are left out of the checkout), so it reads unusable. T7 is minutes long whole, so a changed T7 group
+# module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
+# helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
+# an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
 from harness.tests.home import isolated_home
 name = sys.argv[1][:-3].replace('/', '.')
+group = name.startswith('harness.tests.t7.')
 with isolated_home():
-    result = importlib.import_module(name).run()
+    if group:
+        t7 = importlib.import_module('harness.tests.t7_store_and_seams')
+        wanted = tuple(importlib.import_module(name).CHECKS)
+        result = t7.run(order=lambda todo: [check for check in todo if check in wanted])
+    else:
+        result = importlib.import_module(name).run()
 passed = getattr(result, 'passed', None)
 if passed is not True and passed is not False:
     raise TypeError('run() returned no Result with a bool passed: %r' % (result,))
@@ -1871,7 +1880,8 @@ REPLAY_PROFILES = {
             "sparse_skip": ["demo-assets", "vendor"],
         },
         "py": {
-            "code": r"^(?!harness/tests/).*\.py$", "tests": r"^harness/tests/t\d+_[^/]*\.py$",
+            "code": r"^(?!harness/tests/).*\.py$", "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
+            "suite_filter": {"paths": r"^harness/tests/t7/", "keep": "defines_checks"},
             "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
             "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
                         ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
