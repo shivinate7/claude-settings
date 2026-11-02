@@ -334,6 +334,14 @@ class EngineTests(unittest.TestCase):
         edits = [edit_of(TSX_SOURCE, m["text"]) for m in found if m["line"] == line]
         self.assertIn((line, "  if (props.ok !== true) {"), edits)
 
+    def test_a_boolean_in_a_type_position_gets_no_mutant(self):
+        # `true` and `false` in a type are literal types, not values. A mutant there is one no test can kill.
+        # The value on the next line still gets its mutant.
+        source = "type R = { ok: true } | { ok: false };\nconst ok = true;\n"
+        edits = [edit_of(source, m["text"]) for m in engine_mutants(write("types.ts", source))]
+        self.assertEqual([edit for edit in edits if edit[0] == 1], [], "a mutant was made in a type position")
+        self.assertIn((2, "const ok = false;"), edits)
+
     def test_each_extension_parses_with_its_own_grammar(self):
         cases = [(".js", MJS_SOURCE), (".cjs", MJS_SOURCE), (".mjs", MJS_SOURCE), (".ts", TS_SOURCE),
                  (".mts", TS_SOURCE), (".jsx", JSX_SOURCE), (".tsx", TSX_SOURCE)]
