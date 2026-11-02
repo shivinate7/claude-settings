@@ -884,3 +884,5 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
+- verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
