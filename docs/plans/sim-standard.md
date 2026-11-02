@@ -61,6 +61,12 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
 6. **A gatekeeper session is not a durable home.** It sleeps, dies and costs context. The queue order and the timeout must live in a record and a tool, not in one chat session.
 7. **Disk.** Each Duo adds about 14 GB. A 10 GB backup of the Duo from 11-01 sits at `~/Library/Developer/CoreSimulator/poster-backup-AC2E94F9-20261101/`.
 
+## Is "Data Migration Failed" a real failure? (open, 14:49 CST)
+
+- At 14:48 Duo 2 showed "Data Migration Failed" in `simctl bootstatus` at a 1-minute load of 22. Yet the device worked: `hinge open` worked, `hinge posture` read 180.0, and both screens were lit (climate-feel's report).
+- So the bootstatus line may be noise. Then several "fails" counted in this brief may be misreads, and the deleted Duo AC2E94F9 may not have been broken. The real failures seen today were these: no named-display screenshot for about 2 minutes (13:41 to 13:45, at a load of 130 to 173), and a black screen (12:05).
+- Test this first. The standard should define "usable" as: a named-display screenshot works, and `hinge get` answers. It should not trust the bootstatus text. The boot hook should use the same test.
+
 ## Compile without a simulator (data from the Degen batch runner, 11-02)
 
 - Degen's `make native-check` runs `xcodebuild build-for-testing -destination 'generic/platform=iOS Simulator'`. That compiles the app and its UI-test bundle with no simulator. Logic tests (about 7,570 in the DegenKit package) run on the Mac with `swift test`. 371 UI tests are compiled but run only per lane, and only those a change touches.
