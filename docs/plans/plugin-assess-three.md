@@ -367,6 +367,26 @@ Three cases cannot reach a result: the win rule needs 7 wins in 8. Two ways to r
 Recommended: (b). The arms stay equal, and the calibration diff shows what the real process
 gave.
 
+### Shadow pairs for the next five lanes
+
+The coordinator picked option (b) on 2026-11-01 23:08 CST.
+
+- **Which lanes qualify.** A lane on claude-settings whose brief asks for a normal-size change:
+  one fix, check or rule, with a check that proves it done. Not a trivial edit (one word, one
+  pin), not a survey or plan, and not a screen. The first five such lanes after 2026-11-01 23:08
+  CST qualify, in the order the coordinator sends their briefs.
+- **When.** The coordinator spawns the pair in the same turn it sends the real lane its brief. Both
+  shadows start together.
+- **Base.** The `main` commit the real lane starts from, read when the coordinator sends the
+  brief.
+- **Prompt.** The trial preamble, then the real lane's brief word for word, then the step file
+  at the roadmap commit of that moment. Arm B adds the same text as the ready runs, hash-checked.
+- **Run codes.** A new random two-letter code per shadow. The coordinator keeps the arm key.
+- **Brief file.** The coordinator saves each brief to `docs/plans/trial-briefs/<slug>.md` on its
+  next record PR.
+- **Calibration.** The real lane's merged diff is the third diff for that case. A dropped or held
+  real lane gives no calibration diff; the case still counts on its two arms.
+
 ### Transcripts on the owner's computer (optional)
 
 The repo cases suffice for the trial. A session on the owner's computer adds the true outcome:
