@@ -120,7 +120,9 @@ Other tools, in `judge` order:
                        carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
                        spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
-                       above-row refusal; no override lifts the no-model refusal.
+                       above-row refusal; no override lifts the no-model refusal. A Workflow
+                       `agent()` call is judged as a spawn; one whose model or agentType the scan
+                       cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
@@ -2119,15 +2121,23 @@ def role_name(table, subagent_type) -> str:
     return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
+# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
+# The remedy stays lowercase mid-sentence, so both refusals carry the same words.
+BRIEF_UNREAD = "brief_unread"
+BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
+
+
 def spawn_inputs(tool: str, tool_input):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read, or a spread in the options, carries no marker and
-    grants nothing, so the spawn is judged with an empty brief (owner ruling, item 127 pick a, Nov 1 17:25 CST). A
+    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
+    BRIEF_LITERAL_REMEDY (owner ruling, item 127 pick a, Nov 1 17:25 CST; coordinator ruling, Nov 1 22:54 CST). A
     call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a model. step_up_hit still skips an unread brief, as a marker it cannot read has no round to check.
-    Other tools yield nothing."""
+    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
+    has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
         yield tool_input
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -2138,7 +2148,10 @@ def spawn_inputs(tool: str, tool_input):
                 unseen |= u
             if unseen & {"model", "agentType"} or not keys.get("model"):
                 continue
-            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or ""}
+            if "..." in unseen and "agentType" not in keys:
+                continue
+            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",
+                   BRIEF_UNREAD: prompt is None}
 
 
 def role_model_check(tool: str, tool_input):
@@ -2190,6 +2203,8 @@ def role_model_one(tool_input):
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+            if tool_input.get(BRIEF_UNREAD):
+                extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
@@ -2372,16 +2387,17 @@ OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
-    """(model, role) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
-    else ("", ""). `role` is the role the spawn names, "" for none. A standing grant
+    """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
+    else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    A standing grant
     is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (owner ruling, item 137
     pick a, Nov 1 18:38 CST). Any other spawn above its role's model is refused (owner ruling, item 127 pick a, Nov 1 17:25
     CST), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
-            return str(spawn.get("model")), str(spawn.get("subagent_type") or "")
-    return "", ""
+            return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
+    return "", "", False
 
 
 def opus_without_grant(tool_input) -> bool:
@@ -3393,10 +3409,12 @@ def judge(payload) -> None:
 
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (owner ruling, item 127 pick a, Nov 1 17:25
     # CST). An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
-    opus_model, opus_role = opus_spawn_hit(tool, tool_input)
+    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON,
+               (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+               + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
+                  if opus_unread else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
 
