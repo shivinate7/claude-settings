@@ -4,6 +4,9 @@
 Records live in the folders lint/layout.json marks as records. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
+Also fails when a debt file DELETED against origin/main was a feel-fix (a line starting `**Feel.**`) and had no
+device check (a line starting `**Device check.**`): a fix CI passes can still feel wrong on a device.
+
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
 
@@ -36,9 +39,45 @@ def git_names(root, *args):
     return [name for name in r.stdout.split("\0") if name]
 
 
+def changes(root):
+    """(added, deleted) files of `root` against its origin/main, from one process. Raises Unknown when git cannot say."""
+    names = git_names(root, "diff", "--name-status", "-z", "origin/main...HEAD")
+    added, deleted, i = [], [], 0
+    while i < len(names):
+        status = names[i]
+        i += 1
+        if status[0] in "RC":  # a rename or copy names two paths and is neither an add nor a delete
+            i += 2
+            continue
+        if status == "A":
+            added.append(names[i])
+        elif status == "D":
+            deleted.append(names[i])
+        i += 1
+    return added, deleted
+
+
 def added(root):
     """The files `root` adds against its origin/main. Raises Unknown when git cannot say."""
-    return git_names(root, "diff", "--name-only", "-z", "--diff-filter=A", "origin/main...HEAD")
+    return changes(root)[0]
+
+
+def unchecked_feel_debts(root, deleted):
+    """The deleted debt files whose origin/main text has a line starting `**Feel.**` and none starting
+    `**Device check.**`. Raises Unknown when git cannot show a file."""
+    dirs = tuple(p + "/" for p in layout.candidates(root, "debts"))
+    out = []
+    for f in deleted:
+        if not (f.startswith(dirs) and f.endswith(".md")):
+            continue
+        r = _nowindow.run(["git", "show", "origin/main:" + f], cwd=root, capture_output=True, encoding="utf-8",
+                          errors="replace")
+        if r.returncode:
+            raise Unknown("git show failed: %s" % r.stderr.strip())
+        lines = r.stdout.splitlines()
+        if any(l.startswith("**Feel.**") for l in lines) and not any(l.startswith("**Device check.**") for l in lines):
+            out.append(f)
+    return out
 
 
 def tracked(root):
@@ -63,14 +102,23 @@ def main(args):
         print("check_record_slugs: FAIL: " + str(err))
         return 1
     try:
-        files = args or added(ROOT)
+        if args:  # files given: git is not read, so the feel-fix check does not run
+            files, feel = args, []
+        else:
+            files, deleted = changes(ROOT)
+            feel = unchecked_feel_debts(ROOT, deleted)
+    except layout.LayoutError as err:
+        print("check_record_slugs: FAIL: " + str(err))
+        return 1
     except Unknown as err:
         print("check_record_slugs: UNKNOWN, " + str(err))
         return 1 if os.environ.get("CI") else 0  # CI exit code is a verdict: unknown is red there
     bad = too_long(files, dirs)
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
-    return 1 if bad else 0
+    for f in feel:
+        print("check_record_slugs: FAIL: feel-fix debt deleted with no device check: " + f)
+    return 1 if bad or feel else 0
 
 
 if __name__ == "__main__":
