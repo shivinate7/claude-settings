@@ -803,11 +803,14 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
-        return cmd  # the body may be executed, so keep it under inspection
     if _walk_heredocs(cmd)[2]:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
-    return _drop_heredoc_bodies(cmd)
+    dropped = _drop_heredoc_bodies(cmd)
+    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
+    # is text, and no body line may make another body look run.
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(dropped)):
+        return cmd  # the body may be executed, so keep it under inspection
+    return dropped
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header

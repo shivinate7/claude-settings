@@ -7,8 +7,9 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, is_powershell, norm, split_segments,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, TIMEOUT_FLAGS_BARE,
+    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values, is_powershell, norm,
+    split_segments,
 )
 
 
@@ -367,18 +368,43 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     return _env_relay(texts)
 
 
-def env_heredoc_refusal(raw: str):
-    """`env_refusal` for the substitutions in the body of each UNQUOTED heredoc.
+_QX_OPEN = re.compile(r"(?:\bqx|%x)[ \t]*([({\[<])")
+_QX_CLOSE = {"(": ")", "{": "}", "[": "]", "<": ">"}
 
-    `strip_heredoc_bodies` drops a body before the layers run, and that is right for text. An
-    unquoted body still runs its `$(...)`, backticks and `<(...)`, so those are judged. A quoted
-    delimiter (`<<'EOF'`) makes the body text, and it stays dropped.
+
+def _qx_as_substitution(body: str) -> str:
+    """Write each Perl `qx(...)` and Ruby `%x(...)` as `$(...)`, so `_substitutions` reads the
+    command they run. The span ends at the bracket that closes the opener (nested pairs count)."""
+    out, at = [], 0
+    for opener in _QX_OPEN.finditer(body):
+        if opener.start() < at:
+            continue  # inside the span of an earlier one
+        open_char, depth, end = opener.group(1), 1, opener.end()
+        while end < len(body) and depth:
+            depth += (body[end] == open_char) - (body[end] == _QX_CLOSE[open_char])
+            end += 1
+        out += [body[at:opener.start()], "$(", body[opener.end():end - (depth == 0)], ")"]
+        at = end
+    return "".join(out) + body[at:]
+
+
+def env_heredoc_refusal(raw: str):
+    """`env_refusal` for the heredoc bodies that `strip_heredoc_bodies` drops before the layers run.
+
+    A dropped body is text, except for its spots that run a shell: an UNQUOTED body runs its
+    `$(...)`, backticks and `<(...)`, and the body of a python, node, perl or ruby header runs
+    those and also `qx(...)` and `%x(...)`, whatever its delimiter. Every other word of such a body
+    is the interpreter's own code, not shell words. A quoted delimiter (`<<'EOF'`) on any other
+    header makes the body text, and it stays dropped.
     """
-    for quote, body, _ in _split_heredocs(raw)[1]:
-        if not quote:
-            refusal = env_refusal(body, subs_only=True, heredoc=True)
-            if refusal[0]:
-                return refusal
+    for quote, body, header in _split_heredocs(raw)[1]:
+        interpreter = INTERPRETER_HEREDOC(_without_message_values(header))
+        if quote and not interpreter:
+            continue
+        refusal = env_refusal(_qx_as_substitution(body) if interpreter else body,
+                              subs_only=True, heredoc=True)
+        if refusal[0]:
+            return refusal
     return "", ""
 
 

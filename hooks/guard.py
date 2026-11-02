@@ -2734,7 +2734,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
-    refusal, logged = env_refusal(stripped)
+    # A python, node, perl or ruby body is code, not shell words: env_heredoc_refusal judges its shell spots.
+    refusal, logged = env_refusal(strip_heredoc_bodies(raw, shells_only=True))
     if not refusal:
         refusal, logged = env_heredoc_refusal(raw)
     if refusal:
