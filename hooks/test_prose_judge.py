@@ -52,7 +52,7 @@ REPO_ROOT = os.path.dirname(HERE)
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
-import test_ruling_kind_fixture as fx  # noqa: E402  the record text of PR #1028 at the time of this lane (lint/test_ruling_kind_fixture.py)
+import test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/test_ruling_kind_fixture.py)
 
 try:
     import prose_judge as pj

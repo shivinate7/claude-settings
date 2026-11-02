@@ -1,6 +1,6 @@
 """Fixture text for the ruling-kind cases: lint/test_check_ruling_kind.py and hooks/test_prose_judge.py.
 
-PR_RECORD is PR #1028's record at the time of this lane, as fixture text. It holds two `Kind: process`
+PR_RECORD is pull request 1028's record at the time of this lane, as fixture text. It holds two `Kind: process`
 lines, so the lint refuses it. ONE_KIND_RECORD is the same text with the second Kind line folded away.
 Its Home line stays, so the record has one Kind line and its Home path must exist (HOME_PATH). The
 one-Kind form is derived here, never hand-edited.
