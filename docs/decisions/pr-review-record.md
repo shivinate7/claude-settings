@@ -35,7 +35,7 @@ CI: read live by merge --reviewed
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses.
-- The one home of the form is the merge tool (`merge/merge.py`): `review_body`, `parse_review`, `review_state`.
+- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
 ## The done rules
 
@@ -54,7 +54,7 @@ A round 3 verdict does not decide done. Net value does, when Guard or check is `
 - `merge --reviewed`: two list reads per call. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR. It adds one check read for each ready PR on the list.
 - `merge <pr> --review-record`: one PR read per call. It writes nothing.
 - No new process, file or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList` pins the two list reads. It is not written yet.
+- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads.
 
 ## The limits
 
@@ -67,7 +67,7 @@ A round 3 verdict does not decide done. Net value does, when Guard or check is `
 The coordinator answered both at 23:14. Process-only.
 
 - Q1. Should preview or confirm refuse a PR with no valid record? Pick a: no refusal now. Ruling 113 a names discovery only (rule `outcomes-grant-covers-named-act`). Not taken: confirm refuses an integration PR when a lane tip has no done record. Also not taken: preview prints a review line only.
-- Q2. Which wins: rule `roles-review-cap-three`, or the standing merge grant record's sentence that a logic diff "merges only after a fresh reviewer approves it" (record `standing-merge-grant`)? Pick a: the rule outranks a decision record. Round 3 counts as done, whatever its verdict. Not taken: a final PASS is always needed. The standing merge grant record is not changed here.
+- Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done, whatever its verdict. Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
 
 Kind: process
 Home: merge/merge.py
