@@ -4307,8 +4307,24 @@ sh("detached: the same shape, spaced",
    "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: nohup survives a session close, with a background job",
    "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
-sh("detached: nohup alone, no background job, still detaches from the session",
-   "nohup npm run build", "deny", "detached-launch", cwd=NOGIT)
+# Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup with no trailing `&`
+# runs in the foreground, so it detaches nothing. The rule refuses only the detached forms.
+sh("detached: nohup alone, no background job, runs in the foreground",
+   "nohup npm run build", "allow", cwd=NOGIT)
+sh("detached: nohup of make test, run in the foreground, is allowed", "nohup make test", "allow",
+   cwd=NOGIT)
+sh("detached: setsid -w waits for its child, so it runs in the foreground",
+   "setsid -w make test", "allow", cwd=NOGIT)
+sh("detached: nohup with a trailing background job is still refused", "nohup make test &", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: nohup with a redirect and a trailing background job is still refused",
+   "nohup make test >log 2>&1 &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: setsid with no -w starts its own session", "setsid make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -f forks, so the child outlives the call", "setsid -f make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -w with a trailing background job is still refused", "setsid -w make test &",
+   "deny", "detached-launch", cwd=NOGIT)
 sh("detached: setsid starts its own session",
    "setsid python3 server.py &", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown right after a background job",
@@ -4333,8 +4349,10 @@ sh("detached: a background job inside sh -c",
    "sh -c 'python3 -m http.server 8782 &'", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: a background job inside bash -lc, then another line",
    "bash -lc 'python3 server.py &\necho started'", "deny", "detached-launch", cwd=NOGIT)
-sh("detached: nohup inside sh -c",
-   "sh -c 'nohup python3 server.py'", "deny", "detached-launch", cwd=NOGIT)
+# Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup inside sh -c, with no
+# background job, runs in the foreground and exits with the process.
+sh("detached: nohup inside sh -c runs in the foreground", "sh -c 'nohup python3 server.py'",
+   "allow", cwd=NOGIT)
 sh("detached: sh -c with no background job runs and exits",
    "sh -c 'echo hi; ls'", "allow", cwd=NOGIT)
 sh("detached: sh -c that prints the pid of its job",

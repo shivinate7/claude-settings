@@ -405,8 +405,7 @@ MUTATIONS = [
      '    return False', "guard", "detached: the incident's exact command orphans to pid 1"),
     ("detached-launch: nohup/setsid no longer denies as a bare wrapper",
      '    return word if basename(word) in DETACH_WRAPPERS else ""',
-     '    return ""', "guard", "detached: nohup alone, no background job, still detaches from "
-     "the session"),
+     '    return ""', "guard", "detached: setsid with no -w starts its own session"),
     ("detached-launch: disown right after a background job no longer denies",
      '        if j < len(rest) and basename(rest[j]) == "disown":\n            return "& disown"',
      '        if False:\n            return "& disown"', "guard",
