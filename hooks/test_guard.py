@@ -18460,8 +18460,9 @@ def worktree_home_scratchpad_case():
 def worktree_home_cross_checkout_cost_case():
     """other-checkout's stated cost: one `git worktree list` per write call and per `cd` into another
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
-    redirect included), a `cd` within its own checkout, or a write from a cwd with no `.git` at or
-    above it. A stand-in git on PATH logs each spawn."""
+    redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
+    a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
+    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     real = shutil.which(VCS)
@@ -18475,7 +18476,7 @@ def worktree_home_cross_checkout_cost_case():
     os.chmod(stand_in, 0o755)
     path = folder + os.pathsep + os.environ.get("PATH", "")
     problems = []
-    for label, tool, cwd, tool_input, want_all, want_list in (
+    for label, tool, cwd, tool_input, want_all, want_list, *pin in (
         ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
         ("Grep", "Grep", lane_a, {"pattern": "x", "path": lane_b}, 0, 0),
         ("shell ls", "Bash", lane_a, {"command": "ls " + slash(lane_b)}, None, 0),
@@ -18498,12 +18499,27 @@ def worktree_home_cross_checkout_cost_case():
          {"command": "cd " + slash(XCL_SEP)}, None, 1),
         ("Read of a separate clone", "Read", lane_a,
          {"file_path": os.path.join(XCL_SEP, "src", "app.py")}, 0, 0),
+        # A plain own checkout: its git verbs that change only its own files spawn no list. CLAUDE_PROJECT_DIR
+        # names the clone, as a session's does, so the row reads the same way in a real session.
+        # A commit also meets the other rules' own git reads (8 spawns on the old code), so its total is
+        # not counted: only the list is. checkout -b and stash list spend the list alone, so their total is 0.
+        ("shell git commit in its own checkout", "Bash", lane_a,
+         {"command": VCS + " commit -m x"}, None, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git checkout -b in its own checkout", "Bash", lane_a,
+         {"command": VCS + " checkout -b x"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git stash list in its own checkout", "Bash", lane_a,
+         {"command": VCS + " stash list"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git status in its own checkout", "Bash", lane_a,
+         {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git -C a separate clone commit", "Bash", lane_a,
+         {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
     ):
         if os.path.exists(log):
             os.remove(log)
         decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": path,
                 "config": None, "agent_id": None, "tool_input": tool_input,
-                "temp": os.path.join(ROOT, "tmp")})  # a separate clone must sit outside the temp folder
+                "temp": os.path.join(ROOT, "tmp"),  # a separate clone must sit outside the temp folder
+                "env": pin[0] if pin else None})
         spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
         listed = sum(1 for line in spawns if "worktree list" in line)
         if (want_all is not None and len(spawns) != want_all) or listed != want_list:
@@ -18511,8 +18527,8 @@ def worktree_home_cross_checkout_cost_case():
                 label, len(spawns), listed, "any" if want_all is None else want_all, want_list))
     if problems:
         return False, "; ".join(problems)
-    return True, ("Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write or a cd into a "
-                  "separate clone spawns one list, and a read of one spawns none")
+    return True, ("Read, Grep, quiet shell, own-checkout git verbs and no-repo writes spawn no worktree list; "
+                  "a write, a cd or a git -C into a separate clone spawns one list, and a read of one spawns none")
 
 
 def worktree_home_cross_checkout_override_case():

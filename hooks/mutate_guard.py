@@ -1371,6 +1371,10 @@ MUTATIONS = [
      "        if common and _separate_clone(own, [top], common):",
      "        if False and _separate_clone(own, [top], common):",
      "guard", "a cwd stranded in a separate clone refuses a relative Write"),
+    ("other-checkout: a git verb in a shell call is not read, so a git -C commit into a separate clone passes",
+     '    return "git" in command and any(',
+     '    return False and "git" in command and any(',
+     "guard", "a git -C commit into a separate clone of the same repo is refused"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
