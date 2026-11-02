@@ -2024,10 +2024,36 @@ class Restates(unittest.TestCase):
     def test_a_short_phrase_the_records_also_use_passes(self):
         self.assert_passes(self.child("- Lane note: %s. This repo runs its own check on drafts only." % COMMON))
 
-    def test_a_quoted_record_name_and_a_quoted_owner_quote_pass(self):
+    def test_a_short_quoted_owner_phrase_passes(self):
+        # Two phrases under 12 shared words: the records' own phrase, and eleven words of a record line.
+        for phrase in (COMMON, " ".join(plain_tokens(grant_line())[:11])):
+            with self.subTest(phrase=phrase):
+                unit = '- Owner words: "%s". This repo runs its own check on drafts only.' % phrase
+                self.assert_passes(self.child(unit))
+
+    def test_a_quoted_record_name_passes(self):
+        self.assert_passes(self.child('- The "%s" record names the grant, and this repo keeps its own check.' % GRANT))
+
+    # Ruling 2026-11-02 11:55 CST (owner ruling fb-1041-2): a copy inside double quotes is still a copy.
+    def test_a_quoted_owner_quote_beside_a_quoted_record_name_is_refused(self):
         unit = ('- The "%s" record names the grant, and this repo keeps its own check. Owner words: "%s"'
                 % (GRANT, grant_quote()))
-        self.assert_passes(self.child(unit))
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+
+    def test_a_copy_in_straight_double_quotes_is_refused(self):
+        self.assert_refused(self.child('- "' + grant_line() + '"'), "CLAUDE.md:1")
+
+    def test_a_copy_in_curly_double_quotes_is_refused(self):
+        self.assert_refused(self.child("- “" + grant_line() + "”"), "CLAUDE.md:1")
+
+    def test_a_lone_double_quote_does_not_hide_a_copy_after_it(self):
+        # The lone quote would pair with the quote before "later" and hide the copy between them.
+        unit = '- A lone " mark comes first, then %s and the word "later" ends it.' % grant_line()
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+
+    def test_a_lone_curly_quote_does_not_hide_a_copy_after_it(self):
+        unit = "- A lone “ mark comes first, then %s and the word “later” ends it." % grant_line()
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
 
     def test_a_repo_rule_sharing_one_six_word_run_passes(self):
         unit = ("- Lane note for the team: %s stays the same, while our folder names, review tiers and draft labels "
@@ -2046,9 +2072,10 @@ class Restates(unittest.TestCase):
         repo = Repo(self).write("docs/decisions/own-rule.md", "# Own rule\n\n" + FILLER + "\n")
         self.assert_passes(repo.write("CLAUDE.md", "- " + FILLER + "\n"))
 
-    def test_a_copy_in_a_heading_kind_line_comment_quote_or_code_span_passes(self):
+    # Ruling 2026-11-02 11:55 CST (owner ruling fb-1041-2): quoted copies are refused, so no quote wrap passes.
+    def test_a_copy_in_a_heading_kind_line_comment_or_code_span_passes(self):
         line = grant_line()
-        for wrap in ("# %s", "Kind: %s", "<!-- %s -->", '"%s"', "`%s`"):
+        for wrap in ("# %s", "Kind: %s", "<!-- %s -->", "`%s`"):
             with self.subTest(wrap=wrap):
                 self.assert_passes(self.child(wrap % line))
 
@@ -2123,7 +2150,7 @@ class Restates(unittest.TestCase):
         self.assert_passes(self.agents_symlink_child("- Repo note: this repo keeps its own lane labels."))
 
     def test_a_copy_read_through_an_agents_symlink_names_claude_md(self):
-        # AGENTS.md sorts before CLAUDE.md, so the link is read first. The item still names CLAUDE.md, where the copy is.
+        # AGENTS.md is a symlink, so it is read last, after CLAUDE.md. The item still names CLAUDE.md, where the copy is.
         repo = self.agents_symlink_child("- Own rule for this repo.", "- " + grant_line())
         self.assert_refused(repo, "CLAUDE.md:3")
         self.assertNotIn("AGENTS.md", repo.run("restates")[1], "the item names the symlink AGENTS.md, not CLAUDE.md")
