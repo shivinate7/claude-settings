@@ -884,3 +884,7 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- guard-log-kolkata-needs-tzdata: the forced-zone `when` test sets TZ=Asia/Kolkata, so a machine with no tzdata falls back to UTC and the test goes red with nothing wrong. Fix: a POSIX zone string such as "IST-5:30" (lint/test_guard_log_report.py). Step: guard-log-time-offset.
+- unread-early-line-east-blind: the early +05:00 line in the unread test can fail only on a clock at or west of UTC+3; CI on UTC covers it (hooks/test_decision_watch.py, mods/decision-watch/decision-watch.test.mjs). Step: guard-log-time-offset.
+- guard-log-between-untested: `--between` in main() has no test, only window(); a `Z` bound fails before Python 3.11, so a pace read passes `+00:00` (lint/guard_log_report.py). Step: guard-log-time-offset.
+- decision-watch-long-comment: a comment line near hooks/decision_watch.py:875 runs to 154 characters. Cosmetic. Step: guard-log-time-offset.
