@@ -54,7 +54,7 @@ the desktop app has none.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
 reads the Claude Code binary at env CLAUDE_CODE_EXECPATH in-process, once per new binary (path,
-size, mtime), by anchor strings (setting keys, env names, a flag name, never minified names).
+size, mtime; one cache entry per path), by anchor strings (setting keys, env names, a flag name, never minified names).
 cc_facts() gives each fact or "unknown"; the facts are cached in <config dir>/cc-behavior.json and
 compared with hooks/cc_compaction_baseline.json. A changed fact prints one line, for the
 session to name under Input Needed. Starts no process. Spec: docs/decisions/precompact-handoff.md,
@@ -610,11 +610,12 @@ def run_nudge(payload):
 CC_BASELINE = os.path.join("hooks", "cc_compaction_baseline.json")
 CC_CACHE_NAME = "cc-behavior.json"
 CC_MAX_LINE = 240
+CC_CACHE_PATHS = 8
 CC_SETTINGS_KEYS = ("idleCompaction", "autoCompactWindow", "autoCompactEnabled",
                     "precomputeCompactionEnabled")
 CC_ENV_VARS = ("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
-CC_TAIL = (". Name this under Input Needed in your report, for claude-settings triage "
-           "(step cc-update-behavior-diff).")
+CC_TAIL = (". Name this under Input Needed in your report. Read: decision precompact-handoff, "
+           "item 11; step cc-update-behavior-diff.")
 _CC_IDENT = rb"[A-Za-z_$][\w$]*"
 _CC_NUMBER = re.compile(rb"(\d+(?:\.\d+)?|\.\d+)(?=[;,)])")
 _CC_WORD = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$")
@@ -634,17 +635,28 @@ def _cc_same(values):
     return values[0] if values and all(v == values[0] for v in values) else "unknown"
 
 
-def _cc_assigned(blob, ident):
-    """The number a minified identifier is declared with: `IDENT=<number>` ended by ; , or )."""
+_CC_DECLARED = re.compile(rb"(?:^|[^\w$.])(?:var|let|const)\s+$")
+
+
+def _cc_assigned(blob, ident, anchor):
+    """The number `ident` is declared with, `var|let|const IDENT=<number>` or `,IDENT=<number>`,
+    read from its own declaration: the nearest one before `anchor`, else the nearest after it
+    (a var can be hoisted). Minified names repeat across scopes, and a bare `IDENT=7` is an
+    assignment, not a declaration. Both are skipped. "unknown" when no declaration is found."""
     head = ident + b"="
-    found = []
+    before = after = None
     for pos in _cc_hits(blob, head):
-        if pos and (blob[pos - 1] in _CC_WORD or blob[pos - 1] == 0x2e):  # a longer name, or .NAME
-            continue
+        lead = blob[max(0, pos - 16):pos]
         m = _CC_NUMBER.match(blob, pos + len(head))
-        if m:
-            found.append(float(m.group(1)) if b"." in m.group(1) else int(m.group(1)))
-    return _cc_same(found)
+        if not m or not (lead.endswith(b",") or _CC_DECLARED.search(lead)):
+            continue
+        value = float(m.group(1)) if b"." in m.group(1) else int(m.group(1))
+        if pos < anchor:
+            before = value  # the last one seen before the anchor is the nearest
+        elif after is None:
+            after = value
+            break
+    return before if before is not None else after if after is not None else "unknown"
 
 
 def _cc_default(blob, key):
@@ -655,9 +667,10 @@ def _cc_default(blob, key):
 
 
 def _cc_ident_args(blob, head):
-    """The identifiers in `<head>IDENT)`, in file order."""
+    """(offset, identifier) for each `<head>IDENT)`, in file order."""
     pattern = re.compile(re.escape(head) + rb"(%s)\)" % _CC_IDENT)
-    return [m.group(1) for m in (pattern.match(blob, pos) for pos in _cc_hits(blob, head)) if m]
+    return [(pos, m.group(1)) for pos, m in ((pos, pattern.match(blob, pos))
+                                             for pos in _cc_hits(blob, head)) if m]
 
 
 def cc_facts(blob):
@@ -692,17 +705,18 @@ def cc_facts(blob):
             read.append(name)
     facts["env_vars"] = sorted(read) or "unknown"
     facts["summary_fraction_default"] = _cc_same(
-        _cc_assigned(blob, ident) for ident in _cc_ident_args(blob, b'"tengu_amber_rokovoko",'))
-    # Optional. output_reserve: the window loses min(max output tokens, reserve), the second
-    # argument of the Math.min that reads `.maxOutputTokens`. blocking_margin: the /context
-    # buffer is the identifier subtracted just before the "autocompact_buffer" id.
-    reserves = [_cc_assigned(blob, ident)
-                for ident in _cc_ident_args(blob, b".maxOutputTokens,")]
+        _cc_assigned(blob, ident, pos)
+        for pos, ident in _cc_ident_args(blob, b'"tengu_amber_rokovoko",'))
+    # Optional. output_reserve: the identifier that follows `.maxOutputTokens,` and ends in `)`.
+    # blocking_margin: the /context buffer is the identifier subtracted in the last `)-IDENT:void 0,`
+    # within 2500 bytes before the "autocompact_buffer" id.
+    reserves = [_cc_assigned(blob, ident, pos)
+                for pos, ident in _cc_ident_args(blob, b".maxOutputTokens,")]
     margins = []
     for pos in _cc_hits(blob, b'id:"autocompact_buffer"'):
         subtracted = re.findall(rb"\)-(%s):void 0," % _CC_IDENT, blob[max(0, pos - 2500):pos])
         if subtracted:
-            margins.append(_cc_assigned(blob, subtracted[-1]))
+            margins.append(_cc_assigned(blob, subtracted[-1], pos))
     for name, values in (("blocking_margin", margins), ("output_reserve", reserves)):
         value = _cc_same(values)
         if value != "unknown":
@@ -732,11 +746,14 @@ def _cc_line(head, changes):
 
 def cc_version_check(env=None, config=None):
     """The one line to print about the installed Claude Code, or "". It starts no process. The
-    binary at env CLAUDE_CODE_EXECPATH is read once per new binary (path, size, mtime), its
-    facts are cached in <config dir>/cc-behavior.json, and a fact that differs from CC_BASELINE
-    prints one line. A binary that can not be read prints one "unknown" line per version. With
-    neither CLAUDE_CODE_EXECPATH nor AI_AGENT set, this is no Claude Code session: "".
-    The `version` fact alone is not a change; "unknown" on one side only is."""
+    binary at env CLAUDE_CODE_EXECPATH is read once per new binary (path, size, mtime). The cache,
+    <config dir>/cc-behavior.json, holds one entry per binary path (at most CC_CACHE_PATHS), so two
+    apps with two paths do not evict each other. A fact that differs from the baseline
+    (CC_BASELINE) prints one line. A baseline that can not be read raises before anything is
+    written, so the next start reads the binary again. A binary that can not be read prints one
+    "unknown" line per version. With neither CLAUDE_CODE_EXECPATH nor AI_AGENT set, this is no
+    Claude Code session: "". The `version` fact alone is not a change; "unknown" on one side
+    only is."""
     env = os.environ if env is None else env
     config = config or config_dir()
     cache_path = os.path.join(config, CC_CACHE_NAME)
@@ -747,6 +764,7 @@ def cc_version_check(env=None, config=None):
             cache = {}
     except (OSError, ValueError):
         cache = {}
+    entries = cache.get("paths") if isinstance(cache.get("paths"), dict) else {}
 
     def save(data):
         os.makedirs(config, exist_ok=True)
@@ -763,7 +781,7 @@ def cc_version_check(env=None, config=None):
         try:
             st = os.stat(path)
             key = [path, st.st_size, st.st_mtime_ns]
-            if cache.get("key") == key:
+            if isinstance(entries.get(path), dict) and entries[path].get("key") == key:
                 return ""
             with open(path, "rb") as f:
                 blob = f.read()
@@ -772,12 +790,10 @@ def cc_version_check(env=None, config=None):
     if blob is None:
         if cache.get("unknown_for") == shown:
             return ""
-        cache["unknown_for"] = shown
-        save(cache)
+        save({"paths": entries, "unknown_for": shown})
         return ("Claude Code %s compaction facts are unknown: CLAUDE_CODE_EXECPATH %s%s" % (
             shown, "can not be read" if path else "is not set", CC_TAIL))[:CC_MAX_LINE]
     facts = cc_facts(blob)
-    save({"key": key, "version": facts["version"], "facts": facts})
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CC_BASELINE),
               encoding="utf-8") as f:
         base = json.load(f)
@@ -786,6 +802,11 @@ def cc_version_check(env=None, config=None):
         new = facts.get(name, "unknown")
         if name != "version" and old != new:
             changes.append("%s %s -> %s" % (name, _cc_show(old), _cc_show(new)))
+    entries.pop(path, None)  # a re-seen path moves to the newest place
+    entries[path] = {"key": key, "version": facts["version"], "facts": facts}
+    for old_path in list(entries)[:-CC_CACHE_PATHS]:
+        del entries[old_path]
+    save({"paths": entries})
     if not changes:
         return ""
     return _cc_line("Claude Code %s -> %s changed compaction facts: "

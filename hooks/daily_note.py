@@ -17,10 +17,10 @@ path holds from any working folder.
 There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
 A line's day is the date its timestamp is written with: guard.log holds Central wall time.
 
-Before the done-today gate, at every start, it also prints the one line of
+Before the done-today stamp check, at every start, it also prints the one line of
 precompact_handoff.cc_version_check(): the installed Claude Code changed a compaction fact the
 handoff hooks rely on (docs/decisions/precompact-handoff.md, item 11). That check reads the binary
-only when its path, size or mtime is new, so a normal start costs one stat. It prints nothing
+only when its path, size or mtime is new, so a normal start costs a cache read and one stat. It prints nothing
 when the facts match, and it starts no process.
 
 Seam: CLAUDE_DAILY_NOTE_NOW, an ISO-8601 instant with its UTC offset, in place of the clock.
