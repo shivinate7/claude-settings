@@ -848,9 +848,32 @@ OPTION_NONE_KEY = "none"
 # c188 live on the roadmap branch, so a cell like A1, a lowercase id like c188 or a key like d4 reads as a key.
 KEY_NAMED = re.compile(
     r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
+# A label that carries its own letter tag. The page shows each option by its key's letter, so a label that
+# opens "B: ..." under key a gives the owner two letter sets, and the answer "a" reads two ways (incident,
+# 2026-11-01 16:12 CST, in docs/decisions/option-keys-are-letters.md). One compiled pattern, one pass, no model
+# call. Start tags: "(X) ", "X: ", "X. ", "X) ", "X - " or "X — " with spaces, "Option X:", "Option X -".
+# End tag: "Option X". A letter that only starts a word is no tag: "A rail", "I think", "A/B", "X-ray", "B2B",
+# "A.I.", "e.g.", "Option 2". The tag letter is in a named group; the caller compares it in lowercase.
+LABEL_LETTER_TAG = re.compile(
+    r"^\s*(?:\((?P<paren>[a-z])\)\s"
+    r"|(?P<plain>[a-z])(?:[:.)]\s|\s[-–—]\s)"
+    r"|option\s+(?P<word>[a-z])\s*(?::|\s[-–—](?:\s|$)))"
+    r"|\boption\s+(?P<tail>[a-z])\s*$",
+    re.I)
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
-                      "item's text by that letter (option A, pick b), never by any other key.")
+                      "item's text by that letter (option A, pick b), never by any other key. A label or a "
+                      "mockup label carries no letter but its key: write \"a rail\", never \"B: a rail\".")
+
+
+def label_tag_letter(label) -> str:
+    """The lowercase letter a label carries as a tag, else ""."""
+    if not isinstance(label, str):
+        return ""
+    m = LABEL_LETTER_TAG.search(label)
+    if not m:
+        return ""
+    return next(g for g in m.group("paren", "plain", "word", "tail") if g).lower()
 
 
 def _letter_of(index: int) -> str:
@@ -879,7 +902,8 @@ def key_named_hit(texts) -> str:
 
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
-    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
+    position's letter, labels an option or its mockup with another letter, or names an option in its text by
+    a letter-and-digit key. A task, a note and a
     closed item pass; an update that carries no `options` has no keys to judge."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
@@ -899,6 +923,14 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
+        designs = data.get("designs") if isinstance(data.get("designs"), list) else []
+        labels = {d.get("slug"): d.get("label") for d in designs if isinstance(d, dict)}
+        for o in options:
+            tag = label_tag_letter(o.get("label"))
+            if not tag and isinstance(o.get("design"), str):
+                tag = label_tag_letter(labels.get(o["design"]))
+            if tag and tag != o["key"]:
+                return "option label that carries the letter " + tag + " under key " + o["key"]
     return key_named_hit(_item_text_fields(data))
 
 
