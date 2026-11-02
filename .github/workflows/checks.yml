@@ -132,6 +132,9 @@ jobs:
       - name: Precompact handoff fixture suite
         run: python3 hooks/test_precompact_handoff.py
 
+      - name: Claude Code compaction check fixture suite
+        run: python3 hooks/test_cc_version_check.py
+
       - name: Handoff wave-2 fixture suite
         run: python3 hooks/test_handoff_wave2.py
 
@@ -737,6 +740,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_precompact_handoff.py
 
+      - name: Claude Code compaction check fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_cc_version_check.py
+
       - name: Handoff wave-2 fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_handoff_wave2.py
@@ -1248,6 +1255,10 @@ jobs:
       - name: Precompact handoff fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_precompact_handoff.py
+
+      - name: Claude Code compaction check fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
