@@ -7473,10 +7473,9 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
            "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
 
 
-# ---- env heredoc (incident 2, 2026-11-01 23:38 CST): a coordinator wrote a brief into a file through a
-# heredoc. A body line held an interpreter word before `<<`, or a `| bash` after `<<`. The rule read the
-# whole command for those words, so it kept the body in view and refused the env forms named in the
-# text. Bash reads a body for neither a header nor a pipe. The body is data, so these cases are allowed.
+# ---- env heredoc: bash reads a heredoc body for neither a header nor a pipe, so an interpreter word
+# before `<<`, or a pipe into a shell after `<<`, on a body line does not make the body code. The env
+# forms named in such a body are text and are allowed. A body that a shell runs stays refused.
 _BRIEF_FORMS = "Refused forms, as text:\ncat " + ENV + "\nnode --env-file=" + ENV + " app.js\n"
 for _line in ("python3 - <<X", "cat <<X | bash"):
     sh("env heredoc: incident 2 brief, quoted delimiter, a body line `%s`, allowed" % _line,
