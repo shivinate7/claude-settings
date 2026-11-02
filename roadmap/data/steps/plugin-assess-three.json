@@ -1,0 +1,9 @@
+{
+ "title": "Assess three plugins: iceberg, ambition lenses and hypotize",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.21036,
+ "why": "Owner, Nov 1 21:32 CST: \"send a lane to assess whether we should add the plugin iceberg from anthropic and another called ambition lenses, and another called hypotize\".",
+ "note": "Assess only: what each plugin does, overlap with skills already in claude-settings (one home per capability), cost, and a verdict per plugin. No install. When the verdicts return, the add-or-not question goes to the owner after the question check. Lane session_013NEJL4F6AQcHRyHCWa7re4, started Nov 1 21:35 CST.",
+ "updatedAt": "2026-11-02T03:36:00Z"
+}
