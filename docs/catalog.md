@@ -51,6 +51,7 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 | `hooks/config_watch.py` | hook | PostToolUse | Bash\|PowerShell\|Write\|Edit\|MultiEdit\|NotebookEdit | - | no model | n/a | After a write or shell call, checks the agent model cap in each watched settings file. Reverts a cap change that the guard did not ask about, or a raise past its expiry time. |
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell | - | no model | n/a | After `gh pr ready <N>`, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs. |
 | `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After such a call, appends each simulator that the call took from Shutdown to Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such device. A device that fails the check is stopped and booted once more. |
+| `hooks/refusal_note.py` | hook | PermissionDenied | - | - | no model | n/a | At PermissionDenied, notes each tool the auto-mode classifier refuses, so the Stop guard can make the reply ask the owner about it. Prints nothing. |
 | `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
 
 ## Mods
