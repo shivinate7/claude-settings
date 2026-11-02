@@ -357,7 +357,8 @@ MUTATIONS = [
     ("machine-wide-kill: lsof -t no longer feeds a kill list",
      '            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:\n'
      '                return word + " " + arg',
-     '            if False:\n                return word + " " + arg', "guard", 'kill: lsof -t feeds a kill list'),
+     '            if False:\n                return word + " " + arg', "guard",
+     'kill: lsof -ti piped into xargs kill is the pid list of a kill'),
     ("machine-wide-kill: a kill of a pid this session did not start no longer denies",
      '        if pid_is_owned(abs(number) if number < -1 else number, root) is False:',
      '        if False:', "guard", 'kill: a pid this session did not start',

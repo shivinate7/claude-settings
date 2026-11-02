@@ -3148,8 +3148,14 @@ sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wid
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: killall by name", "killall node", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill: lsof -t feeds a kill list", "lsof -t -i :3000", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill: the same flag bundled", "lsof -ti :3000", "deny", "machine-wide-kill", cwd=NOGIT)
+# Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): a list
+# of pids kills nothing, so `lsof -t` alone passes. Its kill is refused where it feeds one, below.
+sh("kill: lsof -t lists the pids on a port, kills nothing", "lsof -t -i :3000", "allow", cwd=NOGIT)
+sh("kill: the same flag bundled lists the pids, kills nothing", "lsof -ti :3000", "allow", cwd=NOGIT)
+sh("kill: lsof -ti piped into xargs kill is the pid list of a kill", "lsof -ti :3000 | xargs kill",
+   "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pid list from lsof -ti substituted into kill is refused", "kill $(lsof -ti :3000)",
+   "deny", "machine-wide-kill", cwd=NOGIT)
 sh("kill: taskkill by image name", "taskkill /IM node.exe /F", "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: taskkill by image name, dash spelling", "taskkill -im node.exe", "deny",
@@ -3172,6 +3178,20 @@ sh("kill: a signal flag and a pid this session started", "kill -9 %d" % OWNED.pi
 sh("kill: a pid nothing is running under", "kill 4194303", "allow", cwd=NOGIT)
 sh("kill: a pid held in a variable cannot be read, so it passes", "kill $!", "allow", cwd=NOGIT)
 sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
+# Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): `pkill -P`
+# names the children of ONE parent pid, so a parent this session owns passes, as `kill` does.
+sh("kill: pkill -P of the shell's own pid passes", "pkill -P $$", "allow", cwd=NOGIT)
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    sh("kill: pkill -P of a parent this session started passes", "pkill -P %d" % OWNED.pid,
+       "allow", cwd=NOGIT)
+    sh("kill: pkill -P of a parent this session did not start is refused", "pkill -P %d" % FOREIGN,
+       "deny", "machine-wide-kill", cwd=NOGIT)
+    # pid 1 is init. foreign_pid_kill judges 0, 1 and -1 with no root, so it stays refused whatever ps says.
+    sh("kill: pkill -P of init is refused", "pkill -P 1", "deny", "machine-wide-kill", cwd=NOGIT)
+else:
+    skip_case("kill: pkill -P of a parent this session started passes", NO_PS)
+    skip_case("kill: pkill -P of a parent this session did not start is refused", NO_PS)
+    skip_case("kill: pkill -P of init is refused", NO_PS)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
