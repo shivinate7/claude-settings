@@ -9,8 +9,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. The load brake, not a
-  number, decides how many lanes run at once. It does not rotate (see below).
+  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
@@ -96,7 +96,9 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review record on its PR after each round (claude-settings record
-  `pr-review-record`). The batch runner finds it. A lane never rebases onto main and never merges.
+  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
 - Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
   `delete-only` change with Guard or check `no`, which reads done (claude-settings record
