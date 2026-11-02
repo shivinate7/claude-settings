@@ -68,16 +68,19 @@ Incident:
 - 2026-11-01 17:44 CST, relayed by the owner from a session in its home repo: a fix for how a screen feels
   closed on CI alone. Its record still said it waited on the owner to try it.
 
-Built against that incident. The rule applies to every repo. Landed 2026-11-01.
+Built against that incident. Landed 2026-11-01.
+
+Scope: the debt lint runs in each repo whose CI runs `lint/check_record_slugs.py`. The step row runs
+wherever the roadmap builder runs.
 
 Cost:
 
 - Step fields: no new git process, file, timer or log. The fields ride in the step JSON that the builder
   already loads.
-- Debt check: no new diff process, because the diff call it already makes switches to `--name-status`. It
-  adds one `git show origin/main:<path>` for each deleted, renamed-out or changed debt file that it must read.
-  A changed file is read only when its text lacks the `**Feel.**` line. Most of these are not feel debts.
-  It writes no file.
+- Debt check: no new diff process, because the diff call it already makes switches to `--name-status`. The
+  lint reads the origin/main text of each deleted, renamed or edited debt file: one `git show` each, usually
+  zero. It reads the HEAD text only when main's text has `**Feel.**` and no valid device-trial line. The
+  debt folder's `README.md` and `notes.md` are not debts, so the lint does not read them. It writes no file.
 
 Kind: process
 Home: skills/roadmap/build.py

@@ -114,8 +114,8 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - untouched steps and empty notes in a live phase;
 - new top steps with no "Placed ahead of" line;
 - landed feel-fix steps with no valid device trial, in the row `landed, waiting for a device trial`. A
-  feel-fix is a step whose `feel` field is set (decision `feel-fix-waits-device-check`, a feel-fix waits for
-  a device trial). Each entry is `<id> (<marks>)`, where `<marks>` is the step's pull request (`#N`), or its
+  feel-fix is a step whose `feel` is set to anything but `false` or `null` (decision
+  `feel-fix-waits-device-check`, a feel-fix waits for a device trial). Each entry is `<id> (<marks>)`, where `<marks>` is the step's pull request (`#N`), or its
   commit's short hash when no pull request is known. It reads `<id> (<marks>; device trial unreadable)` when
   `deviceCheck` is present but not valid;
 - landed steps that wait for triage to close them. A feel-fix step with a valid device trial reads
