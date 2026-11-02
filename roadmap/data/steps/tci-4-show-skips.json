@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.3375004,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 4 of 12, ranked by harm avoided.",
- "note": "Repos: claude-settings (verdict prints SKIP), then ios-adblock and banchi CI steps print a skip count. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane session_013NEJL2R872faCfW4kRfyG5.",
- "updatedAt": "2026-11-02T00:37:00Z"
+ "note": "Repos: claude-settings (verdict prints SKIP), then ios-adblock and banchi CI steps print a skip count. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane session_013NEJL2R872faCfW4kRfyG5. Per-repo half, waiting (Nov 1 19:36 CST): ios-adblock .github/workflows/ci.yml step \"Test on iOS Simulator\" (xcodebuild test) prints the XCTest skip count (\"with N tests skipped\") through claude-settings verdict or a grep step; skips come from XCTSkip in ProblemSitesTests.swift and BlockerListTests.swift. The coordinator starts its lane once the claude-settings half, PR #1006, merges.",
+ "updatedAt": "2026-11-02T01:40:00Z"
 }
