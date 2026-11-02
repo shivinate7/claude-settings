@@ -1898,22 +1898,44 @@ class CutLanes(Env):
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
         self.assert_one_lane_line(out)
 
-    def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
-        # c110: the check that guards the lane's files fails closed.
-        lane_batch(self, "lane1", "lane2")
-        feat, real = self.head("feat"), merge.sh
+    def unreadable_lane_log(self):
+        """c110: the one git log that reads the batch's merge commits fails. -> the merge's (rc, out)."""
+        real = merge.sh
         def broken(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):
                 return 128, "fatal: bad revision"
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", broken):
-            rc, out = self.go()
+            return self.go()
+
+    def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
+        # c110: the check that guards the lane's files fails closed.
+        lane_batch(self, "lane1", "lane2")
+        feat = self.head("feat")
+        rc, out = self.unreadable_lane_log()
         self.assertEqual(rc, 1, out)
         self.assertIn("--undo-check-unknown-ok", out)
         self.assertNotIn("merged as", out)
         self.assertEqual(self.claims("feat"), 0)
         self.assertEqual(self.head("feat"), feat)
         self.assertFalse(self.lock_ref())
+
+    def test_a_failed_dropped_lane_read_names_its_flag_not_the_no_override_line(self):
+        # the owner's flag lifts this stop, so the line that no override lifts is false here (plan row merge:dropped-lane-unread)
+        lane_batch(self, "lane1", "lane2")
+        rc, out = self.unreadable_lane_log()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+
+    def test_a_dropped_lane_refusal_no_flag_lifts_still_says_no_override(self):
+        # a revert that drops a lane is lifted by no flag, so the stop keeps the line (plan row merge:dropped-lane-reverted)
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertIn("No override lifts this refusal", out)
 
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
@@ -3967,6 +3989,13 @@ class GhHalf(Env):
         self.assertEqual(self.head(), before)
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
+
+    def test_a_red_head_stop_no_flag_lifts_still_says_no_override(self):
+        # no flag lifts a red head, so the stop keeps the line that says so (plan row merge:confirm-head-not-green)
+        self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("No override lifts this refusal", out)
 
     def test_head_pending_then_red_pushes_no_claim(self):
         before = self.head()
@@ -9085,6 +9114,20 @@ class RedMainBrake(Env):
         self.assertEqual(len(line), 1, out)
         self.assertIn("green", line[0])
         self.assertNotIn("refuses it", line[0])
+
+    def test_the_red_main_stop_names_its_flag_not_the_no_override_line(self):
+        # --base-red-ok lifts this stop, so the line that no override lifts is false here (plan row merge:red-base)
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        self.assertIn("--base-red-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+
+    def test_the_unread_main_stop_names_its_flag_not_the_no_override_line(self):
+        # an unread main run is lifted by the same flag, so the stop does not say no override lifts it
+        rc, out, before = self.go([], {}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused(rc, out, before)
+        self.assertIn("--base-red-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
