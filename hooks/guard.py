@@ -1563,8 +1563,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    # A path in no repository is no test of this one, as for the author above.
-    if repo_rel(target, cwd, outside=False) is None:
+    # From a call that runs in a repository, a path in no repository is no test of it, as for the author
+    # above. From a call in no repository nothing says which paths are outside, so the shape decides.
+    if (repo_rel(os.path.join(cwd or "", "x"), cwd, outside=False) is not None
+            and repo_rel(target, cwd, outside=False) is None):
         return ""
     if is_test_rel(rel):
         return target
