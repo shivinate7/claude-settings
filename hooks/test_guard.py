@@ -7182,6 +7182,9 @@ for held in (
     "cat $(printf " + ENV + ")", "(cat " + ENV + ")",
 ):
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+# The trailing paren is no part of the name, so `.env.example)` is the example file and is allowed.
+sh("env: a substitution is judged, (cat " + ENV + ".example) in a group, is allowed",
+   "(cat " + ENV + ".example)", "allow", cwd=NOGIT)
 for text in (
     "printf '" + ENV + "\\n' > .worktreeinclude",
     'gh pr create --draft --body "Adds ' + ENV + '"',
@@ -7251,6 +7254,9 @@ for text in (
     "echo " + ENV + " || echo no; echo done | cat",
 ):
     sh("env: text with no relay, " + text[:40], text, "allow", cwd=NOGIT)
+# The printf escape ends the word, so the name is the example file and the relay is allowed.
+sh("env: a relay of the text, printf '.env.example' with an escape, read back, is allowed",
+   "printf '" + ENV + ".example\\n' > f; cat f", "allow", cwd=NOGIT)
 
 # A duplicated fd on the text segment hides no pipe, and a read that comes BEFORE the write is no relay.
 for held in (
