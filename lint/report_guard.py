@@ -30,6 +30,13 @@ waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clic
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+
+The first report after a compaction also holds a plain `Recovered:` line, or `Recovered: none`,
+anywhere in the report blockquote (`compaction-carry`, item 11 of the precompact-handoff record). A
+compaction is the newest `compact_boundary` system record. The line is demanded only when no earlier
+main-session reply since that boundary holds a report, on landed turns, on unlanded turns whose reply
+has the report shape, and in the rewrite after a missing-report block. Cost: a scan of the records
+main() already loaded (the rewrite reads the transcript once, as before); no file, log or process.
 """
 import json
 import os
@@ -479,6 +486,54 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+# compaction-carry: the first report after a compaction says what the session recovered. The line is
+# plain text, never bold, and no word may end in "recovered:" ahead of it ("Unrecovered:").
+RECOVERED_RE = re.compile(r"(?<![\w*])recovered:", re.I)
+RECOVERED_REASON = (
+    "Recovered guard: this is the first report after a compaction. Under Deviations, add a plain "
+    "line `Recovered: <rulings or facts recovered from git or the page>`, or `Recovered: none`. "
+    "Plain text, not bold, inside the report blockquote."
+)
+
+
+def _reply_text(rec):
+    """The text of a main-session assistant record, else None."""
+    if rec.get("type") != "assistant" or rec.get("isSidechain"):
+        return None
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return None
+    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(parts) if parts else None
+
+
+def recovered_problem(records, text):
+    """RECOVERED_REASON when `text` is the first report after the newest compaction and holds no
+    Recovered line, else ''. The newest `compact_boundary` record anywhere in `records` marks the
+    compaction (its subtype alone is read). An earlier main-session reply after it that holds a
+    report means the line was already due then. The current reply is the last text record when it
+    equals `text`; it never counts as earlier."""
+    boundary = None
+    last_text = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            boundary = i
+        if _reply_text(rec) is not None:
+            last_text = i
+    if boundary is None:
+        return ""
+    end = len(records)
+    if last_text is not None and _reply_text(records[last_text]).strip() == (text or "").strip():
+        end = last_text
+    for rec in records[boundary + 1:end]:
+        earlier = _reply_text(rec)
+        if earlier is not None and report_shape_ok(earlier):
+            return ""
+    if RECOVERED_RE.search(block_text(text)):
+        return ""
+    return RECOVERED_REASON
+
+
 def repo_root(cwd):
     """The nearest folder at or above `cwd` that holds a git entry, else None."""
     here = os.path.realpath(cwd or os.getcwd())
@@ -567,6 +622,9 @@ def rewrite_problems(hook):
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
+        recovered = recovered_problem(records, text)
+        if recovered:
+            reasons.append(recovered)
         return reasons
     except Exception:
         return []
@@ -647,6 +705,11 @@ def main():
         except Exception:
             pass
         try:
+            if report_shape_ok(text):
+                pick.append(recovered_problem(records, text))
+        except Exception:
+            pass
+        try:
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
@@ -677,6 +740,12 @@ def main():
         departs = departs_problem(text)
         if departs:
             reasons.append(departs)
+    except Exception:
+        pass
+    try:
+        recovered = recovered_problem(records, text) if shape_ok else ""
+        if recovered:
+            reasons.append(recovered)
     except Exception:
         pass
     cite = bare_cite(text)
