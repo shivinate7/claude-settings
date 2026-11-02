@@ -325,7 +325,7 @@ item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
 turn it is filed. An answer whose lane is busy is filed at
 once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
-item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path: the note is filed at once on the step, and the item closes when the lane takes it, with no new options. A chat answer has no
+item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path. The note is filed at once on the step. The item closes when the lane takes it, with no new options. A chat answer has no
 `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
