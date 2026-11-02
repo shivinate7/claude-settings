@@ -1114,12 +1114,20 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
-REPORT_RECOVERED_NONE = "> **Done** BUILT abc123\n> **Deviations**\n> - Recovered: none\n> **Next** ship it"
-REPORT_RECOVERED_RULING = "> **Done** BUILT abc123\n> **Deviations** Recovered: P3 ruling from PR #978\n> **Next** ship it"
+
+
+def report_lines(*deviations):
+    """A report whose Deviations bullets are the given lines, for the compaction-carry cases."""
+    bullets = "".join("\n> - %s" % line for line in deviations)
+    return "> **Done** BUILT abc123\n> **Deviations**%s\n> **Next** ship it" % bullets
+
+
+REPORT_BOTH_NONE = report_lines("Recovered: none", "Handoff gave: none")
+REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR 978 (git); fact Y (page)", "Handoff gave: none")
 
 
 class CompactionCarryTests(unittest.TestCase):
-    """The first report after a compaction holds a plain `Recovered:` line (report_guard.py, Stop)."""
+    """After a compaction, each report holds a `Recovered:` line and a `Handoff gave:` line (report_guard.py, Stop)."""
 
     def setUp(self):
         self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -1147,6 +1155,14 @@ class CompactionCarryTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Recovered guard", out["reason"])
 
+    def assertBlocksNaming(self, out, *names):
+        """A block whose reason starts "Recovered guard:" and names each of `names`."""
+        self.assertIsNotNone(out, "no block; the reason should name %r" % (names,))
+        self.assertEqual(out["decision"], "block")
+        self.assertTrue(out["reason"].startswith("Recovered guard:"), out["reason"][:200])
+        for name in names:
+            self.assertIn(name, out["reason"])
+
     def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
         # Catches: a landed turn after a compaction passes with no Recovered line.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
@@ -1165,30 +1181,32 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_green_recovered_line_forms_pass(self):
         rows = [
             # Catches: the bullet line under Deviations is refused.
-            REPORT_RECOVERED_NONE,
+            REPORT_BOTH_NONE,
             # Catches: the line written inline after the Deviations label is refused.
-            "> **Done** BUILT abc123\n> **Deviations** Recovered: none\n> **Next** ship it",
+            "> **Done** BUILT abc123\n> **Deviations** Recovered: none\n> Handoff gave: none\n> **Next** ship it",
             # Catches: an upper-case label is refused (the label is any case).
-            "> **Done** BUILT abc123\n> **Deviations** RECOVERED: none\n> **Next** ship it",
+            "> **Done** BUILT abc123\n> **Deviations** RECOVERED: none\n> Handoff gave: none\n> **Next** ship it",
             # Catches: the line after a semicolon in Next is refused.
-            "> **Done** BUILT abc123\n> **Next** ship it; Recovered: none",
-            # Catches: a ruling named in the line is refused.
-            REPORT_RECOVERED_RULING,
-            # Catches: a bold bullet line is refused. Bold passes, as it does at line start (round 2).
-            "> **Done** BUILT abc123\n> **Deviations**\n> - **Recovered:** none\n> **Next** ship it",
+            "> **Done** BUILT abc123\n> **Deviations** Handoff gave: none\n> **Next** ship it; Recovered: none",
+            # Catches: a ruling with a source named in the line is refused.
+            report_lines("Recovered: P3 ruling from PR #978 (git)", "Handoff gave: none"),
+            # Catches: a bold bullet line is refused. Bold passes, as it does at line start.
+            "> **Done** BUILT abc123\n> **Deviations**\n> - **Recovered:** none\n> - Handoff gave: none\n> **Next** ship it",
         ]
         for reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
 
-    def test_cc_green_earlier_report_with_the_line_satisfies_the_demand(self):
-        # Catches: a Recovered line given in an earlier report since the boundary still demands it again.
-        records = [human("do the task"), compact_boundary(), compact_summary(),
-                   assistant_text(REPORT_RECOVERED_NONE),
-                   human("next task"),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_NO_LINE)]
-        self.assertIsNone(self.stop(records))
+    def test_cc_green_earlier_report_with_both_lines_satisfies_the_demand(self):
+        # Catches: lines given earlier since the boundary still demand them again, in a report or in prose.
+        for earlier in (REPORT_BOTH_NONE, "Recovered: none\nHandoff gave: none"):
+            with self.subTest(earlier=earlier):
+                records = [human("do the task"), compact_boundary(), compact_summary(),
+                           assistant_text(earlier),
+                           human("next task"),
+                           tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                           assistant_text(REPORT_NO_LINE)]
+                self.assertIsNone(self.stop(records))
 
     def test_cc_red_earlier_report_without_the_line_does_not_satisfy(self):
         # Catches: an earlier report with no Recovered line since the boundary satisfies the demand.
@@ -1211,7 +1229,7 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_green_bold_recovered_line_keeps_the_report_shape(self):
         # Catches: "**Recovered:**" read as an unknown report label fails the shape and sends the
         # missing-report block. Like "Departs from", it is not a report label.
-        reply = "> **Done** BUILT abc123\n> **Deviations** none\n> **Recovered:** none\n> **Next** ship it"
+        reply = "> **Done** BUILT abc123\n> **Deviations** none\n> **Recovered:** none\n> Handoff gave: none\n> **Next** ship it"
         self.assertIsNone(self.stop(self.compacted_turn(reply)))
 
     def test_cc_green_rewrite_without_report_shape_has_no_demand(self):
@@ -1227,7 +1245,7 @@ class CompactionCarryTests(unittest.TestCase):
         records = [human("do the task"), compact_boundary(), compact_summary(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                    assistant_text("All done."),
-                   assistant_text("Recovered: none"),
+                   assistant_text("Recovered: none\nHandoff gave: none"),
                    human("next task"),
                    tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
                    assistant_text(REPORT_NO_LINE)]
@@ -1276,7 +1294,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the oldest boundary is used, so its satisfied first report hides the newer boundary.
         records = [human("do the task"), compact_boundary(), compact_summary(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(REPORT_RECOVERED_NONE),
+                   assistant_text(REPORT_BOTH_NONE),
                    human("next task"), compact_boundary(), compact_summary(),
                    tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
                    assistant_text(REPORT_NO_LINE)]
@@ -1305,6 +1323,87 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: a Recovered correction leaves a marker, so its rewrite is checked again and loops.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
         self.assertIsNone(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
+
+    def test_cc_red_handoff_gave_missing_blocks(self):
+        # Catches: a Recovered line with no Handoff gave line passes.
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
+
+    def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
+        # Catches: a Handoff gave line with no Recovered line passes.
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
+
+    def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
+        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
+        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
+        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+
+    def test_cc_green_both_lines_with_sources_pass(self):
+        rows = [
+            # Catches: a sourced Recovered line with a Handoff gave line is refused.
+            REPORT_BOTH_SOURCED,
+            # Catches: the source words are read without regard to case.
+            report_lines("Recovered: fact Z (GIT); fact W (Digest)", "Handoff gave: none"),
+            # Catches: a Handoff gave item is judged for a source. Only the Recovered items need one.
+            report_lines("Recovered: none", "Handoff gave: ruling Q from PR 12"),
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_red_recovered_item_without_a_source_blocks(self):
+        # Catches: a Recovered item that names no git, page or digest source passes.
+        rows = [
+            (report_lines("Recovered: ruling X", "Handoff gave: none"), "ruling X"),
+            (report_lines("Recovered: rule A (git); fact B", "Handoff gave: none"), "fact B"),
+            (report_lines("Recovered: a (git); b", "Handoff gave: none"), None),
+        ]
+        for reply, name in rows:
+            with self.subTest(reply=reply):
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
+
+    def test_cc_red_source_word_must_match_a_whole_word(self):
+        # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
+        for item in ("fact Z (gitlab)", "fact Z (pages)"):
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), item)
+
+    def test_cc_green_bold_handoff_line_keeps_the_report_shape(self):
+        # Catches: "**Handoff gave:**" read as an unknown report label fails the shape.
+        reply = "> **Done** BUILT abc123\n> **Deviations** Recovered: none\n> **Handoff gave:** none\n> **Next** ship it"
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_no_boundary_no_demand_for_either_line(self):
+        # Catches: either line, or its sources, demanded on a turn that never compacted.
+        records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                   tool_result_msg(), assistant_text(report_lines("Recovered: ruling X"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_earlier_recovered_line_and_current_handoff_line_pass(self):
+        # Catches: a Handoff gave line in the current report is refused when an earlier report holds the Recovered line.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(report_lines("Handoff gave: none"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_earlier_satisfying_line_is_not_judged_again(self):
+        # Catches: an earlier report that already satisfied the demand is judged again for its sources.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: ruling X", "Handoff gave: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_rewrite_with_recovered_but_no_handoff_blocks(self):
+        # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
+        first = self.stop(self.compacted_turn("All done."))
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("Send the report now", first["reason"])
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
+                                "Handoff gave")
 
 
 class CompactionCarryCostTests(unittest.TestCase):
@@ -1356,6 +1455,14 @@ class CompactionCarryCostTests(unittest.TestCase):
         self.assertIsNotNone(out, "no missing-report block")
         self.assertIn("Send the report now", out["reason"])
         self.assertEqual([os.path.basename(path) for path in new], [self.sid + ".report-block"])
+
+    def test_cc_cost_both_lines_pass_starts_no_process_and_writes_no_file(self):
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_BOTH_SOURCED)]
+        out, new = self.run_hook(records)
+        self.assertIsNone(out, "a block on a report that carries both lines: %r" % out)
+        self.assertEqual(new, [], "the check wrote files: %r" % new)
 
 
 class PickGuardTests(unittest.TestCase):
