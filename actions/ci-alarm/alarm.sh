@@ -7,9 +7,9 @@
 # identical (one read, only when the shas differ; a missing sha on either side clears nothing); and every
 # job name of R that has an entry neither success nor skipped is a job of N, exact match, each of its
 # entries success. A job of R that passed or was skipped needs no entry in N. An R with no red job (no
-# jobs, all passed, cancelled or skipped only) is never cleared this way. The jobs of R and N are read
-# only for a failed group that has such an N (one read each); a failed jobs or compare read is unknown.
-# The same rule as Host.base_state. Env: BRANCH, SELF
+# jobs, all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms.
+# The jobs of R and N are read only for a failed group that has such an N (one read each); a failed jobs
+# or compare read is unknown. The same failed-run rule as Host.base_state. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
 set -o pipefail

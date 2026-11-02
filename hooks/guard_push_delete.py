@@ -121,14 +121,9 @@ def push_text(segment: str) -> str:
     return PUSH_QUOTED.sub(" ", segment)
 
 
-def push_verdict(args, cwd: str, overrides=None) -> str:
-    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
-
-    Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
-    resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
-    by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
-    else 'deny'. A deletion off the default branch is ''.
-    """
+def _push_parse(args):
+    """The one reader of `git push` arguments: (force, mirror, every, includes, unpinned, leased,
+    delete, remote, refspecs). The remote is '' when none is named."""
     force = mirror = every = includes = unpinned = leased = delete = False
     remote = ""
     plain = []
@@ -175,6 +170,38 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
             plain.append(arg)
     if not remote and plain:
         remote, plain = plain[0], plain[1:]
+    return force, mirror, every, includes, unpinned, leased, delete, remote, plain
+
+
+def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
+    """The branch one refspec writes: `HEAD` and a bare push read the checkout's current branch.
+    None when that cannot be read."""
+    source, colon, target = spec.lstrip("+").partition(":")
+    target = target if colon else source
+    if bare:
+        return _push_bare_destination(cwd, overrides)
+    if target in ("HEAD", "@"):
+        return _push_current_branch(cwd)
+    return target
+
+
+def push_destinations(args, cwd: str, overrides=None):
+    """The branch names a `git push` with these arguments writes, `refs/heads/` cut off, a deletion
+    included. None stands for a destination it cannot resolve."""
+    plain = _push_parse(args)[-1]
+    found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
+    return [t.removeprefix("refs/heads/") if t else t for t in found]
+
+
+def push_verdict(args, cwd: str, overrides=None) -> str:
+    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+
+    Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
+    resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
+    by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
+    else 'deny'. A deletion off the default branch is ''.
+    """
+    force, mirror, every, includes, unpinned, leased, delete, remote, plain = _push_parse(args)
     plus = any(spec.startswith("+") for spec in plain)
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):
@@ -185,12 +212,7 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     defaults = _push_default_branches(cwd, remote or "origin")
     reaches = mirror or every or defaults is None
     for spec in plain or [""]:
-        source, colon, target = spec.lstrip("+").partition(":")
-        target = target if colon else source
-        if not plain:
-            target = _push_bare_destination(cwd, overrides)
-        elif target in ("HEAD", "@"):
-            target = _push_current_branch(cwd)
+        target = _push_dest(spec, not plain, cwd, overrides)
         if target is None or "*" in target:
             reaches = True
         elif target.removeprefix("refs/heads/") in (defaults or ()):
