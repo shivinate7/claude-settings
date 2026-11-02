@@ -202,6 +202,7 @@ gives no page URL: no item exists yet.
 - A lane has no chat with the owner. Its question goes in its report.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
+- The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo").
 
 ## Keep the page on main's code
 
@@ -215,22 +216,119 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`.
-3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
+   republish, so the copy holds the page as it was.
+4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
    `<out>` first and republish once ("Add a design").
-4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
+5. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.
 
 The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
-repo's waiting page from a file behind main is refused, and its reason repeats steps 1 to 3. An allowed
+repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
 one short read-only git process, with no fetch. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
+
+## Keep a copy in the repo
+
+A page that is lost or moved to another org takes its items with it. Once, 80 items were rebuilt from old
+transcripts because no repo held them. So the writer keeps a copy of the page's data in the repo (decision
+`waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
+request. The record branch (`roadmap` by default, `layout.py` `record_branch()`) takes a direct push.
+
+The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
+never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
+
+1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
+   Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
+   and use that path inside the worktree.
+2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
+   `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
+   Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
+   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
+   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
+   is an empty folder with that marker. Make the folder by hand if the tool wrote none.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
+   `<file>` is the page that "Keep the page on main's code" step 1 already read.
+   Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
+   collection is `unknown`.
+4. Read the verdict line.
+   - `same`: stop. Commit nothing.
+   - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
+     commit and push the record branch. The commit message names the count.
+   - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
+     the kind, never the value. Fix the item on the page first, then run the steps again.
+   - `unknown`: nothing was written. Say the line in the reply. A missing collection folder or marker, an
+     emptied collection and a crash (exit 3) are the usual causes.
+
+The copy holds one JSON file per doc, `<collection>/<doc id>.json`, and `page/designData.json`. The mockups live
+in the page's `designData` block, not in the database.
+The scan reads shapes: tokens, keys, cookie and auth headers, passwords, URL query secrets, email addresses and
+phone numbers. A personal fact in plain words, such as an employer or a city, passes. Do not write one in an item.
+
+Cost: one list call per page of each collection, one python process, and one commit when something changed. No
+timer, no watcher.
+
+## Register and cite an artifact
+
+Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
+(`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
+`account`. A role other than `waiting-page` also has `collections`, the collections to export. `id` is a slug of
+32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
+the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
+folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
+has that role.
+
+A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and
+the registry then needs one edit. `python3 lint/check_artifact_cites.py` refuses a bare link and an unregistered id
+in decisions and debts. A brief or a handoff is a working file, and the check does not read it. The roadmap steps
+of a repo may still hold links. List them for triage to move with `python3 ~/.claude/lint/check_artifact_cites.py --root <repo root> --steps list`.
+
+## Before you switch Claude accounts
+
+Run this once before the account, the org or the machine changes. It copies every registered artifact, not only
+the waiting page. A page that moves loses its read access, and the repo then holds its last copy.
+
+1. Check out the record branch in its own worktree, as "Keep a copy in the repo" step 1 says.
+2. Make one new folder. For each entry of the registry, make `<folder>/<id>/`. In it, run `ArtifactData list` for
+   each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
+   `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
+   stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
+   `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
+   `<folder>/<id>/page.html`.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
+   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export.
+4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
+   branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
+   the reply, and fix the cause first.
+
+Cost: one list call per page of each collection of each entry, one python process, and one commit when something
+changed. No timer, no watcher.
+
+## Rebuild a page from the repo
+
+Use this when the page is gone, or moved to an org this account cannot read. It needs the repo only, never the
+live page.
+
+1. Make a new page ("Make a repo's page"), and note its URL. The new page has an empty database.
+2. Check out the record branch in its own worktree and name the copy folder in it, as "Keep a copy in the repo"
+   step 1 says.
+3. Make one new empty folder. Run
+   `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
+   It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop and say so.
+4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
+5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
+   the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
+   it to the new URL, as "Keep the page on main's code" step 4 says.
+6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
+7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
+   in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
 
 ## Add an item
 
@@ -420,7 +518,7 @@ key. It never reuses main's.
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
    `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
-   `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
+   `<title>` to "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST). Change nothing else. A republish keeps the title, and renames an old "Queue" or "Roadmap" title to "<repo> Cockpit" (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
 3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from

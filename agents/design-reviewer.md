@@ -49,5 +49,4 @@ name the parts that decide it. Build no verdict table of sizes and themes for it
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, the first line is PASS, FAIL, or PARTIAL. Then give the verdict table, then each finding with
 the screen, size, theme, what is wrong and what proves it. Under Input Needed, list each clash with
-three parts: what the finding wants, what the repo has, and your pick. Write in Simplified Technical
-English. Report in under 25 lines unless the brief names another cap.
+three parts: what the finding wants, what the repo has, and your pick. Write plainly (rule output-write-in-ste). Report in under 25 lines unless the brief names another cap.
