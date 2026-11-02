@@ -2163,7 +2163,7 @@ def spawn_inputs(tool: str, tool_input):
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
     (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
-    BRIEF_LITERAL_REMEDY (owner ruling, item 127 pick a, Nov 1 17:25 CST; coordinator ruling, Nov 1 22:54 CST). A
+    BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
     call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
     guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
