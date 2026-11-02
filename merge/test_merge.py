@@ -1906,22 +1906,44 @@ class CutLanes(Env):
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
         self.assert_one_lane_line(out)
 
-    def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
-        # c110: the check that guards the lane's files fails closed.
-        lane_batch(self, "lane1", "lane2")
-        feat, real = self.head("feat"), merge.sh
+    def unreadable_lane_log(self):
+        """c110: the one git log that reads the batch's merge commits fails. -> the merge's (rc, out)."""
+        real = merge.sh
         def broken(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):
                 return 128, "fatal: bad revision"
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", broken):
-            rc, out = self.go()
+            return self.go()
+
+    def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
+        # c110: the check that guards the lane's files fails closed.
+        lane_batch(self, "lane1", "lane2")
+        feat = self.head("feat")
+        rc, out = self.unreadable_lane_log()
         self.assertEqual(rc, 1, out)
         self.assertIn("--undo-check-unknown-ok", out)
         self.assertNotIn("merged as", out)
         self.assertEqual(self.claims("feat"), 0)
         self.assertEqual(self.head("feat"), feat)
         self.assertFalse(self.lock_ref())
+
+    def test_a_failed_dropped_lane_read_names_its_flag_not_the_no_override_line(self):
+        # the owner's flag lifts this stop, so the line that no override lifts is false here (plan row merge:dropped-lane-unread)
+        lane_batch(self, "lane1", "lane2")
+        rc, out = self.unreadable_lane_log()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+
+    def test_a_dropped_lane_refusal_no_flag_lifts_still_says_no_override(self):
+        # a revert that drops a lane is lifted by no flag, so the stop keeps the line (plan row merge:dropped-lane-reverted)
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertIn("No override lifts this refusal", out)
 
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
@@ -4003,6 +4025,14 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
 
+    def test_a_red_head_stop_no_flag_lifts_still_says_no_override(self):
+        # no flag lifts a red head, so the stop keeps the line that says so (plan row merge:confirm-head-not-green)
+        self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the head's own checks are not green, so nothing was claimed or pushed", out)
+        self.assertIn("No override lifts this refusal", out)
+
     def test_head_pending_then_red_pushes_no_claim(self):
         before = self.head()
         self.set(checks_seq=[[("checks", "pending", "")], [("checks", "fail", "")]])
@@ -5633,6 +5663,18 @@ class UnknownOverride(Env):
             raise undo.Unknown("git is older than 2.38")
         return unittest.mock.patch.object(undo, "check", boom)
 
+    def unreadable_after_the_claim(self):
+        """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        real, calls = undo.check, []
+        def first_then_boom(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                return real(*a, **k)
+            raise undo.Unknown("git is older than 2.38")
+        return unittest.mock.patch.object(undo, "check", first_then_boom)
+
     def test_unknown_refuses_and_names_the_flag(self):
         before = self.refs()
         with self.unreadable():
@@ -5658,6 +5700,28 @@ class UnknownOverride(Env):
         rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "just let it through")
         self.assertEqual(rc, 1)
         self.assertIn("silently undoes", out)
+
+    def test_the_pre_claim_unknown_stop_names_the_flag_not_the_no_override_line(self):
+        # the owner's flag lifts this stop, so the line that no override lifts is false here (before any claim is pushed)
+        before = self.refs()
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("silent-undo check could not read the history", out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+        self.assertEqual(self.refs(), before)
+
+    def test_the_post_claim_unknown_stop_names_the_flag_not_the_no_override_line(self):
+        # the read after the claim push runs through prove() and fail(); the same flag lifts it, so the no-override line is false
+        with self.unreadable_after_the_claim():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("pushed to feat", out, "the claim was pushed first, so this stop is the one after the claim")
+        self.assertIn("silent-undo check could not read the history", out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+        self.assertFalse(self.lock_ref())
 
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
@@ -9446,6 +9510,37 @@ class RedMainBrake(Env):
         self.assertIn("red", line[0])
         self.assertIn("run 901", line[0])
         self.assertIn("--confirm refuses it", line[0])
+
+    def test_the_red_main_preview_line_names_the_flag_that_lifts_it(self):
+        # --base-red-ok lifts the red-main stop, so the preview line must say the stop is lifted by it (plan row merge:preview-base-run)
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unless --base-red-ok", line[0])
+
+    def test_the_green_main_preview_line_has_no_refusal_clause(self):
+        # a green base refuses nothing, so its line names no refusal and no flag
+        rc, out, _ = self.go([main_run(908, "success")], {}, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("green", line[0])
+        self.assertNotIn("refuses it", line[0])
+
+    def test_the_red_main_stop_names_its_flag_not_the_no_override_line(self):
+        # --base-red-ok lifts this stop, so the line that no override lifts is false here (plan row merge:red-base)
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        self.assertIn("--base-red-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+
+    def test_the_unread_main_stop_names_its_flag_not_the_no_override_line(self):
+        # an unread main run is lifted by the same flag, so the stop does not say no override lifts it
+        rc, out, before = self.go([], {}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused(rc, out, before)
+        self.assertIn("--base-red-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
