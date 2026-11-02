@@ -22,12 +22,12 @@ not a plain git branch name stops the build.
 
 `--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
-`ROADMAP_DATA` is null and the Status tab says the plan is unknown. Without `--block` the builder writes
+`ROADMAP_DATA` is null and the Status tab says the plan is unknown. Without `--block` the roadmap build script writes
 the whole old read-only page. Nothing publishes it.
 
-- **On the record branch.** The checkout stands on the record branch: the builder reads the working
+- **On the record branch.** The checkout stands on the record branch: the roadmap build script reads the working
   tree. Build after each edit to `roadmap/data/`.
-- **Anywhere else.** The builder reads the record branch through the repo history, `origin/<branch>`
+- **Anywhere else.** The roadmap build script reads the record branch through the repo history, `origin/<branch>`
   first. Fetch the branch first, because the roadmap block is as old as the fetch.
 - `--block` needs `--out`, on either path.
 
@@ -69,7 +69,7 @@ home yet, and the session board's store lives on one machine, so both read "unkn
 
 The Status tab's Live work line shows each open project thread's state (asking in its chat, working,
 ready for review, failed, stopped) and the open pull requests, folded to one line of counts. Its body
-lists the threads, the pull requests and the branches. The builder cannot reach project threads or
+lists the threads, the pull requests and the branches. The roadmap build script cannot reach project threads or
 GitHub, so the publisher reads them just before the build and passes one file:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
@@ -101,15 +101,15 @@ GitHub, so the publisher reads them just before the build and passes one file:
 ## A merge marks a step
 
 A lane commit names its step in a `Step: <id>` trailer, in the last paragraph of the message, beside
-the other trailers. Several ids may share one line, split by commas. At build, the builder reads
-the log of `origin/main` (`--main-branch` names another) and marks each named open step "Landed in
+the other trailers. Several ids may share one line, split by commas. At build, the roadmap build script reads
+the log of `origin/main` (`--main-branch` names another). It marks each named open step "Landed in
 #N", where #N is the pull request whose merge put the commit on main. It never closes a step: triage
 closes it, from the upkeep list. A trailer that names no step is listed there too.
 
 ## Refusals
 
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
-  conflict marker. The builder names each file and line, and writes no page. Resolve, then build again.
+  conflict marker. The roadmap build script names each file and line, and writes no page. Resolve, then build again.
 - The checkout is not on the record branch and no `--out` is given.
 
 ## The red line
@@ -124,7 +124,7 @@ exits 1. The printed line tells the two apart.
 
 ## Upkeep list
 
-After each build the builder prints the upkeep list for the triage thread. It names:
+After each build the roadmap build script prints the upkeep list for the triage thread. It names:
 
 - open-step notes that are too long;
 - untouched steps and empty notes in a live phase;
@@ -191,10 +191,10 @@ After each build the builder prints the upkeep list for the triage thread. It na
 ## Cost
 
 About six git processes and one file written per build. With `--live`, the publisher's reads add
-one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
+one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
-page) to the same publish. The builder adds no git process, file, timer or log for either row. The
+page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file the build already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub

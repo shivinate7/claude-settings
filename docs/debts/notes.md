@@ -507,7 +507,6 @@
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/ci-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
 - merge-retarget-before-merge: a base change after the last wait pass and before gh pr merge lands the merge on the new base; no retarget seen. Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none
-- ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still say "Write in Simplified Technical English". Owner's grant, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). Decision: plain-prose-lint
 - undo-rename-below-pair: check_silent_undo reads a rename below git's 50% similarity as a delete and an add, so a small file renamed and rewritten with a pin bump still reads as `hunk reversed` (lint/check_silent_undo.py renamed). Decision: silent-undo-check-design
 - undo-rename-earlier-side: the earlier commits are read --no-renames, so main renaming X to Y while a PR rewrites all of a small X reads as `Y: hunk reversed` (lint/check_silent_undo.py Commit.files). Decision: silent-undo-check-design
 - undo-rename-history-parent: history mode reads a rename between base and parent as lines that parent added. A later merge then reads as a drop. Check mode skips it through the refs filter (lint/check_silent_undo.py lost_in_parent). Decision: silent-undo-check-design
@@ -1157,3 +1156,4 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- retired-advisor-reader: the retired terminal advisor still names a log reader (hooks/reply_judge.py:31, docs/decisions/reply-judge-samples-never-refuses.md:8). The log has no live reader.
