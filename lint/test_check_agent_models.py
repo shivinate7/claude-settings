@@ -7,8 +7,10 @@ Failure classes: false deny (a listed role fails), false allow (another file pas
 collision, case or alias), unreadable frontmatter.
 One case reads the real agents/plan.md: its "Premises first" paragraph cites the premise record.
 The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
+A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 """
 import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -120,6 +122,34 @@ class LaneEffort(unittest.TestCase):
         # The check must read the record when the path is relative, as a run from the repository root gives it.
         code, out = verdict(RECORD_RELPATH, text=LANE_RECORD % "default", relative=True)
         self.assertEqual(code, 1, "a relative record path with a default lane row passes: %r" % out)
+
+
+class RoleListDrift(unittest.TestCase):
+    # The check fails when the guard's role_list_drift names drift, and passes when it names none. The check looks
+    # the function up at run time, so the patch takes effect (decision agent-model-cap, the three role lists).
+    def run_main(self, lines):
+        """Run the check on this repository with role_list_drift patched to `lines`: (code, stdout, pointers)."""
+        pointers = []
+
+        def fake(pointer_root):
+            pointers.append(pointer_root)
+            return list(lines)
+
+        out = io.StringIO()
+        with mock.patch.object(C._guard, "role_list_drift", fake, create=True), contextlib.redirect_stdout(out):
+            code = C.main([])
+        return code, out.getvalue(), pointers
+
+    def test_drift_fails_the_check_and_prints_the_line(self):
+        line = "test-author is on a sonnet row but in HAIKU_ROLES (hooks/guard.py)"
+        code, out, pointers = self.run_main([line])
+        self.assertEqual(code, 1, "a drift line from role_list_drift passes the check: %r" % out)
+        self.assertIn(line, out)
+        self.assertEqual(pointers, [C.ROOT], "the check does not call role_list_drift on this repository")
+
+    def test_no_drift_passes_the_check(self):
+        code, out, _ = self.run_main([])
+        self.assertEqual((code, out), (0, ""), "no drift from role_list_drift still fails the check: %r" % out)
 
 
 class RunFolder(unittest.TestCase):
