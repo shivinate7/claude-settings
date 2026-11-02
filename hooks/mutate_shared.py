@@ -31,7 +31,9 @@ functions, each shaped by its own file's `MUTATIONS`.
 import ast
 import glob
 import hashlib
+import json
 import os
+import queue
 import random
 import re
 import shutil
@@ -39,6 +41,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -332,26 +335,89 @@ def normalize(source: str) -> str:
     return ast.unparse(ast.parse(source))
 
 
-def ast_mutants(source: str, limit=None, seed: int = 0):
-    """Return up to `limit` [(label, mutated source)], one mutation each, repeatable for one seed.
-
-    A mutant whose text equals the normalized source is equivalent and is left out. Raises SyntaxError
-    when `source` does not parse: the caller reads that as UNKNOWN.
-    """
-    base = normalize(source)
-    found = []
-    for position in range(len(_sites(ast.parse(source)))):
-        tree = ast.parse(source)  # a fresh tree per site, so each mutant holds exactly one change
-        kind, node, index = _sites(tree)[position]
-        what = _apply(tree, kind, node, index)
-        line = getattr(node, "lineno", 0)
-        text = ast.unparse(ast.fix_missing_locations(tree))
-        if text != base:
-            found.append(("L%d %s" % (line, what), text))
+def _sample(found, limit, seed):
+    """Up to `limit` of `found`, in order, drawn the same way for every engine, so one seed keeps the
+    same mutants on a .py file and on a .ts file."""
     if limit is not None and len(found) > limit:
         keep = sorted(random.Random(seed).sample(range(len(found)), limit))
         found = [found[i] for i in keep]
     return found
+
+
+def ast_mutants(source: str, limit=None, seed: int = 0, lines=None):
+    """Return up to `limit` [(label, mutated source)], one mutation each, repeatable for one seed.
+
+    `lines`, when given, keeps only the sites whose node starts on one of those 1-based lines; the
+    sample is drawn from what is kept. A mutant whose text equals the normalized source is
+    equivalent and is left out. Raises SyntaxError when `source` does not parse: the caller reads
+    that as UNKNOWN.
+    """
+    base = normalize(source)
+    wanted = None if lines is None else set(lines)
+    found = []
+    for position, (_kind, probe, _index) in enumerate(_sites(ast.parse(source))):
+        if wanted is not None and getattr(probe, "lineno", 0) not in wanted:
+            continue  # skipped before the re-parse below: a large file with a few wanted lines costs few parses
+        tree = ast.parse(source)  # a fresh tree per site, so each mutant holds exactly one change
+        kind, node, index = _sites(tree)[position]
+        line = getattr(node, "lineno", 0)
+        what = _apply(tree, kind, node, index)
+        text = ast.unparse(ast.fix_missing_locations(tree))
+        if text != base:
+            found.append(("L%d %s" % (line, what), text))
+    return _sample(found, limit, seed)
+
+
+# The JavaScript and TypeScript engine runs in its own process, because its parser is the typescript
+# package (hooks/mutate_js.mjs). Cost: one `node` start per file mutated.
+JS_ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mutate_js.mjs")
+JS_ENGINE_TIMEOUT = 120
+
+
+def js_mutants(path: str, limit=None, seed: int = 0, lines=None):
+    """Return up to `limit` [(label, mutated source)] for one .js/.mjs/.cjs/.jsx/.ts/.mts/.cts/.tsx
+    file, sampled as `ast_mutants` samples. `lines` keeps only the sites that start on those lines.
+    Raises ValueError when the engine cannot run or the file does not parse: the caller reads that
+    as UNKNOWN, as it reads a SyntaxError from `ast_mutants`.
+    """
+    import _nowindow  # lazy: this module defines names only at import (see the docstring)
+    if lines is not None and not set(lines):
+        return []  # no line wanted: the engine would reject an empty list, and nothing could match
+    node = shutil.which("node")
+    if not node:
+        raise ValueError("node is not on PATH")
+    command = [node, JS_ENGINE, path]
+    if lines is not None:
+        command += ["--lines", ",".join(str(number) for number in sorted(set(lines)))]
+    try:
+        done = _nowindow.run(command, capture_output=True, text=True, encoding="utf-8",
+                             stdin=subprocess.DEVNULL, timeout=JS_ENGINE_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("the JS engine did not run: %s" % error)
+    if done.returncode != 0:
+        raise ValueError(done.stderr.strip() or "the JS engine exited %d" % done.returncode)
+    try:
+        found = [(item["label"], item["text"]) for item in json.loads(done.stdout)]
+    except (ValueError, KeyError, TypeError) as error:
+        raise ValueError("the JS engine printed no mutant list: %s" % error)
+    return _sample(found, limit, seed)
+
+
+def changed_lines(repo: str, base: str, head: str, path: str) -> set:
+    """The 1-based lines of `path` (repository-relative) that `head` adds or rewrites against `base`.
+    A deleted line adds none. Raises ValueError when the diff cannot be read."""
+    import _nowindow
+    done = _nowindow.run(["git", "-C", repo, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames",
+                          base, head, "--", path], capture_output=True, text=True, encoding="utf-8",
+                         stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        raise ValueError("git diff failed: %s" % done.stderr.strip())
+    lines = set()
+    for hunk in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", done.stdout, re.M):
+        first = int(hunk.group(1))
+        count = 1 if hunk.group(2) is None else int(hunk.group(2))
+        lines.update(range(first, first + count))
+    return lines
 
 
 def classify_run(code, output: str, timed_out: bool) -> str:
@@ -364,33 +430,97 @@ def classify_run(code, output: str, timed_out: bool) -> str:
     return "assert" if FAIL_LINE.search(output) else "crash"
 
 
-def run_suite_file(folder: str, rel: str, timeout: float):
-    """Run one suite as `python3 <rel>` from `folder`. Return (class, seconds). The child gets its own
-    process group, killed whole at the timeout. Output goes to a file: a grandchild that holds a pipe
-    open would make a pipe read wait for it."""
-    import _nowindow  # lazy: this module defines names only at import (see the docstring)
+_TAP_ENTRY = re.compile(r"^\s*(?:not ok|ok)\b|^\s*1\.\.\d|^\s*# Subtest:", re.M)
+_ASSERT_MARK = re.compile(r"^\s*(?:code: 'ERR_ASSERTION'|name: 'AssertionError')", re.M)
+
+
+def classify_node_tap(code, output: str, timed_out: bool) -> str:
+    """One `node --test --test-reporter=tap` run: "pass", "assert" (an assertion went red: a `not ok`
+    block has the keyed line `code: 'ERR_ASSERTION'` or `name: 'AssertionError'`), "crash" (any other
+    red: an import error, a throw, an error text that only names AssertionError) or "timeout". Only "assert" is evidence a mutant was caught. A block runs from a test line to the
+    next one, so an `ok` block that names an assertion (a test that expects one) does not count."""
+    if timed_out:
+        return "timeout"
+    if code == 0:
+        return "pass"
+    starts = [m.start() for m in _TAP_ENTRY.finditer(output)] + [len(output)]
+    for begin, end in zip(starts, starts[1:]):
+        block = output[begin:end]
+        if re.match(r"\s*not ok\b", block) and _ASSERT_MARK.search(block):
+            return "assert"
+    return "crash"
+
+
+def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=None, cwd=None):
+    """Run one suite from `folder`. Return (class, seconds). By default the suite is `python3 <rel>`
+    read by `classify_run`. A replay passes `argv` (the whole command), `classify` (a function of
+    (code, output, timed_out)) and `cwd` (a folder inside `folder`). The child gets its own process
+    group, killed whole at the timeout. Output goes to a file: a grandchild that holds a pipe open
+    would make a pipe read wait for it."""
     env = {k: v for k, v in os.environ.items() if not k.endswith("_UNDER_TEST") and k != "MUTATE_ONLY"}
+    # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    command = argv or [sys.executable, os.path.join(folder, rel)]
     started = time.time()
+    code, output, timed_out = run_in_group(command, cwd or folder, timeout, env)
+    return (classify or classify_run)(code, output, timed_out), time.time() - started
+
+
+_LIVE_GROUPS = set()  # process group ids of the children running now, so a signal can kill them
+_LIVE_LOCK = threading.Lock()
+_STOP = threading.Event()  # set by `request_stop`: no child starts after it
+
+
+def run_in_group(command, cwd: str, timeout: float, env=None):
+    """Run `command` in its own process group, killed whole at the timeout. Return (exit code, output,
+    timed_out). Output goes to a file: a grandchild that holds a pipe open would make a pipe read wait
+    for it. Raises RuntimeError once `request_stop` has been called."""
+    import _nowindow  # lazy: this module defines names only at import (see the docstring)
     timed_out = False
     with tempfile.TemporaryFile() as log:
         extra = {"start_new_session": True} if os.name == "posix" else {}
-        proc = _nowindow.Popen([sys.executable, os.path.join(folder, rel)], cwd=folder, stdout=log,
-                               stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, **extra)
+        with _LIVE_LOCK:
+            if _STOP.is_set():
+                raise RuntimeError("the replay was stopped")
+            proc = _nowindow.Popen(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL, env=env, **extra)
+            _LIVE_GROUPS.add(proc.pid)
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                if os.name == "posix":
-                    os.killpg(proc.pid, signal.SIGKILL)
-                else:
-                    proc.kill()
-            except OSError:
-                proc.kill()
+            _kill_group(proc.pid, proc)
             proc.wait()
+        finally:
+            with _LIVE_LOCK:
+                _LIVE_GROUPS.discard(proc.pid)
         log.seek(0)
         output = log.read().decode("utf-8", "replace")
-    return classify_run(proc.returncode, output, timed_out), time.time() - started
+    return proc.returncode, output, timed_out
+
+
+def _kill_group(pid: int, proc=None) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(pid, signal.SIGKILL)
+        elif proc is not None:
+            proc.kill()
+    except OSError:
+        if proc is not None:
+            proc.kill()
+
+
+def request_stop() -> None:
+    """Stop every child now and start no other: the handler of SIGTERM and SIGINT calls this, so the
+    `finally` blocks of a replay can remove its checkouts."""
+    with _LIVE_LOCK:
+        _STOP.set()
+        for pid in list(_LIVE_GROUPS):
+            _kill_group(pid)
+
+
+def clear_stop() -> None:
+    _STOP.clear()
 
 
 def _copy_scaffold(root: str, dest: str, repo_init: bool) -> None:
@@ -510,4 +640,416 @@ def format_report(rows, gold=None) -> str:
             lines.append("  unusable for %s: %s (%s)" % (row["file"], rel, why))
     if gold is not None:
         lines.append("gold standard: %s" % gold)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------------------------------
+# REPLAY MODE (step tci-6). The question: would the suites a past pull request changed have caught a
+# wrong line in the product code that same pull request added? `python3 hooks/mutate_guard.py --replay
+# <repo> --profile <name>` walks the last merged pull requests of a repository, makes mechanical
+# mutants of the lines each one added (the engines above), and runs the suites it changed against each.
+# Read on demand; no timer, no long-lived process, not a required CI job. The two counts of report
+# mode hold here: a crash is not a kill, and a suite red on the clean source is not a killer.
+# Cost per pull request: one control run per suite, one run per suite per mutant, one `git worktree`
+# per job, one install per lockfile hash. Written: a temp folder of checkouts and one deps folder
+# per lockfile hash, all removed at the end. The target repository is left as found.
+#
+# A PROFILE says how one repository is read: {"code": regex of product files, "code_not": regex of
+# files to leave out (optional), "tests": regex of suite files, "argv": the command with {suite} (the
+# suite path from `cwd`) and {deps} (the install folder), "classify": a CLASSIFIERS name, "cwd": the folder
+# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash with the
+# lockfile beside it in the deps folder (None for no install), "lockfile": its path in the repository,
+# "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
+# "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
+# each part and keeps the rows that hold something.
+
+INSTALL_TIMEOUT = 900
+_MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_PW_FAILURE = re.compile(r"^\s*\d+\) .* ─{3,}\s*$", re.M)
+_PW_FRAME = re.compile(r"^\s*(?:>\s*)?\d+ \|", re.M)
+_PW_ASSERT = re.compile(r"\bexpect\((?:received|locator|page|response)\)|AssertionError|ERR_ASSERTION")
+
+
+def classify_playwright(code, output: str, timed_out: bool) -> str:
+    """One `playwright test` run: "pass", "assert" (the error text of a failure block, before its source
+    frame, holds an `expect(received)` matcher line or an AssertionError), "crash" (any other red: a load error, a throw, no test found) or
+    "timeout". Only "assert" is evidence a mutant was caught."""
+    if timed_out:
+        return "timeout"
+    if code == 0:
+        return "pass"
+    text = _ANSI.sub("", output)
+    starts = [m.start() for m in _PW_FAILURE.finditer(text)] + [len(text)]
+    for begin, end in zip(starts, starts[1:]):
+        block = text[begin:end]
+        frame = _PW_FRAME.search(block)
+        # The error text ends where the source frame starts. The frame quotes the line that stood when
+        # the error was thrown, so an `expect(page)` in it is no evidence of an assertion.
+        if _PW_ASSERT.search(block[:frame.start()] if frame else block):
+            return "assert"
+    return "crash"
+
+
+CLASSIFIERS = {"fail_line": classify_run, "node_tap": classify_node_tap, "playwright": classify_playwright}
+
+
+def _git(repo: str, *args, binary: bool = False, stdin=None):
+    """One git read or write on `repo`. Returns stdout. Raises ValueError on a nonzero exit."""
+    import _nowindow
+    done = _nowindow.run(["git", "-C", repo] + list(args), capture_output=True, input=stdin,
+                         stdin=None if stdin is not None else subprocess.DEVNULL)
+    if done.returncode != 0:
+        raise ValueError("git %s failed: %s" % (args[0], done.stderr.decode("utf-8", "replace").strip()))
+    return done.stdout if binary else done.stdout.decode("utf-8", "replace")
+
+
+def _parse_merge(subject: str, body: str):
+    """(number, title) of a GitHub pull request merge commit, or None for any other commit. The title is
+    the first line of the body, as GitHub writes it."""
+    found = _MERGE_SUBJECT.match(subject)
+    if not found:
+        return None
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    return int(found.group(1)), (lines[0] if lines else "")
+
+
+def merged_prs(repo: str, branch: str, count: int):
+    """The newest `count` pull requests merged on `branch`'s first-parent line, newest first, as
+    [(merge sha, number, title)]. A merge that is not a pull request merge, and a pull request merge
+    inside a branch (a second parent), is left out."""
+    text = _git(repo, "log", "--first-parent", "--merges", "--format=%H%x1f%s%x1f%b%x1e", branch)
+    found = []
+    for record in text.split("\x1e"):
+        fields = record.strip("\n").split("\x1f")
+        if len(fields) != 3:
+            continue
+        parsed = _parse_merge(fields[1], fields[2])
+        if parsed:
+            found.append((fields[0], parsed[0], parsed[1]))
+    return found[:count]
+
+
+def _pr_of(repo: str, sha: str):
+    """(number, title) of the pull request that `sha` merged. 0 and the subject for any other commit."""
+    text = _git(repo, "log", "-1", "--format=%s%x1f%b", sha)
+    subject, _, body = text.partition("\x1f")
+    return _parse_merge(subject, body) or (0, subject.strip())
+
+
+def _changed_files(repo: str, base: str, head: str):
+    """{path: status letter} for each file `head` changes against `base`. A rename reads as a delete and an add."""
+    text = _git(repo, "diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", base, head)
+    tokens = text.split("\0")
+    return {tokens[i + 1]: tokens[i][:1] for i in range(0, len(tokens) - 1, 2)}
+
+
+def _line_of(label: str) -> int:
+    found = re.match(r"L(\d+)\b", label)
+    return int(found.group(1)) if found else 0
+
+
+def _file_at(repo: str, sha: str, path: str) -> bytes:
+    return _git(repo, "show", "%s:%s" % (sha, path), binary=True)
+
+
+def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
+    """The install folder for `sha`'s lockfile: (folder or None, why it is unusable). The install runs once
+    per lockfile hash under `deps_root`, with the lockfile (and its package.json) beside it."""
+    install = profile.get("install")
+    if not install:
+        return None, ""
+    lock = profile.get("lockfile", "package-lock.json")
+    try:
+        data = _file_at(repo, sha, lock)
+    except ValueError:
+        return None, "no lockfile %s at this commit" % lock
+    folder = os.path.join(deps_root, hashlib.sha1(data).hexdigest()[:16])
+    failed, done_mark = os.path.join(folder, "FAILED"), os.path.join(folder, "DONE")
+    if os.path.exists(done_mark):
+        return folder, ""
+    if os.path.exists(failed):
+        with open(failed, encoding="utf-8") as handle:
+            return None, handle.read()
+    os.makedirs(folder, exist_ok=True)
+    _write(os.path.join(folder, os.path.basename(lock)), data.decode("utf-8", "replace"))
+    sibling = os.path.join(os.path.dirname(lock), "package.json")
+    try:
+        _write(os.path.join(folder, "package.json"), _file_at(repo, sha, sibling).decode("utf-8", "replace"))
+    except ValueError:
+        pass
+    steps = install if isinstance(install[0], (list, tuple)) else [install]
+    for step in steps:
+        argv = [part.replace("{deps}", folder) for part in step]
+        try:
+            code, output, timed_out = run_in_group(argv, folder, INSTALL_TIMEOUT)
+            if timed_out:
+                why = "install passed %d s and was killed" % INSTALL_TIMEOUT
+            else:
+                why = "" if code == 0 else "install exited %d: %s" % (code, output.strip()[-300:])
+        except OSError as error:
+            why = "install did not run: %s" % error
+        if why:
+            _write(failed, why)
+            return None, why
+    _write(done_mark, "ok")
+    return folder, ""
+
+
+def _make_checkout(repo: str, sha: str, dest: str, skip, overrides: dict, deps, profile: dict) -> None:
+    """A detached worktree of `repo` at `sha` in `dest`, without the top folders in `skip`, holding
+    `overrides` ({path: text}) and the install folder linked in beside the lockfile. The checkout is
+    written from the index, so a sparse skip changes no setting of the repository."""
+    _git(repo, "-c", "core.hooksPath=%s" % os.devnull, "worktree", "add", "-q", "--detach", "--no-checkout",
+         dest, sha)
+    _git(dest, "read-tree", sha)
+    names = _git(dest, "ls-files", "-z").split("\0")
+    keep = [name for name in names if name and name.split("/")[0] not in skip]
+    _git(dest, "checkout-index", "-z", "--stdin", stdin="\0".join(keep).encode("utf-8") + b"\0")
+    for path, text in overrides.items():
+        _write(os.path.join(dest, path), text)
+    link_name = profile.get("link", "node_modules")
+    if deps and link_name:
+        link = os.path.join(dest, os.path.dirname(profile.get("lockfile", "package-lock.json")), link_name)
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        os.symlink(os.path.join(deps, link_name), link)
+
+
+def _drop_checkout(repo: str, dest: str) -> None:
+    try:
+        _git(repo, "worktree", "remove", "--force", dest)
+    except ValueError:
+        shutil.rmtree(dest, ignore_errors=True)
+        try:
+            _git(repo, "worktree", "prune")
+        except ValueError:
+            pass
+
+
+def _replay_row(repo: str, sha: str) -> dict:
+    number, title = _pr_of(repo, sha)
+    return {"pr": number, "sha": sha, "title": title, "status": "UNKNOWN", "reason": "", "made": 0,
+            "killed": 0, "crashed": 0, "survived": 0, "survivors": [], "unusable": {}, "skipped": {}}
+
+
+def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
+              jobs=None, deps=None) -> dict:
+    """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
+    lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
+    file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
+    survived, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why}.
+    `deps` is a folder shared by many calls, for the installs; None makes one and removes it.
+    A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer."""
+    row = _replay_row(repo, sha)
+    code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
+    not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
+    base = "%s^1" % sha
+    try:
+        files = _changed_files(repo, base, sha)
+    except ValueError as error:
+        row["reason"] = "cannot read the diff: %s" % error
+        return row
+    code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
+    suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
+    if not code:
+        row["status"] = "NO_PRODUCT"
+        return row
+    if not suites:
+        row["status"] = "NO_TESTS"
+        return row
+
+    own = tempfile.mkdtemp(prefix="mutate_replay_")
+    try:
+        return _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout,
+                          jobs or job_count(), deps or os.path.join(own, "deps"))
+    finally:
+        shutil.rmtree(own, ignore_errors=True)
+
+
+def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps):
+    """The body of `replay_pr`, inside the temp folder `own`."""
+    clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
+    found, parse_errors = [], {}
+    for path in code:
+        try:
+            text = _file_at(repo, sha, path).decode("utf-8")
+            lines = changed_lines(repo, base, sha, path)
+            if path.endswith(".py"):
+                clean[path] = normalize(text)
+                made = ast_mutants(text, lines=lines)
+            else:
+                scratch = os.path.join(own, "src", path)
+                os.makedirs(os.path.dirname(scratch), exist_ok=True)
+                with open(scratch, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
+                clean[path] = text
+                made = js_mutants(scratch, lines=lines)
+        except UnicodeDecodeError as error:
+            parse_errors[path] = "not UTF-8: %s" % error
+            continue
+        except (SyntaxError, ValueError) as error:
+            parse_errors[path] = "parse error: %s" % ((str(error).strip().splitlines() or [type(error).__name__])[0])
+            continue
+        found.extend((path, label, mutated) for label, mutated in made)
+    row["skipped"] = parse_errors
+    if not found:
+        reasons = sorted(set(parse_errors.values()))
+        row["reason"] = ("%s; no mutant could be made" % "; ".join(reasons) if reasons
+                         else "no mutant on the lines the pull request added")
+        return row
+    mutants = _sample(found, limit, seed)
+
+    folder, why = _ensure_deps(repo, sha, profile, deps)
+    if why:
+        row["reason"] = why
+        return row
+    cwd_rel = profile.get("cwd", "")
+    classify = CLASSIFIERS[profile["classify"]]
+
+    def command(suite):
+        rel = os.path.relpath(suite, cwd_rel) if cwd_rel else suite
+        return [part.replace("{suite}", rel).replace("{deps}", folder or "") for part in profile["argv"]]
+
+    count = max(1, min(jobs, max(len(suites), len(mutants))))
+    spare = queue.Queue()
+    made_dirs = []
+    try:
+        for number in range(count):
+            dest = os.path.join(own, "w%d" % number)
+            made_dirs.append(dest)
+            try:
+                _make_checkout(repo, sha, dest, set(profile.get("sparse_skip", [])), clean, folder, profile)
+            except (ValueError, OSError) as error:
+                row["reason"] = "checkout failed: %s" % error
+                return row
+            spare.put(dest)
+
+        def borrow(work):
+            dest = spare.get()
+            try:
+                return work(dest)
+            finally:
+                spare.put(dest)
+
+        def run_one(dest, suite, bound):
+            return run_suite_file(dest, suite, bound, argv=command(suite), classify=classify,
+                                  cwd=os.path.join(dest, cwd_rel))
+
+        with ThreadPoolExecutor(max_workers=count) as pool:
+            control = list(pool.map(lambda suite: borrow(lambda dest: run_one(dest, suite, suite_timeout)), suites))
+        usable = []
+        slowest = 0.0
+        for suite, (kind, seconds) in zip(suites, control):
+            if kind == "pass":
+                usable.append((seconds, suite))
+                slowest = max(slowest, seconds)
+            else:
+                row["unusable"][suite] = "not green on the clean source (%s)" % kind
+        if not usable:
+            row["reason"] = "no suite is green on the clean source"
+            return row
+        usable = [suite for _seconds, suite in sorted(usable)]  # the quickest first: the first assertion ends a mutant
+        bound = min(suite_timeout, max(10.0, 5 * slowest))
+
+        def score(dest, mutant):
+            path, _label, text = mutant
+            _write(os.path.join(dest, path), text)
+            try:
+                kinds = set()
+                for suite in usable:
+                    kind = run_one(dest, suite, bound)[0]
+                    kinds.add(kind)
+                    if kind == "assert":
+                        break
+                return kinds
+            finally:
+                _write(os.path.join(dest, path), clean[path])
+
+        with ThreadPoolExecutor(max_workers=count) as pool:
+            outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
+    finally:
+        for dest in made_dirs:
+            _drop_checkout(repo, dest)
+
+    for (path, label, _text), kinds in zip(mutants, outcomes):
+        if "assert" in kinds:
+            row["killed"] += 1
+        elif kinds & {"crash", "timeout"}:
+            row["crashed"] += 1
+        else:
+            row["survived"] += 1
+            row["survivors"].append((path, _line_of(label), label))
+    row["made"] = len(mutants)
+    row["status"] = "OK"
+    return row
+
+
+def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
+    """The rows of one pull request under `profile`: one row, or for a profile of parts the rows of the parts
+    that hold something (a part that sees no product file is left out, unless every part sees none)."""
+    def safely(part):
+        """The row of `replay_pr`, or an UNKNOWN row when it raises, so the pull requests after this one
+        still get rows. A stop (`request_stop`) is not caught."""
+        try:
+            return replay_pr(repo, sha, part, **options)
+        except Exception as error:
+            if _STOP.is_set():
+                raise
+            row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
+                   "survived": 0, "survivors": [], "unusable": {}, "skipped": {},
+                   "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
+            try:
+                row["pr"], row["title"] = _pr_of(repo, sha)
+            except ValueError:
+                pass
+            return row
+
+    if "parts" not in profile:
+        return [safely(profile)]
+    rows = []
+    for name, part in profile["parts"].items():
+        row = safely(part)
+        row["part"] = name
+        rows.append(row)
+    live = [row for row in rows if row["status"] != "NO_PRODUCT"]
+    if live:
+        return live
+    rows[0].pop("part")
+    return rows[:1]
+
+
+def _row_line(row: dict) -> str:
+    tag = " [%s]" % row["part"] if row.get("part") else ""
+    head = "#%d%s %s" % (row["pr"], tag, row["status"])
+    if row["status"] == "OK":
+        return "%s  made %d, killed %d, crashed %d, survived %d  %s" % (
+            head, row["made"], row["killed"], row["crashed"], row["survived"], row["title"])
+    if row["status"] == "UNKNOWN":
+        return "%s  %s  %s" % (head, row["reason"], row["title"])
+    return "%s  %s" % (head, row["title"])
+
+
+def format_replay_row(row: dict) -> str:
+    """One pull request: its line, then each survivor, unusable suite and skipped file on a line of its own.
+    An UNKNOWN row shows its reason and no rate."""
+    lines = [_row_line(row)]
+    for path, line, label in row.get("survivors", []):
+        lines.append("  #%d %s:%d %s" % (row["pr"], path, line, label))
+    for suite, why in sorted(row.get("unusable", {}).items()):
+        lines.append("  unusable #%d %s (%s)" % (row["pr"], suite, why))
+    for path, why in sorted(row.get("skipped", {}).items()):
+        lines.append("  skipped #%d %s (%s)" % (row["pr"], path, why))
+    return "\n".join(lines)
+
+
+def format_replay(rows) -> str:
+    """The replay table: a header, then each row as `format_replay_row` writes it, then one totals line over
+    the scored rows (counts, never a rate; none when no row is scored)."""
+    lines = ["replay of %d merged pull requests" % len(rows)]
+    lines.extend(format_replay_row(row) for row in rows)
+    scored = [row for row in rows if row["status"] == "OK"]
+    if scored:
+        lines.append("scored %d: killed %d of %d mutants (%d crashed, %d survived)" % (
+            len(scored), sum(r["killed"] for r in scored), sum(r["made"] for r in scored),
+            sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored)))
     return "\n".join(lines)

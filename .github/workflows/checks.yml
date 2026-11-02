@@ -258,6 +258,17 @@ jobs:
       - name: Mutation report-mode fixture suite
         run: python3 hooks/test_mutate_report.py
 
+      # The engine parses with typescript, which a bare checkout lacks. The guard is the one map-check.sh uses.
+      - name: Mutation JS engine fixture suite
+        run: |
+          [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
+          python3 hooks/test_mutate_js.py
+
+      - name: Mutation replay fixture suite
+        run: |
+          [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
+          python3 hooks/test_mutate_replay.py
+
       - name: Landed-directory check fixture suite
         run: python3 lint/test_check_landed_dirs.py
 

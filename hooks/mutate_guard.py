@@ -31,10 +31,15 @@ REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jo
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
 demand and refuses nothing: no timer, no CI job.
+
+REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
+[--suite-timeout S] [--jobs N]` scores the suites each recent merged pull request changed against mutants of the
+product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
 """
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1823,6 +1828,110 @@ def report_main(argv) -> int:
     return 0
 
 
+# REPLAY MODE. Repository -> how to read it (the profile keys are in hooks/mutate_shared.py). Each profile
+# was measured on its repository: the suite times, and which suites are green on a clean checkout.
+# q_max: one `node --test` file runs 0 to 15 s; harness/tests/checks-known-bad.test.mjs runs past 300 s,
+# so it reads unusable under the suite timeout.
+# banchi: the TypeScript tier runs through the Playwright unit config (the `unit` script of app/package.json),
+# one file as a path argument. Its Python harness (harness/run.py) has no per-module runner of its own, so
+# the runner below imports one harness/tests/tN_*.py and calls its `run()` under `isolated_home()`, as
+# run.py does. A module is a suite only when it is green on a clean checkout: T6 needs demo-assets/ and T7
+# is minutes long, so both read unusable.
+BANCHI_MODULE_RUNNER = """\
+import importlib, os, sys
+sys.path.insert(0, os.getcwd())
+from harness.tests.home import isolated_home
+name = sys.argv[1][:-3].replace('/', '.')
+with isolated_home():
+    result = importlib.import_module(name).run()
+passed = getattr(result, 'passed', None)
+if passed is not True and passed is not False:
+    raise TypeError('run() returned no Result with a bool passed: %r' % (result,))
+if not passed:
+    print('FAIL: ' + name)
+    print(result.detail)
+    sys.exit(1)
+"""
+REPLAY_PROFILES = {
+    "q_max": {
+        "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/",
+        "tests": r"^harness/tests/[^/]+\.test\.mjs$",
+        "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "sparse_skip": [],
+    },
+    "banchi": {"parts": {
+        "ts": {
+            "code": r"^app/src/.*\.(ts|tsx)$", "tests": r"^app/tests/unit/[^/]+\.unit\.ts$",
+            "argv": ["node", "node_modules/@playwright/test/cli.js", "test", "-c", "playwright.unit.config.ts",
+                     "{suite}"],
+            "classify": "playwright", "cwd": "app",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
+            "sparse_skip": ["demo-assets", "vendor"],
+        },
+        "py": {
+            "code": r"^(?!harness/tests/).*\.py$", "tests": r"^harness/tests/t\d+_[^/]*\.py$",
+            "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
+            "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                        ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                         "requirements.txt"]],
+            "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+        },
+    }},
+}
+
+
+def replay_main(argv) -> int:
+    """Replay the last merged pull requests of a repository, print each row as it ends, then the table.
+    Exit 0 whatever the scores: a replay is not a check. A bad argument is the only nonzero exit."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --replay")
+    parser.add_argument("--replay", required=True, metavar="REPO", help="a clone of the repository to replay")
+    parser.add_argument("--profile", required=True, choices=sorted(REPLAY_PROFILES))
+    parser.add_argument("--prs", type=int, default=20, help="how many of the newest merged pull requests")
+    parser.add_argument("--limit", type=int, default=20, help="mutants per pull request")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--jobs", type=int, default=None)
+    args = parser.parse_args(argv)
+    repo = os.path.abspath(args.replay)
+    try:
+        prs = mutate_shared.merged_prs(repo, "HEAD", args.prs)
+    except ValueError as error:
+        print("ERROR %s" % error)
+        return 2
+    profile = REPLAY_PROFILES[args.profile]
+    print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    rows = []
+
+    def stop(signum, _frame):
+        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
+        # then each checkout is removed and the deps folder with it.
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
+    try:
+        for sha, _number, _title in prs:
+            for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
+                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps):
+                rows.append(row)
+                print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
+    finally:
+        shutil.rmtree(deps, ignore_errors=True)
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
+    print()
+    print(mutate_shared.format_replay(rows))
+    return 0
+
+
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
     """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines).
 
@@ -1944,6 +2053,8 @@ def run_mutant(sources, work: str, entry):
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
+    if "--replay" in sys.argv[1:]:
+        return replay_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
