@@ -88,6 +88,12 @@ def base_repo():
     return r
 
 
+def assert_finding(case, got, path, undo, earlier):
+    """One FAIL names the path, the undoing commit and the earlier commit it undoes, by their 9-char shas."""
+    case.assertTrue(any(path in p and undo[:9] in p and earlier[:9] in p for p in got),
+                    "no FAIL names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], got))
+
+
 class Red(unittest.TestCase):
     def setUp(self):
         self.r = base_repo()
@@ -676,8 +682,11 @@ class Flips(unittest.TestCase):
 
 
 class OwnHistory(unittest.TestCase):
-    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+    """A line a lane commit added is the lane's work. A later lane commit or merge that removes it, with the line still
+    absent at head, is a finding. A `Drops-lines` trailer on the removing commit allows it."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    ALLOW = "\n\n%s: app.txt -- the owner cut these lines" % C.TRAILER
+    ALLOW_NOTE = ["ALLOWED app.txt: the owner cut these lines"]
 
     def setUp(self):
         r = self.r = Repo()
@@ -685,7 +694,7 @@ class OwnHistory(unittest.TestCase):
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
-        r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+        self.own = r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
 
     def main_moves(self, n, date):
         r = self.r
@@ -694,32 +703,56 @@ class OwnHistory(unittest.TestCase):
         r.push()
         r.sh("checkout", "-q", "feat")
 
-    def merge_dropping_own_lines(self, date):
+    def merge_dropping_own_lines(self, date, msg=""):
         r = self.r
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY)
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my own lines", date=date)
+        r.sh("commit", "-q", "-m", "Merge main, drop my own lines" + msg, date=date)
+        return r.sh("rev-parse", "HEAD")
 
-    def test_a_merge_that_removes_the_branchs_own_lines_is_green(self):
+    def test_a_merge_that_removes_the_branchs_own_lines_is_red(self):
         self.main_moves(2, self.T1)
-        self.merge_dropping_own_lines(self.T2)
-        self.assertEqual(self.r.verdict(), [])
+        undo = self.merge_dropping_own_lines(self.T2)
+        assert_finding(self, self.r.verdict(), "app.txt", undo, self.own)
 
-    def test_the_same_through_a_second_in_branch_merge_of_main(self):
+    def test_a_merge_that_removes_the_branchs_own_lines_with_the_trailer_is_allowed(self):
+        self.main_moves(2, self.T1)
+        self.merge_dropping_own_lines(self.T2, self.ALLOW)
+        self.assertEqual(self.r.verdict(), [])
+        self.assertEqual(self.r.notes, self.ALLOW_NOTE)
+
+    def test_the_same_through_a_second_in_branch_merge_of_main_is_red(self):
         r = self.r
         self.main_moves(2, self.T1)
         r.sh("merge", "--no-edit", "main", date=self.T1)  # keeps the lines
         self.main_moves(3, self.T2)
-        self.merge_dropping_own_lines(self.T2)
-        self.assertEqual(r.verdict(), [])
+        undo = self.merge_dropping_own_lines(self.T2)
+        assert_finding(self, r.verdict(), "app.txt", undo, self.own)
 
-    def test_a_later_branch_commit_that_removes_them_is_green(self):
+    def test_the_same_through_a_second_in_branch_merge_of_main_with_the_trailer_is_allowed(self):
+        r = self.r
+        self.main_moves(2, self.T1)
+        r.sh("merge", "--no-edit", "main", date=self.T1)  # keeps the lines
+        self.main_moves(3, self.T2)
+        self.merge_dropping_own_lines(self.T2, self.ALLOW)
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, self.ALLOW_NOTE)
+
+    def test_a_later_branch_commit_that_removes_them_is_red(self):
         self.main_moves(2, self.T1)
         r = self.r
-        r.commit("remove my lines", date=self.T2, app_txt=BODY)
+        undo = r.commit("remove my lines", date=self.T2, app_txt=BODY)
+        r.sh("merge", "--no-edit", "main", date=self.T2)
+        assert_finding(self, r.verdict(), "app.txt", undo, self.own)
+
+    def test_a_later_branch_commit_that_removes_them_with_the_trailer_is_allowed(self):
+        self.main_moves(2, self.T1)
+        r = self.r
+        r.commit("remove my lines" + self.ALLOW, date=self.T2, app_txt=BODY)
         r.sh("merge", "--no-edit", "main", date=self.T2)
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, self.ALLOW_NOTE)
 
     def test_a_flagged_line_is_printed_in_full_with_no_cap(self):
         r = self.r
@@ -753,10 +786,6 @@ class LaneUndo(unittest.TestCase):
         """The lane's commits, oldest first: upstream..head, parents before children."""
         return self.r.sh("rev-list", "--topo-order", "--reverse", "origin/main..HEAD").split()
 
-    def assert_finding(self, got, path, undo, earlier):
-        self.assertTrue(any(path in p and undo[:9] in p and earlier[:9] in p for p in got),
-                        "no FAIL names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], got))
-
     def merge_main_note(self, side):
         """Main adds a note where the lane's case ends, so the merge conflicts on app.txt. The conflict resolves to `side`."""
         r = self.r
@@ -776,7 +805,7 @@ class LaneUndo(unittest.TestCase):
         a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
         b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
         self.assertEqual(self.lane(), [a, b])
-        self.assert_finding(r.verdict(), "app.txt", b, a)
+        assert_finding(self, r.verdict(), "app.txt", b, a)
 
     def test_a_whole_file_put_back_byte_for_byte_to_its_pre_lane_blob_is_red(self):
         r = self.r
@@ -785,7 +814,7 @@ class LaneUndo(unittest.TestCase):
         b = r.commit("B: put other.txt back", other_txt="other v1\n")
         self.assertEqual(self.lane(), [a, b])
         self.assertEqual(r.sh("rev-parse", b + ":other.txt"), pre)  # scope: the same blob as before A
-        self.assert_finding(r.verdict(), "other.txt", b, a)
+        assert_finding(self,r.verdict(), "other.txt", b, a)
 
     def test_a_later_commit_that_restores_the_dropped_lines_is_green(self):
         r = self.r
@@ -856,7 +885,7 @@ class LaneUndo(unittest.TestCase):
         a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
         m = self.merge_main_note("theirs")
         self.assertEqual(self.lane(), [a, m])
-        self.assert_finding(r.verdict(), "app.txt", m, a)
+        assert_finding(self,r.verdict(), "app.txt", m, a)
 
     def test_a_merge_that_drops_a_line_main_added_still_fails_with_lane_lines_present(self):  # control
         r = self.r
@@ -878,7 +907,7 @@ class LaneUndo(unittest.TestCase):
         a = r.commit("A: add 49 test lines", app_txt=self.CARD + self.BLOCK)
         b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
         self.assertEqual(self.lane(), [a, b])
-        self.assert_finding(r.verdict(), "app.txt", b, a)
+        assert_finding(self,r.verdict(), "app.txt", b, a)
 
 
 class IntegrationBase(unittest.TestCase):
