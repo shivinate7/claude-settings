@@ -17,6 +17,18 @@ import merge  # noqa: E402
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
+
+def printed(out, marker):
+    """The first printed line of `out` that holds `marker`, or ""."""
+    return next((line for line in out.splitlines() if marker in line), "")
+
+def assert_cites(test, rid, line):
+    """The printed refusal `rid` must cite a decision or a rule in its line, unless it is in the exempt list."""
+    test.assertTrue(line, "no printed line for refusal %s" % rid)
+    test.assertTrue(rid in audit.REFUSAL_UNCITED_EXEMPT or audit.cites(line, CITE_HOMES),
+                    "refusal %s prints no cite: %s" % (rid, line))
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -741,6 +753,7 @@ class Race(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("held", out)
+        assert_cites(self, "lock-held", printed(out, "is held by"))
         self.assertEqual(self.refs(), before)
 
     def test_a_lock_that_is_not_ours_never_expires(self):
@@ -2427,6 +2440,16 @@ class BaseAware(Env):
         for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
             p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
 
+    def test_a_head_that_holds_a_record_claim_on_another_base_stops_and_claims_nothing(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "claimed on the wrong base\n\nRecord-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        assert_cites(self, "claim-off-default-base", printed(out, "holds a Record-claim"))
+
     def put_locks(self, *branches):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "lock")
         for b in branches:
@@ -2579,6 +2602,23 @@ class Unlock(Env):
 
     def test_unlock_with_no_lock_is_fine(self):
         self.assertEqual(self.run_merge("--unlock")[0], 0)
+
+    def test_a_lock_ref_that_cannot_be_read_stops_the_read_and_names_it(self):
+        sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        with self.assertRaises(merge.Stop) as caught:
+            self.lock.read("main")
+        assert_cites(self, "lock-acquire-unreadable", str(caught.exception))
+
+    def test_an_unlock_that_the_remote_refuses_stops_and_names_the_push(self):
+        sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "held, not ours")
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
+        hook = os.path.join(self.bare, "hooks", "pre-receive")  # every ref update to the origin is refused from here on
+        with open(hook, "w") as f:
+            f.write("#!/bin/sh\necho 'refused by the test' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
+        with self.assertRaises(merge.Stop) as caught:
+            self.lock.unlock("main")
+        assert_cites(self, "unlock-failed", str(caught.exception))
 
     def test_unlock_of_a_missing_ref_says_so_and_never_says_the_lock_was_removed(self):  # the ref is absent, nothing was removed
         rc, out = self.run_merge("--unlock", "main")
@@ -3894,6 +3934,46 @@ class GhHalf(Env):
         self.assertIn("still shows the head before the push", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
+    def test_a_base_that_changes_during_the_wait_reverts_the_claim_and_names_both(self):
+        def retarget():  # the first wait retargets the pull request, so the next read sees a new base
+            if self.paused and not getattr(self, "retargeted", False):
+                self.retargeted = True
+                self.set(base="integ")
+        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
+        rc, out = self.run_merge("7", "--confirm", host=self.gh_host(pause=retarget))
+        self.assertEqual(rc, 1, out)
+        assert_cites(self, "wait-base-changed", printed(out, "changed from main to integ"))
+
+    def test_a_pull_request_gh_reads_blocked_gets_no_merge_call(self):
+        self.set(pr_raw={"mergeable_state": "blocked"})
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        assert_cites(self, "blocked-or-behind", printed(out, "reads BLOCKED"))
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pinned_list_that_differs_from_the_protection_stops_before_the_merge(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gates"]))))
+        self.set(contexts=["checks"])
+        self.host = None  # main builds the real Host from the config, and runs the pinned check on it
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        assert_cites(self, "pinned-mismatch", printed(out, "pins gates"))
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_lock_that_moves_during_the_first_rate_wait_stops_both_lock_lines(self):
+        # The rival takes the lock ref during the first rate wait, so the run's extension for the next wait fails.
+        def rival():
+            if self.paused and self.paused[-1] in RATE_LADDER and not getattr(self, "rival_done", False):
+                self.rival_done = True
+                sh(self.other, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+                sha = sh(self.other, "git", "commit-tree", "FETCH_HEAD^{tree}", "-p", "FETCH_HEAD", "-m", "rival lock")
+                sh(self.other, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
+        self.set(contexts=["checks"], api_fail={"msg": RATE_403, "after_checks": 1})
+        rc, out = self.run_merge("7", "--confirm", host=self.gh_host(required="protection", pause=rival))
+        self.assertEqual(rc, 1, out)
+        assert_cites(self, "rate-wait-unextendable", printed(out, "needs the merge lock extended first"))
+        assert_cites(self, "lock-extend-failed", printed(out, "cannot extend the merge lock"))
+
     # Decision ci-wait-reads-run-status: block never runs `gh run watch`. It pauses 30 s, and the next pass of the wait loop reads.
     # The old spin guard ("a watch that returned at once pauses a full minute") went with the watch.
     def test_a_pending_run_pauses_30_seconds_and_returns(self):
@@ -3911,6 +3991,7 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("went DIRTY", out)
+        assert_cites(self, "wait-base-changed", printed(out, "went DIRTY"))
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
