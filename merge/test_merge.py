@@ -9388,7 +9388,7 @@ class CloudSession(Env):
         return rc, out.getvalue(), err.getvalue()
 
 class MergeRoleCheck(CloudSession):
-    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (owner ruling 2026-11-01 21:34 CST: the coordinator never merges).
+    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
     The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked."""
 
@@ -9425,7 +9425,7 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
 
     # ---- the constants and the reader
-    # owner ruling 2026-11-01 21:34 CST: only a batch runner merges
+    # decision session-tiers: only a batch runner merges
     def test_the_merge_roles_are_the_batch_runner_only(self):
         self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner"})
 
@@ -9493,16 +9493,16 @@ class MergeRoleCheck(CloudSession):
                 self.put_role(role)
                 self.assert_refused()
 
-    # owner ruling 2026-11-01 21:34 CST: re-pointed to batch-runner, the only merge role, so the refusal is for the other session
+    # decision session-tiers: re-pointed to batch-runner, the only merge role, so the refusal is for the other session
     def test_a_role_recorded_for_another_session_refuses(self):
-        self.put_role("batch-runner", session="cse_another_session")  # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator
+        self.put_role("batch-runner", session="cse_another_session")  # decision session-tiers: re-pointed from coordinator
         self.assert_refused()
 
     def test_no_session_id_in_the_environment_refuses(self):
         # The last three pair an absent or empty id with an equal-looking recorded one: absent never equals absent.
         for session, recorded in ((None, ROLE_SESSION), ("", ""), (None, None), (None, "")):
             with self.subTest(session=session, recorded=recorded):
-                # owner ruling 2026-11-01 21:34 CST: re-pointed to batch-runner, so the refusal is for the missing session id
+                # decision session-tiers: re-pointed to batch-runner, so the refusal is for the missing session id
                 self.put_role("batch-runner", session=recorded)
                 self.assert_refused(CLAUDE_CODE_REMOTE_SESSION_ID=session)
 
@@ -9521,7 +9521,7 @@ class MergeRoleCheck(CloudSession):
         self.assertNotIn("batch-runner", err.lower())
 
     # ---- the role check lets through
-    # owner ruling 2026-11-01 21:34 CST: the coordinator never merges, so a recorded coordinator role is refused (was: merges)
+    # decision session-tiers: the coordinator never merges, so a recorded coordinator role is refused (was: merges)
     def test_a_coordinator_session_is_refused_at_confirm(self):
         self.put_role("coordinator")
         self.assert_refused()
@@ -9561,14 +9561,14 @@ class MergeRoleCheck(CloudSession):
     # ---- the writer: merge --role <tier>
     def test_role_writes_this_sessions_role_and_makes_the_state_folder(self):
         self.assertEqual(self.role_files(), {})
-        rc, out, err = self.run_main("--role", "batch-runner")  # owner ruling 2026-11-01 21:34 CST: re-pointed; the coordinator is refused below
+        rc, out, err = self.run_main("--role", "batch-runner")  # decision session-tiers: re-pointed; the coordinator is refused below
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
         with self.cloud():
             self.assertEqual(merge.read_merge_role(), "batch-runner")
         self.assertEqual(self.host.pr_calls, [])  # the writer reads no host
 
-    # owner ruling 2026-11-01 21:34 CST: the writer refuses the coordinator tier as it refuses any non-merge tier, and names no tier
+    # decision session-tiers: the writer refuses the coordinator tier as it refuses any non-merge tier, and names no tier
     def test_role_refuses_the_coordinator_tier_and_names_no_tier(self):
         rc, out, err = self.run_main("--role", "coordinator")
         self.assertNotEqual(rc, 0, out + err)
@@ -9584,7 +9584,7 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
 
     def test_a_role_the_writer_recorded_passes_the_check(self):
-        # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator to batch-runner
+        # decision session-tiers: re-pointed from coordinator to batch-runner
         rc, out, err = self.run_main("--role", "batch-runner")
         self.assertEqual(rc, 0, out + err)
         rc, out, err = self.run_main("7", "--confirm")
@@ -9690,7 +9690,7 @@ class StandingGrantSwitch(CloudSession):
         self.assert_grant_refused(rc, out, err, refs)
 
     # ---- the key is optional: absent is today's behaviour, and no notice names it
-    # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator to batch-runner
+    # decision session-tiers: re-pointed from coordinator to batch-runner
     def test_an_absent_key_proceeds_for_a_batch_runner_and_no_notice_names_it(self):
         self.put_role("batch-runner")  # the fixture's base is CONFIG, which leaves out requiredChecks: the defaults notice prints
         rc, out, err = self.run_main("7", "--confirm")
@@ -9707,7 +9707,7 @@ class StandingGrantSwitch(CloudSession):
         self.assertNotRegex(out + err, r"(?i)standinggrant")
 
     # ---- true is the grant on: `--confirm` runs as before, in the cloud and out of it
-    # owner ruling 2026-11-01 21:34 CST: flipped from proceeds to refused, the grant's value does not matter to a coordinator
+    # decision session-tiers: flipped from proceeds to refused, the grant's value does not matter to a coordinator
     def test_true_refuses_confirm_for_a_coordinator_in_the_cloud(self):
         self.grant_config(standingGrant=True)
         self.put_role("coordinator")
@@ -9727,7 +9727,7 @@ class StandingGrantSwitch(CloudSession):
         self.assert_merged(rc, out, err)
 
     # ---- false: a cloud coordinator or batch runner may not confirm
-    # owner ruling 2026-11-01 21:34 CST: the role check refuses the coordinator before the PR read and before the grant is read,
+    # decision session-tiers: the role check refuses the coordinator before the PR read and before the grant is read,
     # so the owner-ask line of the grant is not what refuses it
     def test_false_refuses_confirm_for_a_coordinator_in_the_cloud(self):
         self.grant_config(standingGrant=False)
@@ -9751,7 +9751,7 @@ class StandingGrantSwitch(CloudSession):
 
     def test_false_changes_no_preview_in_the_cloud(self):
         self.grant_config(standingGrant=False)
-        self.put_role("batch-runner")  # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator
+        self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
         refs = self.refs()
         rc, out, err = self.run_main("7")
         self.assertEqual(rc, 0, out + err)
@@ -9783,12 +9783,12 @@ class StandingGrantSwitch(CloudSession):
     def test_the_base_false_refuses_even_when_the_pr_tree_says_true(self):
         self.grant_config(standingGrant=False)
         self.put_pr_tree(self.grant_text(standingGrant=True))
-        self.refused_as("batch-runner")  # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator
+        self.refused_as("batch-runner")  # decision session-tiers: re-pointed from coordinator
 
     def test_the_base_without_the_key_proceeds_even_when_the_pr_tree_says_false(self):  # control
         self.grant_config()
         self.put_pr_tree(self.grant_text(standingGrant=False))
-        self.put_role("batch-runner")  # owner ruling 2026-11-01 21:34 CST: re-pointed from coordinator
+        self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
         rc, out, err = self.run_main("7", "--confirm")
         self.assert_merged(rc, out, err)
 
@@ -9879,7 +9879,7 @@ class CloudAllow(unittest.TestCase):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    # owner ruling 2026-11-01 21:34 CST: the coordinator never merges, so its role rule goes; the batch-runner rule stays
+    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
     def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
         allow = self.allow()
         self.assertEqual(len(allow), 3, allow)

@@ -296,7 +296,7 @@ def tearDownModule():
 
 class SessionStartMergeRoleTests(unittest.TestCase):
     """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the one tier that may run
-    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; owner ruling 2026-11-01 21:34 CST: the coordinator never merges).
+    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; decision session-tiers: the coordinator never merges).
     It reads the hook's own text, so no repo fixture is built. The existing SessionStartTierLineTests prove the line prints
     once and only in the cloud."""
 
@@ -307,14 +307,14 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
         self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
 
-    # owner ruling 2026-11-01 21:34 CST: re-pointed from both tiers to the batch runner alone
+    # decision session-tiers: re-pointed from both tiers to the batch runner alone
     def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
         role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
-    # owner ruling 2026-11-01 21:34 CST: no sentence of the tier line says a coordinator merges
+    # decision session-tiers: no sentence of the tier line says a coordinator merges
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
         told = [s for s in sentences(hook_tier_line()) if re.search(r"\bmerge", s, re.IGNORECASE) and "coordinator" in s.lower()]
         self.assertEqual(told, [], "the tier line says a coordinator merges")

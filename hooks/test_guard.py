@@ -8158,7 +8158,7 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 
 # A record's own tier is allowed. Any other tier is refused, both ways round.
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
-# owner ruling 2026-11-01 21:34 CST: the coordinator never merges, so its own record does not allow the coordinator role.
+# decision session-tiers: the coordinator never merges, so its own record does not allow the coordinator role.
 role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
           role_path("coordinator"))
 role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
@@ -8188,7 +8188,7 @@ for _role_prefix in ("", "cd somewhere && "):
         _role_cmd = _role_prefix + _role_form + " --role batch-runner"
         role_allow(_role_cmd + " allows its own record", _role_cmd, role_path("runner"))
         role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
-        # owner ruling 2026-11-01 21:34 CST: the coordinator never merges, in any form, even on its own record
+        # decision session-tiers: the coordinator never merges, in any form, even on its own record
         _coord_cmd = _role_prefix + _role_form + " --role coordinator"
         role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
 # Nothing the guard cannot read as an own record allows.
@@ -20504,7 +20504,7 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. Owner ruling 2026-11-01 21:34 CST: the load brake is local-only. With CLAUDE_CODE_REMOTE=true no reading refuses
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true no reading refuses
 # a lane-start call, busy or full, and an agent's own shell or file write is allowed at full too. The verdict is the
 # proof: the reader may run or not (reads=None), and an allowed call writes no file, so nothing reaches guard.log.
 LB_CLOUD = "true"
