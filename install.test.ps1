@@ -615,6 +615,21 @@ function Get-InstallLogLines([string]$Cfg) {
     return @(Get-Content -LiteralPath $lp)
 }
 
+# Get-InstallLogStampProblems LINES PREFIX OFFSET: one string per problem in LINES, the install log lines that
+# name PREFIX (e.g. 'install.ps1:'). Each must start with yyyy-MM-ddTHH:mm:ss, a sign, HH:mm and a space,
+# and carry the offset OFFSET. An empty result means every line holds.
+# Its shell twin is stamp_problems in hooks/test_install_src.sh: a PowerShell case cannot call that step.
+function Get-InstallLogStampProblems([string[]]$Lines, [string]$Prefix, [string]$Offset) {
+    $named = @($Lines | Where-Object { $_.Contains($Prefix) })
+    if ($named.Count -eq 0) { return @("no line of the install log names $Prefix") }
+    $problems = @()
+    foreach ($l in $named) {
+        if ($l -notmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d ') { $problems += "no offset stamp: $l"; continue }
+        if ($l.Substring(19, 6) -ne $Offset) { $problems += "offset $($l.Substring(19, 6)), want ${Offset}: $l" }
+    }
+    return @($problems)
+}
+
 # Add-NoSubdirRule DIR: deny the current user the right to make a sub-directory in DIR. A directory
 # symlink is a sub-directory, so the link try fails there, while a file in DIR, a link in any other
 # folder, and a copy into a directory that already exists in DIR all still work. That makes a skill
@@ -778,6 +793,11 @@ try {
         Check "hookgonefail1: install.ps1 still writes its run summary line to the install log" ($null -ne $hfMode)
         Check "hookgonefail1: the summary line's hook= field does not state a removal" ($null -ne $hfMode -and $hfMode -ne 'removed')
         Check "hookgonefail1: the install log names the hook and says the delete failed" $hfNamed
+        # The delete-failed line is install.ps1's own log line too: it must carry the zone offset.
+        $hfOffset = Get-Date -Format zzz
+        $hfStamps = @(Get-InstallLogStampProblems @($hfLines) 'install.ps1:' $hfOffset)
+        Check "hookgonefail1: each install.ps1 install-log line, the delete-failed line included, carries the zone offset ($hfOffset)" ($hfStamps.Count -eq 0)
+        if ($hfStamps.Count) { Write-Host "  hookgonefail1 stamp problems: $($hfStamps -join ' | ')" }
         if (-not $hfNamed -or $null -eq $hfMode) { Write-Host "  hookgonefail1: exit $($hfRes.Exit); log hook= '$hfMode'; install log: $($hfLines -join ' | ')" }
     }
 } finally {
@@ -803,6 +823,16 @@ try {
     Check "hookwrite1: the marked post-merge hook is still there when symlinks fail" ($null -ne $hwText -and $hwText.Contains($HookMarker))
     Check "hookwrite1: the hook was rewritten, not left as the stale one" ($null -ne $hwText -and -not $hwText.Contains('# stale body'))
     Check "hookwrite1: the install log's hook= field says installed" ((Get-InstallLogHookMode $HwCfg) -eq 'installed')
+    # install.ps1's own log lines carry the zone offset this host has now.
+    $hwOffset = Get-Date -Format zzz
+    $hwStamps = @(Get-InstallLogStampProblems @(Get-InstallLogLines $HwCfg) 'install.ps1:' $hwOffset)
+    Check "hookwrite1: each install.ps1 install-log line starts with an ISO 8601 stamp that carries the zone offset ($hwOffset)" ($hwStamps.Count -eq 0)
+    if ($hwStamps.Count) { Write-Host "  hookwrite1 stamp problems: $($hwStamps -join ' | ')" }
+    # The post-merge hook's own log lines: the hook text install.ps1 wrote, read here, not run (see the gap note).
+    # No date stamp in it may lack the zone offset, and the offset form must be used.
+    $hwBareStamp = ($null -ne $hwText) -and (($hwText -match '\$\(date\)') -or ($hwText -match 'date \+%Y-%m-%dT%H:%M:%S\)'))
+    Check "hookwrite1: the post-merge hook writes no date stamp without the zone offset" (($null -ne $hwText) -and -not $hwBareStamp)
+    Check "hookwrite1: the post-merge hook formats its stamps with the zone offset" (($null -ne $hwText) -and ($hwText -match '%:?z|-Iseconds'))
     if ($hwRes.Exit -ne 0) { Write-Host "  hookwrite1 output: $($hwRes.Text)" }
 } finally {
     Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
