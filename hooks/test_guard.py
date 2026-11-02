@@ -16195,16 +16195,17 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
-    guard subprocess happens to run from. `session` is the payload's session_id.
+    guard subprocess happens to run from. `session` is the payload's session_id. `temp` is the
+    temp folder the guard run reads as its own (see TEMP_DIR), or None for the system temp.
     """
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
-        "config": None, "agent_id": agent_id, "process_cwd": process_cwd,
+        "config": None, "agent_id": agent_id, "process_cwd": process_cwd, "temp": temp,
         "tool_input": tool_input,
     })
 
@@ -16376,6 +16377,123 @@ def worktree_home_cross_checkout_case():
     if problems:
         return False, "; ".join(problems)
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
+
+
+def worktree_home_scratchpad_case():
+    """Rule 0, `other-checkout`, for a session's own scratchpad. A linked worktree under
+    `<temp>/<slug>/<session_id>/scratchpad/` belongs to that session, so its top-level calls may
+    write into it from the primary checkout. The same layout under another session's scratchpad, an
+    agent call, a call with no session id, a symlink out of the scratchpad, and a `..` path that
+    climbs into another checkout stay refused. Labels 1 to 10 name the forms; a failure names its label.
+    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md (other-checkout)."""
+    if os.name == "nt":
+        return SKIP, "skipped: a symlink needs a privilege Windows does not grant here"
+    primary, _lane_a, lane_b, _scratch = _cross_checkout_fixture("xcoscratch")
+    for needed in (os.path.join(primary, ".git"), os.path.join(lane_b, ".git")):
+        if not os.path.exists(needed):
+            sys.exit("fixture setup failed in worktree_home_scratchpad_case: %r is missing" % needed)
+    # The temp folder the guard reads for these calls. It sits in the run folder, so teardown removes it.
+    scratch_tmp = os.path.join(ROOT, "xcoscratch_tmp")
+    session, other_session = "scratch-sid-0001", "scratch-sid-0002"
+    slug, other_slug = "-home-user-claude-settings", "-home-user-compass-dc"
+    made = []   # the worktrees this case adds, removed at the end
+
+    def scratch_worktree(slug_name, sid, branch):
+        path = os.path.join(scratch_tmp, slug_name, sid, "scratchpad", "wt-notes")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        added = run_vcs(primary, "worktree", "add", "-q", path, "-b", branch)
+        if added.returncode != 0 or not os.path.isfile(os.path.join(path, ".git")):
+            sys.exit("fixture setup failed in worktree_home_scratchpad_case: git worktree add %r "
+                     "failed. stderr: %s" % (path, added.stderr.strip()))
+        made.append(path)
+        return path
+
+    def climb(start, target):
+        """A path that begins inside `start`, climbs out with `..`, and lands on `target`."""
+        return os.path.join(start, os.path.relpath(target, start))
+
+    problems = []
+
+    def check(label, expect, tool, cwd, sid=session, agent=None, **tool_input):
+        got, reason = _decide_full(tool, cwd, agent_id=agent, session=sid, temp=scratch_tmp,
+                                   **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason
+                                   or scratch_tmp in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    try:
+        wt_main = scratch_worktree(slug, session, "scratch-notes-main")
+        wt_resume = scratch_worktree(other_slug, session, "scratch-notes-resume")
+        wt_other = scratch_worktree(slug, other_session, "scratch-notes-other")
+        pad = os.path.dirname(wt_main)   # this session's scratchpad, beside its worktree
+        link_primary = os.path.join(pad, "to-primary")
+        link_lane_b = os.path.join(pad, "to-lane-b")
+        os.symlink(primary, link_primary)
+        os.symlink(lane_b, link_lane_b)
+        bash_echo = "cd %s && echo x > a.txt" % slash(wt_main)
+
+        # 1. Incident 2, exact form. `git add` and `git commit` name no write target, so the exact
+        # form is an allow pin. 1b is the red form: a redirect is the write the rule reads.
+        check("1a incident 2 git add and commit", "allow", "Bash", primary,
+              command="cd %s && git add a.txt && git commit -m x" % slash(wt_main))
+        check("1b cd into own scratchpad worktree, then a redirect", "allow", "Bash", primary,
+              command=bash_echo)
+        # 2. Write and Edit into a file in the own scratchpad worktree.
+        check("2a Write into own scratchpad worktree", "allow", "Write", primary,
+              file_path=os.path.join(wt_main, "a.txt"), content="x")
+        check("2b Edit into own scratchpad worktree", "allow", "Edit", primary,
+              file_path=os.path.join(wt_main, "a.txt"), old_string="x", new_string="y")
+        # 3. Incident 3: a heredoc written into the own scratchpad worktree.
+        check("3 cd into own scratchpad worktree, then a heredoc", "allow", "Bash", primary,
+              command="cd %s && cat > f.md <<'EOF'\nx\nEOF" % slash(wt_main))
+        # 4. Resume: the same session id, under a second project slug.
+        check("4a Write into a worktree under a second slug, same session", "allow", "Write",
+              primary, file_path=os.path.join(wt_resume, "a.txt"), content="x")
+        check("4b redirect into a worktree under a second slug, same session", "allow", "Bash",
+              primary, command="cd %s && echo x > a.txt" % slash(wt_resume))
+        # 5. Another session's scratchpad, with the payload carrying this session's id.
+        check("5a Write into another session's scratchpad worktree", "deny", "Write", primary,
+              file_path=os.path.join(wt_other, "a.txt"), content="x")
+        check("5b redirect into another session's scratchpad worktree", "deny", "Bash", primary,
+              command="cd %s && echo x > a.txt" % slash(wt_other))
+        # 6. The same redirect from an agent that carries this session's id.
+        check("6a agent redirect into own scratchpad worktree", "deny", "Bash", primary,
+              agent="scratch-agent-1", command=bash_echo)
+        check("6b agent Write into own scratchpad worktree", "deny", "Write", primary,
+              agent="scratch-agent-1", file_path=os.path.join(wt_main, "a.txt"), content="x")
+        # 7. A cd into the own worktree, then a cd into a sibling worktree: the sibling is the target.
+        check("7 cd into own worktree, then cd into a sibling, then a redirect", "deny", "Bash",
+              primary, command="cd %s && cd %s && echo x > a.txt" % (slash(wt_main), slash(lane_b)))
+        # 8. A `..` path that begins inside the own worktree and resolves into another checkout.
+        check("8a Write climbing out of own worktree into the primary", "deny", "Write", wt_main,
+              file_path=climb(wt_main, os.path.join(primary, "src", "app.py")), content="x")
+        check("8b Write climbing out of own worktree into a sibling", "deny", "Write", primary,
+              file_path=climb(wt_main, os.path.join(lane_b, "src", "app.py")), content="x")
+        check("8c redirect climbing out of own worktree into a sibling", "deny", "Bash", primary,
+              command="echo x > " + slash(climb(wt_main, os.path.join(lane_b, "src", "app.py"))))
+        # 9. A symlink in the own scratchpad, not a worktree, pointing into another checkout. The
+        # lexical path is inside the scratchpad, so only the resolved path tells it apart.
+        check("9a Write through a symlink in own scratchpad into the primary", "deny", "Write",
+              wt_main, file_path=os.path.join(link_primary, "src", "app.py"), content="x")
+        check("9b Write through a symlink in own scratchpad into a sibling", "deny", "Write",
+              primary, file_path=os.path.join(link_lane_b, "src", "app.py"), content="x")
+        # 10. No session id: the scratchpad layout alone grants nothing.
+        check("10a sessionless Write into own scratchpad worktree", "deny", "Write", primary,
+              sid=None, file_path=os.path.join(wt_main, "a.txt"), content="x")
+        check("10b sessionless redirect into own scratchpad worktree", "deny", "Bash", primary,
+              sid=None, command=bash_echo)
+    finally:
+        for path in made:
+            if os.path.exists(path):
+                run_vcs(primary, "worktree", "remove", "--force", path)
+        shutil.rmtree(scratch_tmp, ignore_errors=True)
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("1-10: own-scratchpad writes allowed; another session's, agent's, sessionless, "
+                  "symlinked and climbing writes refused")
 
 
 def worktree_home_cross_checkout_cost_case():
@@ -16816,6 +16934,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
+     "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
+     worktree_home_scratchpad_case),
     ("worktree-home: an owner override lifts the cross-checkout refusal",
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
@@ -22135,6 +22256,7 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CST)", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
     ("worktree-home: any session's write into another checkout", "worktree-home"),
+    ("worktree-home: a write into a worktree in the session's own scratchpad", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
