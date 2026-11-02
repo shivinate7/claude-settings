@@ -34,10 +34,18 @@ from guard_core import (
 # the allow list, and neither is the next one nobody thought of.
 
 ENV_ALLOWED = ".env.example"
+ENV_PREFIX = ".env"
 
-# The whole basename: `.env`, or a variant such as `.env.local`. The example file is checked in and
-# is documentation, so it is exempt. A variant is held, because it holds the same secrets.
-ENV_BASENAME = re.compile(r"^\.env(\.[A-Za-z0-9_.\-]+)?$")
+
+def names_env_file(name: str) -> bool:
+    """The one predicate for an environment file's BASENAME, in every form of the guard.
+
+    A name is held when it starts with `.env`: `.env`, `.env.local`, `.envrc`, `.environment`. The
+    whole name `.env.example` is the one exception. It is checked in and is documentation. A variant
+    is held, because it holds the same secrets. The Write and Edit form (`is_env`) and the shell form
+    (`env_reference`, `_glob_could_name_env`) both call this, so no form reads a narrower name.
+    """
+    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED
 
 # A word prefix that is a PATH, for deciding whether a backslash before `.env` is a separator or a
 # regex escape. `.\.env` and `C:\Users\me\.env` are paths. The `process\.env` in a grep pattern is
@@ -286,14 +294,12 @@ ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
 
 def _glob_could_name_env(word: str) -> bool:
-    if word.startswith(ENV_ALLOWED):
-        return False
-    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x")):
+    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x", ".envrc")):
         return True
     for fill in ("", "x"):
         sample = ENV_GLOB_PART.sub(
             lambda m: (m.group(1) or "a") if m.group(0) != "*" else fill, word)
-        if sample == ".env" or sample.startswith(".env."):
+        if names_env_file(sample):
             return True
     return False
 
@@ -319,13 +325,9 @@ def env_reference(word: str) -> str:
         word = tail
         break
     word = re.sub(r"\\(?!\.)", "", word)
-    if word == ENV_ALLOWED:
-        return ""
     if ENV_GLOB.search(word) and word.startswith("."):
         return word if _glob_could_name_env(word) else ""
-    if not ENV_BASENAME.match(word):
-        return ""
-    return word
+    return word if names_env_file(word) else ""
 
 
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
@@ -663,7 +665,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
 
 def is_env(path: str) -> bool:
     name = norm(path).rsplit("/", 1)[-1]
-    return name.startswith(".env") and name != ENV_ALLOWED
+    return names_env_file(name)
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
