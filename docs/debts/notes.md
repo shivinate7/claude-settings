@@ -875,3 +875,8 @@
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
 - feel-step-set-done-untried: triage can set a feel step to done with no device trial, and the step then leaves every upkeep row (skills/roadmap/build.py upkeep). Decision: feel-fix-waits-device-check.
+- feel-rename-half-similar: a rename under 50% similar, or with diff.renames off, reads as a delete: safe fail, wrong message (lint/check_record_slugs.py).
+- feel-edit-swap-message: an edit that drops `**Feel.**` and adds a valid device trial fails with a misleading message (lint/check_record_slugs.py).
+- feel-trial-time-space: a device-trial time with a space instead of `T` fails, though step JSON takes it (lint/check_record_slugs.py).
+- feel-lint-says-device-check: the lint message says "device check" where prose says "device trial" (lint/check_record_slugs.py).
+- feel-probe-skips-debt-check: the compliance probe in other repos does not run the debt check (lint/compliance_probes.py).
