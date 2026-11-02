@@ -529,6 +529,8 @@ mkdir -p "$CLAUDE_DIR"
 # retired-files.txt are acted on. install.ps1 keeps the same format and rules.
 # "Shipped": git lists the path under $SRC (tracked, or untracked and not ignored). A $SRC that is not a
 # git checkout (a tarball) ships what exists. A git read that fails counts as shipped: never remove on doubt.
+# Cost per install: one `git ls-files` process per landed folder, its list kept for every later question
+# about that folder; one manifest file written (temp file, then rename); no timer, no other process.
 MANIFEST="$CLAUDE_DIR/backups/install-manifest.txt"
 RETIRED_DIR="$CLAUDE_DIR/backups/retired"
 TAB=$(printf '\t')
@@ -540,10 +542,27 @@ NEW_RECORD=""
 FAILED_SUBS=""
 GIT_SRC=0; [ ! -e "$SRC/.git" ] || GIT_SRC=1
 
+# ship_load SUB: one git read of everything git lists under SUB, kept in ship_*_<SUB> variables. Sets
+# SHIP_RC (git's exit status) and SHIP_LIST (one path per line).
+ship_load() {
+  sl_k=$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')
+  eval "sl_have=\${ship_have_$sl_k:-}"
+  if [ -z "$sl_have" ]; then
+    sl_out=$( { git -C "$SRC" ls-files --cached --others --exclude-standard -z -- ":(literal)$1" 2>/dev/null; echo "rc=$?"; } | tr '\0' '\n')
+    sl_rc=${sl_out##*rc=}; sl_list=${sl_out%rc=*}
+    eval "ship_have_$sl_k=1; ship_rc_$sl_k=\$sl_rc; ship_list_$sl_k=\$sl_list"
+  fi
+  eval "SHIP_RC=\$ship_rc_$sl_k; SHIP_LIST=\$ship_list_$sl_k"
+}
+
+# shipped PATH [SUB]: PATH is a file, or a folder with a file git lists under it. SUB is the folder whose
+# list answers (default: PATH without its last name).
 shipped() {
   [ "$GIT_SRC" = 1 ] || { [ -e "$SRC/$1" ]; return; }
-  ship_out=$(git -C "$SRC" ls-files --cached --others --exclude-standard -- ":(literal)$1" 2>/dev/null) || return 0
-  [ -n "$ship_out" ]
+  ship_load "${2:-${1%/*}}"
+  [ "$SHIP_RC" = 0 ] || return 0
+  case "$NL$SHIP_LIST" in *"$NL$1$NL"*|*"$NL$1/"*) return 0 ;; esac
+  return 1
 }
 
 # A folder whose landing failed removes nothing this run.
@@ -579,9 +598,16 @@ remove_recorded() {
   if [ "$rr_match" = 1 ]; then
     # A folder is removed whole only under skills/. Every other folder holds files and links: rm -f, never -rf.
     case "$2" in
-      d) rm -rf "$rr_d" && log "removed $rr_d (main no longer ships $1)"; rm -f "$SKILL_COPY_DIR/${1#skills/}" ;;
-      *) rm -f "$rr_d" && log "removed $rr_d (main no longer ships $1)" ;;
+      d) rm_cmd="rm -rf" ;;
+      *) rm_cmd="rm -f" ;;
     esac
+    if $rm_cmd "$rr_d"; then
+      log "removed $rr_d (main no longer ships $1)"
+      [ "$2" != d ] || rm -f "$SKILL_COPY_DIR/${1#skills/}"
+    else
+      log "could not remove $rr_d; the next install tries again"
+      return 1
+    fi
   else
     log "kept $rr_d: it is not what the last install put there, so it is yours; main no longer ships $1"
   fi
@@ -591,7 +617,7 @@ remove_recorded() {
 retire_blocked() {
   [ "$INSTALL_FAILED" != 0 ] && return 0
   case "$FAILED_SUBS" in *" $1 "*) return 0 ;; esac
-  shipped "$1" || return 0
+  shipped "$1" "$1" || return 0
   return 1
 }
 
@@ -603,7 +629,7 @@ retire_recorded() {
     protected_name "$rp" && continue
     if shipped "$rp"; then printf '%s\n' "$rp$TAB$rk$TAB$rv"; continue; fi
     if retire_blocked "${rp%/*}"; then printf '%s\n' "$rp$TAB$rk$TAB$rv"; continue; fi
-    remove_recorded "$rp" "$rk" "$rv" >&2
+    remove_recorded "$rp" "$rk" "$rv" >&2 || printf '%s\n' "$rp$TAB$rk$TAB$rv"
   done
 }
 
@@ -619,8 +645,9 @@ retire_listed() {
     case "$lp" in */*) ;; *) continue ;; esac
     protected_name "$lp" && continue
     shipped "$lp" && continue
-    if retire_blocked "${lp%/*}"; then echo PENDING; continue; fi
     ld="$CLAUDE_DIR/$lp"
+    # A blocked folder holds the first manifest back only for a name that sits on disk now.
+    if retire_blocked "${lp%/*}"; then { [ -e "$ld" ] || [ -L "$ld" ]; } && echo PENDING; continue; fi
     if [ -L "$ld" ] && case "$(readlink "$ld")" in "$SRC"/*|"${CLONE_DIR:-$SRC}"/*) true ;; *) false ;; esac; then
       rm -f "$ld" && log "removed $ld (main no longer ships $lp)" >&2
     elif [ -e "$ld" ] || [ -L "$ld" ]; then
@@ -641,7 +668,7 @@ retire_and_record() {
     pending=$(retire_listed)
     [ -z "$pending" ] || return 0
   fi
-  mkdir -p "$CLAUDE_DIR/backups" || return 0
+  mkdir -p "$CLAUDE_DIR/backups" || { log "WARN: could not make $CLAUDE_DIR/backups, so $MANIFEST is not written"; return 0; }
   printf '%s' "$NEW_RECORD" | LC_ALL=C sort > "$MANIFEST.cs-new" && mv -f "$MANIFEST.cs-new" "$MANIFEST" \
     || { rm -f "$MANIFEST.cs-new"; log "WARN: could not write $MANIFEST"; }
 }

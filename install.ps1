@@ -305,6 +305,8 @@ dest="`$cfg/settings.json"
 if [ -f "`$repo/settings.json" ] && [ ! -L "`$dest" ]; then
   put "`$repo/settings.json" "`$dest" && echo "claude-settings: refreshed `$dest"
 fi
+nl='
+'
 # landed-dirs.txt at the repo root names the directories, the same file install.ps1 itself
 # reads below and install.sh reads on Linux/macOS. One name per line, `#` comments allowed.
 while IFS= read -r sub || [ -n "`$sub" ]; do
@@ -312,11 +314,16 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
   [ -n "`$sub" ] || continue
   [ -d "`$repo/`$sub" ] || continue
   mkdir -p "`$cfg/`$sub"
+  # One git read per folder: shiplist holds every path git lists under it (tracked, or untracked and not
+  # ignored), one per line. listed REL is true for a path in it, and when git could not answer.
+  shipok=0
+  if shiplist="`$(git -C "`$repo" ls-files --cached --others --exclude-standard -- ":(literal)`$sub" 2>/dev/null)"; then shipok=1; fi
+  listed() { [ "`$shipok" = 1 ] || return 0; case "`$nl`$shiplist`$nl" in *"`$nl`$1`$nl"*|*"`$nl`$1/"*) return 0 ;; esac; return 1; }
   if [ "`$sub" = "skills" ]; then
     for d in "`$repo/`$sub"/*; do
       [ -d "`$d" ] || continue
       # A folder git lists no file in (retired, or only ignored leftovers) is not copied, as install.ps1 does.
-      [ -n "`$(git -C "`$repo" ls-files --cached --others --exclude-standard -- ":(literal)`$sub/`$(basename "`$d")" 2>/dev/null)" ] || continue
+      listed "`$sub/`$(basename "`$d")" || continue
       dest="`$cfg/`$sub/`$(basename "`$d")"
       if [ -L "`$dest" ]; then continue; fi
       # A real directory here is this same installer's own earlier copy (no symlink
@@ -334,6 +341,8 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
     [ -f "`$f" ] || continue
     case "`$(basename "`$f")" in guard.py|guard_*.py) [ "`$gset" = 1 ] && continue ;; esac
     [ "`$sub" = bin ] && [ "`$(basename "`$f")" = rm ] && continue
+    # A file git does not list (retired, or ignored) is not copied.
+    listed "`$sub/`$(basename "`$f")" || continue
     d="`$cfg/`$sub/`$(basename "`$f")"
     [ -L "`$d" ] || { put "`$f" "`$d" && echo "claude-settings: refreshed `$d"; }
   done
@@ -568,11 +577,39 @@ $RetiredDir   = Join-Path (Join-Path $ClaudeDir 'backups') 'retired'
 $LandedList   = [System.Collections.Generic.List[object]]::new()   # @{ Rel; Dest } for each entry the run landed or kept
 $FailedSubs   = @{}
 
-function Test-Shipped([string]$Rel) {
+# Cost per install: one `git ls-files` process per landed folder, its list kept for every later question
+# about that folder; one manifest file written (temp file, then rename); no timer, no other process.
+$ShipCache = @{}
+$GitMissingLogged = $false
+# One git read of everything git lists under $Sub. Mode: 'list' (Paths holds them), 'failed' (git's own exit
+# status was not 0), or 'exists' (no git on this machine, so a file counts as shipped when it exists).
+function Get-ShipList([string]$Sub) {
+    if ($ShipCache.ContainsKey($Sub)) { return $ShipCache[$Sub] }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        if (-not $script:GitMissingLogged) { Log "git not found; a file counts as shipped when it exists"; $script:GitMissingLogged = $true }
+        $res = @{ Mode = 'exists'; Paths = @() }
+    } else {
+        $res = & {
+            $ErrorActionPreference = 'Continue'
+            $out = & git -C $RepoDir ls-files --cached --others --exclude-standard -z -- ":(literal)$Sub" 2>$null
+            $rc = $LASTEXITCODE
+            if ($rc -ne 0) { @{ Mode = 'failed'; Paths = @() } }
+            else { @{ Mode = 'list'; Paths = @((@($out) -join '').Split([char]0) | Where-Object { $_ }) } }
+        }
+    }
+    $ShipCache[$Sub] = $res
+    return $res
+}
+# $Rel is a file, or a folder with a file git lists under it. $Sub is the folder whose list answers
+# (default: $Rel without its last name).
+function Test-Shipped([string]$Rel, [string]$Sub = '') {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) { return (Test-Path -LiteralPath (Join-Path $RepoDir $Rel)) }
-    $raw = Get-Git -C $RepoDir ls-files --cached --others --exclude-standard -- ":(literal)$Rel"
-    if ($LASTEXITCODE -ne 0) { return $true }
-    return (@($raw | Where-Object { "$_".Trim() }).Count -gt 0)
+    if (-not $Sub) { $Sub = if ($Rel.Contains('/')) { $Rel.Substring(0, $Rel.LastIndexOf('/')) } else { $Rel } }
+    $l = Get-ShipList $Sub
+    if ($l.Mode -eq 'exists') { return (Test-Path -LiteralPath (Join-Path $RepoDir $Rel)) }
+    if ($l.Mode -eq 'failed') { return $true }
+    foreach ($p in $l.Paths) { if ($p -ceq $Rel -or $p.StartsWith("$Rel/")) { return $true } }
+    return $false
 }
 function Get-FileSha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 # The tree hash install.sh computes: each file's "./path hash" line, sorted, one hash over all lines.
@@ -611,7 +648,7 @@ function Move-ToRetired([string]$Rel) {
 # folder git lists nothing under.
 function Test-RetireBlocked([string]$Sub) {
     if ($AgentFailed -or $GuardStageFailed -or $FailedSubs.ContainsKey($Sub)) { return $true }
-    return (-not (Test-Shipped $Sub))
+    return (-not (Test-Shipped $Sub $Sub))
 }
 
 # Runs once, after every folder landed and every failed file was retried. Writes the manifest atomically.
@@ -644,7 +681,7 @@ function Complete-Retire {
                     Remove-Leftover $dest
                     Log "removed $dest (main no longer ships $rel)"
                     if ($rel -like 'skills/*') { Remove-Item -LiteralPath (Join-Path (Join-Path (Join-Path $ClaudeDir 'backups') 'skill-copies') $rel.Substring(7)) -Force -ErrorAction SilentlyContinue }
-                } catch { Log "could not remove $dest ($($_.Exception.Message)); left in place" }
+                } catch { Log "could not remove $dest ($($_.Exception.Message)); the next install tries again"; $newLines.Add($line) }
             } else {
                 Log "kept ${dest}: it is not what the last install put there, so it is yours; main no longer ships $rel"
             }
@@ -655,8 +692,9 @@ function Complete-Retire {
             foreach ($raw in @(Get-Content -LiteralPath $listPath)) {
                 $rel = ($raw -replace '#.*', '').Trim()
                 if (-not $rel -or $rel -notmatch '/' -or (Test-ProtectedName $rel) -or (Test-Shipped $rel)) { continue }
-                if (Test-RetireBlocked $rel.Substring(0, $rel.LastIndexOf('/'))) { $pending = $true; continue }
                 $dest = Join-Path $ClaudeDir $rel
+                # A blocked folder holds the first manifest back only for a name that sits on disk now.
+                if (Test-RetireBlocked $rel.Substring(0, $rel.LastIndexOf('/'))) { if (Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue) { $pending = $true }; continue }
                 $i = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
                 if (-not $i) { continue }
                 try {
