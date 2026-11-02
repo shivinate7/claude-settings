@@ -7525,6 +7525,34 @@ sh("env: heredoc-false-alarm pin: a quoted cat body with a lone apostrophe and a
    "cat > n.md <<'EOF'\nDon't cat " + ENV + " # here\nEOF", "allow", cwd=PROJ)
 sh("env: heredoc-false-alarm pin: an unquoted cat body of plain words naming an env read, allowed",
    "cat > n.md <<EOF\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+# A quoted python or node body that passes a string to a shell call runs that string in the shell, so an
+# env read inside that string denies. A body that only names the read in text, with no shell call, allows.
+sh("env: heredoc-false-alarm: a quoted python body hands a dollar-paren env read to os.system, denies",
+   "python3 - <<'PY'\nimport os\nos.system(\"cat $(echo " + ENV + ")\")\nPY", "deny", "env-file",
+   cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted python body hands a dollar-paren export to os.system, denies",
+   "python3 - <<'PY'\nimport os\nos.system(\"export $(cat " + ENV + " | xargs)\")\nPY", "deny", "env-file",
+   cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted python body hands a backtick env read to subprocess, shell=True, denies",
+   "python3 - <<'PY'\nimport subprocess\nsubprocess.run(\"cat " + _BT + "echo " + ENV + _BT + "\", shell=True)\nPY",
+   "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted node body hands a backtick env read to execSync, denies",
+   "node - <<'JS'\nrequire('child_process').execSync(" + _BT + "cat " + ENV + _BT + ")\nJS",
+   "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted node body hands a dollar-paren env read to execSync, denies",
+   "node - <<'JS'\nconst { execSync } = require('child_process');\nexecSync(\"cat $(echo " + ENV + ")\");\nJS",
+   "deny", "env-file", cwd=PROJ)
+# The allow pin for the python body above: the env read is named in a string, and no shell call runs it.
+sh("env: heredoc-false-alarm pin: a quoted python body names an env read in a string, no shell call, allowed",
+   "python3 - <<'PY'\nimport json\nd = {\"note\": \"the guard refuses " + _BT + "cat " + ENV + _BT
+   + "\"}\nprint(json.dumps(d))\nPY", "allow", cwd=PROJ)
+# A header that names python, or a heredoc that a shell reads from a written file, runs the body's
+# substitutions, so an env read there denies.
+sh("env: heredoc-false-alarm: an echo header, then a quoted body with an env read that sh x.sh runs, denies",
+   "echo python; cat <<'EOF' > x.sh\n$(cat " + ENV + ")\nEOF\nsh x.sh", "deny", "env-file", cwd=PROJ)
+# A python -c before a heredoc does not make the heredoc body a shell call, so the body stays text.
+sh("env: heredoc-false-alarm: a python -c before a quoted heredoc to notes.md, env read in body, allowed",
+   "python3 -c 'print(1)'; cat <<'EOF' > notes.md\nread " + ENV + " later\nEOF", "allow", cwd=PROJ)
 
 
 # =========================================================================== git env set
