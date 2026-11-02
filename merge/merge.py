@@ -726,7 +726,8 @@ class Host:
     def batch_running(self, n, base, unprotected_counts_all=False, ignore=None, head=None):
         """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a required check
         reported and not completed (rule git-no-merge-during-batch-ci), unless that head contains n's head (decision no-merge-during-batch-ci):
-        the compare `head...other head` reads `ahead` or `identical`, and it is read only for a busy pull request. A failed read raises Stop.
+        the compare `head...other head` reads `ahead` or `identical`, and so does the compare `base...head` (this head holds the base tip). Both are read only for a busy
+        pull request, the second only when the first passes. A failed read raises Stop.
         `head` is n's head sha; None reads it through pr(n). The run counts because a required job can wait on another job
         (checks.yml's `checks` needs `scope`), so it has no row yet. A required name with no entry and no running workflow on that head
         does not count: a ready PR whose CI never reports would block every merge. merge.ignoreChecks runs and checks never count. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
@@ -754,12 +755,13 @@ class Host:
                 continue
             if head is None:
                 head = self.pr(n)["head"]
-            if not self.holds_head(head, d["head"]["sha"]):
+            # contained only when the busy head holds this head AND this head holds the base tip: else its run never tested the base this merge lands on
+            if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
 
     def holds_head(self, head, other):
-        """True when the commit `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
+        """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
@@ -1517,6 +1519,14 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         return False, "the paths of main or of the batch cannot be read"
     theirs, ours = ({p for p in out.split("\0") if p} for _, out in reads)
     if not theirs:  # main's tree is the merge base's: the merge of sha and tip is sha's tree, which the green run tested
+        # ... only if no commit between changed a path: a pull_request run tested the merge with main as it was then, path and all
+        trees = git(wt, "log", "--format=%T", f"{m}..{tip}")
+        base_tree = git(wt, "rev-parse", f"{m}^{{tree}}")
+        if trees[0] or base_tree[0]:
+            return False, "the trees of main's commits since the merge base cannot be read"
+        moved = [t for t in trees[1].split() if t != base_tree[1]]
+        if moved:
+            return False, f"main changed paths since the merge base and changed them back ({len(moved)} commit{'s' * (len(moved) != 1)} with another tree), so the green run tested a main that had them"
         n = int(count[1])
         verdict = True, f"{base_ref.split('/', 1)[-1]} moved by {n} commit{'s' * (n != 1)} that change no path; the merge of the head and the tip is the head's tree"
         _SMALL_MOVES[key] = verdict
