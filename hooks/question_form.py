@@ -1254,7 +1254,9 @@ def past_rulings(question_text, repo_root):
         other = guard_pointer.pointer_checkout()
     except Exception:
         other = ""
-    if other and os.path.realpath(other) != os.path.realpath(repo_root):
+    if not other:
+        unknown.append("claude-settings decision records (absent)")
+    elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
@@ -1304,6 +1306,9 @@ def ruling_cite(reason, ids, strict=False) -> str:
     """Classify a refusal reason against the ids the model was shown. "cited" when it names a shown id and no
     record that was not shown. "bogus" when it names a `decisions/..` or `debts/..` record that was not shown, or,
     with `strict` (a call that judges item 8 alone), names no shown id. "" for any other refusal (a form item)."""
+    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
+    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
+
     def names(i):
         return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
     shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
@@ -1338,14 +1343,14 @@ def chat_units(tool_input) -> list:
 
 
 def page_units(judged) -> list:
-    """(marker text, words text) for each decision write of `judged_item_writes`; a task is no question. The
-    marker text is the item's `context`, or a str_replace's new_str."""
+    """(marker text, words text) for each write of `judged_item_writes`, a task too (every question is vetted).
+    The marker text is the item's `context`, or a str_replace's new_str."""
     units = []
     for write in judged:
         data = write.get("data")
         if "new_str" in write:
             units.append((write["new_str"], write["new_str"]))
-        elif isinstance(data, dict) and data.get("kind") != "task" and not data.get("steps"):
+        elif isinstance(data, dict):
             units.append((str(data.get("context") or ""), " ".join(_all_strings(data))))
     return units
 
@@ -1353,29 +1358,43 @@ def page_units(judged) -> list:
 # ------------------------------------------------------------------ option keys: one letter, one question
 
 # The key of an option line: `a)`, `(a)`, `a.`, `a:`, `**a**`, `**a)**`, with a bullet and a digit prefix (`1a`)
-# allowed. The line must go on with text, so a sentence that opens with a one-letter word is no key.
-OPTION_KEY = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*|\()?(\d*[A-Za-z])(?:\)|\.|:|\*\*)(?:\*\*)?[ \t]+(\S.*)$", re.M)
+# allowed. The line must go on with text, so a sentence that opens with a one-letter word is no key. A bullet with
+# a colon (`- a: 3 files`) is a list item, never a key.
+OPTION_KEY = re.compile(r"^[ \t]*(?P<bullet>[-*+][ \t]+)?(?:\*\*|\()?(?P<key>\d*[A-Za-z])(?P<close>\)|\.|:|\*\*)"
+                        r"(?:\*\*)?[ \t]+\S", re.M)
 
 
 def _option_keys(reply) -> list:
+    """(key, question line) for each option line of the reply's Input Needed item. The question line is the last
+    non-option line with a `?` before the option, else the item's first line, lowercased."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     from report_guard import input_needed_section  # the one reader of the Input Needed item
-    return [(k.lower(), " ".join(t.lower().split())) for k, t in OPTION_KEY.findall(input_needed_section(reply))]
+    found, asked, first = [], "", ""
+    for line in input_needed_section(reply).splitlines():
+        match = OPTION_KEY.match(line)
+        if match and not (match.group("bullet") and match.group("close") == ":"):
+            found.append((match.group("key").lower(), asked or first))
+            continue
+        plain = " ".join(line.lower().split())
+        if plain:
+            first = first or plain
+            asked = plain if "?" in plain else asked
+    return found
 
 
 def key_overlap(reply, earlier_replies) -> str:
-    """The option keys, comma joined, that two questions share: within the Input Needed of `reply`, or with the
-    Input Needed of an assistant reply since the last human message. The same key with the same option text is a
-    question sent again, never a clash. '' when no key clashes."""
+    """The option keys, comma joined, that two questions share. A key used twice in the Input Needed of `reply` is
+    a clash. So is a key that an assistant reply since the last human message also uses under a different question
+    line. The same key under the same question line is a question sent again, never a clash. '' when none clash."""
     seen, clash = {}, set()
-    for key, text in _option_keys(reply):
-        if key in seen and seen[key] != text:
+    for key, question in _option_keys(reply):
+        if key in seen:
             clash.add(key)
-        seen.setdefault(key, text)
+        seen.setdefault(key, question)
     for earlier in earlier_replies:
-        for key, text in _option_keys(earlier):
-            if key in seen and seen[key] != text:
+        for key, question in _option_keys(earlier):
+            if key in seen and seen[key] != question:
                 clash.add(key)
     return ", ".join(sorted(clash))
