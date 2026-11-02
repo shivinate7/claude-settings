@@ -35,7 +35,9 @@ a turn end in these cases:
     message: send_message or SendMessage whose message names `<owner>/<name>` as a whole token, without
     case (REPO_HOME, _names_repo). A sentence period or a URL path after the name still counts;
     `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
-    transcript read, the anchoring and the stand-downs of the page check (Pages.sent takes the proof);
+    transcript read and the anchoring of the page check (Pages.sent takes the proof). Its home may sit in
+    backticks or end in `:,;.`, as a ruling home may (home_path). Its stand-down systemMessage reads
+    "Feedback guard: repo sends not checked" and the page one reads "page sends not checked";
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -82,7 +84,7 @@ OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
               "task": ("todo", "debts", "debt-notes")}
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
-FAIL_OPEN_PAGES = "Feedback guard: page sends not checked (%s)."
+FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -269,13 +271,14 @@ class Homes:
 
 
 class Pages:
-    """Checks that each page item's number was sent to the page writer after the owner's message.
-    The transcript loads once, on the first open page item. `skip` holds the reasons a block stood
-    down, for the systemMessage line. An unreadable transcript stands down every block; a block with
-    no owner record stands down alone."""
+    """Checks that each page item's number was sent to the page writer, and each repo item's name to
+    that repo's triage session, after the owner's message. The transcript loads once, on the first
+    open page or repo item. `skip` maps each label (page, repo) to the reasons its blocks stood down,
+    for the systemMessage line. An unreadable transcript stands down every block; a block with no
+    owner record stands down alone."""
 
     def __init__(self, path):
-        self.path, self.records, self.owners, self.unread, self.skip = path, None, None, False, []
+        self.path, self.records, self.owners, self.unread, self.skip = path, None, None, None, {}
 
     def _load(self):
         if self.records is None:
@@ -285,24 +288,29 @@ class Pages:
                     raise OSError("no transcript_path in the payload")
                 self.records = _transcript.read_transcript(self.path)
             except (OSError, ValueError) as e:
-                self.unread = True
-                self.skip.append("the transcript cannot be read: %s" % (" ".join(str(e).split())
-                                                                       or type(e).__name__))
+                self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
+                                                                      or type(e).__name__)
             for i, rec in enumerate(self.records):
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
-    def sent(self, text, k, proof, stamp):
+    def _stand_down(self, label, why):
+        self.skip.setdefault(label, [])
+        if why not in self.skip[label]:
+            self.skip[label].append(why)
+
+    def sent(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
         k-th block with this text. True too when the check stands down: no transcript, or no such
         owner record."""
         if not self._load():
+            self._stand_down(label, self.unread)
             return True
         anchors = [i for i, said in self.owners if said == text]
         if len(anchors) < k:
-            self.skip.append("the transcript has no owner record %d for the message at %s" % (k, stamp))
+            self._stand_down(label, "the transcript has no owner record %d for the message at %s" % (k, stamp))
             return True
         return any(proof(use) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
                    for use in _transcript.tool_uses(r))
@@ -385,11 +393,11 @@ def _names_repo(use, owner, name):
 
 def repo_problem(item_id, rest, text, k, stamp, pages):
     """None when the repo item's home is repo:<owner>/<name> and the send is proved, or the check stood down."""
-    m = REPO_HOME.fullmatch(home_word(rest))
+    m = REPO_HOME.fullmatch(home_path(rest))
     if m is None:
         return "%s [repo] has a malformed repo home: it needs `repo:<owner>/<name>`" % item_id
     slug = "%s/%s" % m.groups()
-    if pages is None or pages.sent(text, k, lambda use: _names_repo(use, *m.groups()), stamp):
+    if pages is None or pages.sent(text, k, lambda use: _names_repo(use, *m.groups()), stamp, "repo"):
         return None
     return ("%s [repo] repo:%s: the transcript shows no send naming %s after the owner's message; send the"
             " owner's message to that repo's triage session (send_message naming %s)" % (item_id, slug, slug, slug))
@@ -458,7 +466,8 @@ def main():
             homes, pages = Homes(hook.get("cwd")), Pages(hook.get("transcript_path"))
             reasons = problems(blocks, handoff, homes, burst, pages, inbox)
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + (
-                [FAIL_OPEN_PAGES % "; ".join(pages.skip)] if pages.skip else [])
+                [FAIL_OPEN_SENDS % (label, "; ".join(why)) for label, why in sorted(
+                    pages.skip.items(), key=lambda kv: kv[0] != "page")])
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
