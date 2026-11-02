@@ -109,16 +109,19 @@ Other tiers keep the model default. Ruled out: `effortLevel` in user settings do
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
 SessionStart hook reaches only Bash.
 
-**The lane repo tag.** Guard rule `lane-repo-tag` (basis measured, landed 2026-11-02) refuses a
-`create_session` call tagged `cs-build:lane` that carries no tag equal (casefolded) to `cs-repo:` plus the
-calling checkout's origin `owner/name`. Incident: 2026-11-02 00:08 CST, lanes tagged with the short repo
-name made 18 false in-progress flags on the roadmap page, because the live check matches the full tag.
-The repo is the last two segments of the origin's path with `.git` stripped; the host is never read, since
-the cloud proxy serves another host. With no readable origin, any `cs-repo:<owner>/<name>` tag passes. A
-roll-out lane carries this repo's tag beside its target's. The rule runs after `lane-effort-pin`, so a call
-that breaks both reads the pin first. An owner override lifts it. `REPO_TAG` in `hooks/shared_names.py` is
-the one name, shared with `skills/roadmap/build.py`. Cost: one `git remote get-url origin` read, only on a
-lane `create_session`; no new process, file or timer.
+**The lane repo tag.** Guard rule `lane-repo-tag` refuses a `create_session` call tagged `cs-build:lane` that
+carries no tag equal to `cs-repo:` plus the calling checkout's origin `owner/name`. The tag is read as the
+roadmap reads it (`repo_tag_names` in `hooks/shared_names.py`, which both import): the exact prefix, no strip,
+the owner/name compared without case. A tag the roadmap cannot read does not pass the guard. The repo is the
+last two segments of the origin's path with `.git` stripped; the host is never read, since the cloud proxy
+serves another host. A local path with no scheme counts by its path. With no readable origin, any
+`cs-repo:<owner>/<name>` tag passes. A roll-out lane carries this repo's tag beside its target's. The rule
+runs after `lane-effort-pin`, so a call that breaks both reads the pin first. An owner override lifts it.
+Cost: one `git remote get-url origin` process start per lane `create_session`; no file or timer.
+Kind of risk: incident. Landed 2026-11-02.
+
+Incident: 2026-11-01 18:08 CST, lanes tagged with the short repo name made 18 false in-progress flags on
+the roadmap page, because the live check matches the full tag.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the

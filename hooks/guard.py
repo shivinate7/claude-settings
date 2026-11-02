@@ -135,9 +135,11 @@ Other tools, in `judge` order:
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
   lane-repo-tag        deny. A `create_session` call with a lane tag (as for lane-effort-pin) and no tag
-                       that equals `cs-repo:` plus the calling checkout's origin `owner/name`, casefolded.
-                       The repo is the last two segments of the origin's path, `.git` stripped; the host
-                       is never read. With no readable origin, any tag `cs-repo:<owner>/<name>` passes.
+                       that names the calling checkout's origin `owner/name` as the roadmap reads a repo tag
+                       (`repo_tag_names`): exact `cs-repo:` prefix, no strip, owner/name without case.
+                       The repo is the last two segments of the origin's path (a scheme-less local path
+                       too), `.git` stripped; the host is never read. With no readable origin, any tag
+                       `cs-repo:<owner>/<name>` passes.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
@@ -1893,8 +1895,14 @@ def origin_repo(cwd: str) -> str:
     if done is None or done.returncode != 0:
         return ""
     url = done.stdout.strip()
-    # `scheme://host/path` keeps the path; scp form `user@host:path` keeps what follows the colon.
-    path = url.split("://", 1)[1].partition("/")[2] if "://" in url else url.partition(":")[2]
+    # `scheme://host/path` keeps the path; scp form `user@host:path` (a colon before the first slash) keeps what
+    # follows the colon; a local path with no scheme is the path itself.
+    if "://" in url:
+        path = url.split("://", 1)[1].partition("/")[2]
+    elif ":" in url.partition("/")[0]:
+        path = url.partition(":")[2]
+    else:
+        path = url
     segments = [part for part in path.rstrip("/").split("/") if part]
     if len(segments) < 2:
         return ""
@@ -1915,13 +1923,11 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str) -> str:
     if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
         return ""
     repo = origin_repo(cwd)
+    # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
-        if not isinstance(tag, str):
-            continue
-        tag = tag.strip().casefold()
-        if repo and tag == REPO_TAG + repo:
+        if repo and repo_tag_names(tag, repo):
             return ""
-        if not repo and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
+        if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
             return ""
     return ", ".join(str(t) for t in tags)
 
@@ -2012,8 +2018,8 @@ ROLE_DEFAULT = "general-purpose"
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
 # Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
-from shared_names import REPO_TAG  # noqa: E402  the one home of the tag name, shared with skills/roadmap/build.py
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"

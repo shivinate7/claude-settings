@@ -37,6 +37,13 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 REPO_TAG = "cs-repo:"
 STEP_TAG = "cs-step:"
 
+
+def repo_tag_names(tag, slug) -> bool:
+    """True when `tag` is exactly REPO_TAG plus `slug` (owner/name), the slug compared without case. The one
+    reading of a repo tag: no strip, the exact prefix, so a tag one reader accepts the other accepts."""
+    return isinstance(tag, str) and tag.startswith(REPO_TAG) and tag[len(REPO_TAG):].lower() == slug.lower()
+
+
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
 

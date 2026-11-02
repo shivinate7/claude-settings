@@ -98,7 +98,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from shared_names import REPO_TAG, STEP_TAG  # noqa: E402  the one home of the tag names, shared with the guard (hooks/shared_names.py)
+from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
 def git(repo, *args, stdin=None):
@@ -543,7 +543,7 @@ def live_work(path, steps, slug=None):
                         and (r.get("tags") is None or isinstance(r["tags"], list)))
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
-        ours = lambda t: isinstance(t, str) and t.startswith(REPO_TAG) and t[len(REPO_TAG):].lower() == slug.lower()
+        ours = lambda t: repo_tag_names(t, slug)
         session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED_SESSION
                                 and any(map(ours, r.get("tags") or []))
                                 for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})
