@@ -911,3 +911,5 @@
 - unread-early-line-east-blind: the early +05:00 line in the unread test can fail only on a clock at or west of UTC+3; CI on UTC covers it (hooks/test_decision_watch.py, mods/decision-watch/decision-watch.test.mjs). Step: guard-log-time-offset.
 - guard-log-between-untested: `--between` in main() has no test, only window(); a `Z` bound fails before Python 3.11, so a pace read passes `+00:00` (lint/guard_log_report.py). Step: guard-log-time-offset.
 - decision-watch-long-comment: a comment line near hooks/decision_watch.py:875 runs to 154 characters. Cosmetic. Step: guard-log-time-offset.
+- undo-presence-skip: a line the merge-base holds, which both parents keep and the merge drops, reads as kept, in place or across a rename, by the `in_b` skip in lost_in_parent (lint/check_silent_undo.py). Decision: silent-undo-check-design
+- undo-readd-old-name: main renames a file and adds a new file at the old name. Git pairs no rename, so lost_in_parent reads the base at the new name and flags a line the branch edited (lint/check_silent_undo.py). False alarm, same on main. Decision: silent-undo-check-design
