@@ -190,6 +190,7 @@ NO_PS = "Windows has no ps, so ownership reads unknown and this case does not ru
 NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
 NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
+NO_EXEC_BIT = "Windows git ignores the exec bit (core.filemode is false), so a chmod makes no mode change here"
 
 
 def skip_case(label, reason):
@@ -570,6 +571,7 @@ BCCLEAN = os.path.join(ROOT, "bc-clean")            # case 6: a clean tree on a 
 BCLOCKED = os.path.join(ROOT, "bc-locked")          # the incident tree, locked
 BCLIVE = os.path.join(ROOT, "bc-live")              # the incident tree, with a live session standing in it
 BCLIVECFG = os.path.join(ROOT, "bc-livecfg")        # the config folder holding that session's record
+BCEXEC = os.path.join(ROOT, "bc-exec")              # the incident tree, f.txt at mode 100755 in the base
 
 # SYMLINK WORKTREES (the feed-build incident). An agent linked
 # `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
@@ -1753,11 +1755,15 @@ def _base_git(where, *args):
     return done
 
 
-def _base_copy_tree(where, branch, moved=True):
+def _base_copy_tree(where, branch, moved=True, executable=False):
     """Build one base-copy tree at `where`: a linked worktree of BCMAIN on `branch`, pushed at the base P0.
+    When `executable`, P0 is a commit that sets f.txt to mode 100755, so the base carries the exec bit.
     When `moved`, BCSECOND pushes P1 (a change to f.txt, and a new g.txt) to that branch. BCMAIN then fetches
     it and moves the branch onto P1 with `update-ref`, which leaves the worktree's index on P0."""
     _base_git(BCMAIN, "worktree", "add", "-q", where, "-b", branch)
+    if executable:
+        _base_git(where, "update-index", "--chmod=+x", "f.txt")
+        _base_git(where, *IDENT, "commit", "-q", "-m", "make f.txt executable on " + branch)
     _base_git(where, "push", "-q", "origin", branch)
     if not moved:
         return
@@ -1863,9 +1869,16 @@ def _build_base_copies():
     )
     _require_base_copy(BCLIVE, BC_INCIDENT, 0)
 
+    # Exec bit: the incident tree, with f.txt at mode 100755 in its base. The worktree copy is chmod 0655.
+    # git reads that as 100644 (it tests the owner bit only), so f.txt is dirty in its mode alone.
+    if os.name != "nt":  # Windows git ignores the exec bit, so this tree could not be built there
+        _base_copy_tree(BCEXEC, "bc-exec", executable=True)
+        os.chmod(os.path.join(BCEXEC, "f.txt"), 0o655)
+        _require_base_copy(BCEXEC, ["MM f.txt", "D  g.txt"], 0)
+
 
 lazy_fixture([BCMAIN, BCINC, BCUNIQUE, BCUNTRACKED, BCUNPUSHED, BCBYPASS, BCCLEAN, BCLOCKED, BCLIVE,
-              BCLIVECFG], _build_base_copies)
+              BCLIVECFG, BCEXEC], _build_base_copies)
 
 
 def _build_links():
@@ -2999,6 +3012,86 @@ sh("worktree remove: base copies, the incident tree, locked, still denies",
    VCS + " worktree remove " + slash(BCLOCKED), "deny", "shared-tree", cwd=BCMAIN)
 sh("worktree remove: base copies, the incident tree under a live session still denies",
    VCS + " worktree remove " + slash(BCLIVE), "deny", "shared-tree", cwd=BCMAIN, config=BCLIVECFG)
+
+# THE EXEC BIT. BCEXEC is the incident tree with f.txt at mode 100755 in its base and 0655 in the worktree.
+# git reads that copy as 100644, so the tree holds a change no pushed commit has. The guard must refuse it.
+if os.name != "nt":
+    sh("worktree remove: base copies, the incident tree whose exec bit differs in the worktree still denies",
+       VCS + " worktree remove " + slash(BCEXEC), "deny", "shared-tree", cwd=BCMAIN)
+else:
+    skip_case("worktree remove: base copies, the incident tree whose exec bit differs in the worktree still denies",
+              NO_EXEC_BIT)
+
+
+# THE COST OF THE PUSHED-COPY READ. dirty_paths_are_pushed_copies (git_reads.py) states its cost: at most 14
+# fixed git starts, then one ls-tree per candidate tried and one for-each-ref per candidate a match uses, with
+# 2 + BASE_COPY_REFLOG_CAP candidates at most. Each git start of that read goes through `_git`, so the count is
+# taken there, on a fresh load of git_reads.py. The incident tree must answer True: a False would stop the
+# read early and the count would prove nothing about the whole read.
+def _load_git_reads():
+    """git_reads.py, loaded fresh from the folder GUARD sits in, so a patch to it touches no other load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "git_reads_cost_case", os.path.join(os.path.dirname(GUARD), "git_reads.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _tree_marks(where):
+    """{path: mtime_ns} of every file and folder under WHERE, a `.git` entry excluded. A write moves one."""
+    marks = {}
+    for folder, dirnames, filenames in os.walk(where):
+        for name in dirnames + filenames:
+            if name != ".git":
+                path = os.path.join(folder, name)
+                marks[path] = os.lstat(path).st_mtime_ns
+    return marks
+
+
+def base_copies_read_cost_case():
+    """The stated cost of dirty_paths_are_pushed_copies, measured on the incident tree, writes nothing."""
+    materialize(BCINC)
+    git_reads = _load_git_reads()
+    starts = []
+    real_git = git_reads._git
+
+    def counting_git(where, *args):
+        starts.append(args)
+        return real_git(where, *args)
+
+    lines = _porcelain(BCINC)
+    marks = _tree_marks(BCINC)
+    git_reads._git = counting_git
+    try:
+        got = git_reads.dirty_paths_are_pushed_copies(BCINC, lines)
+    finally:
+        git_reads._git = real_git
+    fixed = [args for args in starts if "ls-tree" not in args and "for-each-ref" not in args]
+    ls_tree = [args for args in starts if "ls-tree" in args]
+    for_each_ref = [args for args in starts if "for-each-ref" in args]
+    candidates = 2 + git_reads.BASE_COPY_REFLOG_CAP
+    problems = []
+    if got is not True:
+        problems.append("the incident tree read as %r, want True" % (got,))
+    if len(fixed) > 14:
+        problems.append("%d fixed git starts, want at most 14" % len(fixed))
+    if len(ls_tree) > candidates:
+        problems.append("%d ls-tree starts, want at most %d candidates" % (len(ls_tree), candidates))
+    if len(for_each_ref) > len(ls_tree):
+        problems.append("%d for-each-ref starts, want at most one per candidate tried (%d)"
+                        % (len(for_each_ref), len(ls_tree)))
+    if _tree_marks(BCINC) != marks:
+        problems.append("a file or folder in the tree changed mtime during the read")
+    if _porcelain(BCINC) != lines:
+        problems.append("git status --porcelain changed during the read")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "fixed %d (bound 14), ls-tree %d and for-each-ref %d (candidate bound %d), no file written" % (
+        len(fixed), len(ls_tree), len(for_each_ref), candidates)
+
+
+FIXTURELESS_CHECKS.add(base_copies_read_cost_case)  # builds only the base-copy trees it reads
 
 # `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
 # is an ASK, never a deny, whatever the run location.
@@ -11376,6 +11469,12 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
+# base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
+BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
+                        "starts and writes no file")
+LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
+LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
