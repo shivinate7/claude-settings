@@ -103,7 +103,10 @@ Other tools, in `judge` order:
                        other than the one holding its cwd. A nested worktree owns its own files.
                        A target in no checkout, or in the clone's `.git`, passes; unreadable git
                        passes. The shell form reads the targets frozen-path reads, after a
-                       leading `cd`. An override lifts it.
+                       leading `cd`. A Bash or PowerShell `cd` or `Set-Location` into another
+                       checkout is refused too, bare or chained; the cd target in the caller's
+                       recorded home, a session's recorded home, or the caller's own
+                       `agent-<id>-<suffix>` red-run folder passes that act. An override lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -240,7 +243,8 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _segment_cd_target, _segment_git_c_target, _split_heredocs,
+            _strip_heredoc_bodies_unconditionally, agent_role, basename, cap_safe,
             clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
             nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
@@ -860,6 +864,14 @@ OTHER_CHECKOUT_REASON = (
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
     "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
     "janitor sweep."
+)
+
+OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
+OTHER_CHECKOUT_CD_REASON = (
+    "Rule (other checkout): this command changes directory into another checkout of this clone, "
+    "not the one this session stands in. "
+    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
+    "`cd`."
 )
 
 
@@ -3019,24 +3031,104 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
+def _checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def _cd_targets(tool: str, command: str, where: str):
+    """The folder each real `cd` or `Set-Location` segment of COMMAND moves into, as a realpath. Read
+    the way `_run_dir` reads the shell: heredoc bodies dropped first, one segment at a time, so a
+    `cd` in a quote, a comment or a heredoc body is text. A target that holds a variable, a bare
+    `cd`, `cd -` and a folder that does not exist are not read."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    command = _strip_heredoc_bodies_unconditionally(command)
+    if not re.search(r"\bcd\b|set-location", command, re.IGNORECASE):
+        return []
+    found, ends = [], []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        named = _segment_cd_target(tokens) if tokens else None
+        if named is None or _unexpanded(named):
+            continue
+        at = dir_before_segment(segments, number, where, ends)
+        folder = shell_abs(named, at) if at else None
+        if folder and os.path.isdir(folder):
+            found.append(os.path.realpath(folder))
+    return found
+
+
+def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
+    """True when a `cd` into TARGET goes into the caller's recorded agent home (the recovery step
+    worktree-home allows) or, for a call with no `agent_id`, the session's recorded home. It skips
+    the `cd` act only; the write scan still judges every write in the same command. File reads,
+    no git."""
+    status, home, _ = agent_worktree_home(payload, cwd)
+    if status == "home" and path_is_inside(target, home) is True:
+        return True
+    if isinstance(payload, dict) and payload.get("agent_id"):
+        return False
+    primary, _lane = session_home_place(cwd)
+    record = session_home_record(payload, primary) if primary else ""
+    try:
+        with open(record, encoding="utf-8") as handle:
+            held = handle.read().strip()
+    except OSError:
+        return False
+    return bool(held) and path_is_inside(target, held) is True
+
+
+def _cd_red_run(payload, roots, owner: str) -> bool:
+    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
+    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
+    whole, so a sibling whose id only starts with this one does not pass."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not agent_id or not owner:
+        return False
+    folder = os.path.dirname(owner)
+    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
+            and os.path.basename(folder) == "worktrees"
+            and os.path.basename(os.path.dirname(folder)) == ".claude"
+            and os.path.dirname(os.path.dirname(folder)) in roots)
+
+
+def other_checkout_hit(tool: str, tool_input: dict, cwd: str, payload=None) -> str:
     """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
-    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
-    unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    of this clone other than the one holding `cwd`, or a shell `cd` moves into one, else ''. A
+    target in no checkout passes. An unreadable git state, or a cwd in no checkout, is unknown and
+    passes. One git read per call that can write, or that `cd`s toward a folder under another
+    `.git` entry. Liftable by an owner override, unlike `worktree_home_hit`
     (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    moves = []
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
+        writes = bool(targets)
     elif tool in SHELL_TOOLS:
         targets = None
-        command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):
-            return ""
+        raw = str(tool_input.get("command", "") or "")
+        command = strip_heredoc_bodies(raw)
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        moves = _cd_targets(tool, raw, where) if where else []
     else:
         return ""
-    if targets == []:
+    if moves:
+        # A `cd` stays in its own checkout when the nearest `.git` above its target is the one above
+        # the cwd. Stat alone tells, so only a move toward another `.git` entry spends the git read.
+        own_root = _checkout_root_by_stat(os.path.realpath(where))
+        moves = [m for m in moves
+                 if own_root and _checkout_root_by_stat(m) != own_root and not _cd_home_exempt(payload, where, m)]
+    if not moves and not writes:
         return ""
-    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     roots = clone_checkouts(where) if where else None
     own = _owning_checkout(where, roots) if roots else ""
     if not own:
@@ -3052,8 +3144,11 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
         return (bool(owner) and owner != own
                 and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
 
+    for move in moves:
+        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+            return OTHER_CHECKOUT_CD_DETAIL + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
         return "shell write into another checkout: " + hit if hit else ""
     for target in targets:
         if elsewhere(target, where):
@@ -3290,9 +3385,11 @@ def judge(payload) -> None:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
-    other_hit = other_checkout_hit(tool, tool_input, cwd)
+    other_hit = other_checkout_hit(tool, tool_input, cwd, payload)
     if other_hit:
-        refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
+        refuse(tool, "deny", "other-checkout",
+               OTHER_CHECKOUT_CD_REASON if other_hit.startswith(OTHER_CHECKOUT_CD_DETAIL)
+               else OTHER_CHECKOUT_REASON, other_hit)
     # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
     # override lifts it, and it is not in never_lifted: the owner may mean the write.
     session_hit = session_home_hit(payload, tool, tool_input, cwd)

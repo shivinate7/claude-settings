@@ -18,7 +18,7 @@ Run the tests you write, and show each one fails for the right reason before the
 passes after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
-Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
+Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<your agent id>-red`. The guard lets you `cd` into that folder only; a `cd` into any other checkout is refused. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
 
 Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text, per building-scanner-respects-strings.
 
