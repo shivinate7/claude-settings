@@ -26,5 +26,19 @@ Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, 
 
 Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
 
+### A fix round
+
+The orchestrator starts each fix round as a fresh agent spawn with `isolation: 'worktree'`. The new worktree starts from the lane branch head.
+
+The orchestrator resumes an agent by name only when that agent died mid-round (`roles-resume-by-name`: resume a dead agent by name, never fresh). A resumed agent keeps its old worktree. `worktree-home` (an agent stays in its recorded home) keeps it there.
+
+Why: a test-author worktree, resumed for a fix round, held staged copies of four files. The copies equal the old branch base, because the branch ref had moved under the index. Committing them would have undone a merged PR.
+
+Each agent runs `git diff --cached --stat` before each commit. The list names only the files that the agent changed this round. Any other file means the branch moved under the worktree. The agent commits nothing and reports it.
+
+No hook or check enforces this yet. The agent files and the brief template carry it.
+
+Risk kind: incident, 2026-11-01 22:41 CST, worktree of lane `merge-lock-record-drift`.
+
 Kind: build
 Plan: docs/decisions/lanes-start-in-tool-worktrees.md#the-ruling (all)

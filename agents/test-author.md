@@ -15,7 +15,7 @@ needs a product change, report that change. The orchestrator assigns it to a bui
 
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
 Run the tests you write, and show each one fails for the right reason before the build, or
-passes after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+passes after it. Before you stop for any reason, commit your work to your own branch and push it. Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees). Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
 Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
