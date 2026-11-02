@@ -649,9 +649,9 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 25 min: slowest 18.07 min is 72% of it (range 8.77-18.07, median 12.13, n 17 = 16 green + 1 cap end,
-    # 2026-11-01 22:11 to 2026-11-02 07:41 UTC; decision ci-job-caps).
-    timeout-minutes: 25
+    # Cap 28 min: slowest about 19.2 min (a floor, run 41407758669 was cut) is 69% of it (range 8.77-19.2, median 12.27,
+    # n 18 = 16 green + 2 cap ends, 2026-11-01 22:11 to 2026-11-02 07:41 UTC; decision ci-job-caps).
+    timeout-minutes: 28
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -670,8 +670,8 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap (slowest 10.87 min, 72%), so a hang reads red at this step.
-        timeout-minutes: 15
+        # Own cap: slowest 11.68 min is 73% of it, so a hang reads red at this step.
+        timeout-minutes: 16
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
