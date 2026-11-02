@@ -10985,8 +10985,8 @@ BUILDER_GREEN = [
                                   "[tool.pytest.ini_options]\nminversion = '7'\n")),
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
-# A builder's test change is REFUSED at commit and push, and BLOCKED at the first stop (the
-# builder-refuse section below pins the planned fix). The rule id is the one the refusal prints.
+# A builder's test change is REFUSED at commit and push, and BLOCKED at the first stop. The
+# builder-refuse section below pins the base rule and the refusal text. The rule id is the one the refusal prints.
 BDIFF = "builder-diff"
 for _name, _change in BUILDER_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
@@ -11616,11 +11616,12 @@ LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs no
 # =========================================================================== builder refusal
 #
 # A builder's test change is REFUSED at `git commit` and `git push`, and BLOCKED at its first
-# SubagentStop (decision builders-cannot-edit-tests; debt refusal-route-around-guard). These cases
-# pin the planned base fix in guard.py diff_bases: each commit HEAD moved to by a reset, checkout,
-# merge or pull is a base, unless one of the agent's own commits is its ancestor. A path offends
-# only if it differs from EVERY base. Until that fix lands, each case here is red: the guard logs
-# and allows. The rows that pin a stop, the write tool and a clean builder sit beside these.
+# SubagentStop (decision builders-cannot-edit-tests). These cases pin the base rule in guard.py
+# diff_bases and diff_violation: each commit HEAD was handed by a reset, checkout, merge or pull is
+# a base. A base that holds one of the agent's own commits still vouches for each path that commit
+# did not change. A path offends only if it differs from every base that vouches for it. A test
+# file that both sides changed in a hand-resolved merge offends whatever it holds. The rows that pin
+# a stop, the write tool and a clean builder sit beside these.
 FAMILY = "builder-refuse"
 TEST_A = "tests/test_a.py"
 # The test-author's five cases, added to main's test file on the lane branch.
