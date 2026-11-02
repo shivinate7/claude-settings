@@ -105,6 +105,11 @@ class LayoutFile(Tree):
         self.assertEqual({k: v["path"] for k, v in kinds.items()}, want)
         self.assertEqual(self.layout.layout()["extras"], EXTRAS)
 
+    def test_waiting_data_is_a_waiting_kind_not_core(self):
+        kinds = self.layout.kinds()
+        self.assertIn("waiting-data", kinds, "no waiting-data kind in the layout")  # scope: the layout
+        self.assertEqual(kinds["waiting-data"].get("set"), "waiting", "waiting-data is not set waiting")
+
     def test_rolled_out_repo_reads_docs(self):
         self.roll_out()
         self.put("decisions/x.md")  # a stray root folder is not read once the repo rolled out
@@ -485,6 +490,14 @@ class WaitingCopy(Tree):
         self.assertEqual(code, 2, out)
         self.assertIn("unknown", out)
         self.assertNotIn("in shape", out)
+
+    def test_a_waiting_page_not_rolled_out_with_no_copy_to_read_is_unknown(self):
+        self.extras({"waiting-page": self.URL, "rolled-out": False})
+        self.assertFalse(self.ref_exists("refs/heads/roadmap"), "the fixture has a local roadmap")  # scope: the fixture
+        code, out = self.probe()
+        self.assertEqual(code, 2, out)
+        self.assertIn("unknown", out)
+        self.assertNotIn("preview finding", out, "an unread copy reads as a clear preview")
 
 
 class SetWaitingPage(Tree):
