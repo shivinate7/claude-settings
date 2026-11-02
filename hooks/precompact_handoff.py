@@ -22,9 +22,9 @@ the desktop app has none.
   level, ok or failed, time). With a handoff file, the digest runs from that file's last
   rewrite (its mtime), capped at 200,000 characters; with none, it is the last 60,000
   characters. A "## Refused acts" section ends it: the first line (200 characters at most) of
-  the newest 50 refused tool results in that span, oldest first. Cost: one extra small JSON file
-  read (~/.claude.json) at PreCompact; no process start, no file written beyond the digest.
-  The Claude config file is read at each Stop only, not at PreCompact.
+  the newest 50 refused tool results in that span, oldest first. Cost: no extra file read, no
+  process start, no file written beyond the digest. The Claude config file (~/.claude.json) is
+  read at each Stop only.
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
   message: follow the installed prompt file, rewrite the session's own handoff at
@@ -38,13 +38,15 @@ the desktop app has none.
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
   the top, then the top = room - margin; limit = window_limit(model of the last such entry): env
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW (a count, or a k/m suffix such as 200k, 1.5m), then modelSettings.<model>.autoCompactWindow, then
-  autoCompactWindow in <config dir>/settings.json, default 500,000). compact_threshold follows
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW (a count, or a k/m suffix such as 200k, 1.5m; a positive value
+  is clamped to 100,000..1,000,000), then modelSettings.<model>.autoCompactWindow, then
+  autoCompactWindow in <config dir>/settings.json (each an int in 100,000..1,000,000), default
+  500,000). compact_threshold follows
   Claude Code's own compaction trigger: min(E - round(E * f), E - 13k), E = limit - 20k, and f =
   summary_fraction(limit), the summary buffer fraction in the flags Claude Code caches in
   $CLAUDE_CONFIG_DIR/.claude.json (else ~/.claude.json): the tengu_amber_moleskin table, then
   tengu_amber_rokovoko, then 0.2 (384k on 500k with 0.2; 441.6k with 0.08).
-  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (0 < p <= 100) can lower it in every session and window.
+  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (its leading number p, 0 < p <= 100) can lower it in every session and window.
   The hook cannot read the session's live state, so it reads the same cached flag. The last
   checkpoint is at size = threshold - margin, margin = min(50k, room // 2), so it always sits
   below the live threshold. The bucket lives in
@@ -167,11 +169,16 @@ def _result_text(block):
 
 # A refused act: a failed tool result whose first line says a hook or a permission turned it away:
 # "<Event>:<Tool> hook error", the user's "doesn't want to proceed" / "tool use was rejected",
-# "Permission to use <Tool> has been denied", or a first line that starts "denied:" or "refused:".
-# A plain failure ("Exit code 1", ECONNREFUSED, an OS "Permission denied") is not one.
+# "Permission to use <Tool> [with <x>] has been denied", "Permission for this action has been
+# denied", "was denied by the Claude Code auto mode classifier", "Refusing to run it", or a first
+# line that starts "denied:" or "refused:". A plain failure ("Exit code 1", ECONNREFUSED, an OS
+# "Permission denied") is not one.
 _REFUSAL = re.compile(
     r"hook error|(?:doesn['\u2019]t|does not) want to proceed|tool use was rejected"
-    r"|permission to use \S+ has been denied|^(?:denied|refused):", re.I)
+    r"|permission to use \S+(?: with .*?)? has been denied"
+    r"|permission for this action has been denied"
+    r"|was denied by the claude code auto mode classifier|refusing to run it"
+    r"|^(?:denied|refused):", re.I)
 
 
 def _refusal_line(block):
@@ -637,13 +644,17 @@ def summary_fraction(limit):
     return f if _fraction_ok(f) else DEFAULT_SUMMARY_FRACTION
 
 
-def _remote_pct():
+# JS parseFloat's leading number: "80%" is 80. Infinity is out of range anyway, so it is not read.
+_LEADING_FLOAT = re.compile(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
+
+
+def _pct_override():
     """CLAUDE_AUTOCOMPACT_PCT_OVERRIDE as a number in (0, 100], else None. Claude Code 2.1.316
-    applies it in every session and window."""
-    try:
-        p = float(os.environ.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", ""))
-    except ValueError:
+    applies it in every session and window, and parses it with parseFloat."""
+    m = _LEADING_FLOAT.match(os.environ.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", ""))
+    if not m:
         return None
+    p = float(m.group(1))
     return p if 0 < p <= 100 else None
 
 
@@ -660,41 +671,39 @@ def compact_threshold(limit):
     eff = limit - OUTPUT_RESERVE
     cap = eff - BUFFER_FLOOR
     threshold = min(eff - math.floor(eff * summary_fraction(limit) + 0.5), cap)  # JS Math.round
-    pct = _remote_pct()
+    pct = _pct_override()
     if pct is not None:
         threshold = min(threshold, min(math.floor(eff * pct / 100), cap))
     return int(threshold)
 
 
 _WINDOW_SUFFIX = re.compile(r"(\d+(?:\.\d+)?)([km])", re.I)
+WINDOW_MIN = 100_000
+WINDOW_MAX = 1_000_000
 
 
 def window_limit(model=None):
     """The session's auto-compact window: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
     modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in
-    <config dir>/settings.json, then DEFAULT_WINDOW. A bad value falls to the next tier."""
+    <config dir>/settings.json, then DEFAULT_WINDOW. As in Claude Code 2.1.316, only the env var
+    takes a k/m suffix, and a positive env value is clamped to WINDOW_MIN..WINDOW_MAX. A settings
+    value counts only as an int in that range. A bad value falls to the next tier."""
     # shortcut: the model's own window is not read, so a model window smaller than every
     # tier makes nudges late and can skip the first one. Upgrade when hook input carries it.
     def parse(v):
-        """A token count: a positive int, or a string with a k/m suffix ("200k", "1.5M"), else None."""
-        if isinstance(v, int) and not isinstance(v, bool):
-            return v if v > 0 else None
-        if isinstance(v, str):
-            m = _WINDOW_SUFFIX.fullmatch(v.strip())
-            if m:
-                unit = 1000 if m.group(2).lower() == "k" else 1_000_000
-                n = int(round(float(m.group(1)) * unit))
-                return n if n > 0 else None
+        """A settings value: an int in WINDOW_MIN..WINDOW_MAX, else None."""
+        if isinstance(v, int) and not isinstance(v, bool) and WINDOW_MIN <= v <= WINDOW_MAX:
+            return v
         return None
-    env = os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")
-    try:
+    env = os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip()
+    if re.fullmatch(r"[+-]?\d+", env):  # Python's int() also takes "1_000"
         v = int(env)
-        if v > 0:
-            return v
-    except ValueError:
-        v = parse(env)
-        if v:
-            return v
+    else:
+        m = _WINDOW_SUFFIX.fullmatch(env)
+        v = int(round(float(m.group(1)) * (1000 if m.group(2).lower() == "k" else 1_000_000))) \
+            if m else 0
+    if v > 0:
+        return max(WINDOW_MIN, min(v, WINDOW_MAX))
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
             settings = json.load(f)
