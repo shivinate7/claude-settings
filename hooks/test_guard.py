@@ -20228,6 +20228,31 @@ workflow_allow("role-model: Workflow builder on sonnet with a variable brief is 
                "const brief = 'Fix the failing case.';\n"
                + _step_flow("brief", "agentType: 'builder', model: 'sonnet'"))
 
+# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
+# constant holds the words, so each refusal of a variable brief carries the same remedy.
+BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
+workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names the literal-brief remedy",
+                "const brief = 'Fix the failing case.';\n"
+                + _step_flow("brief", "agentType: 'builder', model: 'opus'"),
+                carries=BRIEF_LITERAL_REMEDY)
+workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is denied under agent-role-model and names the literal-brief remedy",
+                "const brief = 'Audit: check the glossary for meaning drift.';\n"
+                + _step_flow("brief", "agentType: 'Explore', model: 'sonnet'"),
+                rule=ROLE_RULE, carries=BRIEF_LITERAL_REMEDY, lacks=ROLE_LACKS)
+
+# H4: a call whose agentType the scan cannot read is skipped, not judged as general-purpose (guard.py spawn_inputs).
+# A shorthand agentType is unread, so the designer and design-reviewer rows pass on opus.
+workflow_allow("role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed",
+               "for (const agentType of ['designer', 'design-reviewer']) agent(`Review the screen.`, {agentType, model: 'opus'});")
+# A spread of an object the scan cannot read hides the agentType, so the call is skipped and not judged as general-purpose.
+workflow_allow("role-model: Workflow opus agent() with a spread and no literal agentType is skipped, and allowed",
+               "const base = {};\n"
+               "await agent(`Fix the failing case.`, {...base, model: 'opus'});")
+# The boundary pair: a literal agentType after the same spread is read, and the Opus ceiling refuses it.
+workflow_refuse("role-model: Workflow builder on opus after a spread of base with a literal agentType is denied",
+                "const base = {};\n"
+                "await agent(`Fix the failing case.`, {...base, agentType: 'builder', model: 'opus'});")
+
 
 def workflow_opus_override_check():
     """The owner's typed override lifts the Opus refusal of a Workflow builder whose brief is a variable: refused with
