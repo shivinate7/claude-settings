@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-01 18:44 CST: each job's cap in `.github/workflows/checks.yml` is generous on purpose, as a stopgap, until each repo's time-pinned tests are gone. The end state is decision `test-strategy-reset`: tests prove outcomes and never fail on runner speed.
+Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. The owner named the CI fix step that ends the stopgap; it reads as decision `test-strategy-reset` (tests prove outcomes and never fail on runner speed). This repo's caps, with their measured runs, are in the table below.
 
 Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
