@@ -8300,8 +8300,8 @@ record_refuse("a lane's HEAD push from the roadmap checkout is refused", VCS + "
 # A fork's record branch is its own. Its extras file names roadmap-fork, so that push is refused there.
 record_refuse("a lane's push of roadmap-fork is refused in the fork that names it its record branch",
               VCS + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=RECFORK)
-# The default name stays a record branch in a fork too (ruling: lane orchestrator, 2026-11-01 18:59 CST): a fork's
-# lane still may not write `roadmap`. These two replace the cases that allowed it.
+# The default name stays a record branch in a fork too. Owner ruling "Triage is the only writer of the roadmap"
+# (session-tiers, owner 2026-10-28): a fork's lane may not write `roadmap` either.
 record_refuse("a lane's push to roadmap in the fork is refused, since roadmap is a record branch in a fork too",
               VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
 record_refuse("a lane's push to roadmap with git -C into the fork is refused, roadmap being a record branch in a fork too",
@@ -8337,6 +8337,19 @@ record_refuse("a triage record then a tag call that names no sessions is refused
               VCS + " push origin roadmap", role_path("triage-then-tags-no-ids"))
 record_refuse("a triage record then a tag call on another session and on this one is refused",
               VCS + " push origin roadmap", role_path("untagged-then-both-tags"))
+# A push in a subshell, behind a pipe, under bash -c or with a trailing `&` is still a push to the checkout it
+# runs in. A cd inside the subshell moves that folder, so the record branch is read there.
+record_refuse("a lane's push to roadmap in a subshell after a cd into the roadmap checkout is refused",
+              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin roadmap)", LANE_TRANSCRIPT)
+record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tail, is refused",
+              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin HEAD:roadmap) 2>&1 | tail -1",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
+              'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap with a trailing background & is refused",
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
+             "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
 record_refuse("a comment opener inside a string does not hide a push to roadmap",
               'echo "# note" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
@@ -8389,6 +8402,66 @@ record_allow("a multi-line quoted string that names a push to roadmap is text",
              'echo "first\n' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+
+
+def record_push_cost_case():
+    """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
+    `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
+    `git config` read of push.default, and a HEAD push reads no push.default. The layout and extras files
+    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
+    transcript is read only when the push reaches the record branch: a push to another branch passes
+    with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
+    on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git("rwcost")
+    if path is None:
+        return False, "no git on PATH"
+    problems = []
+
+    def case_of(command, cwd, transcript):
+        return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+                "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+
+    def spawn_kinds(command, cwd):
+        if os.path.exists(log):
+            os.remove(log)
+        decide(case_of(command, cwd, LANE_TRANSCRIPT))
+        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        kinds = {}
+        for line in lines:
+            words = line.split()
+            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+            while len(words) >= 2 and words[0] in ("-C", "-c"):
+                words = words[2:]
+            word = words[0] if words else ""
+            kinds[word] = kinds.get(word, 0) + 1
+        return kinds, lines
+
+    for label, tail, want in (
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 1, "config": 1}),
+    ):
+        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        if kinds != want:
+            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        if label == "a bare push" and not any("push.default" in line for line in lines):
+            problems.append("a bare push: no read of push.default")
+        if label == "a HEAD push" and any("push.default" in line for line in lines):
+            problems.append("a HEAD push: reads push.default, which it must not")
+    unreadable = role_path("unreadable")
+    for tail in ("push origin lane/foo", "push origin HEAD", "push"):
+        got, _reason = decide(case_of(VCS + " " + tail, PUSHFEAT, unreadable))
+        if got != "allow":
+            problems.append("%s with an unreadable transcript: %s, want allow" % (tail, got))
+    got, _reason = decide(case_of(VCS + " push origin roadmap", PUSHFEAT, unreadable))
+    if got != "deny":
+        problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+                 "the transcript is read only at the record branch"
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
@@ -15672,22 +15745,30 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def _stand_in_git(tag):
+    """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
+    Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
+    real = shutil.which(VCS)
+    if not real:
+        return None, None
+    folder = os.path.join(ROOT, tag + "_bin")
+    log = os.path.join(ROOT, tag + "_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    return log, folder + os.pathsep + os.environ.get("PATH", "")
+
+
 def worktree_home_cross_checkout_cost_case():
     """other-checkout's stated cost: one `git worktree list` per write call, none for a Read, a
     Grep, a shell call that writes no file (a `2>&1` or `/dev/null` redirect included), or a write
     from a cwd with no `.git` at or above it. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
-    real = shutil.which(VCS)
-    if not real:
-        return False, "no git on PATH"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
-    folder = os.path.join(ROOT, "xcocost_bin")
-    log = os.path.join(ROOT, "xcocost_spawns.log")
-    stand_in = os.path.join(folder, VCS)
-    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
-    os.chmod(stand_in, 0o755)
-    path = folder + os.pathsep + os.environ.get("PATH", "")
+    log, path = _stand_in_git("xcocost")
+    if path is None:
+        return False, "no git on PATH"
     problems = []
     for label, tool, cwd, tool_input, want_all, want_list in (
         ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
@@ -16114,6 +16195,8 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
+     "only, and reads the transcript only at the record branch", record_push_cost_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
