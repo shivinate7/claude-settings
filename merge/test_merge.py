@@ -1955,7 +1955,7 @@ class CutLanes(Env):
         self.revert_on_batch(self.merge_of("lane1"))
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertIn("rebuild the integration branch from main without the lane", out)
         self.assertIn("No override lifts this refusal", out)
 
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
