@@ -2805,7 +2805,9 @@ PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, 
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
 PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
                      "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
-                     "with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+                     "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
+                     "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Queue\" "
+                     "and publish it to the same url.")
 
 
 def _stale_pages_module():
