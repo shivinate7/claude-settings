@@ -30,13 +30,13 @@ a turn end in these cases:
     block with a systemMessage. A block with no owner record for its text passes with a systemMessage,
     and the other blocks are still checked;
   - an open repo item (`[repo] -> repo:<owner>/<name>`: the owner's feedback is about that other repo;
-    each part matches `[A-Za-z0-9._-]+`, any other home is a malformed repo home; checked in every block
-    that holds one, burst or not; a `[closed]` one is never checked) has no send after the owner's
+    the home is read as a ruling home is (home_path): a matching pair of backticks or quotes comes off,
+    a `#anchor` drops, a trailing `:,;.` strips; then each part must match `[A-Za-z0-9._-]+`, else the
+    home is malformed and blocks; checked in every block that holds one, burst or not; a `[closed]` one is never checked) has no send after the owner's
     message: send_message or SendMessage whose message names `<owner>/<name>` as a whole token, without
     case (REPO_HOME, _names_repo). A sentence period or a URL path after the name still counts;
     `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
-    transcript read and the anchoring of the page check (Pages.sent takes the proof). Its home may sit in
-    backticks or end in `:,;.`, as a ruling home may (home_path). Its stand-down systemMessage reads
+    transcript read and the anchoring of the page check (Pages.sent takes the proof). Its stand-down systemMessage reads
     "Feedback guard: repo sends not checked" and the page one reads "page sends not checked";
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
