@@ -2,11 +2,10 @@
 
 ## The ruling
 
-Owner, 2026-11-02 (waiting page item 133, pick a), roadmap step tci-5-platform-tested: a batch of an iPhone or Mac app merges on quick checks. After a set number of app batches, or at a milestone the owner names, one full Swift run on a GitHub Mac machine tests main. A red run blocks the next merge until it is fixed.
+Owner, 2026-10-27 12:07 CDT, roadmap step c95 (decision `ci-cut-in-steps`, step 3, milestone runs): full-scale test runs happen at milestones, not on every merge. Applied to iPhone and Mac app tests on 2026-11-01 18:44 CST (roadmap step tci-5-platform-tested): a batch of an app merges on quick checks, and a full Swift run on a GitHub Mac machine tests main at a milestone.
 
-- Basis: the owner's Oct 27 CI ruling (`ci-cut-in-steps`, step 3, milestone runs).
-- Not a full Swift run on every app batch (option b). It costs the most Mac minutes, about 10 times the cost of Linux minutes, on every batch.
-- Not a repo exemption that keeps its own Mac run (option c). Not picked.
+- Incident: waiting page item 133 asked this again. The owner answered "none" at 2026-11-01 18:38 CST ("I thought we agreed most full-scale tests are done at a milestone level"), and triage closed it as already ruled.
+- The cadence of milestone runs (a count of app batches, or a milestone the owner names) is not ruled yet.
 
 Cost: the Mac runs only at milestones. A broken batch can sit on main until the next milestone run finds it.
 
