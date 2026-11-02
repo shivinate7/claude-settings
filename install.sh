@@ -529,7 +529,7 @@ mkdir -p "$CLAUDE_DIR"
 # After landing, a recorded entry that main no longer ships is removed, only when it still matches its
 # record; a mismatch is the person's own, kept and logged. A folder whose landing failed, or a run that
 # failed, removes nothing. With no manifest yet (the first run of this version), only the names in
-# retired-files.txt are acted on. install.ps1 keeps the same format and rules.
+# retired-files.txt are acted on. install.ps1 does not read it yet (lane install-ps1-manifest).
 # "Shipped": git lists the path under $SRC (tracked, or untracked and not ignored). A $SRC that is not a
 # git checkout (a tarball) ships what exists. A git read that fails counts as shipped: never remove on doubt.
 # Cost per install: one `git ls-files` process per landed folder, its list kept for every later question

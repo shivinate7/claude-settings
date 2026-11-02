@@ -1,4 +1,4 @@
-# Files install.sh and install.ps1 may remove from ~/.claude (or %USERPROFILE%\.claude) on the first run
+# Files install.sh may remove from ~/.claude on the first run
 # after the install manifest was added, when main no longer ships them. One <folder>/<name> per line,
 # the folder as in landed-dirs.txt. Blank lines and text after # are ignored.
 #
