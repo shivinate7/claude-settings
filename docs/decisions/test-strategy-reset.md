@@ -9,7 +9,7 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
    checks that the code follows a speed best practice, such as a count of calls or cache hits.
 3. One shared set of fixtures: one git template, and one fake each for `gh`, `claude` and `xcrun`.
 4. The pure-parse guard families run in one Python process. The cases that need a real hook process stay as subprocess cases.
-5. A test stays only when it names the real failure it catches (P2, red proof, in the section below). A test that pins a known finding
+5. A test stays only when it names its real failure, such as a wrong allow or deny, lost work, a stuck merge, or a wrong record (P2, red proof). A test that pins a known finding
    becomes a debt, not a test.
 6. A merge of look-alike tests keeps one row for each item in a guard's list, each part of its pattern, and each filter. A row that alone
    fails when that item goes stays.
@@ -26,7 +26,7 @@ P1. Assert the outcome the person meets, not a proxy (a log string, a call count
 - degen 50149a79 — a source-text check passed while the screen showed the defect; the check was dropped and a debt opened.
 Applies to: every test.
 
-P2. Prove red first on a named old commit, with a green control beside it, for a wrong allow or deny, lost work, a stuck merge, or a wrong record.
+P2. Prove red first on a named old commit, with a green control beside it.
 - claude-settings 962eafcb1 — three guard defects: cases red on a named commit, controls green, true positives still refused.
 - banchi 6d56fff2 — one red check plus two green controls, then the fix.
 - Counter: mailaudit 8452a12 and 8e94d76 — green suites while real defects shipped; one was found in live use because no test reached the state.
@@ -81,7 +81,7 @@ P10. A reviewer plants the defect on a scratch copy and watches the named case g
 Applies to: review.
 
 P11. A check enforces its rule's outcome, not a stricter or looser reading of it, so test the check on its rule's own cases, including the cases the rule allows.
-- joyous, no hash in evidence (owner ruling, 2026-11-01 20:57 CST) — the merge tool refused a merge the rule allows: a batch sat on a batch whose CI was running. Rule `git-no-merge-during-batch-ci` (no merge to main while a batch's CI runs, so main stays still) does not forbid a batch built on another.
+- joyous PR 63 (2026-11-01; owner ruling 20:57 CST) — the merge tool refused a merge the rule allows: a batch sat on a batch whose CI was running. Rule `git-no-merge-during-batch-ci` (no merge to main while a batch's CI runs, so main stays still) does not forbid a batch built on another.
 Applies to: guards and checks.
 
 ### Checks that could hold these (not built)
