@@ -38,7 +38,7 @@ tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
 
-An Input Needed pick must also reach the owner (decision questions-reach-page). The chat-first clause of
+An Input Needed pick must also reach the owner (decision questions-go-to-owner, "Chat first, then the page"). The chat-first clause of
 the pick guard stays: it passes the turn that asks. Two checks enforce what it promises. A session is a
 lane when its own newest get_session record (hooks/guard_merge.py own_tier) has the tag cs-build:lane or a
 parent_session_id; with no record, no own id or a read error it is owner-facing.
@@ -607,7 +607,7 @@ def refusal_reason(tools):
         "and a line in the repo's debt notes file (notes.md) that names it." % names)
 
 
-# questions-reach-page: an Input Needed pick has to reach the owner. The pick guard above passes the turn
+# questions-go-to-owner, "Chat first, then the page": an Input Needed pick has to reach the owner. The pick guard above passes the turn
 # that asks on a promise (the 5-minute wait and the waiting page); these checks enforce the promise.
 PICK_WAIT_SECONDS = 300
 LANE_TAG = "cs-build:lane"
@@ -766,11 +766,12 @@ def _facts(records):
     return writer, events
 
 
-def _answered(item, writer, events):
-    """True when an event after the item was asked answered it (spec questions-reach-page, section 2a)."""
+def _answered(item, writer, events, timed=True):
+    """True when an event after the item was asked answered it (questions-go-to-owner, "Chat first, then the
+    page"). `timed` False takes every event given, for an item new this Stop: its turn's own sends count."""
     first = _norm((item.get("text") or "").splitlines()[0]) if item.get("text") else ""
     for at, kind, use in events:
-        if at is None or at <= item["asked"]:
+        if timed and (at is None or at <= item["asked"]):
             continue
         if kind in ("owner", "box"):
             return True
@@ -867,7 +868,7 @@ def open_picks_file(hook):
 
 
 def open_pick_check(hook, records, text, after, active):
-    """The owner-facing check (spec questions-reach-page, section 2): (reason, notice).
+    """The owner-facing check (questions-go-to-owner, "Chat first, then the page"): (reason, notice).
 
     Step a clears each item the transcript shows sent or answered; step b keeps this reply's pick open;
     step c blocks at 300 s unsent; step d writes the state when it changed. A rewrite Stop (`active`) runs
@@ -890,8 +891,13 @@ def open_pick_check(hook, records, text, after, active):
                 section = input_needed_section(text)
                 digest = hashlib.sha1(_norm(section).encode("utf-8")).hexdigest()
                 if not any(i.get("hash") == digest for i in items):
-                    items.append({"id": "ask-" + digest[:8], "hash": digest, "asked": now(),
-                                  "text": section[:200]})
+                    item = {"id": "ask-" + digest[:8], "hash": digest, "asked": now(), "text": section[:200]}
+                    # A send, box or items write made earlier in this turn answers the pick: judge a new item
+                    # against the turn's own calls (not its owner message), not against its ask time.
+                    writer, _ = _facts(records)
+                    turn = [e for e in _facts(after)[1] if e[1] != "owner"]
+                    if not _answered(item, writer, turn, timed=False):
+                        items.append(item)
             late = [i for i in items if now() - i["asked"] >= PICK_WAIT_SECONDS]
             if late:
                 names = ", ".join("%s (%s)" % (i["id"], ((i.get("text") or "").splitlines() or [""])[0][:160])
