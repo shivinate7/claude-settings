@@ -1700,6 +1700,28 @@ def case_page_note_blank_and_accepted_notes_save_nothing():
           captured_texts(cfg, sid))
 
 
+PARKED_NOTE = "Wait until the mutation job is split."
+
+
+def parked_answer_data():
+    """A parked act's record, as the waiting page saves it: its note is the entry's own text, not the owner's word."""
+    return {"parked": True, "id": "ci-cap-raise", "act": "unpark", "ref": "Step ci-cap-raise, a 20-minute cap",
+            "note": PARKED_NOTE, "at": PAGE_AT}
+
+
+def case_page_note_parked_answer_saves_nothing():
+    cfg = new_cfg()
+    p = page_note(cfg, "pn-parked", response_of([("park-ci-cap-raise", parked_answer_data())]))
+    check("page note parked: the mode ran", ran_page_note(p), p.desc())
+    check("page note parked: nothing saved, no file", tree_of(cfg) == {}, sorted(tree_of(cfg)))
+    cfg, sid = new_cfg(), "pn-parked-mixed"
+    mixed = response_of([("park-ci-cap-raise", parked_answer_data()), ("a-7k2", answer_data())])
+    p = page_note(cfg, sid, mixed)
+    check("page note parked, mixed: the one real note is the only block",
+          ran_page_note(p) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
 def case_page_note_reads_every_response_shape():
     for form in ("string", "blocks", "nested"):
         cfg, sid = new_cfg(), "pn-form-" + form
@@ -1900,6 +1922,7 @@ CASES = (
     case_page_note_same_get_twice_saves_once,
     case_page_note_other_calls_save_nothing,
     case_page_note_blank_and_accepted_notes_save_nothing,
+    case_page_note_parked_answer_saves_nothing,
     case_page_note_reads_every_response_shape,
     case_page_note_alone_in_its_turn_is_not_a_burst,
     case_page_note_prints_no_time_line,

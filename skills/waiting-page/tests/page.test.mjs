@@ -4332,7 +4332,8 @@ const parkBtn = (page, p, act) => parkLine(page, p).locator(".btn.pkb", { hasTex
 const parkLoaded = (page, key = null) => page.waitForFunction((k) => !!(state.meta && state.meta.parked) && (k === null || !!state.answers[k]), key, { timeout: 3000 }).catch(() => {});
 // Off is aria-disabled (the line stays focusable) or the disabled attribute.
 const parkOff = async (b) => (await b.getAttribute("aria-disabled")) === "true" || (await b.isDisabled());
-const parkWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" || l[0] === "delete"));
+// Each write as [kind, collection, id]: the body of a set is left out, so a case compares the write, not its content.
+const parkWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" || l[0] === "delete").map((l) => l.slice(0, 3)));
 // The sent badge on a line ("Unpark sent", "Drop sent"). It renders after the write, so wait for it, then return it.
 const parkBadge = async (page, p, text) => { await parkLine(page, p).locator(".ans", { hasText: text }).waitFor({ timeout: 3000 }).catch(() => {}); return parkLine(page, p).locator(".ans", { hasText: text }); };
 
