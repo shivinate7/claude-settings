@@ -1711,11 +1711,11 @@ def parked_answer_data():
 
 def case_page_note_parked_answer_saves_nothing():
     cfg = new_cfg()
-    p = page_note(cfg, "pn-parked", response_of([("park-ci-cap-raise", parked_answer_data())]))
+    p = page_note(cfg, "pn-parked", response_of([("park.ci-cap-raise", parked_answer_data())]))
     check("page note parked: the mode ran", ran_page_note(p), p.desc())
     check("page note parked: nothing saved, no file", tree_of(cfg) == {}, sorted(tree_of(cfg)))
     cfg, sid = new_cfg(), "pn-parked-mixed"
-    mixed = response_of([("park-ci-cap-raise", parked_answer_data()), ("a-7k2", answer_data())])
+    mixed = response_of([("park.ci-cap-raise", parked_answer_data()), ("a-7k2", answer_data())])
     p = page_note(cfg, sid, mixed)
     check("page note parked, mixed: the one real note is the only block",
           ran_page_note(p) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
