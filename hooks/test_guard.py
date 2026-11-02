@@ -16436,6 +16436,112 @@ def worktree_home_cross_checkout_override_case():
     return ok, why or "refused before the override, lifted under it"
 
 
+def _scratch_worktree_fixture(name):
+    """`_cross_checkout_fixture(name)`, plus two linked worktrees of its primary, one in each of two
+    sessions' scratchpads: `<ROOT>/<name>_sessions/<session id>/scratchpad/wt-notes`. The folders
+    stand under this run's folder, so teardown removes them with the rest. Returns the paths, and
+    for each session its id, its scratchpad and its worktree."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture(name)
+    sessions = os.path.join(ROOT, name + "_sessions")
+    made = {}
+    for key in ("own", "other"):
+        sid = "%s-%s-session" % (name, key)
+        scratchpad = os.path.join(sessions, sid, "scratchpad")
+        worktree = os.path.join(scratchpad, "wt-notes")
+        if not os.path.isdir(worktree):
+            added = run_vcs(primary, "worktree", "add", "-q", worktree, "-b", "%s-%s-notes" % (name, key))
+            if added.returncode != 0:
+                sys.exit("fixture setup failed in _scratch_worktree_fixture: git worktree add %r "
+                         "failed. stderr: %s" % (worktree, added.stderr.strip()))
+        made[key] = {"sid": sid, "scratchpad": scratchpad, "worktree": worktree}
+    return {"primary": primary, "lane_a": lane_a, "lane_b": lane_b, "scratch": scratch,
+            "own": made["own"], "other": made["other"]}
+
+
+def worktree_home_scratchpad_case():
+    """Rule 0, `other-checkout`, and the scratchpad exception. A linked worktree of the clone that
+    lives in the session's OWN scratchpad is a checkout like any other: that session's own calls may
+    write into it, from the primary or from another worktree (a resume). Stay refused: another
+    session's scratchpad worktree, a symlink in the own scratchpad that resolves into another
+    checkout, a '..' climb or a cd hop into the primary, a write from inside the own worktree into
+    the primary, an agent call, and a call with no session id. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md (other-checkout)."""
+    fx = _scratch_worktree_fixture("xsp")
+    primary, lane_a = fx["primary"], fx["lane_a"]
+    own, other = fx["own"], fx["other"]
+    own_w, other_w = own["worktree"], other["worktree"]
+    own_sid = own["sid"]
+    primary_app = os.path.join(primary, "src", "app.py")
+    agent = "scratchagent0a1b2c3d"  # an agent id in the shape AGENT_ID accepts
+    link = os.path.join(own["scratchpad"], "link")  # a symlink in the own scratchpad, to <primary>/src
+    if not os.path.islink(link):
+        try:
+            os.symlink(os.path.join(primary, "src"), link, target_is_directory=True)
+        except OSError as error:
+            return SKIP, "skipped: this platform makes no symlink here (%s)" % error
+    problems = []
+
+    def check(label, expect, tool, cwd, session=own_sid, agent_id=None, **tool_input):
+        got, reason = _decide_full(tool, cwd, agent_id=agent_id, session=session, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or ROOT in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # The own session's calls pass: from the primary, and from another worktree of the clone with the
+    # same session id, as a resumed session would run.
+    for where, cwd in (("from the primary", primary), ("from another worktree", lane_a)):
+        check(where + ": cd into the own scratchpad worktree, then a redirect", "allow", "Bash", cwd,
+              command="cd " + slash(own_w) + " && echo x > a.txt")
+        check(where + ": cd into the own scratchpad worktree, then a heredoc", "allow", "Bash", cwd,
+              command="cd " + slash(own_w) + " && cat > a.txt <<'E'\nhello\nE\n")
+        check(where + ": cd into the own scratchpad worktree, then sed -i", "allow", "Bash", cwd,
+              command="cd " + slash(own_w) + " && sed -i s/a/b/ notes.md")
+        check(where + ": Write into the own scratchpad worktree", "allow", "Write", cwd,
+              file_path=os.path.join(own_w, "notes", "a.md"), content="x")
+        check(where + ": Edit into the own scratchpad worktree", "allow", "Edit", cwd,
+              file_path=os.path.join(own_w, "notes.md"), old_string="a", new_string="b")
+        check(where + ": plain cd, git add, git commit (regression)", "allow", "Bash", cwd,
+              command="cd " + slash(own_w) + " && " + VCS + " add notes.md && " + VCS + " commit -m x")
+    check("from the primary: git -C into the own scratchpad worktree, commit (regression)", "allow",
+          "Bash", primary, command=VCS + " -C " + slash(own_w) + " commit -m x")
+
+    # Refused: another session's worktree, a symlink that resolves out, a climb, a hop, an agent call
+    # and a call with no session id.
+    check("another session's scratchpad worktree: cd, then a redirect", "deny", "Bash", primary,
+          command="cd " + slash(other_w) + " && echo x > a.txt")
+    check("another session's scratchpad worktree: Write", "deny", "Write", primary,
+          file_path=os.path.join(other_w, "notes", "a.md"), content="x")
+    check("cd from the own worktree into the primary, then a redirect", "deny", "Bash", lane_a,
+          command="cd " + slash(own_w) + " && cd " + slash(primary) + " && echo x > a.txt")
+    check("symlink in the own scratchpad into the primary: Write through it", "deny", "Write", lane_a,
+          file_path=os.path.join(link, "app.py"), content="x")
+    check("symlink in the own scratchpad into the primary: redirect through it", "deny", "Bash", lane_a,
+          command="echo x > " + slash(os.path.join(link, "app.py")))
+    climb = os.path.join(os.path.relpath(primary, own_w), "src", "app.py")
+    check("'..' climb from the own worktree into the primary: Write", "deny", "Write", own_w,
+          file_path=climb, content="x")
+    check("'..' climb from the own worktree into the primary: redirect", "deny", "Bash", own_w,
+          command="echo x > " + slash(climb))
+    check("inside the own worktree, a write into the primary: Write", "deny", "Write", own_w,
+          file_path=primary_app, content="x")
+    check("inside the own worktree, a write into the primary: redirect", "deny", "Bash", own_w,
+          command="echo x > " + slash(primary_app))
+    check("agent call with the own session id: Write into the own worktree", "deny", "Write", primary,
+          agent_id=agent, file_path=os.path.join(own_w, "notes.md"), content="x")
+    check("agent call with the own session id: cd, then a redirect", "deny", "Bash", primary,
+          agent_id=agent, command="cd " + slash(own_w) + " && echo x > a.txt")
+    check("no session id: cd into the own scratchpad worktree, then a redirect", "deny", "Bash",
+          primary, session=None, command="cd " + slash(own_w) + " && echo x > a.txt")
+    check("no session id: Write into the own scratchpad worktree", "deny", "Write", primary,
+          session=None, file_path=os.path.join(own_w, "notes", "a.md"), content="x")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "own scratchpad worktree allowed for its own calls; other session's, symlink, climb, hop, agent and no-session calls refused"
+
+
 def worktree_home_later_field_case():
     """Rule 0 judges EVERY path field of a write call, not only the first (PR #306 review gap).
 
@@ -16820,6 +16926,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
+    ("worktree-home: a session's own scratchpad worktree passes for its own calls; another session's, "
+     "a symlink, a climb, an agent call and a no-session call stay refused",
+     worktree_home_scratchpad_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
