@@ -266,7 +266,7 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
-        from shared_names import read_merge_role, role_path  #the one reader of the role file, for rule coordinator-scope
+        from shared_names import read_recorded_role, role_path  #the one reader of the role file, for rule coordinator-scope
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
@@ -290,8 +290,8 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, _add_shape, _commit_shape,
-            _is_python, gh_call_of, git_call_of,
+            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, ROLE_TAG_PREFIX, _add_shape,
+            _commit_shape, _is_python, _own_get_session_tags, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, merge_confirm_of, records_page_hit, role_proof_hit, settings_roots,
             TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
@@ -3228,9 +3228,9 @@ COORDINATOR_SCOPE_REASON = (
 )
 # A coordinator's acts (rule coordinator-scope, waiting-page ruling 111 a, 2026-11-01 11:53 CST): in a coordinator build
 # only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only for a type of
-# COORDINATOR_AGENT_ROLES, compared casefolded. Cost: the role file is read once per call, shared with
-# coordinator_scope_hit (_cloud_coordinator); a spawn or Workflow call reads nothing else, and a shell call adds no
-# process (a string scan of the command).
+# COORDINATOR_AGENT_ROLES, compared exactly. Cost: the role file is read once per call, shared with
+# coordinator_scope_hit (_cloud_coordinator), and the transcript once per call, only when the role file is missing;
+# a spawn or Workflow call reads nothing else, and a shell call adds no process (a string scan of the command).
 COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own. "
@@ -3241,6 +3241,9 @@ COORDINATOR_MERGE_REASON = (
     "Rule (Roles): in a coordinator build only the batch runner merges. "
     "Remedy: hand the branch, head and PR to the batch runner, or brief a lane session to do it."
 )
+# The host's tools that merge for a coordinator: the merge tool, and the one that arms a merge to land later. The arming
+# tool stays out of MERGE_TOOLS, so merge-checks does not judge it.
+COORDINATOR_MERGE_TOOLS = MERGE_TOOLS + ("mcp__github__enable_pr_auto_merge",)
 _COORDINATOR_ROLE = {}
 # The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default,
 # laid out by its scaffold.py. skills/roadmap/build.py (record_source, DATA) tells the checkout apart the same
@@ -3568,26 +3571,45 @@ def coordinator_interpreter_hit(command: str, cwd: str, session_id: str) -> str:
     return ""
 
 
+def _own_tag_tier(transcript) -> str:
+    """The tier the session's own cs-build tag names, else '': the tags of the newest get_session result for the
+    session's own id (merge-role-proof's reader), read from the transcript."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and isinstance(transcript, str) and transcript:
+            tags = _own_get_session_tags(transcript, own_id)
+            if isinstance(tags, list) and ROLE_TAG_PREFIX + "coordinator" in tags:
+                return "coordinator"
+    except Exception:
+        pass
+    return ""
+
+
 def _cloud_coordinator(payload) -> bool:
-    """True for a cloud session's own call (no agent_id, no agent_type, CLAUDE_CODE_REMOTE true) whose merge role is
-    `coordinator`. The role file is read once per process for one session id and config folder, so the two coordinator
-    rules share one read."""
+    """True for a cloud session's own call (no agent_id, no agent_type, CLAUDE_CODE_REMOTE true) whose tier is
+    `coordinator`. The role file decides when it is there. When it is missing, the tier is the session's own cs-build
+    tag in its newest get_session result in the transcript. The answer is kept for one session id, config folder and
+    transcript, so the two coordinator rules share one role-file read and at most one transcript read."""
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         return False
     if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
         return False
-    key = (os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"), str(role_path()))
+    transcript = payload.get("transcript_path")
+    key = (os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"), str(role_path()), transcript)
     if key not in _COORDINATOR_ROLE:
-        _COORDINATOR_ROLE[key] = read_merge_role() == "coordinator"
+        recorded = read_recorded_role()
+        _COORDINATOR_ROLE[key] = (recorded == "coordinator" if recorded is not None
+                                  else _own_tag_tier(transcript) == "coordinator")
     return _COORDINATOR_ROLE[key]
 
 
 def _coordinator_type_refused(agent_type) -> bool:
-    """True when an agent type is not one a coordinator may run: missing, empty, not a string, or outside
-    COORDINATOR_AGENT_ROLES once casefolded."""
+    """True when an agent type is not one a coordinator may run: missing, empty, not a string, or not exactly one of
+    COORDINATOR_AGENT_ROLES."""
     if not isinstance(agent_type, str):
         return True
-    return agent_type.strip().casefold() not in {role.casefold() for role in COORDINATOR_AGENT_ROLES}
+    return agent_type not in COORDINATOR_AGENT_ROLES
 
 
 def coordinator_act_hit(payload, tool: str, tool_input: dict):
@@ -3596,7 +3618,8 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
     if not isinstance(tool_input, dict):
         return "", ""
     is_workflow = tool == "Workflow" and isinstance(tool_input.get("script"), str)
-    if tool not in SPAWN_TOOLS and tool not in MERGE_TOOLS and tool not in SHELL_TOOLS and not is_workflow:
+    if (tool not in SPAWN_TOOLS and tool not in COORDINATOR_MERGE_TOOLS and tool not in SHELL_TOOLS
+            and not is_workflow):
         return "", ""
     if not _cloud_coordinator(payload):
         return "", ""
@@ -3613,12 +3636,14 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
             if "agentType" in unseen or "..." in unseen or _coordinator_type_refused(keys.get("agentType")):
                 return COORDINATOR_SPAWN_REASON, "workflow agent " + str(keys.get("agentType") or "(unread type)")[:40]
         return "", ""
-    if tool in MERGE_TOOLS:
+    if tool in COORDINATOR_MERGE_TOOLS:
         return COORDINATOR_MERGE_REASON, "merge tool"
     for segment in split_segments(strip_heredoc_bodies(str(tool_input.get("command", "") or ""))):
         if not segment.strip():
             continue
         if merge_call_of(segment) is not None:
+            if "--disable-auto" in (gh_call_of(segment) or ()):   # disarms a merge, merges nothing
+                continue
             return COORDINATOR_MERGE_REASON, "gh pr merge"
         if merge_confirm_of(segment):
             return COORDINATOR_MERGE_REASON, "merge --confirm"

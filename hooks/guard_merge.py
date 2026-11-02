@@ -49,17 +49,20 @@ def git_call_of(segment: str):
     return tokens[cursor].lower(), tokens[cursor + 1:]
 
 
+def _unparen(tokens):
+    """The tokens of a subshell segment, `( ... )`, without its parentheses; other tokens come back as they are."""
+    if not tokens or not tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
+        return tokens
+    tokens = [tokens[0].lstrip("(")] + tokens[1:]
+    tokens[-1] = tokens[-1].rstrip(")")
+    return [t for t in tokens if t]
+
+
 def gh_call_of(segment: str):
     """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
-    tokens = segment_tokens(segment)
+    tokens = _unparen(segment_tokens(segment))
     if not tokens:
         return None
-    if tokens[0].startswith("("):   # a subshell, as detached_launch_hit reads it
-        tokens = [tokens[0].lstrip("(")] + tokens[1:]
-        tokens[-1] = tokens[-1].rstrip(")")
-        tokens = [t for t in tokens if t]
-        if not tokens:
-            return None
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
@@ -89,9 +92,16 @@ def merge_call_of(segment: str):
     merges at once.
     """
     rest = gh_call_of(segment)
-    if rest is None or rest[:2] != ["pr", "merge"]:
+    if rest is None:
         return None
     selector, repo = "", ""
+    while rest and (rest[0] in ("-R", "--repo") or rest[0].startswith("--repo=")):   # a repo flag before `pr`
+        if rest[0].startswith("--repo="):
+            repo, rest = rest[0][len("--repo="):], rest[1:]
+        else:
+            repo, rest = (rest[1] if len(rest) > 1 else ""), rest[2:]
+    if rest[:2] != ["pr", "merge"]:
+        return None
     args = rest[2:]
     if "-h" in args or "--help" in args:
         return None   # help merges nothing
@@ -493,7 +503,7 @@ def _merge_tool_args(segment: str, wide: bool = False):
     The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on `merge/merge.py` or
     `merge/launch.py`. `wide` also takes `merge.cmd` and python on the shim file, `python3 bin/merge`.
     """
-    tokens = segment_tokens(segment)
+    tokens = _unparen(segment_tokens(segment))
     if not tokens:
         return None
     index = resolve_command(tokens)

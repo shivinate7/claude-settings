@@ -884,3 +884,5 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- coordinator-explore-has-bash: Explore agents have Bash, so an agent of a coordinator can run a merge, because a call with an agent_id is exempt from coordinator-scope. Decision: session-tiers.
+- coordinator-override-offer-wording: the refusal lists `override 15m` in its override offer, while waiting-page item 112 a says one act. Decision: session-tiers.
