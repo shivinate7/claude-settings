@@ -1,9 +1,9 @@
 {
  "title": "Mockups have a home that outlives sessions and accounts",
  "phase": "now",
- "status": "doing",
+ "status": "todo",
  "order": 484.100005,
  "why": "Owner ask in chat, Nov 2 11:49 CST (from the home coordinator run): design files and artifacts outlive sessions and accounts.",
- "note": "Lane mockup-homes (session_013NEJL3hSuVyEnDwKLnExuC), started by the coordinator 11:50 CST: the home for mockup files, and a roadmap check that each mockup id has a file. The artifact registry and the wind-down export are in step waiting-data-in-repo. Port: yes, every repo with screens.",
- "updatedAt": "2026-11-02T17:51:00Z"
+ "note": "Lane mockup-homes (session_013NEJL3hSuVyEnDwKLnExuC), started by the coordinator 11:50 CST: the home for mockup files, and a roadmap check that each mockup id has a file. The artifact registry and the wind-down export are in step waiting-data-in-repo. Port: yes, every repo with screens. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state.",
+ "updatedAt": "2026-11-02T19:10:00Z"
 }
