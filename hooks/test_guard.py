@@ -8803,6 +8803,7 @@ def cite_unread_folders_case():
     os.makedirs(os.path.dirname(copy), exist_ok=True)
     copy_guard_family(os.path.dirname(copy))
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
 
@@ -11310,6 +11311,7 @@ def role_log_case():
     folder = os.path.join(ROOT, "rolelog")
     os.makedirs(folder, exist_ok=True)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     stops = [
         ({"cwd": os.path.join(DIFFROOT, "b-giveup-main")}, "role-diff-main-checkout"),
@@ -11341,6 +11343,7 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
@@ -12373,6 +12376,7 @@ def port_get_logs_nothing_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = LOGDIR
     run = subprocess.run(
         [sys.executable, GUARD],
@@ -12550,6 +12554,7 @@ def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
     """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
     Returns the printed stdout, empty when the guard allowed the call."""
     env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     run = subprocess.run([sys.executable, WP_GUARD],
@@ -12682,6 +12687,7 @@ def pd_run(name, body):
     folder = os.path.join(ROOT, "pd", "cfg-" + name)
     os.makedirs(folder, exist_ok=True)
     env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
@@ -14222,6 +14228,9 @@ def decide(case):
     # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    # A cloud session (CLAUDE_CODE_REMOTE "true") skips the load brake. Every run judges a
+    # local machine, as lb_run does.
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     for name, value in (case.get("env") or {}).items():   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
         if value is None:   # None drops a variable the runner's own environment holds, as a case that tests the missing default needs
@@ -14284,6 +14293,7 @@ def log_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = LOGDIR
     for command in ("pkill -f node", VCS + " status"):
         subprocess.run(
@@ -14319,6 +14329,7 @@ def config_edit_log_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     calls = [
         {"tool_name": "Edit", "tool_input": {"file_path": PROJ_SETTINGS}, "cwd": NOGIT},
@@ -14361,6 +14372,7 @@ def cap_log_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     calls = [
         {"tool_name": "Write",
@@ -14416,6 +14428,7 @@ def cap_deep_path_log_case():
     if os.path.exists(log):
         os.remove(log)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     payload = {"tool_name": "Write",
                "tool_input": {"file_path": deep, "content": cap_settings()},
@@ -14465,6 +14478,7 @@ def cap_reason_bound_case():
         "cwd": NOGIT,
     }
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(ROOT, "capbound")
     result = subprocess.run(
         [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
@@ -14493,6 +14507,7 @@ def cap_reason_bound_case():
 def _crash_judge_run(folder):
     """Runs the guard with its judge raising, under CLAUDE_CONFIG_DIR = folder. Returns the run."""
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     code = ("import io, sys, importlib.util as u\n"
             "spec = u.spec_from_file_location('g', %r)\n"
@@ -14539,6 +14554,7 @@ def subject_unread_log_case(command=None, expect_note=True):
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env["PATH"] = GITBLIND
     env.pop("CLAUDE_CODE_SESSION_ID", None)
@@ -14593,6 +14609,7 @@ def agent_worktree_noted_case(command):
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
@@ -14654,6 +14671,7 @@ def branch_base_unread_log_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
@@ -15578,6 +15596,7 @@ def merge_tool_missing_case():
     # guard_core.py. mutate_shared.guard_tree copies from the real hooks/, not from GUARD's folder.
     copy_guard_family(os.path.dirname(copy))
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
     result = subprocess.run(
@@ -15623,6 +15642,7 @@ def merge_import_exits_case():
     # Read at run time, so a fix to the real tool is the one this case judges.
     shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(folder, "merge", "merge.py"))
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("PYTHONPATH", None)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHPEND + os.pathsep + PY_PATH
@@ -15782,6 +15802,7 @@ def log_env_case():
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     result = subprocess.run(
         [sys.executable, GUARD],
@@ -18095,6 +18116,7 @@ def _run_copy(folder, command, name):
     cfg = os.path.join(ROOT, "failclosed-cfg", name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
@@ -18353,6 +18375,7 @@ def _reload_run(folder, name, fix=None, command=None):
     cfg = os.path.join(ROOT, "reload-cfg", name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
@@ -18519,6 +18542,7 @@ SESSION_LOG_DENY = {"tool_name": "Bash", "tool_input": {"command": "pkill -f nod
 def _session_log_run(folder, body, extra_env=None):
     """Run the guard once on a raw payload string, with CLAUDE_CONFIG_DIR set to `folder`."""
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.update(extra_env or {})
@@ -20106,6 +20130,7 @@ def ov_no_module_check():
     if os.path.exists(os.path.join(folder, "override.py")):
         return False, "the scratch copy holds override.py, so the case proves nothing"
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.update(CLAUDE_CONFIG_DIR=config, CLAUDE_GUARD_ROOT_PID=str(os.getpid()),
@@ -21378,6 +21403,7 @@ def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
     if tool_input is None:
         tool_input = {"command": "echo hi"}
     env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = config
