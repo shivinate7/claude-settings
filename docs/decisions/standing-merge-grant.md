@@ -8,7 +8,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
-- Each build has one holder. In a build with a coordinator, the coordinator holds the grant, and only the batch runner runs the merge, under it (waiting-page item 111, pick a, 2026-11-01 11:53 CST; owner, 2026-11-01 21:34 CST: the coordinator never merges).
+- Each build has one holder. In a build with a coordinator, the coordinator holds the grant. Only the batch runner runs the merge, under it (waiting-page item 111, pick a, 2026-11-01 11:53 CST). The coordinator never merges (owner, 2026-11-01 21:34 CST).
 - A session with no coordinator (solo or one lane) holds the 2026-10-10 grant in claude-settings only. The 19:23 ruling does not widen it.
 - In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the coordinator or batch-runner role. A cloud session with no coordinator and no such role cannot merge.
 - A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
