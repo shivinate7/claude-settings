@@ -975,7 +975,6 @@ class PageRulings(UpkeepFixture):
     def test_a_skipped_session_row_does_not_make_the_row_unknown(self):
         """The sessions list feeds the stale-step row only. A wrong-shape session row is skipped there,
         and this row still lists its uncited item."""
-        self.use_origin("owner/fixture")
         self.commit_step("c153", note="Waiting.")
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING"), "session_test03"],
                      items=[self.item(9)])
