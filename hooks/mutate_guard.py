@@ -1247,6 +1247,20 @@ MUTATIONS = [
      '        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):',
      '        if not SHELL_WRITE_HINT.search(command):',
      "guard", "worktree-home: the cross-checkout read costs"),
+    ("other-checkout: an agent call uses the session's scratchpad pass",
+     '                                   "" if not isinstance(payload, dict) or payload.get("agent_id")\n'
+     '                                   else session_id_of(payload))',
+     '                                   session_id_of(payload))',
+     "guard", "worktree-home: a session's own scratchpad worktree passes"),
+    ("other-checkout: a scratchpad of any session passes, not only the caller's own",
+     '        if under_session_scratchpad(resolved, session_id):',
+     '        if in_any_session_scratchpad(resolved):',
+     "guard", "worktree-home: a session's own scratchpad worktree passes"),
+    ("other-checkout: the scratchpad pass reads the path text, not its real path",
+     '        if under_session_scratchpad(resolved, session_id):',
+     '        if session_id and ("/" + session_id + "/scratchpad/") in os.path.abspath(\n'
+     '                os.path.join(at, target)).replace("\\\\", "/"):',
+     "guard", "worktree-home: a session's own scratchpad worktree passes"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',

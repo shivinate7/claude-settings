@@ -3209,11 +3209,13 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
+def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "") -> str:
     """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
     unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    that can write. `session_id` is the calling session's own id, or '' for an agent call or a
+    call with none: a target in that session's own scratchpad passes, with no further read.
+    Liftable by an owner override, unlike `worktree_home_hit`
     (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
@@ -3237,6 +3239,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
         except Exception:
+            return False
+        # A linked worktree can live in the session's own scratchpad, which is in no checkout by
+        # intent. The session made it, so its own writes there are its own.
+        if under_session_scratchpad(resolved, session_id):
             return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
@@ -3489,7 +3495,10 @@ def judge(payload) -> None:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
-    other_hit = other_checkout_hit(tool, tool_input, cwd)
+    # An agent shares its session's id, so only a call with no `agent_id` may use the scratchpad pass.
+    other_hit = other_checkout_hit(tool, tool_input, cwd,
+                                   "" if not isinstance(payload, dict) or payload.get("agent_id")
+                                   else session_id_of(payload))
     if other_hit:
         refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
     # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
