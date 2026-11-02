@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.210352,
  "why": "Follow-ups from the refusal-versus-rule sweep (step refusal-matches-rule; owner Nov 1 20:57 CST).",
- "note": "Items: press-link, silent-write, agent-model-cap (plain Explore on Opus passes without asking). Each needs the owner's word: fix the tool or rewrite the rule. Not ready: a page question per item, after the question check (past rulings first). Source: lane refusal-matches-rule, draft PR #1029, record docs/plans/refusal-vs-rule.md section \"Follow-up steps\", Nov 1 21:11 CST. Each item is one fix with its own red-first case; a lane may take any subset. Port: yes, the guards are shared.",
- "updatedAt": "2026-11-02T03:13:00Z"
+ "note": "Items: press-link, silent-write, agent-model-cap (plain Explore on Opus passes without asking). Each needs the owner's word: fix the tool or rewrite the rule. Not ready: a page question per item, after the question check (past rulings first). Source: lane refusal-matches-rule, draft PR #1029, record docs/plans/refusal-vs-rule.md section \"Follow-up steps\", Nov 1 21:11 CST. Each item is one fix with its own red-first case; a lane may take any subset. Port: yes, the guards are shared. Question check, Nov 1 21:14 CST: agent-model-cap is already ruled by page item 137 pick a (owner, Nov 1 18:38 CST: Explore runs on Opus only for audits), so it is a tool fix, not a question; it goes with lane explore-audit-marker. press-link and silent-write still to check against past rulings before any page item.",
+ "updatedAt": "2026-11-02T03:15:00Z"
 }
