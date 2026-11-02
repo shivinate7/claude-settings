@@ -711,6 +711,21 @@ def case_gh_login_switch_on_the_page():
     page("gh login switch: a str_replace on command with no gh text is allowed", "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
           "new_str": "step two"}, None)
+    # A str_replace that changes one gh line to another adds no gh line. Rule gh-login-switch asks for the switch
+    # when an edit adds a gh line (the waiting-page skill's wording); the stored command keeps its own switch.
+    page("gh login switch: a str_replace that changes one gh line to another, on a command that keeps its switch, is allowed",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 4"}, None)
+    # An edit that removes the switch from a command that still runs gh is refused, and so is one that adds a gh
+    # line with no switch beside the line it keeps.
+    page("gh login switch: a str_replace that removes the switch and leaves a gh line is refused", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command",
+          "old_str": "gh auth switch -u shivinate7\ngh pr view 3", "new_str": "gh pr view 3"},
+         ("gh-login-switch", None))
+    page("gh login switch: a str_replace that adds a gh line beside a gh line, with no switch, is refused",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 3\ngh pr merge 3"},
+         ("gh-login-switch", None))
 
 # ------------------------------------------------------------------ a step's span or fence holds a shell line only as a command
 

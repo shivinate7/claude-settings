@@ -12766,6 +12766,16 @@ wp_write("gh login switch: a str_replace on command that adds a switch, then gh,
 wp_write("gh login switch: a str_replace on command with no gh text is allowed", "allow",
          "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
          old_str="step one", new_str="step two")
+# A gh line changed to another gh line adds no gh line, so the switch the stored command holds still stands.
+wp_write("gh login switch: a str_replace that changes one gh line to another, on a command that keeps its switch, is allowed",
+         "allow", "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh pr view 3", new_str="gh pr view 4")
+wp_write("gh login switch: a str_replace that removes the switch and leaves a gh line is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh auth switch -u shivinate7\ngh pr view 3", new_str="gh pr view 3")
+wp_write("gh login switch: a str_replace that adds a gh line beside a gh line, with no switch, is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh pr view 3", new_str="gh pr view 3\ngh pr merge 3")
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
