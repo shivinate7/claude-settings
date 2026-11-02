@@ -7472,6 +7472,60 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
            % (_label, _form),
            "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
 
+# ---- heredoc false alarm (lane env-heredoc-false-alarm). A quoted delimiter makes the body text, so an
+# env read in it runs nothing. An unquoted body runs its substitutions, and only those are judged.
+_BT = "`"
+# Incident 2 (2026-11-01 23:38 CST): a quoted brief body named a python heredoc header and an env read.
+sh("env: heredoc-false-alarm: a quoted cat body names a python heredoc header and an env read, allowed",
+   "cat > scratch/brief.md <<'EOF'\nrun python3 - <<X later\ncat " + ENV + " is refused\nEOF",
+   "allow", cwd=PROJ)
+# A clean python heredoc later in the call does not put an unrelated quoted cat body under scan.
+sh("env: heredoc-false-alarm: a quoted cat body with an env read, then a clean python heredoc, allowed",
+   "cat > b.md <<'A'\ncat " + ENV + "\nA\npython3 - <<'B'\nprint(1)\nB", "allow", cwd=PROJ)
+# Inferred reproduction of incident 1 (2026-11-01 23:41 CST; the exact command is unknown). Bash never
+# expands a backtick or a `$( )` inside a quoted delimiter, so either one in a python string is text.
+sh("env: heredoc-false-alarm: inferred reproduction, a quoted python body, a backtick env read in a string",
+   "python3 - <<'EOF'\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted python body, a dollar-paren env read in a string, allowed",
+   "python3 - <<'EOF'\nd = {\"note\": \"refuses $(cat " + ENV + ")\"}\nEOF", "allow", cwd=PROJ)
+# A comment opener inside a string, and a template literal that spans lines, are text in a quoted body.
+sh("env: heredoc-false-alarm: a hash opener in a quoted python string, a backtick env read, allowed",
+   "python3 - <<'EOF'\nd = {\"note\": \"# refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted node body, a multi-line template literal with an env read, allowed",
+   "node - <<'EOF'\nconst note = `the guard\nruns $(cat " + ENV + ") here`;\nconsole.log(note);\nEOF",
+   "allow", cwd=PROJ)
+# Pins: each shape below runs its env read in bash, so it stays denied.
+sh("env: heredoc-false-alarm pin: a python body with an unquoted delimiter, bash runs its backticks, denies",
+   "python3 - <<EOF\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body with a backtick env read, bash runs it, denies",
+   "cat > n.md <<EOF\nhi " + _BT + "cat " + ENV + _BT + "\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body with a dollar-paren env read, bash runs it, denies",
+   "cat > n.md <<EOF\nhi $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a hash opener in double quotes in an unquoted body, the read still runs",
+   "cat > n.md <<EOF\n\"# quoted\" $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body piped to sh, the env read runs, denies",
+   "cat <<'A' | sh\ncat " + ENV + "\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted bash body, the env read runs, denies",
+   "bash <<'A'\ncat " + ENV + "\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted bash body, a backtick env read in an echo, bash runs it, denies",
+   "bash <<'A'\necho \"" + _BT + "cat " + ENV + _BT + "\"\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body written to x.sh and run by sh, denies",
+   "cat > x.sh <<'A'\ncat " + ENV + "\nA\nsh x.sh", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted python body with a bare env line, denies",
+   "python3 - <<'EOF'\nx = 1\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body, then a python body with a bare env line, denies",
+   "cat > b.md <<'A'\nnotes\nA\npython3 - <<'B'\nx = 1\ncat " + ENV + "\nB", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a lone apostrophe comment in a quoted python body, then a bare env line",
+   "python3 - <<'EOF'\n# don't\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=PROJ)
+# Pins: each shape below holds its env name as text, so it stays allowed.
+sh("env: heredoc-false-alarm pin: a quoted cat body with a lone apostrophe and a hash, allowed",
+   "cat > n.md <<'EOF'\nDon't cat " + ENV + " # here\nEOF", "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body of plain words naming an env read, allowed",
+   "cat > n.md <<EOF\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+
 
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
