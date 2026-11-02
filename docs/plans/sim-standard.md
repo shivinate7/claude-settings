@@ -9,6 +9,7 @@ Make claude-settings the one home of iPhone simulator use on this Mac. Today eac
 - 2026-11-02 13:05 CST: the shared simulator is the iPhone Duo, not an iPhone 17.
 - 2026-11-02 13:17 CST: `sim-test` must point at a Duo, not an iPhone 18 Pro. Tests on both are best, but the Duo is the priority.
 - 2026-11-02 13:17 CST: erase the shared Duo (done 13:18; it did not help, see below).
+- 2026-11-02 13:49 CST: "this mac can only have one sim and it needs to be shared across the repos". No repo makes its own simulator (Degen included). The one simulator is the shared iPhone Duo AC2E94F9. The standard should drop "when a lane may make its own" and any per-lane device.
 - 2026-11-02 13:26 CST: reinstall the iOS 27.1 runtime (done 13:31; it fixed the Duo, see below).
 
 ## Repos and who uses a simulator
