@@ -2268,14 +2268,17 @@ def cap_counts(prompt):
             "inbox": sum(r.startswith("inbox:") for r in refs)}
 
 
-def cap_repo(name, steps, notes):
-    """A rolled-out repo with `steps` roadmap steps at STEP_REF and `notes` non-blank lines in the
-    layout's debt-notes file, for the candidate caps."""
+def cap_repo(name, steps, notes, done=0):
+    """A rolled-out repo with `steps` roadmap steps at STEP_REF, the first `done` of them marked done and
+    the rest todo, and `notes` non-blank lines in the layout's debt-notes file, for the candidate caps.
+    No steps: no roadmap ref at all."""
     root = repeat_repo(name)
-    put_ref(root, STEP_REF, {
-        STEP_DIR + "step-%03d.json" % n: json.dumps(
-            {"title": "Wheel step %d spins faster" % n, "note": "Sets the wheel speed for step %d." % n}) + "\n"
-        for n in range(1, steps + 1)})
+    if steps:
+        put_ref(root, STEP_REF, {
+            STEP_DIR + "step-%03d.json" % n: json.dumps(
+                {"title": "Wheel step %d spins faster" % n, "status": "done" if n <= done else "todo",
+                 "note": "Sets the wheel speed for step %d." % n}) + "\n"
+            for n in range(1, steps + 1)})
     write_file(os.path.join(root, "docs", "debts", "notes.md"),
                "".join("- note %d: keep the wheel speed setting in the reader\n" % n for n in range(1, notes + 1)))
     return root
@@ -2304,7 +2307,7 @@ def case_repeat_cap_keeps_each_source_within_its_share():
         counts = cap_counts(prompt)
         check("cap %d: one model call" % steps, len(calls) == 1, p.desc())
         check("cap %d: the old inbox block is a candidate" % steps, "OLD-A" in prompt, counts)
-        check("cap %d: at least one notes line is a candidate" % steps, "[note:1] " in prompt, counts)
+        check("cap %d: the newest notes line is a candidate" % steps, "[note:120] " in prompt, counts)
         check("cap %d: at most 400 candidates" % steps, counts["all"] <= 400, counts)
         check("cap %d: at most 200 roadmap steps" % steps, counts["roadmap"] <= 200, counts)
         check("cap %d: at most 100 backlog lines" % steps, counts["backlog"] <= 100, counts)
@@ -2366,6 +2369,83 @@ def case_repeat_unplaced_mark_is_reported_as_not_marked():
     check("unplaced: the reason says not marked", "not marked" in reason, reason)
     check("unplaced: the reason never says marked on the item",
           re.search(r"(?<!not )marked on the item", reason) is None, reason)
+
+
+def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
+    """An item whose own words hold `repeats` still gets the mark when the model names it. The mark is
+    ` repeats <ref>` at the line tail, so a ref-like run in the middle of the words is not a mark."""
+    root = repeat_repo("repeat-word", step=True)
+    cfg, sid = new_cfg(), "repeat-word"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    line4 = "- fb-1-4 [note] -> the wheel repeats forever"
+    line5 = "- fb-1-5 [note] -> the wheel repeats roadmap:wheel-speed slowly"
+    add_item(cfg, sid, line=line4)
+    add_item(cfg, sid, line=line5)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer("fb-1-4", "fb-1-5"))
+    check("word: one model call on the Stop", len(calls) == 1, p.desc())
+    check("word: the item keeps its words and gains the mark at the tail",
+          inbox_line(cfg, sid, "fb-1-4") == line4 + MARKED, inbox_line(cfg, sid, "fb-1-4"))
+    check("word: a ref-like run mid-line is not a mark, so the line gains one",
+          inbox_line(cfg, sid, "fb-1-5") == line5 + MARKED, inbox_line(cfg, sid, "fb-1-5"))
+    reason = block_reason(p) or ""
+    check("word: the reason names both items and says marked",
+          "fb-1-4 may repeat %s" % REPEAT_REF in reason and "fb-1-5 may repeat %s" % REPEAT_REF in reason
+          and "marked on the item" in reason and "not marked" not in reason, reason)
+
+
+def case_repeat_cap_keeps_the_newest_notes_lines():
+    """Under the cap a line file keeps its newest lines. A 150-line notes file puts its last line in the
+    prompt, and the backlog stays at its share of 100."""
+    root = cap_repo("repeat-notes-150", 0, 150)
+    cfg, sid = new_cfg(), "repeat-notes-150"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("notes: one model call", len(calls) == 1, p.desc())
+    check("notes: the last line, note 150, is a candidate", "note:150" in candidate_refs(prompt),
+          cap_counts(prompt))
+    check("notes: the backlog stays at its share of 100", cap_counts(prompt)["backlog"] == 100,
+          cap_counts(prompt))
+
+
+def case_repeat_cap_keeps_the_open_roadmap_steps():
+    """Under the cap the roadmap steps not marked done come first. Of 250 steps the last 50 are open and
+    sort last by slug: every open step is a candidate, and the done steps take the rest of the share."""
+    root = cap_repo("repeat-open-250", 250, 0, done=200)
+    cfg, sid = new_cfg(), "repeat-open-250"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    refs = candidate_refs(prompt)
+    missing = ["roadmap:step-%03d" % n for n in range(201, 251) if "roadmap:step-%03d" % n not in refs]
+    check("open: one model call", len(calls) == 1, p.desc())
+    check("open: all 50 open steps are candidates", missing == [], missing[:5])
+    check("open: the roadmap stays at its share of 200", cap_counts(prompt)["roadmap"] == 200,
+          cap_counts(prompt))
+
+
+def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
+    """An answer entry whose id or ref is a list is not a hit. It must not stop the valid hit of the same
+    answer, which still gets its mark and its reason."""
+    root = repeat_repo("repeat-list", step=True)
+    cfg, sid = new_cfg(), "repeat-list"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    answer = json.dumps({"repeats": [
+        {"id": [ITEM_ID], "ref": REPEAT_REF},
+        {"id": ITEM_ID, "ref": [REPEAT_REF]},
+        {"id": ITEM_ID, "ref": REPEAT_REF}]})
+    p, calls = stop(cfg, sid, root, answer=answer)
+    check("list: one model call", len(calls) == 1, p.desc())
+    check("list: the valid hit still marks the line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    reason = block_reason(p) or ""
+    check("list: the block names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason,
+          p.desc())
+    check("list: no repeats-not-checked note", "repeats not checked" not in str(guard_json(p) or {}),
+          p.desc())
 
 
 # Row tables. A row is one case body from above. A row that raises is red and names
@@ -2485,6 +2565,10 @@ CASES = (
     case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
     case_repeat_second_judging_adds_no_second_mark,
     case_repeat_unplaced_mark_is_reported_as_not_marked,
+    case_repeat_word_repeats_in_an_item_still_gets_the_mark,
+    case_repeat_cap_keeps_the_newest_notes_lines,
+    case_repeat_cap_keeps_the_open_roadmap_steps,
+    case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
 )
 
 
