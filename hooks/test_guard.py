@@ -16327,6 +16327,80 @@ def worktree_home_cwd_cap_case():
     return True, "a /c/ cwd gives the agent cap rule the verdict main gives: ask"
 
 
+# The builder cases below run off Windows. They read a `/c/` cwd through the loaded guard's own
+# `_expanded`, with only the drive map changed: `/c/` reads under the run folder, and a relative
+# target is joined onto the cwd as given, so a `/c/` cwd stays raw in that join, as on Windows.
+# os.name reads as Windows for the one call. On Windows the real drive reader runs in the case
+# above.
+C_FORM_ON_WINDOWS = "on Windows the real drive reader runs, in the builder case above"
+
+
+def _slash_c_expanded(real, root):
+    """The guard's `_expanded`, with a `/c/` path read under `root`. Every other path, and the join
+    of a relative path onto its cwd, goes to the real reader as given."""
+    def expanded(path, cwd):
+        bare = path.strip("'\"")
+        if bare.startswith("/c/"):
+            bare = os.path.join(root, bare[3:])
+        return real(bare, cwd)
+    return expanded
+
+
+def _slash_c_builder_hit(name, target):
+    """role_write_hit for a builder write to `target`, from a `/c/` cwd in the repository that
+    `_c_form_fixture(name)` builds. Returns the hit: non-empty when the write is refused."""
+    primary = _c_form_fixture(name)
+    cwd = "/c/" + os.path.basename(primary)
+    guard = _load_guard_module()
+    real_expanded, real_name = guard._expanded, os.name
+    guard._expanded = _slash_c_expanded(real_expanded, ROOT)
+    os.name = "nt"
+    try:
+        return guard.role_write_hit("builder", {"content": "x"}, target, cwd, "")
+    finally:
+        os.name = real_name
+        guard._expanded = real_expanded
+
+
+def worktree_home_cwd_builder_deny_case():
+    """A builder's write to a test file, from a `/c/` cwd in a repository, is refused. The probe and
+    the target both read the cwd in drive form. Read raw, the target counts as outside every
+    checkout and the write is allowed (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if not _slash_c_builder_hit("builder-deny", "tests/test_app.py"):
+        return False, "/c/ cwd in a repository, builder write to tests/test_app.py: " \
+                      "expected deny, got allow"
+    return True, "a builder write to a test file from a /c/ cwd in a repository is refused"
+
+
+def worktree_home_cwd_builder_src_case():
+    """A builder's write to product code, from the same `/c/` cwd, is allowed. The drive read must
+    not widen the test rule to product paths (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if _slash_c_builder_hit("builder-src", "src/app.py"):
+        return False, "/c/ cwd in a repository, builder write to src/app.py: " \
+                      "expected allow, got deny"
+    return True, "a builder write to product code from a /c/ cwd in a repository is allowed"
+
+
+def worktree_home_cwd_builder_scratch_case():
+    """A builder's write to a path in no repository, from a `/c/` cwd in one, is allowed. The target
+    is outside every checkout, so no test rule reaches it (decision builders-cannot-edit-tests)."""
+    if os.name == "nt":
+        return SKIP, C_FORM_ON_WINDOWS
+    if _slash_c_builder_hit("builder-scratch", "/c/scratch-out/probe.py"):
+        return False, "/c/ cwd in a repository, builder write to /c/scratch-out/probe.py: " \
+                      "expected allow, got deny"
+    return True, "a builder write to a path in no repository from a /c/ cwd is allowed"
+
+
+# Each builds its own repository and calls no lazy fixture, so a filtered run skips that build.
+FIXTURELESS_CHECKS.update((worktree_home_cwd_builder_deny_case, worktree_home_cwd_builder_src_case,
+                           worktree_home_cwd_builder_scratch_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -16424,6 +16498,12 @@ LOG_CHECKS = (
     ("worktree-home: the config-edit rule reads a /c/ cwd as main does",
      worktree_home_cwd_config_case),
     ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
+    ("worktree-home: a builder write to a test file from a /c/ cwd in a repository is refused "
+     "off Windows", worktree_home_cwd_builder_deny_case),
+    ("worktree-home: a builder write to product code from a /c/ cwd in a repository is allowed "
+     "off Windows", worktree_home_cwd_builder_src_case),
+    ("worktree-home: a builder write to a path in no repository from a /c/ cwd is allowed "
+     "off Windows", worktree_home_cwd_builder_scratch_case),
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -21730,6 +21810,9 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the frozen-path rule reads", "worktree-home"),
     ("worktree-home: the config-edit rule reads", "worktree-home"),
     ("worktree-home: the agent cap rule reads", "worktree-home"),
+    ("worktree-home: a builder write to a test file from a /c/ cwd", "worktree-home"),
+    ("worktree-home: a builder write to product code from a /c/ cwd", "worktree-home"),
+    ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
