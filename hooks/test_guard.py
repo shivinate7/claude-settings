@@ -11933,9 +11933,34 @@ def _g3_pull_rebase(w):
 
 def _h1r_restore(w):
     """After a clean rebase onto main, the builder writes main's bytes back over the test file, which drops the
-    test-author's case. The write follows a rebase, so it is logged and not refused."""
+    test-author's case. The rebase kept main's side, but that does not license a write made after it: refused."""
     _g2_rebase(w)
     write(os.path.join(w, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+
+
+def _h1r_committed(w):
+    """The write-back of _h1r_restore, committed by the builder. The commit is the builder's own, and it drops
+    the test-author's case."""
+    _h1r_restore(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "restore main's test file")
+
+
+def _fixup_rebase(w):
+    """Cut at the test-author's lane tip. The builder commits product work, commits a fixup of it, then rebases
+    with autosquash. The todo editor is `true`, so the list runs as autosquash built it. Product files only."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    _product_commit(w)
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "fixup! product work")
+    _must(w, *IDENT, "-c", "sequence.editor=true", "rebase", "-i", "--autosquash", "lane")
+    # A rebase that ran no fixup would pass for the wrong reason: check the squash and its reflog step.
+    subjects = run_vcs(w, "log", "--format=%s", "lane..HEAD").stdout.splitlines()
+    steps = run_vcs(w, "reflog", "--format=%gs", "HEAD").stdout
+    if subjects != ["product work"] or "rebase (fixup)" not in steps:
+        sys.exit("fixture setup failed: the fixup rebase in %r did not squash: %r" % (w, subjects))
 
 
 def _b1_cherry(w):
@@ -12250,10 +12275,28 @@ diff_repo("bd-j1-squash", _j1_squash)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at "
                          "the first stop", refused_push_and_stop_case("bd-j1-squash")))
 
-# Log-only: a rebase pick, and a write after a rebase, change a test file, and the guard logs them for the reviewer.
-diff_repo("bd-h1r-restore", _h1r_restore)
-LOG_CHECKS_EXTRA.append(("builder-refuse: after a rebase, main's bytes written back over a test file are logged only",
-                         logged_builder_case("bd-h1r-restore")))
+# A write after a rebase is the builder's own. Main's bytes written back over a test file the rebase replayed
+# drop the test-author's case, so the write is refused at commit, push and stop.
+_bd_h1r = diff_repo("bd-h1r-restore", _h1r_restore)
+sh("builder-refuse: after a rebase, main's bytes written back over a test file are denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: after a rebase, main's bytes written back over a test file are denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+add("builder-refuse: after a rebase, main's bytes written back over a test file are blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_h1r, agent_id="bld1", agent_type="builder")
+# The same write, committed by the builder: the commit holds the drop, so push and the first stop are refused.
+diff_repo("bd-h1r-committed", _h1r_committed)
+LOG_CHECKS_EXTRA.append(("builder-refuse: after a rebase, main's bytes written back over a test file and committed are "
+                         "denied at push and at the first stop",
+                         refused_push_and_stop_case("bd-h1r-committed")))
+# Allowed, no test edit: a rebase -i that squashes the builder's fixup into its product commit. It logs nothing.
+diff_repo("bd-fixup-rebase", _fixup_rebase)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase -i that squashes a fixup of the builder's product commits is allowed "
+                         "at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-fixup-rebase")))
+# Log-only: a conflict in a test file that the builder resolved during a rebase is a replay it chose, so the
+# guard logs it for the reviewer. Out of scope for the rebase write-back ruling: the builder resolved it with
+# `--ours` during the replay, which is not a write after the rebase. It stays logged only.
 diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
