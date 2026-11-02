@@ -1,0 +1,9 @@
+{
+ "title": "sim-test stops a simulator that is crash-looping",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21007,
+ "why": "In home (Nov 1), a simulator crash-looped for 7 minutes before anyone stopped it. A check in sim-test would have stopped it in about 10 seconds.",
+ "note": "Fix: after sim-test boots a simulator, it watches the new SpringBoard crash reports; at 3 or more within 30 seconds it shuts down what it booted, and prints that it did and why. It reads only during its own run (no new watcher process). Red first: a fixture that writes 3 crash reports in 30 seconds makes sim-test shut down and exit red with the message. Basis: named incident (home, Nov 1, 7 minutes). Port: yes, sim-test is shared. Ready.",
+ "updatedAt": "2026-11-02T01:05:00Z"
+}
