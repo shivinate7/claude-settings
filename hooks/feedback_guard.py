@@ -37,7 +37,8 @@ Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_ac
 guard judges the well-formed, open items whose ids the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
 all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
-compares each item's owner message by meaning with at most REPEAT_MAX candidates of REPEAT_CUT
+compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
+source) of REPEAT_CUT
 characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
 in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INBOXES newest other
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
@@ -418,7 +419,8 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
 REPEAT_MODEL = "claude-haiku-5-5"
 REPEAT_TIMEOUT = 45  # the settings.json row allows 60
 REPEAT_CUT = 300  # characters of one candidate in the prompt
-REPEAT_MAX = 400  # candidates in the prompt: roadmap first, then backlog, then inboxes, newest first
+REPEAT_MAX = 400  # candidates in the prompt: roadmap first, then backlog, then inbox blocks, newest first
+REPEAT_SHARES = {"roadmap": 200, "backlog": 100, "inbox": 100}  # per source, so one cannot crowd out the rest
 REPEAT_INBOXES = 50  # other sessions' inboxes read, newest by mtime
 MESSAGE_CUT = 1000  # characters of one new message in the prompt
 MARK = " repeats "  # appended to an item line, before the ref
@@ -574,7 +576,8 @@ def other_inbox_candidates(inbox, root):
 
 
 def candidates(homes, inbox, blocks, skip):
-    """The (ref, label, text) of every older item to compare with, at most REPEAT_MAX, roadmap first.
+    """The (ref, label, text) of every older item to compare with, at most REPEAT_SHARES per source and
+    REPEAT_MAX in all, roadmap first.
     Each source fails open. Outside a git repo only this inbox's earlier blocks count."""
     found, root = [], None
     try:
@@ -582,13 +585,13 @@ def candidates(homes, inbox, blocks, skip):
     except ruling_home._GitFailure:
         root = None
     own = os.path.basename(inbox)[:-len(INBOX_SUFFIX)]
-    sources = [lambda: inbox_candidates(blocks, own, skip)]
+    sources = [("inbox", lambda: inbox_candidates(blocks, own, skip))]
     if root is not None:
-        sources = [lambda: roadmap_candidates(root), lambda: backlog_candidates(root)] + sources \
-            + [lambda: other_inbox_candidates(inbox, root)]
-    for source in sources:
+        sources = [("roadmap", lambda: roadmap_candidates(root)), ("backlog", lambda: backlog_candidates(root)),
+                   ("inbox", lambda: inbox_candidates(blocks, own, skip) + other_inbox_candidates(inbox, root))]
+    for share, source in sources:
         try:
-            found += source()
+            found += source()[:REPEAT_SHARES[share]]
         except Exception as e:  # a source is advisory; the others still count
             print("feedback_guard: repeats source: %s" % e, file=sys.stderr)
     return found[:REPEAT_MAX]
@@ -616,8 +619,9 @@ def judge(homes, inbox, blocks, new):
 
 
 def mark_items(inbox, blocks, hits):
-    """Appends ` repeats <ref>` to each hit item's line, in one rewrite through a temp file and
-    os.replace. A line that is not the item any more is left alone."""
+    """Appends ` repeats <ref>` to each hit item's line, before a trailing `[closed]`, in one rewrite
+    through a temp file and os.replace. Returns the ids whose line carries a mark now. A line that is
+    not the item any more is left alone and its id is not returned. A line that has a mark keeps it."""
     at = {}
     for b in blocks:
         for ln, number in zip(b["items"], b["item_at"]):
@@ -626,20 +630,32 @@ def mark_items(inbox, blocks, hits):
                 at.setdefault(found[0], number)
     with open(inbox, "rb") as f:
         lines = f.read().decode("utf-8").split("\n")
+    placed, changed = set(), False
     for item_id, ref, _ in hits:
         n = at.get(item_id)
-        if n is not None and n <= len(lines) and lines[n - 1].startswith("- %s " % item_id):
-            tail = "\r" if lines[n - 1].endswith("\r") else ""
-            lines[n - 1] = lines[n - 1].rstrip("\r") + MARK + ref + tail
-    temp = inbox + ".tmp"
-    with open(temp, "wb") as f:
-        f.write("\n".join(lines).encode("utf-8"))
-    os.replace(temp, inbox)
+        if n is None or n > len(lines) or not lines[n - 1].startswith("- %s " % item_id):
+            continue
+        placed.add(item_id)
+        if MARK in lines[n - 1]:
+            continue
+        tail = "\r" if lines[n - 1].endswith("\r") else ""
+        body, closed = lines[n - 1].rstrip(), ""
+        if body.endswith("[closed]"):
+            body, closed = body[:-len("[closed]")].rstrip(), " [closed]"
+        lines[n - 1] = body + MARK + ref + closed + tail
+        changed = True
+    if changed:
+        temp = inbox + ".tmp"
+        with open(temp, "wb") as f:
+            f.write("\n".join(lines).encode("utf-8"))
+        os.replace(temp, inbox)
+    return placed
 
 
-def flag_text(item_id, ref, label):
-    return ("%s may repeat %s (\"%s\"); marked on the item. Merge the work, or drop the mark if it is not "
-            "a repeat." % (item_id, ref, label))
+def flag_text(item_id, ref, label, placed=True):
+    what = "marked on the item" if placed else "not marked: its line was not found"
+    return "%s may repeat %s (\"%s\"); %s. Merge the work, or drop the mark if it is not a repeat." % (
+        item_id, ref, label, what)
 
 
 def not_checked(why):
@@ -655,11 +671,10 @@ def judge_stop(homes, inbox, blocks, judged):
         return [], None
     try:
         hits, why = judge(homes, inbox, blocks, new)
-        if hits:
-            mark_items(inbox, blocks, hits)
+        placed = mark_items(inbox, blocks, hits) if hits else set()
     except Exception as e:
         return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
-    return [flag_text(*h) for h in hits], (None if why is None else not_checked(why))
+    return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
 
 
 def main():
@@ -691,7 +706,7 @@ def main():
                 print(json.dumps({"systemMessage": msg}))
             return 0
         if blocks is None:
-            reasons = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
+            reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
         else:
             try:
                 with open(precompact_handoff.handoff_path(hook["session_id"]), encoding="utf-8",
@@ -700,16 +715,19 @@ def main():
             except OSError:
                 handoff = ""
             pages = Pages(hook.get("transcript_path"))
-            reasons = problems(blocks, handoff, homes, burst, pages, inbox) + flags
+            found = problems(blocks, handoff, homes, burst, pages, inbox)
+            reasons = found + flags
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
                 [FAIL_OPEN_PAGES % "; ".join(pages.skip)] if pages.skip else [])
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
-            out.update(decision="block", reason="Feedback inbox: " + "; ".join(reasons)
-                       + ". The check reads the inbox file at each Stop, so items added in any later turn count,"
-                       " and no new heading is needed. Send each page ruling to the page writer, and put open"
-                       " standing ids in the handoff.")
+            reason = "Feedback inbox: " + "; ".join(r.rstrip(".") for r in reasons)
+            if found:
+                reason += (". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                           " and no new heading is needed. Send each page ruling to the page writer, and put open"
+                           " standing ids in the handoff.")
+            out.update(decision="block", reason=reason + ("" if found else "."))
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr
