@@ -943,3 +943,4 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- red-main-clear-step-gates: the cross-group clear (actions/ci-alarm/clears.py) compares job conclusions, so a job whose failing step is gated to `push` passes in a dispatch run and can clear the red push run. This repo's ci-scope.sh sets every output true on push, schedule and dispatch, so it cannot hit here; a same-group dispatch already clears a red push on main. Decision: no-merge-onto-red-main.

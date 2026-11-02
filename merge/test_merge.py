@@ -9011,7 +9011,7 @@ class RedMainBrake(Env):
         self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
     def test_a_green_schedule_run_with_a_different_job_set_does_not_clear_an_older_red_push_run(self):
-        # runs are grouped by workflow and event (roadmap step ci-alarm-reads-by-event). The cross-group clear (no-merge-onto-red-main, 2026-11-02)
+        # runs are grouped by workflow and event (roadmap step ci-alarm-reads-by-event). The cross-group clear (decision no-merge-onto-red-main)
         # needs the newer run to hold every job of the red run. This schedule run lacks `checks`, so it clears nothing: the job sets decide it.
         jobs = {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]}
         rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")], jobs)
@@ -9019,7 +9019,7 @@ class RedMainBrake(Env):
         self.assertIn("run 914", out)
 
     def test_a_green_push_run_with_a_different_job_set_does_not_clear_an_older_red_schedule_run(self):
-        # a schedule run is judged in its own group. The cross-group clear (no-merge-onto-red-main, 2026-11-02) needs the newer run to hold
+        # a schedule run is judged in its own group. The cross-group clear (decision no-merge-onto-red-main) needs the newer run to hold
         # every job of the red run. This push run lacks `checks`, so it clears nothing: the job sets decide it.
         jobs = {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success")]}  # a push and a nightly run different jobs
         rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")], jobs)
