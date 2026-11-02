@@ -11848,7 +11848,7 @@ add("impeccable: critique then animate after the semicolon is denied", "deny",
 for _verb in impeccable_command_verbs():
     if _verb in ("audit", "critique"):   # the two reviews, which a `;` may follow
         continue
-    add("impeccable: audit then %s after the semicolon is denied" % _verb, "deny",
+    add("impeccable: audit then a %s command verb after the semicolon is denied" % _verb, "deny",
         "impeccable-review-only", tool="Skill", skill=IMP, args="audit the page; %s the page" % _verb)
 
 add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
