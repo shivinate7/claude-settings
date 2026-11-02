@@ -1138,3 +1138,4 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- restates-na-by-copied-anchors: a child repo whose rule files hold at least 90% of the live claude-settings anchors (NA_SHARE, lint/compliance_probes.py) reads as claude-settings, so restates gives n/a there. Reachable only by copying the global rules whole. Decision: child-cites-not-copies (a child repo names a claude-settings record and never copies it).
