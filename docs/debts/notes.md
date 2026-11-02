@@ -1089,3 +1089,4 @@
 - spec-prose-oracle: a builder write to a prose fixture under spec/ (`spec/golden/out.md`, `spec/fixtures/expected.txt`) passes, though such a file is a test oracle. Decision: builders-cannot-edit-tests
 - author-raw-cwd: the test-author and designer branch of role_write_hit reads a `/c/` cwd raw, so on Windows an author write outside its scope passes. Same on main. Decision: builders-cannot-edit-tests
 - lane-force-push-refused: lane worktree-base-copies-remove's `git push --force-with-lease` to its own draft branch, to add Red-run trailers, was refused by the auto-mode classifier on 2026-11-02 00:30 CST. The lane opened replacement PR #1064. Refusing stays as on main (lint/report_guard.py forced an allow ask). Decision: owner-override.
+- coordinator-spawn-log-matched-unchecked: the coordinator spawn log case in hooks/test_guard.py passes matched=None, so a wrong matched field on a spawn refusal still passes. Decision: session-tiers
