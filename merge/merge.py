@@ -2139,7 +2139,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
-                records += ". --confirm refuses it. " + stale_page_remedy(n)
+                records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
             elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
                 records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
     finally:
@@ -2165,11 +2165,16 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
 
-def stale_page_remedy(n):
-    """The one text of the refusal of a stale records page on a ready PR, for `confirm` and `preview`. A cloud session cannot
-    return a PR to draft (GraphQL only), so the owner's computer does that act."""
-    return (f"Return #{n} to draft (a cloud session cannot do that, so a session on the owner's computer does), "
-            f"run merge {n} --confirm on the draft (the records step), then mark it ready after its draft run shows.")
+def stale_page_remedy(n, claim=""):
+    """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. A cloud session cannot
+    return a PR to draft (GraphQL only), so the owner's computer does that act. `claim`: the Record-claim the head holds, if any.
+    The draft step refuses a claim head, so the claim commit is reverted first or the remedy would loop."""
+    steps = (f"Return #{n} to draft (a cloud session cannot do that, so a session on the owner's computer does), "
+             f"run merge {n} --confirm on the draft (the records step), then mark it ready after its draft run shows.")
+    if not claim:
+        return steps
+    return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
+            f"Revert that claim commit on the branch, then run the records step: " + steps)
 
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
@@ -2257,7 +2262,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI
             if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree
                 raise Stop(f"the records page on the ready #{n} is stale, and there is no claim to make or resume, so a page-only push would restart its CI. "
-                           f"Nothing was claimed or pushed. {stale_page_remedy(n)}")
+                           f"Nothing was claimed or pushed. {stale_page_remedy(n, head_claim(wt))}")
             if trailer or rebuilt:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
