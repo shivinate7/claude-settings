@@ -7,6 +7,8 @@ Readers: each one finds the records of a fixture repo laid out under docs/ (a ro
 an extras file), and of a repo still at its legacy root folders. Extras: a repo's extras file adds
 its own kind. Constant check: a mutant that puts a record path literal back in one reader, or
 moves the guard's literal, is red; a kind name, a docstring and a comment are not.
+Waiting copy: a repo whose extras file names a waiting page must hold its `waiting/` folder on its record branch,
+and an unreadable branch is unknown. Cases run the child-repo probe on git fixtures.
 Identity: check_layout.py reads the readers of claude-settings itself, so it gives no verdict
 elsewhere. A child repo's tree, an installed copy and a stray folder get one refusal line that points
 to `compliance_probes.py layout <root>`; a worktree, a subfolder and a symlinked path of a checkout pass.
@@ -28,6 +30,7 @@ LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
 REPO = os.path.dirname(LINT)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run; its sweep is proved in test_find_copies.py)
@@ -97,7 +100,8 @@ class LayoutFile(Tree):
         want = {"claude-md": "CLAUDE.md", "agents-md": "AGENTS.md", "rules": ".claude/rules",
                 "decisions": "docs/decisions", "debts": "docs/debts", "debt-notes": "docs/debts/notes.md",
                 "plans": "docs/plans", "specs": "docs/specs", "records-index": "docs/records.md",
-                "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
+                "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots",
+                "waiting-data": "waiting"}
         self.assertEqual({k: v["path"] for k, v in kinds.items()}, want)
         self.assertEqual(self.layout.layout()["extras"], EXTRAS)
 
@@ -367,6 +371,112 @@ class RecordBranch(Tree):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "record-branch": bad}))
                 with self.assertRaises(self.layout.LayoutError):
                     self.layout.record_branch(self.tree)
+
+
+class WaitingCopy(Tree):
+    """The waiting page's copy lives in `waiting/` on the record branch (decision waiting-data-in-repo). A repo whose
+    extras file names a waiting page must hold that folder there. The child-repo layout probe runs the check, and it
+    reads the branch that record_branch() names, the local ref first, then origin's. A branch that cannot be read is
+    unknown: exit 2, never a pass and never a fail (a shallow CI clone holds no record branch)."""
+    URL = "https://claude.ai/artifact/abc123"
+    COPY = {"waiting/items/a.json": '{"id": "a"}\n'}
+    BRIEF = {"briefs/a.md": "# Brief\n"}
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        for kind in self.layout.layout()["kinds"].values():
+            if kind.get("set") == "core":  # the probe flags a missing core kind, so each one holds a file
+                path = kind["path"]
+                self.put(path if "." in os.path.basename(path) else path + "/a.md")
+        self.git("add", "-A", "-f")
+        self.git("commit", "-q", "-m", "base")
+
+    def git(self, *args, input=None, env=None):
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def extras(self, keys):
+        data = {"kinds": {}, "rolled-out": True}
+        data.update(keys)
+        self.put(EXTRAS, json.dumps(data))
+
+    def record(self, branch, files):
+        """A record branch whose one commit holds `files` ({path: text}). Plumbing only: no checkout moves."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + branch))
+        self.git("read-tree", "--empty", env=env)
+        for rel, text in files.items():
+            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
+            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", "refs/heads/" + branch, commit)
+
+    def origin_only(self, branch):
+        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
+        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, bare)
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        self.git("remote", "add", "origin", bare)
+        self.git("push", "-q", "origin", branch)
+        self.git("update-ref", "-d", "refs/heads/" + branch)
+
+    def probe(self):
+        return run([os.path.join(LINT, "compliance_probes.py"), "layout", self.tree], self.tree)
+
+    def test_a_waiting_page_with_no_copy_on_its_record_branch_is_flagged(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+        self.assertIn("waiting", out, "the finding does not name the waiting folder")
+
+    def test_a_copy_on_the_record_branch_passes(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", dict(self.BRIEF, **self.COPY))
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_a_repo_with_no_waiting_page_is_not_asked_for_a_copy(self):
+        self.extras({})
+        self.record("roadmap", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_the_record_branch_the_layout_names_is_the_one_read(self):
+        self.extras({"waiting-page": self.URL, "record-branch": "roadmap-fork"})
+        self.record("roadmap", self.COPY)
+        self.record("roadmap-fork", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+
+    def test_a_copy_on_origin_only_is_read(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.COPY)
+        self.origin_only("roadmap")
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_origin_without_the_copy_is_flagged(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.BRIEF)
+        self.origin_only("roadmap")
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+
+    def test_a_record_branch_that_cannot_be_read_is_unknown_not_a_pass(self):
+        self.extras({"waiting-page": self.URL})
+        code, out = self.probe()
+        self.assertEqual(code, 2, out)
+        self.assertIn("unknown", out)
+        self.assertNotIn("in shape", out)
 
 
 class SetWaitingPage(Tree):
