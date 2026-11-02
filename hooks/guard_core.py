@@ -547,12 +547,14 @@ def resolve_command(tokens):
     return _walk_wrappers(tuple(tokens))[0]
 
 
-def _wrapper_flags(word: str, tokens, index: int):
+def _wrapper_flags(word: str, tokens, index: int, takes=None):
     """Read a wrapper's flags from `index`, getopt-style. Return (the index after them,
     [(flag, value)]). A short-flag cluster is read letter by letter: the first letter that takes a
-    value (WRAPPER_VALUE_FLAGS) takes the rest of the cluster, or the next word when it is the last
-    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value."""
-    takes = WRAPPER_VALUE_FLAGS.get(word, ())
+    value (WRAPPER_VALUE_FLAGS, or `takes` when given) takes the rest of the cluster, or the next
+    word when it is the last letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'`
+    each skip the value."""
+    if takes is None:
+        takes = WRAPPER_VALUE_FLAGS.get(word, ())
     end = len(tokens)
     found = []
     while index < end and tokens[index].startswith("-"):
@@ -693,16 +695,27 @@ def INTERPRETER_HEREDOC(text: str) -> bool:
 
 
 # A header-line segment runs a file the heredoc wrote when it names the file as a command (a direct
-# path), or gives it to a shell or to `source` / `.` (and, for a rule that reads any interpreter,
-# to python, perl, ruby or node).
+# path), or gives it to a shell or to `source` / `.` as the script or on stdin (and, for a rule that
+# reads any interpreter, to python, perl, ruby or node).
 _RUNS_SHELL = re.compile(r"(?:%s|source|\.)(?:\.exe|\.cmd)?" % _SHELLS).fullmatch
 _RUNS_INTERPRETER = re.compile(r"(?:%s|source|\.)(?:\.exe|\.cmd)?" % _INTERPRETERS).fullmatch
-_REDIRECT_OUT = re.compile(r"\d?>>?(?!&)(.*)", re.S).fullmatch
+# A redirect token: (its fd or `&`, the operator, a glued target). `>&2` and `<&0` copy a descriptor.
+# `<<`, `<<<` and `<(` redirect no file.
+_REDIRECT = re.compile(r"(\d*|&)(>>|>\||>&|>|<&|<(?![<(]))(.*)", re.S).fullmatch
+# Per interpreter: the flags that take a value (the next word, or the rest of a short cluster), and
+# those among them whose code is a string or a module, so that no script file runs. The flags of
+# perl, ruby and pwsh are not read: each operand of theirs, and stdin, may be the script.
+_SCRIPT_FLAGS = {
+    "python": ({"-W", "-X", "-c", "-m"}, {"-c", "-m"}),
+    "shell": ({"-o", "-O", "--rcfile", "--init-file", "-c"}, {"-c"}),
+    "node": ({"-r", "--require", "--import", "--loader", "-C", "-e", "--eval", "-p", "--print"},
+             {"-e", "--eval", "-p", "--print"}),
+}
 
 
 def _written_files(headers) -> set:
-    """The files that heredoc header lines write: each unquoted `>` or `>>` target, and the names
-    given to `tee`."""
+    """The files that heredoc header lines write: each unquoted `>`, `>>`, `>|`, `&>` or `&>>`
+    target, and the names given to `tee`."""
     files = set()
     for header in headers:
         for segment in split_segments(header):
@@ -711,37 +724,101 @@ def _written_files(headers) -> set:
                 continue
             quoted = getattr(tokens, "quoted", ())
             for at, token in enumerate(tokens):
-                found = _REDIRECT_OUT(token) if at not in quoted else None
-                if found:
-                    files.add(found.group(1) or (tokens[at + 1] if at + 1 < len(tokens) else ""))
+                found = _REDIRECT(token) if at not in quoted else None
+                if found and found.group(2) in (">", ">>", ">|"):
+                    files.add(found.group(3) or (tokens[at + 1] if at + 1 < len(tokens) else ""))
             for at in command_indexes(tokens):
                 if basename(tokens[at]) == "tee":
                     files.update(t for t in tokens[at + 1:] if not t.startswith("-"))
     return files
 
 
+def _run_name(token: str) -> str:
+    """The file name a word runs or names, with the group marks around it dropped: `$(./deploy)`,
+    `` `./deploy` `` and `./deploy)` each name `deploy`."""
+    return basename(token.lstrip("`")).rstrip(")`")
+
+
+def _command_words(tokens) -> list:
+    """(index, word) for each command a segment runs: each word `command_indexes` finds, and each
+    unquoted `$(` or backtick substitution that opens an assignment value or an argument
+    (`out=$(./deploy)`, `` echo `./deploy` ``), which `command_indexes` does not read."""
+    found = [(at, tokens[at]) for at in command_indexes(tokens)]
+    quoted = getattr(tokens, "quoted", ())
+    for at, token in enumerate(tokens):
+        value = token.split("=", 1)[1] if ASSIGNMENT.match(token) else token
+        if at not in quoted and value.startswith(("$(", "`")) and (at, token) not in found:
+            found.append((at, value))
+    return found
+
+
+def _operands(tokens, start: int):
+    """(the words after `start`, with each redirect and its target taken out, the files the segment
+    reads on stdin)."""
+    quoted = getattr(tokens, "quoted", ())
+    words, stdin = [], []
+    at = start
+    while at < len(tokens):
+        found = _REDIRECT(tokens[at]) if at not in quoted else None
+        at += 1
+        if not found:
+            words.append(tokens[at - 1])
+            continue
+        target = found.group(3)
+        if not target:
+            target, at = (tokens[at] if at < len(tokens) else ""), at + 1
+        if found.group(2) == "<" and found.group(1) in ("", "0"):
+            stdin.append(target)
+    return words, stdin
+
+
+def _script_operands(name: str, words) -> list:
+    """The words that interpreter `name` may run as its script: the first word that is not a flag or
+    a flag's value, or `-` for stdin when there is none or that word is `-`. None when the code is a
+    string or a module (`python3 -m json.tool F`)."""
+    name = re.sub(r"\.(?:exe|cmd)$", "", name)
+    kind = ("python" if name.startswith("python") else "node" if name == "node"
+            else "shell" if name in ("bash", "sh", "zsh", "dash", "ksh", "source", ".") else None)
+    if kind is None:
+        return list(words) + ["-"]
+    takes, no_script = _SCRIPT_FLAGS[kind]
+    cut = next((at for at, word in enumerate(words) if word in ("-", "--")), len(words))
+    at, flags = _wrapper_flags(name, words[:cut], 0, takes)
+    if any(flag in no_script for flag, _ in flags):
+        return []
+    if kind == "shell" and any(flag == "-s" for flag, _ in flags):
+        return ["-"]   # `bash -s` reads the script from stdin
+    if at == cut < len(words) and words[cut] == "--":
+        at += 1
+    return [words[at]] if at < len(words) else ["-"]
+
+
 def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
     """True when a segment of `stripped` (the header lines) runs a file that a heredoc header of
-    `cmd` writes, so the body is what runs. Reading or staging the file (`cat F`, `git add F`)
-    runs nothing."""
-    files = {name[2:] if name.startswith("./") else name
-             for name in _written_files(header for _, _, header in _split_heredocs(cmd)[1])} - {""}
+    `cmd` writes, so the body is what runs. Reading or staging the file (`cat F`, `git add F`), or
+    giving it as an argument to a script (`python3 lint.py F`), runs nothing."""
+    files = {_run_name(name) for name in
+             _written_files(header for _, _, header in _split_heredocs(cmd)[1])} - {""}
     if not files:
         return False
-
-    def is_written(token: str) -> bool:
-        token = token[2:] if token.startswith("./") else token
-        return any(token == name or token.endswith("/" + name) for name in files)
-
     runs = _RUNS_SHELL if shells_only else _RUNS_INTERPRETER
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    piped = False   # the segment before pipes a written file into this one (`cat F | bash`)
+    for segment, end in zip(segments, ends):
         tokens = segment_tokens(segment)
-        if tokens is None:
-            continue
-        for at in command_indexes(tokens):
-            if is_written(tokens[at]) or (
-                    runs(basename(tokens[at])) and any(is_written(t) for t in tokens[at + 1:])):
-                return True
+        for at, word in ([] if tokens is None else _command_words(tokens)):
+            name = _run_name(word)
+            if name in files:
+                return True   # a direct path, such as `./deploy`
+            if not runs(name):
+                continue
+            words, stdin = _operands(tokens, at + 1)
+            for script in _script_operands(name, words):
+                if (_run_name(script) in files) if script != "-" else (
+                        piped or any(_run_name(source) in files for source in stdin)):
+                    return True
+        piped = end == "|" and tokens is not None and any(_run_name(t) in files for t in tokens)
     return False
 
 
