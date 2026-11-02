@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.21007,
  "why": "In home (Nov 1), a simulator crash-looped for 7 minutes before anyone stopped it. A check in sim-test would have stopped it in about 10 seconds.",
- "note": "Fix: after sim-test boots a simulator, it watches the new SpringBoard crash reports; at 3 or more within 30 seconds it shuts down what it booted, and prints that it did and why. It reads only during its own run (no new watcher process). Red first: a fixture that writes 3 crash reports in 30 seconds makes sim-test shut down and exit red with the message. Basis: named incident (home, Nov 1, 7 minutes). Port: yes, sim-test is shared. Ready. Lane session_013NEJL3rd4F6NYG6NJVzL63 (with sim-machine-lock), started Nov 1 19:04 CST.",
- "updatedAt": "2026-11-02T01:05:00Z"
+ "note": "Fix: after sim-test boots a simulator, it watches the new SpringBoard crash reports; at 3 or more within 30 seconds it shuts down what it booted, and prints that it did and why. It reads only during its own run (no new watcher process). Red first: a fixture that writes 3 crash reports in 30 seconds makes sim-test shut down and exit red with the message. Basis: named incident (home, Nov 1, 7 minutes). Port: yes, sim-test is shared. Ready. Lane session_013NEJL3rd4F6NYG6NJVzL63 (with sim-machine-lock), started Nov 1 19:04 CST. Built in draft PR #1022 (batch runner 7), Nov 1 20:43 CST. Unproven until a Mac run: the real SpringBoard crash report folder and file names. Stays open until a recorded Mac run proves them.",
+ "updatedAt": "2026-11-02T02:45:00Z"
 }

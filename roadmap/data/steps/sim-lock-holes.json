@@ -1,0 +1,9 @@
+{
+ "title": "Every simulator boot goes through the lock and is recorded",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.2103,
+ "why": "After PR #1022 (lane sim-machine-lock, Nov 1 20:43 CST), two holes remain: some boots skip the lock, and sim-test boots go unrecorded.",
+ "note": "(1) xcodebuild -destination naming a shut-down device, and the MCP launch tool, still boot outside the sim-test lock; route or refuse them. (2) sim-test boots are no longer checked by sim-boot-is-verified and write no sim-boots.jsonl line, so a sim-test killed with SIGKILL leaves an unrecorded simulator that the sweep keeps; sim-test records its boot. Red first for each. Other gaps: docs/debts/notes.md (lane sim-machine-lock). Port: yes. Ready after PR #1022 merges.",
+ "updatedAt": "2026-11-02T02:45:00Z"
+}
