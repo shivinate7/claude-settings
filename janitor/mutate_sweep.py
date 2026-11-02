@@ -1484,7 +1484,8 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
     shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
-    # Every hooks module, so a module guard.py or sweep.py imports cannot be left out. The loop
+    # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
+    # lazily is not covered. The loop
     # below replaces the guard family and git_reads.py with the target's text (mutated or real).
     mutate_shared.guard_tree(hooks_dir)
     shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
