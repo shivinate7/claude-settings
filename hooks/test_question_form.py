@@ -1069,8 +1069,17 @@ def case_widens_words_in_the_reply_judge_prompt():
     check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
 
 
+# ------------------------------------------------------------------ item 51's field: a picture's focus at the top level
+
+def case_item_51_stray_field():
+    """A focus written at the top level of a decision, outside its designs, is a field the page does not list. It is
+    refused as item-field-rendered and names the field, on both surfaces."""
+    page("a top-level focus the page does not list is refused, naming it", "set",
+         entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
+
+
 def main():
-    for case in (case_item_92, case_form_lines, case_form_placeholders_on_edits,
+    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
@@ -1081,7 +1090,8 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_port_main_side, case_port_departs_shapes, case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_port_main_side, case_port_departs_shapes, case_call_judge,
+                 case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()

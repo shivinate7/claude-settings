@@ -25,6 +25,7 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
     _nowindow = subprocess
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
+ALARM_EVENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "ci-alarm", "events.json")  # the events the red-main check judges and their groups; one home, the CI alarm reads it too
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
 sys.path.insert(0, os.path.dirname(RECORDS))
 try:
@@ -942,12 +943,13 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = ("push", "schedule", "workflow_dispatch")  # the runs of the base's own commits; a dispatch is the tool's own remedy
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The CI alarm reads the same file
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
-        Judged: per workflow file in `flows` (the paths on the base), its newest completed run on `base` of BASE_EVENTS. A newer run still going
-        waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
+        not in it is never judged), the newest completed run on `base`. A green push or dispatch never hides a red schedule run; a dispatch
+        clears an older red push. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
@@ -959,7 +961,7 @@ class Host:
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown = [], []
-            for r in {r["path"]: r for r in reversed(done)}.values():
+            for r in {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.values():
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
                 got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
