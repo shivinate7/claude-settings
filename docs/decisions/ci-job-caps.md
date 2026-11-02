@@ -9,7 +9,7 @@ Owner, 2026-10-27, roadmap step c95 (the cap rule):
 - A full CI run is red only when something is broken, never because a job ran out of time.
 - The target is a slowest run under 80% of the cap.
 - A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
-- A cap rises only with a measured figure in the comment beside it.
+- A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (coordinator, 2026-11-01 19:25 CST, applying the 18:44 ruling).
 
 ## The table
 
