@@ -535,8 +535,8 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 10 min. A green run took 18 s to 44 s over 4 runs (debt measured-time-table). The browser
-    # install is the only network step, and it no longer waits on apt.
+    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps). The browser install is
+    # the only network step, and it no longer waits on apt.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -572,7 +572,8 @@ jobs:
   pointer-windows:
     runs-on: windows-latest
     needs: scope
-    # Cap 10 min leaves room for install-set.test.ps1 on a slow runner (figures: debt measured-time-table).
+    # Cap 10 min, about 2.4x the slowest of 30 runs, 4.2 min, for install-set.test.ps1 on a slow runner
+    # (decision ci-job-caps).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -661,7 +662,7 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
+    # Cap 50 min, about 1.5x the slowest of 30 runs, 32.7 min (decision ci-job-caps).
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
