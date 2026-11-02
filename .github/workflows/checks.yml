@@ -89,6 +89,13 @@ jobs:
       - name: Workflow supply-chain audit (zizmor)
         run: pipx run zizmor==1.30.1 .github/ actions/
 
+      # The pinned tsc and astro-check on PATH for the fixture suites below that run them (code-check, comment scan).
+      - name: Code-check tools
+        timeout-minutes: 5
+        run: |
+          npm ci --ignore-scripts --prefix actions/code-check/tools
+          echo "$PWD/actions/code-check/tools/node_modules/.bin" >> "$GITHUB_PATH"
+
       # Ruff, mypy (strict, over the .code-check.json list), ShellCheck, tsc and astro-check, from the table in
       # actions/code-check/standard.json. Fails on a tracked language with no row. No format step.
       - name: Code check
@@ -104,8 +111,6 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: |
           for spec in $(python3 actions/code-check/code_check.py --pins); do pipx install "$spec"; done
-          npm ci --ignore-scripts --prefix actions/code-check/tools
-          export PATH="$PWD/actions/code-check/tools/node_modules/.bin:$PATH"
           python3 actions/code-check/test_action.py
 
       - name: Ruling-kind records-dir input
@@ -131,6 +136,9 @@ jobs:
 
       - name: Precompact handoff fixture suite
         run: python3 hooks/test_precompact_handoff.py
+
+      - name: Claude Code compaction check fixture suite
+        run: python3 hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
         run: python3 hooks/test_handoff_wave2.py
@@ -267,6 +275,11 @@ jobs:
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
+      - name: Mutation replay fixture suite
+        run: |
+          [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
+          python3 hooks/test_mutate_replay.py
+
       - name: Landed-directory check fixture suite
         run: python3 lint/test_check_landed_dirs.py
 
@@ -282,8 +295,14 @@ jobs:
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
+      - name: Red-run trailer fixture suite
+        run: python3 lint/test_check_red_run.py
+
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
+
+      - name: Time-pinned finder fixture suite
+        run: python3 lint/test_find_time_pinned.py
 
       - name: Mod version fixture suite
         run: python3 lint/test_check_mod_versions.py
@@ -299,6 +318,13 @@ jobs:
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
+      - name: Red-run trailer
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
@@ -736,6 +762,10 @@ jobs:
       - name: Precompact handoff fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_precompact_handoff.py
+
+      - name: Claude Code compaction check fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1248,6 +1278,10 @@ jobs:
       - name: Precompact handoff fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_precompact_handoff.py
+
+      - name: Claude Code compaction check fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
