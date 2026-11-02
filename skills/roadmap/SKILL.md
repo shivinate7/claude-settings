@@ -78,7 +78,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
      "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
-     "sessions": [{"id", "session_status", "tags"}]}
+     "sessions": [{"id", "session_status", "tags"}],
+     "items": [{"n", "status", "home"}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
@@ -86,6 +87,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
   The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
   Live work.
+- `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
+  `n`, `status` and `home`. The upkeep list reads it for page rulings. A live file with no `items` list
+  still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
@@ -138,6 +142,21 @@ After each build the builder prints the upkeep list for the triage thread. It na
   - the repo's GitHub name cannot be read;
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old (an old list counts a dead
     lane as live), or is more than 5 minutes ahead;
+- page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
+  done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
+  optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
+  is the words `item <n>` in any case, with an optional `#` (`page item 9`). Cite each item on its
+  own, as `item <n>`. "items 9 and 10" cites neither item, and "item 9 and 10" cites item 9 only.
+  Each entry reads `<id> (page item <n>)`. Triage files the ruling on the step's note. The row reads
+  one `unknown (<why>)` entry, never an empty list, when:
+  - `--live` is missing or unreadable;
+  - the live file is not a JSON object;
+  - the live file has no `threads` or `pulls` list;
+  - `readAt` is not an ISO time, has no time zone, is over 60 minutes old or is more than 5 minutes ahead;
+  - there is no `items` list;
+  - an `items` row has the wrong shape (`n` not an int, `status` or `home` not a string).
+
+  A skipped session row does not blank this row. An empty `items` list reads zero;
 - `Step:` trailers that name no step.
 
 ## Cost
@@ -145,7 +164,8 @@ After each build the builder prints the upkeep list for the triage thread. It na
 About six git processes and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
-fields per session in the file. The builder adds no git process, file, timer or log for it.
+fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
+page) to the same publish. The builder adds no git process, file, timer or log for either row.
 No watcher, no timer, no log.
 
 ## Tests
