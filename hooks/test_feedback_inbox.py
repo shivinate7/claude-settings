@@ -56,6 +56,16 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
     For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
 
+Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges each new item with one
+  model call per Stop, `decision_watch.invoke_model` (model claude-haiku-5-5, timeout 45 s, effort
+  None). A match appends ` repeats <ref>` to the item's line in the inbox. The block reason names it,
+  or systemMessage does when stop_hook_active. Judged ids are kept in the turn state file under
+  `judged`. Candidates come from the repo of the payload cwd: the step at refs/remotes/origin/roadmap,
+  the layout's backlog files in the working tree, and older inboxes whose sidecar `<sid>.inbox.repo`
+  names the repo. Capture writes that sidecar once, in a repo. The repeat cases stub the model call
+  through a probe that runs feedback_guard.py as __main__. Their fixture repos are rolled out (layout
+  extras file), so debts sit at docs/debts.
+
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
   the session has a transcript. It reads the inbox, the handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md
@@ -221,14 +231,16 @@ def new_cfg():
     return cfg
 
 
-def run(path, raw, cfg, args=()):
-    """Runs one hook script the way the harness does. Returns a Proc."""
+def run(path, raw, cfg, args=(), extra_env=None):
+    """Runs one hook script the way the harness does. Returns a Proc. `extra_env` adds variables
+    for one run, such as a git shim's PATH."""
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "LOCAL_TIME_NOW"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
+    env.update(extra_env or {})
     try:
         cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=30)
@@ -243,29 +255,37 @@ def payload(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
-def capture(cfg, sid, prompt):
+def capture(cfg, sid, prompt, cwd=None, extra_env=None):
+    """One owner prompt. `cwd` is the payload's folder: the config folder unless a case names a repo."""
     return run(LT_PATH, payload({"hook_event_name": "UserPromptSubmit", "session_id": sid,
-                                 "prompt": prompt, "cwd": cfg}), cfg)
+                                 "prompt": prompt, "cwd": cwd or cfg}), cfg, extra_env=extra_env)
 
 
 def guard(cfg, sid, stop_active=False, cwd=None, transcript=None):
-    """Runs the guard. `cwd` is the session's folder in the payload: the shared fixture repo unless
-    a case names another. `transcript` is the payload's transcript_path, left out when None."""
+    """Runs the guard, as the Stop hook does, through the probe: its model call is stubbed to answer
+    that nothing repeats, so no case reaches a real model. `cwd` is the session's folder in the
+    payload: the shared fixture repo unless a case names another. `transcript` is the payload's
+    transcript_path, left out when None."""
     obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active,
            "cwd": cwd or fixture_repo()}
     if transcript is not None:
         obj["transcript_path"] = transcript
-    return run(GUARD_PATH, payload(obj), cfg)
+    log = os.path.join(os.path.dirname(cfg), "model-calls-guard.log")
+    return run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH),
+               extra_env={"FG_STUB_LOG": log})
 
 
 GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
           "-c", "init.defaultBranch=main")
 
 
-def git(where, *args):
-    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30)
+def git(where, *args, env=None, stdin=None):
+    """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails."""
+    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30,
+                        env=env, input=stdin)
     if cp.returncode != 0:
         raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
+    return cp.stdout.decode("utf-8", "replace")
 
 
 def make_repo(name, tracked=(), untracked=(), extras=None):
@@ -1804,6 +1824,630 @@ def case_page_note_u2028_in_at_saves_once():
           captured_texts(cfg, sid))
 
 
+# --------------------------------------------------------------------------- repeat cases
+# The Stop guard judges each new item: one model call per Stop, over the items that Stop has not
+# judged yet. A match is marked on the item line. The model is stubbed by PROBE_SOURCE, which runs
+# the guard as its own __main__ block with decision_watch.invoke_model replaced.
+
+STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as last fetched; never fetched here
+STEP_DIR = "roadmap/data/steps/"
+REPEAT_REF = "roadmap:wheel-speed"
+STEP_JSON = json.dumps({"title": "Wheel spins faster",
+                        "why": "Viewers want the wheel to turn faster.",
+                        "note": "Sets the wheel speed for each turn."}, indent=2) + "\n"
+STEP_TEXTS = ("Wheel spins faster", "Viewers want the wheel to turn faster.",
+              "Sets the wheel speed for each turn.")
+DEBT_SLUG = "wheel-speed-cap"
+DEBT_TITLE = "Wheel speed cap"
+DEBT_SENTENCE = "The spin rate is capped at twelve degrees per frame."
+DEBT_TEXT = "# %s\n\n%s\n" % (DEBT_TITLE, DEBT_SENTENCE)
+ROLLED_OUT = json.dumps({"rolled-out": True, "kinds": {}}) + "\n"  # the layout keeps debts at docs/debts
+ITEM_ID, ITEM_ID_2 = "fb-0958-1", "fb-0958-2"
+ITEM_LINE = "- fb-0958-1 [note] -> noted"
+ITEM_LINE_2 = "- fb-0958-2 [note] -> noted"
+MARKED = " repeats " + REPEAT_REF
+MSG_ONE = "the carousel spins too slow\nspeed it up for the reader\nthanks"
+MSG_TWO = "the carousel is slow again\nmake the spin quicker\nthanks"
+OLD_A_SID = "a1b2c3d4-6e5f-4a3b"  # the candidate ref names an inbox by its first eight characters
+OLD_B_SID = "b2c3d4e5-7f6a-4b3c"
+OLD_A_TEXT = "OLD-A: the carousel spins too slow for the reader"
+OLD_B_TEXT = "OLD-B: the carousel spins too slow for the reader"
+ANSWER_NONE = json.dumps({"repeats": []})
+
+# The probe installs the stub on decision_watch.invoke_model, the one model caller, and then runs
+# feedback_guard.py as __main__. The stub mirrors decision_watch's defaults, so a call that leaves
+# model, timeout or effort to the default shows the default in the log.
+PROBE_SOURCE = r"""import json, os, runpy, sys
+sys.path.insert(0, sys.argv[1])
+import decision_watch
+
+
+def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
+         effort="xhigh"):
+    with open(os.environ["FG_STUB_LOG"], "a", encoding="utf-8") as f:
+        f.write(json.dumps({"prompt": prompt, "model": model, "timeout": timeout,
+                            "effort": effort}) + "\n")
+    if os.environ.get("FG_STUB_DROP"):
+        path, prefix = json.loads(os.environ["FG_STUB_DROP"])
+        with open(path, encoding="utf-8") as f:
+            kept = [ln for ln in f.read().split("\n") if not ln.startswith(prefix)]
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(kept))
+    if os.environ.get("FG_STUB_ERROR"):
+        return None, os.environ["FG_STUB_ERROR"]
+    return json.loads(os.environ.get("FG_STUB_ANSWER", '{"repeats": []}')), None
+
+
+decision_watch.invoke_model = stub
+runpy.run_path(sys.argv[2], run_name="__main__")
+"""
+
+JUDGE_RUNS = [0]
+
+
+def probe_path():
+    """The probe script, written once per run beside the run's other folders."""
+    path = os.path.join(ROOT, "guard_probe.py")
+    if not os.path.exists(path):
+        write_file(path, PROBE_SOURCE)
+    return path
+
+
+def repeat_repo(name, step=False, debt=False):
+    """A rolled-out fixture repo. `step` puts the roadmap step at STEP_REF only, so a read of the
+    working tree finds nothing. `debt` writes the debt untracked, so the read is of the working tree."""
+    root = make_repo(name, extras=ROLLED_OUT)
+    if step:
+        put_ref(root, STEP_REF, {STEP_DIR + "wheel-speed.json": STEP_JSON})
+    if debt:
+        write_file(os.path.join(root, "docs", "debts", DEBT_SLUG + ".md"), DEBT_TEXT)
+    return root
+
+
+def put_ref(root, ref, files):
+    """Makes one parentless commit of `files` ({path: text}) and points `ref` at it. The working
+    tree and main never hold these files, so only a read of `ref` finds them. The temp index sits
+    beside the repo, in the run folder."""
+    # One git start per step, not per file: a few hundred steps would cost minutes in process starts.
+    env = dict(os.environ, GIT_INDEX_FILE=root + ".ref.index")
+    paths = []
+    for rel in files:
+        path = os.path.join(root + ".ref", *rel.split("/"))
+        write_file(path, files[rel])
+        paths.append(path)
+    blobs = git(root, "hash-object", "-w", "--", *paths).split()
+    index = "".join("100644 %s\t%s\n" % (blob, rel) for blob, rel in zip(blobs, files))
+    git(root, "update-index", "--index-info", env=env, stdin=index.encode("utf-8"))
+    tree = git(root, "write-tree", env=env).strip()
+    commit = git(root, "commit-tree", tree, "-m", "roadmap fixture").strip()
+    git(root, "update-ref", ref, commit)
+
+
+def repeat_answer(*item_ids):
+    """The model's answer naming each item as a repeat of the roadmap step (no items: none)."""
+    return json.dumps({"repeats": [{"id": i, "ref": REPEAT_REF} for i in item_ids]})
+
+
+def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None):
+    """One Stop of the guard, run the way the Stop hook runs it, with the model stubbed by the probe.
+    Returns (Proc, calls). Each call is a dict the stub logged: prompt, model, timeout, effort.
+    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
+    JUDGE_RUNS[0] += 1
+    log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
+    env = dict(extra_env or {}, FG_STUB_LOG=log)
+    if answer is not None:
+        env["FG_STUB_ANSWER"] = answer
+    if error is not None:
+        env["FG_STUB_ERROR"] = error
+    if drop is not None:
+        env["FG_STUB_DROP"] = json.dumps(list(drop))
+    obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active, "cwd": cwd}
+    p = run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
+    return p, [json.loads(ln) for ln in read_or_empty(log).splitlines()]
+
+
+def add_item(cfg, sid, line=ITEM_LINE):
+    """The session jots an item under the newest block."""
+    append_file(inbox_of(cfg, sid), line + "\n")
+
+
+def inbox_line(cfg, sid, item_id):
+    """The item's line in the inbox, or an empty string."""
+    for ln in read_or_empty(inbox_of(cfg, sid)).split("\n"):
+        if ln.startswith("- " + item_id + " "):
+            return ln
+    return ""
+
+
+def turns_rel(sid):
+    return os.path.join("handoffs", sid + ".inbox.turns")
+
+
+def inbox_rel(sid):
+    return os.path.join("handoffs", sid + ".inbox.md")
+
+
+def sidecar_rel(sid):
+    return os.path.join("handoffs", sid + ".inbox.repo")
+
+
+def turns_state(cfg, sid):
+    try:
+        return json.loads(read_file(os.path.join(cfg, turns_rel(sid))))
+    except (OSError, ValueError):
+        return None
+
+
+def sidecar_of(cfg, sid):
+    return os.path.join(cfg, sidecar_rel(sid))
+
+
+def write_old_inbox(cfg, sid, text, sidecar=None):
+    """Another session's inbox: one block of `text`, with one jotted item. `sidecar` (a repo path),
+    when given, writes the session's sidecar the way capture does on its first save."""
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-0812-1 [note] -> noted",)))
+    if sidecar is not None:
+        write_file(sidecar_of(cfg, sid), sidecar)
+
+
+def snapshot(folder):
+    """{relative path: (mtime_ns, bytes)} for each file under `folder`."""
+    out = {}
+    for d, _, names in os.walk(folder):
+        for name in names:
+            path = os.path.join(d, name)
+            with open(path, "rb") as f:
+                out[os.path.relpath(path, folder)] = (os.stat(path).st_mtime_ns, f.read())
+    return out
+
+
+def written_between(before, after):
+    """The relative paths that are new, or changed, between two snapshots."""
+    return {rel for rel, state in after.items() if before.get(rel) != state}
+
+
+def git_counter(cfg):
+    """A `git` first on PATH for one case's runs. Each start appends one line to the log, then runs
+    the real git. Returns the env for run(). It is a POSIX shell script, and CI runs this file on
+    Linux and macOS only."""
+    base = os.path.dirname(cfg)
+    real = shutil.which("git")
+    if real is None:
+        raise RuntimeError("git is not on PATH")
+    script = os.path.join(base, "shim", "git")
+    write_file(script, '#!/bin/sh\necho "$*" >> "$GIT_SHIM_LOG"\nexec "$GIT_SHIM_REAL" "$@"\n')
+    os.chmod(script, 0o755)
+    return {"PATH": os.path.dirname(script) + os.pathsep + os.environ.get("PATH", ""),
+            "GIT_SHIM_LOG": os.path.join(base, "git-starts.log"), "GIT_SHIM_REAL": real}
+
+
+def git_lines(env, since=0):
+    """The shim's log lines from index `since` on: one line per git start, with its arguments."""
+    return read_or_empty(env["GIT_SHIM_LOG"]).splitlines()[since:]
+
+
+def grep_starts(lines):
+    return sum(1 for ln in lines if "grep" in ln.split())
+
+
+def plain_folder(base):
+    """A folder outside any git repo, with a debt that matches the owner's words. Nothing in it may
+    be read: a folder outside a repo has no roadmap, no backlog and no inbox binding."""
+    plain = os.path.join(base, "plain")
+    write_file(os.path.join(plain, "docs", "debts", DEBT_SLUG + ".md"), DEBT_TEXT)
+    return plain
+
+
+def in_a_repo(path):
+    cp = subprocess.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+                        capture_output=True, timeout=30)
+    return cp.returncode == 0
+
+
+def case_repeat_roadmap_step_marks_the_item_and_blocks():
+    """The owner says `carousel`; the step says `wheel`. The model names the step for the item. The
+    item line gains the mark, and the block names it. The mark keeps the line well formed."""
+    root = repeat_repo("repeat-roadmap", step=True)
+    cfg, sid = new_cfg(), "repeat-roadmap"
+    check("roadmap: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("roadmap: one model call on the Stop", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if calls else ""
+    check("roadmap: the prompt holds the step text and its ref",
+          all(t in prompt for t in STEP_TEXTS) and REPEAT_REF in prompt, prompt[-300:])
+    check("roadmap: the prompt holds the owner's message and the item id",
+          MSG_ONE.split("\n")[0] in prompt and ITEM_ID in prompt, prompt[-300:])
+    check("roadmap: the item line gains the mark", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    reason = block_reason(p) or ""
+    check("roadmap: the block reason names the item and the ref",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
+    check("roadmap: no reason calls the item malformed", "malformed" not in reason, reason)
+
+
+def case_repeat_stop_hook_active_marks_and_tells_the_owner():
+    """An active Stop judges too. It marks the item, blocks nothing, and names the item in
+    systemMessage, so the owner sees it."""
+    root = repeat_repo("repeat-active", step=True)
+    cfg, sid = new_cfg(), "repeat-active"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), stop_active=True)
+    check("active: one model call on the Stop", len(calls) == 1, p.desc())
+    check("active: the item line gains the mark", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    out = guard_json(p) or {}
+    check("active: no block", not is_block(out), p.desc())
+    check("active: systemMessage names the item and the ref",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str(out.get("systemMessage", "")), p.desc())
+
+
+def case_repeat_judged_items_are_not_judged_again():
+    """One judging Stop per item. The judged ids sit in the turn state. A Stop with no new item makes
+    no call, and a Stop that finds nothing writes no inbox. A folder outside a repo has no candidate
+    text, so its Stop makes no call either."""
+    root = repeat_repo("repeat-second", step=True)
+    cfg, sid = new_cfg(), "repeat-second"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    before = snapshot(cfg)
+    p1, calls1 = stop(cfg, sid, root, answer=ANSWER_NONE)
+    check("judged: the first Stop judges the item once", len(calls1) == 1, p1.desc())
+    check("judged: the judged id is kept in the turn state",
+          ITEM_ID in (turns_state(cfg, sid) or {}).get("judged", []), turns_state(cfg, sid))
+    check("judged: no repeat found, so the inbox is not rewritten",
+          inbox_rel(sid) not in written_between(before, snapshot(cfg)), sorted(written_between(before, snapshot(cfg))))
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("judged: a Stop with no new item makes zero model calls", calls2 == [], len(calls2))
+    check("judged: nothing is marked", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE, inbox_line(cfg, sid, ITEM_ID))
+    cfg_plain = new_cfg()
+    plain = plain_folder(os.path.dirname(cfg_plain))
+    capture(cfg_plain, "repeat-plain", MSG_ONE, cwd=plain)
+    add_item(cfg_plain, "repeat-plain")
+    p3, calls3 = stop(cfg_plain, "repeat-plain", plain, answer=repeat_answer(ITEM_ID))
+    check("judged: outside a repo there is no candidate text, so zero model calls", calls3 == [],
+          len(calls3))
+
+
+def case_repeat_removed_mark_is_not_flagged_again():
+    """The session drops a mark that is not a repeat. The next Stop makes no call and flags nothing."""
+    root = repeat_repo("repeat-removed", step=True)
+    cfg, sid = new_cfg(), "repeat-removed"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("removed mark: the first Stop marks the item", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    text = read_file(inbox_of(cfg, sid))
+    write_file(inbox_of(cfg, sid), text.replace(MARKED, ""))
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("removed mark: the next Stop makes zero model calls", calls2 == [], len(calls2))
+    check("removed mark: the item stays unmarked", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE,
+          inbox_line(cfg, sid, ITEM_ID))
+    check("removed mark: the next Stop flags nothing", "may repeat" not in p2.out, p2.desc())
+
+
+def case_repeat_upgrade_stop_judges_nothing_already_there():
+    """A turn state with no `judged` key, from before the feature: every item already there counts as
+    judged, so the upgrade Stop makes no call. An item added after the upgrade is judged."""
+    root = repeat_repo("repeat-upgrade", step=True)
+    cfg, sid = new_cfg(), "repeat-upgrade"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    write_file(os.path.join(cfg, turns_rel(sid)), json.dumps({"seen": 1, "burst": [0]}))
+    p1, calls1 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("upgrade: the Stop with an old item makes zero model calls", calls1 == [], len(calls1))
+    check("upgrade: the old item stays unmarked", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE,
+          inbox_line(cfg, sid, ITEM_ID))
+    capture(cfg, sid, MSG_TWO, cwd=root)
+    add_item(cfg, sid, ITEM_LINE_2)
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID_2))
+    prompt = calls2[0]["prompt"] if len(calls2) == 1 else ""
+    check("upgrade: the item added after the upgrade is judged once", len(calls2) == 1 and ITEM_ID_2 in prompt,
+          len(calls2))
+    check("upgrade: that item is marked", inbox_line(cfg, sid, ITEM_ID_2) == ITEM_LINE_2 + MARKED,
+          inbox_line(cfg, sid, ITEM_ID_2))
+
+
+def case_repeat_model_error_fails_open_and_is_not_retried():
+    """A model error flags nothing, blocks nothing, and says in one systemMessage line that repeats
+    were not checked. The item counts as judged, so the next Stop makes no call."""
+    root = repeat_repo("repeat-error", step=True)
+    cfg, sid = new_cfg(), "repeat-error"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p1, calls1 = stop(cfg, sid, root, error="timed out after 45 s")
+    check("error: one model call on the Stop", len(calls1) == 1, p1.desc())
+    out = guard_json(p1) or {}
+    msg = str(out.get("systemMessage", ""))
+    check("error: one systemMessage line says repeats were not checked",
+          "Feedback guard: repeats not checked (" in msg and "\n" not in msg, p1.desc())
+    check("error: no block", not is_block(out), p1.desc())
+    check("error: the item is not marked", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE,
+          inbox_line(cfg, sid, ITEM_ID))
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("error: the next Stop makes zero model calls", calls2 == [], len(calls2))
+
+
+def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
+    """An older inbox is a candidate only with a sidecar that names this repo. Capture writes this
+    session's sidecar once, inside a repo, and never outside one."""
+    root = repeat_repo("repeat-binding")
+    cfg, sid = new_cfg(), "repeat-binding"
+    env = git_counter(cfg)
+    write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
+    write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
+    start = len(git_lines(env))
+    capture(cfg, sid, MSG_ONE, cwd=root, extra_env=env)
+    check("binding: capture in a repo writes the sidecar with the repo's path",
+          read_or_empty(sidecar_of(cfg, sid)).strip() == os.path.realpath(root), read_or_empty(sidecar_of(cfg, sid)))
+    check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
+          git_lines(env, start))
+    mid = snapshot(cfg)
+    capture(cfg, sid, MSG_TWO, cwd=root, extra_env=env)
+    check("binding: a second capture leaves the sidecar as it was",
+          sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("binding: the old inbox with a sidecar for this repo is a candidate",
+          "OLD-A" in prompt and "inbox:" + OLD_A_SID[:8] + "@" in prompt, prompt[-300:])
+    check("binding: the old inbox with no sidecar is not a candidate", "OLD-B" not in prompt, "OLD-B found")
+    check("binding: this session's earlier message is a candidate",
+          MSG_ONE.split("\n")[0] in prompt and "inbox:" + sid[:8] + "@" in prompt, prompt[-300:])
+    cfg_plain = new_cfg()
+    plain = plain_folder(os.path.dirname(cfg_plain))
+    check("binding: the plain folder is outside any git repo", not in_a_repo(plain), plain)
+    capture(cfg_plain, "repeat-out", MSG_ONE, cwd=plain)
+    check("binding: capture outside a repo writes no sidecar",
+          not os.path.exists(sidecar_of(cfg_plain, "repeat-out")), sidecar_of(cfg_plain, "repeat-out"))
+
+
+def case_repeat_backlog_debt_text_is_in_the_prompt():
+    """A debt in the layout's backlog folder, untracked, is a candidate: its ref and its text go in."""
+    root = repeat_repo("repeat-backlog", debt=True)
+    cfg, sid = new_cfg(), "repeat-backlog"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("backlog: one model call on the Stop", len(calls) == 1, p.desc())
+    check("backlog: the prompt holds the debt's ref", "debt:" + DEBT_SLUG in prompt, prompt[-300:])
+    check("backlog: the prompt holds the debt's title and text", DEBT_TITLE in prompt and DEBT_SENTENCE in prompt,
+          prompt[-300:])
+
+
+def case_repeat_cost_one_call_one_grep_and_two_files():
+    """Two new items cost one model call, one `git grep` and no more than one other git start beyond a
+    Stop with nothing to judge. A flagged judging Stop writes the turn state and the inbox only. A Stop
+    with no new item makes no call, starts no grep, and writes the turn state only."""
+    root = repeat_repo("repeat-cost", step=True, debt=True)
+    cfg, sid = new_cfg(), "repeat-cost"
+    env = git_counter(cfg)
+    capture(cfg, sid, MSG_ONE, cwd=root, extra_env=env)
+    add_item(cfg, sid, ITEM_LINE)
+    capture(cfg, sid, MSG_TWO, cwd=root, extra_env=env)
+    add_item(cfg, sid, ITEM_LINE_2)
+    before = snapshot(cfg)
+    start = len(git_lines(env))
+    p1, calls1 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+    lines1 = git_lines(env, start)
+    mid_start = len(git_lines(env))
+    prompt = calls1[0]["prompt"] if len(calls1) == 1 else ""
+    check("cost: one model call covers both new items",
+          len(calls1) == 1 and ITEM_ID in prompt and ITEM_ID_2 in prompt
+          and MSG_ONE.split("\n")[0] in prompt and MSG_TWO.split("\n")[0] in prompt, len(calls1))
+    check("cost: the judging Stop starts exactly one git grep", grep_starts(lines1) == 1, lines1)
+    files1 = written_between(before, snapshot(cfg))
+    check("cost: a flagged judging Stop writes the turn state and the inbox, nothing else",
+          files1 == {turns_rel(sid), inbox_rel(sid)}, sorted(files1))
+    mid = snapshot(cfg)
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+    lines2 = git_lines(env, mid_start)
+    check("cost: a Stop with no new item makes zero model calls", calls2 == [], len(calls2))
+    check("cost: a Stop with no new item starts no git grep", grep_starts(lines2) == 0, lines2)
+    check("cost: a Stop with no new item writes the turn state only",
+          written_between(mid, snapshot(cfg)) <= {turns_rel(sid)}, sorted(written_between(mid, snapshot(cfg))))
+    extra = len(lines1) - len(lines2) - grep_starts(lines1)
+    check("cost: the judging Stop starts at most one non-grep git process beyond a Stop with nothing to judge",
+          extra <= 1, "judging=%d quiet=%d grep=%d" % (len(lines1), len(lines2), grep_starts(lines1)))
+
+
+def candidate_refs(prompt):
+    """The ref of each candidate line: the lines under the prompt's CANDIDATES heading."""
+    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+    return re.findall(r"^\[([^\]]+)\] ", part, re.M)
+
+
+def cap_counts(prompt):
+    refs = candidate_refs(prompt)
+    return {"all": len(refs),
+            "roadmap": sum(r.startswith("roadmap:") for r in refs),
+            "backlog": sum(r.split(":")[0] in ("debt", "todo", "note") for r in refs),
+            "inbox": sum(r.startswith("inbox:") for r in refs)}
+
+
+def cap_repo(name, steps, notes, done=0):
+    """A rolled-out repo with `steps` roadmap steps at STEP_REF, the first `done` of them marked done and
+    the rest todo, and `notes` non-blank lines in the layout's debt-notes file, for the candidate caps.
+    No steps: no roadmap ref at all."""
+    root = repeat_repo(name)
+    if steps:
+        put_ref(root, STEP_REF, {
+            STEP_DIR + "step-%03d.json" % n: json.dumps(
+                {"title": "Wheel step %d spins faster" % n, "status": "done" if n <= done else "todo",
+                 "note": "Sets the wheel speed for step %d." % n}) + "\n"
+            for n in range(1, steps + 1)})
+    write_file(os.path.join(root, "docs", "debts", "notes.md"),
+               "".join("- note %d: keep the wheel speed setting in the reader\n" % n for n in range(1, notes + 1)))
+    return root
+
+
+def set_judged(cfg, sid, judged):
+    """Rewrites the turn state's `judged` list, as a Stop that failed to save it would leave it."""
+    state = json.loads(read_file(os.path.join(cfg, turns_rel(sid))))
+    state["judged"] = judged
+    write_file(os.path.join(cfg, turns_rel(sid)), json.dumps(state))
+
+
+def case_repeat_cap_keeps_each_source_within_its_share():
+    """Per-source shares: roadmap 200, backlog 100, inbox blocks 100, 400 in all. A roadmap past its share
+    must not push the older inbox block and the notes lines out of the prompt. Two sizes: 250 steps
+    holds under the 400 total, so only its shares fail; 346 steps fills the 400 before the inbox."""
+    for steps in (250, 346):
+        name = "repeat-cap-%d" % steps
+        root = cap_repo(name, steps, 120)
+        cfg, sid = new_cfg(), name
+        write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid)
+        p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+        prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+        counts = cap_counts(prompt)
+        check("cap %d: one model call" % steps, len(calls) == 1, p.desc())
+        check("cap %d: the old inbox block is a candidate" % steps, "OLD-A" in prompt, counts)
+        check("cap %d: the newest notes line is a candidate" % steps, "[note:120] " in prompt, counts)
+        check("cap %d: at most 400 candidates" % steps, counts["all"] <= 400, counts)
+        check("cap %d: at most 200 roadmap steps" % steps, counts["roadmap"] <= 200, counts)
+        check("cap %d: at most 100 backlog lines" % steps, counts["backlog"] <= 100, counts)
+        check("cap %d: at most 100 inbox blocks" % steps, counts["inbox"] <= 100, counts)
+
+
+def case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period():
+    """A block whose only reason is a repeat flag carries neither the page and standing suffix, nor a
+    double period. A flag beside another reason has no double period either."""
+    root = repeat_repo("repeat-reason", step=True)
+    cfg, sid = new_cfg(), "repeat-reason"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    reason = block_reason(p) or ""
+    check("reason: the repeat-only Stop blocks", block_reason(p) is not None, p.desc())
+    check("reason: no page and standing suffix on a repeat-only block",
+          "Send each page ruling" not in reason, reason)
+    check("reason: no double period in a repeat-only block", ".." not in reason, reason)
+    cfg2, sid2 = new_cfg(), "repeat-mixed"
+    capture(cfg2, sid2, MSG_ONE, cwd=root)
+    add_item(cfg2, sid2)
+    capture(cfg2, sid2, MSG_TWO, cwd=root)  # a burst message with no item: a reason of its own
+    p2, calls2 = stop(cfg2, sid2, root, answer=repeat_answer(ITEM_ID))
+    reason2 = block_reason(p2) or ""
+    check("reason: a repeat flag beside another reason is in the block with no double period",
+          "may repeat" in reason2 and ".." not in reason2, reason2)
+
+
+def case_repeat_second_judging_adds_no_second_mark():
+    """A state write that failed leaves an item unjudged. The next Stop judges it again, and its line
+    must keep one mark."""
+    root = repeat_repo("repeat-twice", step=True)
+    cfg, sid = new_cfg(), "repeat-twice"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("twice: the first Stop marks the item", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    set_judged(cfg, sid, [])
+    p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("twice: the second Stop judges the item again", len(calls2) == 1, p2.desc())
+    check("twice: the line keeps one mark", inbox_line(cfg, sid, ITEM_ID).count(" repeats ") == 1,
+          inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_repeat_unplaced_mark_is_reported_as_not_marked():
+    """The item's line is gone by the time the mark goes on: the block reason names the flag and says
+    it is not marked, and never says it is marked on the item."""
+    root = repeat_repo("repeat-unplaced", step=True)
+    cfg, sid = new_cfg(), "repeat-unplaced"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID),
+                    drop=(inbox_of(cfg, sid), "- " + ITEM_ID + " "))
+    check("unplaced: one model call", len(calls) == 1, p.desc())
+    reason = block_reason(p) or ""
+    check("unplaced: the reason names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
+    check("unplaced: the reason says not marked", "not marked" in reason, reason)
+    check("unplaced: the reason never says marked on the item",
+          re.search(r"(?<!not )marked on the item", reason) is None, reason)
+
+
+def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
+    """An item whose own words hold `repeats` still gets the mark when the model names it. The mark is
+    ` repeats <ref>` at the line tail, so a ref-like run in the middle of the words is not a mark."""
+    root = repeat_repo("repeat-word", step=True)
+    cfg, sid = new_cfg(), "repeat-word"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    line4 = "- fb-1-4 [note] -> the wheel repeats forever"
+    line5 = "- fb-1-5 [note] -> the wheel repeats roadmap:wheel-speed slowly"
+    add_item(cfg, sid, line=line4)
+    add_item(cfg, sid, line=line5)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer("fb-1-4", "fb-1-5"))
+    check("word: one model call on the Stop", len(calls) == 1, p.desc())
+    check("word: the item keeps its words and gains the mark at the tail",
+          inbox_line(cfg, sid, "fb-1-4") == line4 + MARKED, inbox_line(cfg, sid, "fb-1-4"))
+    check("word: a ref-like run mid-line is not a mark, so the line gains one",
+          inbox_line(cfg, sid, "fb-1-5") == line5 + MARKED, inbox_line(cfg, sid, "fb-1-5"))
+    reason = block_reason(p) or ""
+    check("word: the reason names both items and says marked",
+          "fb-1-4 may repeat %s" % REPEAT_REF in reason and "fb-1-5 may repeat %s" % REPEAT_REF in reason
+          and "marked on the item" in reason and "not marked" not in reason, reason)
+
+
+def case_repeat_cap_keeps_the_newest_notes_lines():
+    """Under the cap a line file keeps its newest lines. A 150-line notes file puts its last line in the
+    prompt, and the backlog stays at its share of 100."""
+    root = cap_repo("repeat-notes-150", 0, 150)
+    cfg, sid = new_cfg(), "repeat-notes-150"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("notes: one model call", len(calls) == 1, p.desc())
+    check("notes: the last line, note 150, is a candidate", "note:150" in candidate_refs(prompt),
+          cap_counts(prompt))
+    check("notes: the backlog stays at its share of 100", cap_counts(prompt)["backlog"] == 100,
+          cap_counts(prompt))
+
+
+def case_repeat_cap_keeps_the_open_roadmap_steps():
+    """Under the cap the roadmap steps not marked done come first. Of 250 steps the last 50 are open and
+    sort last by slug: every open step is a candidate, and the done steps take the rest of the share."""
+    root = cap_repo("repeat-open-250", 250, 0, done=200)
+    cfg, sid = new_cfg(), "repeat-open-250"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    refs = candidate_refs(prompt)
+    missing = ["roadmap:step-%03d" % n for n in range(201, 251) if "roadmap:step-%03d" % n not in refs]
+    check("open: one model call", len(calls) == 1, p.desc())
+    check("open: all 50 open steps are candidates", missing == [], missing[:5])
+    check("open: the roadmap stays at its share of 200", cap_counts(prompt)["roadmap"] == 200,
+          cap_counts(prompt))
+
+
+def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
+    """An answer entry whose id or ref is a list is not a hit. It must not stop the valid hit of the same
+    answer, which still gets its mark and its reason."""
+    root = repeat_repo("repeat-list", step=True)
+    cfg, sid = new_cfg(), "repeat-list"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    answer = json.dumps({"repeats": [
+        {"id": [ITEM_ID], "ref": REPEAT_REF},
+        {"id": ITEM_ID, "ref": [REPEAT_REF]},
+        {"id": ITEM_ID, "ref": REPEAT_REF}]})
+    p, calls = stop(cfg, sid, root, answer=answer)
+    check("list: one model call", len(calls) == 1, p.desc())
+    check("list: the valid hit still marks the line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+    reason = block_reason(p) or ""
+    check("list: the block names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason,
+          p.desc())
+    check("list: no repeats-not-checked note", "repeats not checked" not in str(guard_json(p) or {}),
+          p.desc())
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -1908,6 +2552,23 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
+    case_repeat_roadmap_step_marks_the_item_and_blocks,
+    case_repeat_stop_hook_active_marks_and_tells_the_owner,
+    case_repeat_judged_items_are_not_judged_again,
+    case_repeat_removed_mark_is_not_flagged_again,
+    case_repeat_upgrade_stop_judges_nothing_already_there,
+    case_repeat_model_error_fails_open_and_is_not_retried,
+    case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once,
+    case_repeat_backlog_debt_text_is_in_the_prompt,
+    case_repeat_cost_one_call_one_grep_and_two_files,
+    case_repeat_cap_keeps_each_source_within_its_share,
+    case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
+    case_repeat_second_judging_adds_no_second_mark,
+    case_repeat_unplaced_mark_is_reported_as_not_marked,
+    case_repeat_word_repeats_in_an_item_still_gets_the_mark,
+    case_repeat_cap_keeps_the_newest_notes_lines,
+    case_repeat_cap_keeps_the_open_roadmap_steps,
+    case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
 )
 
 
