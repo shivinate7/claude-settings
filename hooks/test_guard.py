@@ -19491,7 +19491,7 @@ cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A &&
 # build only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only when its type is
 # Plan, Explore or claude-code-guide. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
 # merge`, or the merge tool's --confirm) is refused before any read. create_session and start_session stay allowed.
-# The rows name no model: the test run's env sets the subagent default, so the floor, cap and role-model rules stay quiet.
+# The rows name no model: the test run's env sets the agent default, so the floor, cap and role-model rules stay quiet.
 # A refusal must not echo the brief, so every refused row carries a sentinel brief in `lacks`.
 CS_SPAWN_PROMPT = "Zebra quartz brief"
 CS_SPAWN_INPUT = {"subagent_type": "builder", "prompt": CS_SPAWN_PROMPT}
