@@ -14073,13 +14073,13 @@ add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-fl
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# The floor's remedy names Sonnet only. Opus is refused above a builder's row (owner item 127 pick a,
-# Nov 1 17:25 CST), so a remedy that names it sends the owner into the Opus refusal.
+# The floor's remedy names Sonnet only. Opus is refused above a builder's row, so a remedy that names it
+# would send the owner into the Opus refusal (decision agent-model-cap).
 add("floor: Agent builder with model haiku names sonnet, and not opus", "deny", "agent-model-floor",
     carries=("model sonnet",), lacks=("opus", "Opus"),
     tool="Agent", prompt="do it", model="haiku", subagent_type="builder")
-# An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker (owner ruling,
-# item 137 pick a, Nov 1 18:38 CST). Without it the Opus ceiling refuses it, and an owner override lifts it.
+# An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker. Without it the
+# Opus ceiling refuses it, and an owner override lifts it (decision agent-model-cap).
 add("floor: Agent Explore with model opus and no Audit: marker is denied (item 137)", "deny",
     "agent-model-cap", tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
 add("floor: Agent Explore with model opus and Audit: on line one is allowed (item 137)", "allow",
@@ -14248,15 +14248,14 @@ for _name, _verdict, _script in (
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
 # A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
-# Agent spawn (owner ruling, item 127 pick a, Nov 1 17:25 CST, rule agent-model-cap).
+# Agent spawn (decision agent-model-cap).
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
 
-# ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
-# Task spawn that sets model opus is refused under `agent-model-cap` (owner ruling, item 127 pick a, Nov 1 17:25
-# CST), unless a standing grant covers it: Plan, the designer, the design reviewer, a builder's third-round marker
-# line, and an Explore whose brief carries the Audit: marker (item 137 pick a, Nov 1 18:38 CST). An owner override
+# ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
+# refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
+# builder's third-round marker line, and an Explore whose brief carries the Audit: marker. An owner override
 # lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
 # deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
@@ -20044,8 +20043,8 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
 
 
 def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
-    """An Opus spawn above its row is refused under agent-model-cap, not this rule (owner ruling, item 127 pick a,
-    Nov 1 17:25 CST). An owner override lifts it, so the case is not never-lifted."""
+    """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts it,
+    so the case is not never-lifted."""
     add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
         **role_input(role, model, prompt))
 
@@ -20208,7 +20207,7 @@ workflow_allow("role-model: a commented-out Workflow builder on opus is not a sp
 
 # ---- H2: a brief the scan cannot read grants nothing. A variable brief has no literal for the scan, and a spread
 # before the options' literal keys hides them, so the Opus ceiling judges the call with no marker and refuses it
-# (decision agent-model-cap, owner ruling item 127 pick a). The markers below sit in the variable on purpose: the
+# (decision agent-model-cap). The markers below sit in the variable on purpose: the
 # scan does not read them, so they are no grant. Failure class: a false allow (an above-row Opus spawn in a script
 # passes because its brief or its options are not literal).
 workflow_refuse("role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied",
