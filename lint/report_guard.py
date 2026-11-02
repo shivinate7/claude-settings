@@ -35,8 +35,7 @@ hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: o
 On landed turns it also refuses a reply sentence that says a decision was rewritten (rewritten, rewrote,
 rewrites, rewrite of) for a ruling when that decision's record was last committed before the ruling, on
 every local branch, every remote branch and HEAD (`rewrite-cite-predates-ruling`, named incident F119:
-sessions said decision ci-job-caps was rewritten for the owner's 2026-11-01 18:44 CST ruling while main
-showed it last touched on Oct 28). A cited id is a word next to the rewrite word that names a file in the
+a report said a decision was rewritten for a ruling that its record's last commit predates). A cited id is a word next to the rewrite word that names a file in the
 decisions folder; no "decision" word is needed, and an id after under, by, per, following or see is not
 checked. A queued sentence (pending, queued), or a rewrite word just after a negation or a modal (not,
 no, never, will, should, must, can, may, could, needs and the like), claims no rewrite. The ruling time is
@@ -611,8 +610,8 @@ def _rewritten_ids(sentence):
 
 def _ruling_stamp(sentence):
     """(day, clock, zone) of the stamp next to the word "ruling" in `sentence`, else None. The stamp sits right
-    before the word ("the 2026-11-01 18:44 CST ruling"), or follows it after "at" or "of" ("ruling of
-    2026-11-01 18:44 CST"). Any other stamp, such as a merge time, is not the ruling time. `day` is None for a
+    before the word ("the YYYY-MM-DD HH:MM CST ruling"), or follows it after "at" or "of" ("ruling of
+    YYYY-MM-DD HH:MM CST"). Any other stamp, such as a merge time, is not the ruling time. `day` is None for a
     clock-only stamp."""
     stamps = [(m.start(), m.end(), m.groups()) for m in STAMP_FULL_RE.finditer(sentence)]
     for m in STAMP_CLOCK_RE.finditer(sentence):
