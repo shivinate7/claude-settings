@@ -28,6 +28,8 @@ unless the same main-session turn opened the question box (AskUserQuestion), or 
 waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
 waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
+`past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 """
@@ -38,7 +40,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
+from _transcript import (  # noqa: E402
+    is_last_human, last_reply, read_transcript, records_after_last_human, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -583,6 +586,201 @@ def write_marker(hook, idx):
         pass
 
 
+# A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
+# a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
+# the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
+# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+RELAY_RULE_REASON = (
+    "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
+    "that names that ruling and says why the owner is asked again.")
+UNVETTED_REASON = (
+    "Unvetted guard: the past-ruling check could not run (%s), so this question would reach the owner unchecked. "
+    "Add the line `Unvetted: <why it could not be checked>` to the question and send it again.")
+KEYS_REASON = (
+    "Question-keys guard (rule question-keys): two questions to the owner use the option key(s) %s, so his answer "
+    "could mean either. Give each question its own keys, such as 1a/1b for the first and 2a/2b for the second, and "
+    "send the questions again.")
+ASK_TEXT_MAX = 6000
+# A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
+# code span is no question.
+SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
+# A code span: a run of backticks, its text, and a closing run of the same length (CommonMark).
+CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)
+LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
+
+
+def prose_questions(text):
+    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
+    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
+    inside a list an indented line is list text, never code."""
+    found, fenced, code_ok, in_list = [], False, True, False
+    for line in text.splitlines():
+        inner = QUOTE_PREFIX.sub("", line, count=1)
+        body = inner.strip()
+        if body.startswith("```"):
+            fenced, code_ok = not fenced, True
+            continue
+        if fenced:
+            continue
+        if not body:
+            code_ok = True
+            continue
+        indented = bool(INDENTED_CODE.match(inner))
+        if code_ok and indented and not in_list:
+            continue  # code_ok stays True: the next indented line is code too
+        code_ok = False
+        if LIST_ITEM.match(inner):
+            in_list = True
+        elif not indented:
+            in_list = False
+        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
+            found.append(body)
+    return found
+
+
+def has_input_needed(text):
+    """True when the reply's Input Needed label holds an item (hooks/reply_judge.py, the one reader)."""
+    if "input needed" not in text.casefold():
+        return False
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from reply_judge import has_input_needed as home
+        return home(text)
+    except Exception:
+        return True  # an unreadable reader means the item is judged, never skipped
+
+
+def asked_text(text):
+    """The text that asks the owner something, capped from the front so the end of a report stays: the whole text
+    when Input Needed holds an item, else its prose question lines with its `Unvetted:` lines, else ''. The
+    Unvetted lines stay so the Unvetted remedy can be met in a prose question."""
+    if has_input_needed(text):
+        return text[-ASK_TEXT_MAX:]
+    questions = prose_questions(text)
+    if not questions:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form  # the one home of the Unvetted line
+    # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
+    questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
+    unvetted = [line.strip() for line in text.splitlines() if question_form.UNVETTED_LINE.match(line)]
+    return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
+
+
+def cannot_run(asked, why):
+    """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
+    `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
+
+
+def past_ruling_problem(asked, cwd):
+    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
+    print(question_form.unknown_line(unknown), file=sys.stderr)
+    unreadable = question_form.unreadable_sources(unknown)
+    if unreadable:
+        return cannot_run(asked, "; ".join(unreadable))
+    import call_judge  # the one home of item 8, its model and its time limit
+    import decision_watch
+    prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
+              + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
+              "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
+              "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
+              + question_form.candidates_block(candidates, unknown))
+    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
+                                                 timeout=call_judge.PAST_RULING_TIMEOUT,
+                                                 shape=call_judge.OK_SHAPE, effort=None)
+    if error:
+        return cannot_run(asked, " ".join(str(error).split()))
+    if verdict.get("ok") is not False:
+        return ""
+    reason = verdict.get("reason")
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
+    if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
+        return cannot_run(asked, "the review cited a record that was not in the list")
+    return RELAY_RULE_REASON % reason
+
+
+def since_last_message(after):
+    """The records after the last user record that is not a tool result: an owner message or a peer's message. A
+    past-ruling check reads only the replies to that message, so an older question is not judged again."""
+    start = 0
+    for i, rec in enumerate(after):
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "user" or rec.get("isSidechain"):
+            continue
+        if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            continue
+        start = i + 1
+    return after[start:]
+
+
+def earlier_replies(after, text):
+    """The assistant text replies since the last human message, without the reply being judged."""
+    texts = []
+    for rec in after:
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "assistant" or rec.get("isSidechain") or not isinstance(content, list):
+            continue
+        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        if parts:
+            texts.append("\n".join(parts))
+    if texts and texts[-1].strip() == text.strip():
+        texts.pop()
+    return texts
+
+
+def question_keys_problem(after, text):
+    """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
+    if "input needed" not in text.casefold():
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    clash = question_form.key_overlap(text, earlier_replies(after, text))
+    return KEYS_REASON % clash if clash else ""
+
+
+def relay_reasons(after, text, cwd):
+    """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
+    human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
+    is a check that could not run, so it refuses as Unvetted."""
+    reasons = []
+    try:
+        reasons.append(question_keys_problem(after, text))
+    except Exception as exc:
+        print("question-keys check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    try:
+        asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
+        if asked:
+            try:
+                reasons.append(past_ruling_problem(asked, cwd))
+            except Exception as exc:
+                print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+                reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
+    except Exception as exc:
+        print("past-ruling check could not start: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    return [r for r in reasons if r]
+
+
+def rewrite_relay(hook):
+    """The relay refusals for the rewrite that follows a block: it is checked again, so a rewrite that keeps a ruled
+    question is refused again. At most one model call per Stop."""
+    try:
+        path = hook.get("transcript_path")
+        records = read_transcript(path) if path and os.path.exists(path) else []
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+    except Exception as exc:
+        print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return []
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -594,6 +792,7 @@ def main():
         return
     if hook.get("stop_hook_active"):
         reasons = rewrite_problems(hook)
+        reasons += rewrite_relay(hook)
         if reasons:
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
         return
@@ -633,6 +832,7 @@ def main():
 
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
+    relay = relay_reasons(after, text, hook.get("cwd"))
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
@@ -646,6 +846,7 @@ def main():
             pick.append(departs_problem(text))
         except Exception:
             pass
+        pick += relay
         try:
             pick = [r for r in pick if r]
             if pick:
@@ -679,6 +880,7 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
+    reasons += relay
     cite = bare_cite(text)
     if cite:
         reasons.append(

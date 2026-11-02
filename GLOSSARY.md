@@ -69,3 +69,4 @@ one name for each thing, and a list of names to avoid.
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
 | fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |
+| Unvetted | A question that reaches the owner with no past-ruling check, because the check could not run. Its text carries the line `Unvetted: <reason>`, so he reads it as unchecked. | `docs/decisions/question-form.md` | — |

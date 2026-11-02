@@ -25,6 +25,7 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -39,6 +40,15 @@ def setUpModule():
     _ISOLATION["dir"] = tempfile.TemporaryDirectory()
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
+    stub = tempfile.TemporaryDirectory()
+    _ISOLATION["stub"] = stub
+    with open(os.path.join(stub.name, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(tcj.STUB_SITE)
+    _ISOLATION["env"] = {k: os.environ.get(k) for k in MODEL_ENV}
+    os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (stub.name, os.environ.get("PYTHONPATH")) if p)
+    os.environ.update(CJ_LOADED_DIR=stub.name, CJ_RECORD=os.path.join(stub.name, "calls.jsonl"),
+                      CJ_ANSWER=tcj.ALLOW)
+    os.environ.pop("CJ_MODEL_FAIL", None)
 
 
 def tearDownModule():
@@ -47,6 +57,12 @@ def tearDownModule():
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
     else:
         os.environ["CLAUDE_CONFIG_DIR"] = prev
+    for key, value in _ISOLATION.pop("env").items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    _ISOLATION.pop("stub").cleanup()
     _ISOLATION.pop("dir").cleanup()
 
 
@@ -2537,6 +2553,228 @@ class GuardLogAppendRaceTests(unittest.TestCase):
                                 "record() did not wait out a contended lock: %.2f s" % seconds)
         self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
+
+
+# ------------------------------------------------------------------ relayed questions and option keys
+#
+# A Stop whose reply holds Input Needed, or a prose line ending in `?` outside code fences, gets one past-ruling model
+# call (spec past-rulings, relayed questions). The model is the stub in hooks/test_call_judge.py, set up in setUpModule:
+# CJ_ANSWER is its answer, CJ_MODEL_FAIL makes it fail, and every call is recorded. A model error refuses once with the
+# Unvetted: remedy; an absent source allows with the stderr notice; question-keys refuses two questions on one key.
+MODEL_ENV = ("PYTHONPATH", "CJ_LOADED_DIR", "CJ_RECORD", "CJ_ANSWER", "CJ_MODEL_FAIL")
+RELAY = "> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+PROSE_Q = "Should the GitHub apps keep their access to claude-settings?"
+DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
+FENCED_Q = "```\nkeep the apps?\n```\n> **Done** OTHER read the audit\n> **Next** wait"
+UNVETTED = "Unvetted: the model review could not run, so the owner reads this question unchecked."
+REFUSE_APPS = json.dumps({"ok": False, "reason": "past-ruling: %s, 2026-10-28, already decides this." % tcj.APPS_SLUG})
+KEYS_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
+KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
+                 "> 2a) about 2x\n> 2b) under 80%")
+KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
+KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+
+
+C153_MARK = "c153-5e7a"
+C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settings as is, because calling into a repo "
+                 "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
+
+
+class PastRulingRelay(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.record = os.path.join(_ISOLATION["stub"].name, "calls.jsonl")
+        self.reset_calls()
+        self.decided = tcj.make_repo("relay-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        self.bare = tcj.make_repo("relay-bare")
+        self.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
+
+    def reset_calls(self):
+        for name in ("calls.jsonl", "git.log"):
+            path = os.path.join(_ISOLATION["stub"].name, name)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def git_starts(self):
+        # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
+        path = os.path.join(_ISOLATION["stub"].name, "git.log")
+        if not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            return len(f.read().split())
+
+    def model_calls(self):
+        if not os.path.exists(self.record):
+            return []
+        with open(self.record, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None):
+        if records is None:
+            records = [human("decide"), assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
+        if model_fail:
+            overrides["CJ_MODEL_FAIL"] = "1"
+        with mock.patch.dict(os.environ, overrides):
+            run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        return out, run.stderr
+
+    @staticmethod
+    def reason(out):
+        return out.get("reason", "") if out.get("decision") == "block" else ""
+
+    def test_relayed_ruling_refuses_with_the_rule_and_the_ruling(self):
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_APPS)
+        calls = self.model_calls()
+        self.assertTrue("past-ruling" in self.reason(out) and tcj.APPS_SLUG in self.reason(out), out)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_absent_sources_allow_with_the_unknown_notice(self):
+        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(out, {}, out)
+        self.assertIn("past-ruling search unknown:", err)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_reply_with_neither_input_needed_nor_a_question_makes_no_call(self):
+        out, _ = self.stop(self.ci, DONE_ONLY)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+        self.assertNotIn("past-ruling", self.reason(out))
+
+    def test_prose_question_triggers_the_check(self):
+        self.stop(self.decided, PROSE_Q, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_question_inside_a_code_fence_does_not_trigger(self):
+        self.stop(self.decided, FENCED_Q)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
+        out, _ = self.stop(self.decided, RELAY, model_fail=True)
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True)
+        self.assertEqual(out, {}, out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_question_keys_refuse_two_questions_with_the_same_keys(self):
+        out, _ = self.stop(self.decided, KEYS_SAME, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_distinct_keys_do_not_trigger_question_keys(self):
+        out, _ = self.stop(self.decided, KEYS_DISTINCT, answer=tcj.ALLOW)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
+    def test_question_keys_see_an_earlier_reply_since_the_last_human(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_unshown_id_cite_takes_the_unvetted_path(self):
+        # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
+        bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
+        out, _ = self.stop(self.decided, RELAY, answer=bogus)
+        self.assertIn("Unvetted:", self.reason(out), out)
+
+    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
+        out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_relay_exception_refuses_unvetted_with_a_stderr_line(self):
+        # relay_reasons catches an exception and fails open. A hook cwd that is not a path raises inside the relay
+        # check, and that must refuse with the Unvetted remedy and a stderr line (owner rulings, Nov 1 19:30 CST).
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": 12345}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("past-ruling", run.stderr)
+
+    def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True, "cwd": self.decided}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": REFUSE_APPS}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_earlier_blockquote_question_does_not_hide_the_input_needed_item(self):
+        # The c153 replay: an earlier blockquote line ends in "?", then the real Input Needed item asks the ruled question.
+        repo = tcj.make_repo("relay-c153", steps={"c153": C153_SENTENCE})
+        reply = "> Did the last audit finish?\n> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+        self.stop(repo, reply, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(C153_MARK, calls[0]["prompt"])
+
+    def test_a_question_mark_inside_a_prose_line_triggers_the_check(self):
+        self.stop(self.decided, "Ship the fix? Say go and I merge.", answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_question_in_an_earlier_assistant_text_block_triggers_the_check(self):
+        records = [human("decide"), assistant_text("Ship the fix?"), assistant_text(DONE_ONLY)]
+        self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_unvetted_line_beside_a_prose_question_passes_when_the_model_fails(self):
+        # Review round 2: a prose question with no Input Needed item. The Unvetted line beside the question passes it,
+        # whether it sits on its own line, in a blockquote, or on the question line.
+        beside = ("Should the GitHub apps keep their access to claude-settings?\n" + UNVETTED,
+                  "> Should the GitHub apps keep their access to claude-settings?\n> " + UNVETTED,
+                  "Should the GitHub apps keep their access to claude-settings? " + UNVETTED)
+        for reply in beside:
+            self.reset_calls()
+            out, _ = self.stop(self.decided, reply, model_fail=True)
+            self.assertEqual(out, {}, reply)
+
+    def test_a_second_stop_after_a_peer_message_makes_no_call_for_an_old_question(self):
+        # The question was asked on the first Stop. A plain reply after a peer message must not ask it again.
+        first = [human("decide"), assistant_text(PROSE_Q)]
+        self.stop(self.ci, records=first, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        second = first + [peer_msg("status: the lane ended"), assistant_text(DONE_ONLY)]
+        self.stop(self.ci, records=second, answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+
+    def test_question_keys_keep_their_window_across_a_peer_message(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), peer_msg("status: the lane ended"),
+                   assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_a_question_mark_only_inside_a_code_span_makes_no_call(self):
+        self.stop(self.decided, "Use `keep the apps?` as the probe.", answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
+        records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
 
 
 if __name__ == "__main__":
