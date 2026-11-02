@@ -17,7 +17,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 
 | Job | Runner | n | Median | Slowest | Cap before | Cap after | Slowest as % of cap after | Cap ends, no red step | Target met |
 |---|---|---|---|---|---|---|---|---|---|
-| checks | ubuntu | 30 | 22.1 | 30.4 | 36 | 36 | 55 (19.8 projected) | 0 | yes after the split |
+| checks | ubuntu | 16 | 28.9 | 35.4 | 36 | 52 | 68 | 0 | yes |
 | checks-guard (new) | ubuntu | 30 | 9.8 | 10.6 | none | 22 | 50 (10.9 projected) | 0 | yes |
 | checks-windows-rest | windows | 30 | 17.0 | 43.0 | 38 | 28 | 48 (13.3 projected) | 1, against the cap in force (38) | yes after the split |
 | checks-windows-sweep (new) | windows | 30 | 7.3 | 19.1 | none | 40 | 49 (19.6 projected) | 0 | yes |
@@ -33,12 +33,12 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 | checks-shoot | ubuntu | 30 | 0.8 | 1.0 | 10 | 10 | 10 | 0 | yes |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 0 | yes |
 
-- Every after-figure for a new or re-capped job (checks, checks-guard, checks-windows-rest, checks-windows-sweep) is projected. The projection subtracts the measured step times of the moved suites from the measured job times. Cap ends count against the cap in force before this change.
+- Every after-figure for a new or re-capped job (checks-guard, checks-windows-rest, checks-windows-sweep) is projected. The projection subtracts the measured step times of the moved suites from the measured job times. Cap ends count against the cap in force before this change.
 - One full run on the branch (workflow dispatch, run 40559535659, 2026-10-27) measured each job under its new cap: checks 16.9 of 36, checks-guard 7.4 of 22, checks-windows-rest 6.2 of 28, checks-windows-sweep 12.4 of 40, shell-macos 7.6 of 18. The highest was checks-windows-guard-2 at 13.0 of 20 (65%). One run is n=1, so the next 30 runs on main replace the projections.
 - `checks-windows-rest`: run 40542065223 (push to main) ended at the 38 min cap that was in force. The job started 16:33:37 UTC, so the cap fired at 17:11:37. GitHub's cancel grace then ran 5 more minutes, to 17:16:37, which is the 43.0 min figure. The step "Record stamp engine fixture suite" (normal slowest 1.5 min, n 28) started at 16:53:15 and never finished. That step now has its own 5 min cap, so a hang reads red at the step.
 - `checks-windows-sweep`: the fixture suite takes 8.2 min slowest and the mutation test 10.9 min slowest (push only).
-- `checks` is not re-capped. Its projected slowest is 19.8 of 36 (55%).
-- `checks` slowest is still above half its cap, so debt `checks-job-near-timeout` stays open.
+- `checks`: the 30-run window above and the projected 19.8 min no longer apply to this row, because the guard suite did not leave the critical path as projected. The row uses 20 runs of `checks.yml` from run 41361394638 (2026-11-01 23:17 UTC) to run 41413936732 (2026-11-02 08:33 UTC): 16 green runs, range 25.2 to 35.4 min, median 28.9, no cap ends. The other 4 runs are left out: 2 were cancelled by a newer run (13.0 and 11.5 min) and 2 failed (11.8 and 23.7 min). The slowest, run 41407916830, is 98% of the old 36 min cap. The new 52 min cap is a stopgap under the owner's 2026-11-01 18:44 CST ruling above (35.4 is 68% of it, under the merge tool's 70% warning). Step times in min, mean of the oldest 6 green runs to the newest 6, with the maximum: merge tool git-half fixture suite 6.20 to 6.43 (7.22); install.sh checkout-detection suite 3.67 to 5.83 (6.98), the only step that grew by more than 1 min, so it has its own 10 min cap (6.98 is 70% of it); stall watch 2.89 (2.92). In the newest 6 runs, hooks suites are 36.7% of job time, merge 24.4% and lint 16.6%, so no family dominates. The job is not split: checks-macos (median 30.3, maximum 37.1) is the critical path, so a split of `checks` would not shorten the wait. `merge.deadlineMinutes` in `.github/stamp.json` rises from 55 to 60, the largest cap plus 5.
+- `checks` slowest is 35.4 of 52 (68%), still above half its cap, so debt `checks-job-near-timeout` stays open.
 
 ## How to measure again
 
