@@ -7,7 +7,7 @@
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -272,7 +272,7 @@ def say(*lines):
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
-LOCK_MAX_HOLD = 6 * 3600  # seconds: the hard bound on one run's hold, counted from the take. No rate wait extends the lock past it (a rate wait is the exception to the 600 s cap; standing-merge-grant)
+LOCK_MAX_HOLD = 6 * 3600  # seconds: the bound on how far a rate wait extends the lock, counted from the take. It does not cap the take's own expiry (decision standing-merge-grant)
 
 def lock_ref(b):
     """The one name of the lock ref. Mac and cloud runs must share it, or each would hold a lock the other cannot see."""
