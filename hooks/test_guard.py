@@ -13765,7 +13765,8 @@ FAMILY = "option-letter-keys"
 # misread. An option at index i takes the lowercase letter of the page's letter for i. The writer also refuses
 # a key that is missing or not a string, a key that repeats, and the key none, which the page reads as "none of
 # these". A task, a note and a closed item are not judged. An open item's text names no option by a
-# letter-and-digit key, as in "option e2".
+# letter-and-digit key, as in "option e2". An option's label that opens with a letter tag for another letter is
+# refused too, and so is a designs label that does the same, when an option names that design's slug.
 
 OL_DOC = "letter-keys"
 OL_CTX = "The stamp check runs in the lint job today. The test job could run it too."
@@ -13826,6 +13827,54 @@ ol("an option whose key is null is denied", "deny", ol_item(options=ol_opt(0, ke
 ol("a multi item keyed a, b and c with a list pick is allowed", "allow", ol_item(multi=True, pick=["a", "c"]))
 ol("a multi item keyed e2, a and c with a list pick is denied", "deny",
    ol_item(multi=True, options=ol_keyed("e2", "a", "c"), pick=["a", "c"]))
+
+# A label that opens with a letter tag names its option by that letter. The page shows an option by its key's
+# letter, so a tag for another letter gives the owner two letter sets, and an answer "a" reads two ways. A tag is
+# "(X) ", "X: ", "X. ", "X) ", "X — " or "X - " at label start, "Option X:" or "Option X —" at label start,
+# or "Option X" at label end. A letter that only starts a word is no tag: "X-ray", "B2B", "A rail", "A.I.", "e.g.".
+INCIDENT_OPTIONS = [
+    dict(OL_BASE[0], key="a", label="B: a bottom strip"),
+    dict(OL_BASE[1], key="b", label="D: drag sideways"),
+    dict(OL_BASE[2], key="c", label="A: a rail"),
+    dict(OL_BASE[2], key="d", label="C: a grab line"),
+]
+UNTAGGED = ("a bottom strip", "drag sideways", "a rail", "a grab line")
+ol("four options keyed a to d labelled B, D, A and C are denied", "deny", ol_item(options=INCIDENT_OPTIONS))
+ol("four options keyed a to d with no letter tags are allowed", "allow",
+   ol_item(options=[dict(o, label=t) for o, t in zip(INCIDENT_OPTIONS, UNTAGGED)]))
+ol("an option keyed a labelled (B) a strip is denied", "deny", ol_item(options=ol_opt(0, label="(B) a strip")))
+ol("an option keyed a labelled Option B: a strip is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B: a strip")))
+ol("an option keyed a labelled b. a strip is denied", "deny", ol_item(options=ol_opt(0, label="b. a strip")))
+ol("an option keyed a labelled B - a strip is denied", "deny", ol_item(options=ol_opt(0, label="B - a strip")))
+ol("an option keyed a labelled B) a strip is denied", "deny", ol_item(options=ol_opt(0, label="B) a strip")))
+ol("an option keyed a labelled B — a strip is denied", "deny", ol_item(options=ol_opt(0, label="B — a strip")))
+ol("an option keyed a labelled Option B — a strip is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B — a strip")))
+ol("an option keyed a labelled a strip, Option B is denied", "deny", ol_item(options=ol_opt(0, label="a strip, Option B")))
+ol("an option keyed a labelled b: a strip is denied", "deny", ol_item(options=ol_opt(0, label="b: a strip")))
+ol("an option keyed b labelled A rail on the left is allowed", "allow", ol_item(options=ol_opt(1, label="A rail on the left")))
+ol("an option keyed c labelled I think the lint job is allowed", "allow",
+   ol_item(options=ol_opt(2, label="I think the lint job")))
+ol("an option keyed b labelled A/B test the job is allowed", "allow", ol_item(options=ol_opt(1, label="A/B test the job")))
+ol("an option keyed b labelled X-ray first is allowed", "allow", ol_item(options=ol_opt(1, label="X-ray first")))
+ol("an option keyed a labelled B2B sales is allowed", "allow", ol_item(options=ol_opt(0, label="B2B sales")))
+ol("an option keyed a labelled Option 2: keep it is allowed", "allow", ol_item(options=ol_opt(0, label="Option 2: keep it")))
+ol("an option keyed a labelled a: rail is allowed", "allow", ol_item(options=ol_opt(0, label="a: rail")))
+ol("an option keyed a labelled (A) rail is allowed", "allow", ol_item(options=ol_opt(0, label="(A) rail")))
+ol("an option keyed b labelled A.I. review is allowed", "allow", ol_item(options=ol_opt(1, label="A.I. review")))
+ol("an option keyed a labelled e.g. the lint job is allowed", "allow", ol_item(options=ol_opt(0, label="e.g. the lint job")))
+ol("an option keyed a labelled Option A — a rail is allowed", "allow",
+   ol_item(options=ol_opt(0, label="Option A — a rail")))
+ol("an option keyed a labelled a strip, Option A is allowed", "allow", ol_item(options=ol_opt(0, label="a strip, Option A")))
+# A designs entry is judged only when an option names its slug as `design`. The page reads a design's label as
+# its picture's caption, so the same letter tag rule applies to it.
+ol("an option keyed a with design rail, and that design labelled Option C: a rail, is denied", "deny",
+   ol_item(options=ol_opt(0, design="rail"), designs=[{"slug": "rail", "label": "Option C: a rail"}]))
+ol("an option keyed a with design rail, and that design labelled Option A: a rail, is allowed", "allow",
+   ol_item(options=ol_opt(0, design="rail"), designs=[{"slug": "rail", "label": "Option A: a rail"}]))
+ol("a design that no option names, labelled Option C: a rail, is not judged", "allow",
+   ol_item(designs=[{"slug": "rail", "label": "Option C: a rail"}]))
 
 # Item text: an option named by a letter-and-digit key, after option, options, pick or key.
 ol("a context that says option e2 is safer, keys a, b and c, is denied", "deny", ol_item(context="option e2 is safer"))
