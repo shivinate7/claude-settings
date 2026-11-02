@@ -4,17 +4,18 @@
 
 A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops ACCIDENTAL test edits (`guard-guards-mistakes-only`). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in the diff (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect, which each had a bypass. `hooks/guard.py` reads one diff at three points:
+Judge the result, not the commands. The act is a test path in the diff (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect, which each had a bypass. `hooks/guard.py` checks a builder's test changes at four points:
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). It LOGS.
 - A builder's SubagentStop. It LOGS.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It DENIES. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
+- A builder's Bash or PowerShell call that writes a test path. It DENIES with the same reason. It reads a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). Both readings use the same predicate as the Edit path (`builder_test_path`). See the shell check below.
 
 Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line (`builder-diff` or `author-diff`) with the path, and the guard allows the act. An unreadable diff logs `role-diff-unread`. The reviewer reads the log and the diff. Reason: the base can be wrong, and a refusal on a wrong base is a false alarm (`verification-cry-wolf-guard-is-spent`). Restore the refusal when the base defect is fixed, with the undo route and the once-only stop.
 
 **Roles.** The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder`: logged when the diff holds a test path. The write tool refuses it.
+- `builder`: logged when the diff holds a test path. The write tool and the shell check refuse it.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config or a dev dependency list.
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). A diff that holds one is logged at commit, push or stop (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
@@ -33,6 +34,14 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line 
 - Rename or delete product files, and add a dependency or a script to a manifest.
 - Read tests, and keep test changes that the branch inherited or that main brought in a merge. Keeping them needs no edit. A merge conflict in a test file is not the builder's: resolving it chooses what the test checks, so a test-author resolves it. The refusal says so.
 - Use a name that only looks like a test, such as `src/contest.py`.
+
+## The shell check
+
+The shell check does not replace the act. The act stays the test path in the diff. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
+
+- Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
+- Landed: 2026-11-02.
+- Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
 
 Kind: process
 Home: hooks/guard.py
