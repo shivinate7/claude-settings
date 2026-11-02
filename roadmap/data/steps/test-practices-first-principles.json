@@ -1,0 +1,9 @@
+{
+ "title": "Shared test-making practice, from first principles and evidence",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.21031,
+ "why": "Owner, Nov 1 20:49 CST: \"yeah again i'm not too sure on how much best practices we absorb from good tests to better replicate good tests as i think we have few guidelines now asides for outcomes based thinking, but would like to see some more shared best practices on test making from first principles\".",
+ "note": "One shared home for test-making practice, derived from first principles and from evidence across the six repos: tests that went red on a real defect, mutation kills, red-first records, flake records, and the time-pinned tests being removed (step time-pinned-tests-go). Loaded by test-author and builder in every repo. Extend the existing homes (decision test-strategy-reset, agents/test-author.md), never a second. Each practice cites the test or incident that earned it. Lane started by the coordinator Nov 1 20:51 CST. Port: yes, every repo.",
+ "updatedAt": "2026-11-02T02:52:00Z"
+}
