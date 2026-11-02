@@ -1203,6 +1203,24 @@ class RefusalCiteRepoTests(unittest.TestCase):
         self.assertIn("outcomes-tests-are-statements", anchors)  # CLAUDE.md
         self.assertIn("style-cut-narration", anchors)  # output-styles/shiv-stylisms.md
 
+    # Ids whose rewrites take them off the exempt list.
+    LEAVE_EXEMPT = {"builder-test-edit", "detached-launch", "git-env-set", "lane-by-slug", "load-brake",
+                    "bare-merge", "cite-by-id", "ask-alone", "linked-node-modules", "owner-judge",
+                    "item-field-rendered", "page-stale", "agent-model-cap"}
+    # Ids that stay exempt, each with its home.
+    STAY_EXEMPT = {"gh-login-switch", "handoff-unread", "item-field-rendered", "merge-role-proof",
+                   "option-letter-keys", "page-stale", "question-departs", "rework-off-page", "trust-card-in-build"}
+    # Named in both lists. Both checks skip them until the owner rules which list holds them.
+    OPEN_OVERLAP = {"item-field-rendered", "page-stale"}
+
+    def test_the_rewritten_ids_leave_the_exempt_list_and_the_kept_ids_keep_a_home(self):
+        still = sorted((self.LEAVE_EXEMPT - self.OPEN_OVERLAP) & set(REFUSAL_UNCITED_EXEMPT))
+        self.assertEqual(still, [], "still exempt: " + ", ".join(still))
+        for rid in sorted(self.STAY_EXEMPT - self.OPEN_OVERLAP):
+            with self.subTest(rid=rid):
+                self.assertIn(rid, REFUSAL_UNCITED_EXEMPT)
+                self.assertTrue(HOME_RE.fullmatch(REFUSAL_UNCITED_EXEMPT[rid]))
+
 
 HOMES = ({"alpha"}, {"anchor-one"})
 SCOPE = {"guard"}
@@ -1216,6 +1234,57 @@ def status_of(src, rid, extra=None, homes=HOMES):
 
 def unattributed_of(src):
     return refusal_status({"guard": src}, HOMES, SCOPE)[1]
+
+
+def site_problems(module, src):
+    """The ratchet's problems for one module's source, with no exempt list and no emitted check."""
+    return refusal_problems({module: src}, HOMES, {}, {module})
+
+
+def uncited_site(problems, module):
+    """True when a problem names a site in `module` whose reason prints no cite."""
+    return any("%s.py:" % module in p and "no cite" in p for p in problems)
+
+
+CRASH_REASON = ("guard-crash: the guard is missing a part and cannot judge this call.\n"
+                "Remedy: reinstall, don't retry # or /* or // here.")
+
+
+def raw_deny_src(reason):
+    """A JSON deny printed straight to stdout: the shape of the guard-crash deny in hooks/guard.py."""
+    return ('def crash():\n'
+            '    print(json.dumps({"hookSpecificOutput": {\n'
+            '        "hookEventName": "PreToolUse", "permissionDecision": "deny",\n'
+            '        "permissionDecisionReason": """%s"""}}))\n'
+            '    sys.exit(0)\n' % reason)
+
+
+JUDGE_SHAPES = (("blind_brief", "    sys.exit(0)"), ("call_judge", "    return 0"),
+                ("prose_judge", "    return 0"), ("sendmessage_state", "    return 0"))
+
+
+def judge_src(prefix, exit_line, fallback=None):
+    """A judge hook's refuse(): a constant prefix, an optional fallback reason, then a JSON deny printed
+    with exit 0. The shape of hooks/blind_brief.py, call_judge.py, prose_judge.py and sendmessage_state.py."""
+    lines = ['PREFIX = "%s"' % prefix, "def refuse(payload, tool, reason):"]
+    if fallback:
+        lines.append('    reason = reason or "%s"' % fallback)
+    lines += ['    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",',
+              '                                             "permissionDecision": "deny",',
+              '                                             "permissionDecisionReason": PREFIX + reason}}))',
+              exit_line]
+    return "\n".join(lines) + "\n"
+
+
+def merge_src(raise_line):
+    """The stop classes of merge/merge.py, then one function that runs `raise_line`."""
+    return ('class Stop(Exception):\n    """A refusal."""\n'
+            'class NetStop(Stop):\n    """A network error."""\n'
+            'class Dropped(Stop):\n    """A dropped line."""\n'
+            'class Held(Stop):\n    pass\n'
+            'LOCK_CITE = "(decision alpha, one run holds the merge lock)"\n'
+            'def go(b):\n'
+            '    %s\n' % raise_line)
 
 
 class RefusalCiteFixtureTests(unittest.TestCase):
@@ -1373,6 +1442,46 @@ class RefusalCiteFixtureTests(unittest.TestCase):
                      'refuse(t, "deny", "two-args")', 'refuse(t, "deny", rule="no-reason", matched=m)'):
             with self.subTest(call=call):
                 self.assertEqual(unattributed_of("def go():\n    %s\n" % call), ["guard.py:2"])
+
+    def test_a_raw_deny_printed_outside_refuse_needs_a_cite(self):
+        problems = site_problems("guard", raw_deny_src(CRASH_REASON))
+        self.assertTrue(uncited_site(problems, "guard"), problems)
+        cited = raw_deny_src(CRASH_REASON + " See decision alpha.")
+        self.assertEqual(site_problems("guard", cited), [])
+
+    def test_a_judge_deny_reads_its_fallback_and_its_cite_prefix(self):
+        fallback = "the receiver must hear only what changes its work, don't # or /* or //."
+        for module, exit_line in JUDGE_SHAPES:
+            with self.subTest(module=module):
+                problems = site_problems(module, judge_src("rule anchor-one: ", exit_line, fallback))
+                self.assertTrue(uncited_site(problems, module), problems)
+                self.assertEqual(site_problems(module, judge_src("rule anchor-one: ", exit_line)), [])
+                cited = judge_src("rule anchor-one: ", exit_line, "see decision alpha; don't # or /*")
+                self.assertEqual(site_problems(module, cited), [])
+
+    def test_a_merge_stop_needs_a_cite_in_every_raise_form(self):
+        for cls in ("Stop", "NetStop", "Dropped", "Held"):
+            with self.subTest(cls=cls):
+                problems = site_problems("merge", merge_src('raise %s("the lock is not free")' % cls))
+                self.assertTrue(uncited_site(problems, "merge"), problems)
+                cited = merge_src('raise %s("the lock is not free " + LOCK_CITE)' % cls)
+                self.assertEqual(site_problems("merge", cited), [])
+
+    def test_an_fstring_holding_a_cite_constant_passes(self):
+        cited = 'CITE = "see decision alpha"\nrefuse(t, "deny", "fstr-id", f"held {CITE}", m)\n'
+        self.assertEqual(status_of(cited, "fstr-id"), ["cited"])
+        leading = 'CITE = "see decision alpha"\nrefuse(t, "deny", "fstr-lead", f"{CITE} held", m)\n'
+        self.assertEqual(status_of(leading, "fstr-lead"), ["cited"])
+        uncited = 'NOTE = "no cite"\nrefuse(t, "deny", "fstr-no", f"held {NOTE}", m)\n'
+        self.assertEqual(status_of(uncited, "fstr-no"), ["no cite"])
+
+    def test_the_parameter_names_follow_the_defined_signature(self):
+        core = "def refuse(tool, decision, reason, rule, matched):\n    pass\n"
+        src = 'from guard_core import refuse\nrefuse(t, "deny", "see decision alpha", "sig-id", m)\n'
+        self.assertEqual(status_of(src, "sig-id", extra={"guard_core": core}), ["cited"])
+        ask = ("def ask_command(reason, rule, matched, command):\n    pass\n"
+               'ask_command("see decision alpha", "sig-ask", m, "cmd")\n')
+        self.assertEqual(status_of(ask, "sig-ask"), ["cited"])
 
 
 class RefusalCiteRatchetTests(unittest.TestCase):
