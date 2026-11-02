@@ -32,6 +32,13 @@ A reply that holds Input Needed or a prose line ending in `?` also gets the past
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+
+On any turn, landed or not, each line of the last reply that holds the whole word "answered" (any case, outside fences and
+inline code spans) blocks unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`,
+`page:<n>`, an `fb-` id, a `session_` id, a double-quoted phrase or `HH:MM`. Exempt: unanswered, not (yet) answered, never
+answered, hasn't answered, and `[question] -> answered`. One block per turn lists the lines and joins any other reason
+(rule `answered-needs-source`). Risk kind: named incident F188 (claude-settings draft PR #1008, docs/plans/owner-feedback-audit.md),
+landed 2026-11-02. Cost: regex over the reply, no file, no process.
 """
 import json
 import os
@@ -316,6 +323,53 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# answered-needs-source: a reply line that says "answered" names where the answer came from. The source
+# patterns reuse DONE_REF_RE (`#<n>`, PR refs, commit hashes, /pull/ and /commit/ URLs) and CODE_SPAN. Fence lines
+# are found as in prose_questions. A quote pairs only inside one line. A repo path is a token with `/` that has a
+# file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
+ANSWERED_RE = re.compile(r"\banswered\b", re.I)
+ANSWERED_EXEMPT_RE = re.compile(
+    r"\b(?:not(?:\s+yet)?|never|hasn['\u2019]t)\s+answered\b|\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
+ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
+ANSWERED_FILE_RE = re.compile(
+    r"\b[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log|cfg|ini)\b")
+ANSWERED_SOURCE_RE = re.compile(
+    r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b|\"[^\"\n]+\"")
+ANSWERED_REASON = (
+    "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
+    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
+    "inbox id, the owner's quoted words, or the time), or say what is meant in other words. Lines: ")
+
+
+def _has_path(line):
+    for token in line.split():
+        if "/" in token and (re.search(r"\w\.\w", token) or ANSWERED_TOP_DIRS & set(re.split(r"[/\s]+", token))):
+            return True
+    return bool(ANSWERED_FILE_RE.search(line))
+
+
+def answered_problem(text):
+    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
+    if not ANSWERED_RE.search(text):
+        return ""
+    bad, fenced = [], False
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        if body.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        plain = ANSWERED_EXEMPT_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        if not ANSWERED_RE.search(plain):
+            continue
+        kept = CODE_SPAN.sub(lambda m: m.group(2), body)
+        if DONE_REF_RE.search(kept) or ANSWERED_SOURCE_RE.search(kept) or _has_path(kept):
+            continue
+        bad.append(body)
+    return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -833,6 +887,10 @@ def main():
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
     relay = relay_reasons(after, text, hook.get("cwd"))
+    try:
+        relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+    except Exception:
+        pass
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
@@ -880,7 +938,7 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
-    reasons += relay
+    reasons += [r for r in relay if r]
     cite = bare_cite(text)
     if cite:
         reasons.append(

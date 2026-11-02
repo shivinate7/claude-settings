@@ -31,5 +31,7 @@ Known limit: a drive name such as "the A: drive and the B: drive" reads as two l
 
 Cost: no new process, file or timer. One layout read per turn whose Input Needed offers a pick and that opened no box.
 
+**The answered verdict (rule `answered-needs-source`).** On any turn, landed or not, each line of the last reply that holds the whole word "answered" (any case, outside fences and inline code spans) blocks unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a `session_` id, a double-quoted phrase or `HH:MM`. A source inside an inline code span counts. A repo path is a token with `/` that has a file extension or a known top dir (docs/, hooks/, lint/, bin/, skills/, agents/, roadmap/), or a bare file name with a known extension, so "and/or" is no source. Exempt: unanswered, not answered, not yet answered, never answered, hasn't answered, and the inbox home word `[question] -> answered`. One block per turn lists the lines and joins any other reason. A rewrite turn (`stop_hook_active`) stays quiet. Risk kind: named incident F188 (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`), landed 2026-11-02. Cost: regex over the reply, no file, no process; `AnsweredNeedsSourceTests` in `lint/test_report_guard.py` proves it by watching every file the guard opens. Rulings on the open edge cases: owner, process-only, 2026-11-02.
+
 Kind: process
 Home: lint/report_guard.py
