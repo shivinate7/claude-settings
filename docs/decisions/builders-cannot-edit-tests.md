@@ -19,27 +19,27 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 `own_changes` in `hooks/guard.py` reads the HEAD reflog, and judges only what the builder made:
 
 - **Refused.** Each commit the builder made (`commit`, `commit (amend)`, `commit (merge)`) that HEAD still holds, against its first parent. A merge commit is measured against git's own merge of its parents (`git merge-tree`), so only what the builder resolved or added counts. A test path that both sides changed and the builder resolved is refused, whichever side it kept. Also the working tree and its untracked files against HEAD. While a merge is in progress, they are measured against git's own merge of HEAD and MERGE_HEAD.
-- **Logged only.** A replay the builder resolved or chose: a hand-resolved cherry-pick, a revert, a rebase squash, fixup or continue. The working tree while a replay is in progress (a cherry-pick, revert, squash or rebase). A path that a rebase replayed and that holds the upstream side again.
+- **Logged only.** A replay the builder resolved or chose: a hand-resolved cherry-pick, a revert, a rebase squash, fixup or continue. The working tree while a replay is in progress (a cherry-pick, revert, squash or rebase). A path that a rebase replayed and that holds the upstream side again. Debt `rebase-writeback-logged` (a builder's write of main's bytes over such a path) stays logged, not refused.
 - **Not read.** A plain cherry-pick, rebase pick or `am`, a clean merge, a reset, a checkout and a pull. Each brings other people's commits.
 
 **Known gap.** A squash merge or a `cherry-pick -n`, once committed, is a plain own commit: git removes its marker at the commit. Its test change is refused at push and stop.
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 46 of 49 `builder-refuse` cases pass on this tip. Three fail: the squash and the committed `cherry-pick -n` (the known gap), and the case that wants the deny to name base commits, which this rule no longer has.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 49 of 49 `builder-refuse` cases pass on this tip.
 
 ## Roles
 
 The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder`: refused at commit, push and stop when the diff holds a test path. The write tool refuses it too.
+- `builder`: refused at commit, push and stop when the diff holds a test path. The write tool refuses it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config or a dev dependency list (`author-diff`). Never refused at commit, push or stop.
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). At commit, push and stop, a diff that holds one is logged only (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
 - `designer`: at commit, push and stop, an offence is logged only (`designer-diff`).
 - Each write refusal names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`).
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).
-- A refusal is final: an agent never writes a refused path another way. The write tool refuses by path. At commit, push and stop, a builder's test change is judged on the whole diff, so a test file written by shell is refused there too. Other refused paths rest on prose only (owner), in `agents/builder.md` and `agents/test-author.md`.
+- A refusal is final: an agent never writes a refused path another way. The write tool refuses by path. At commit, push and stop, a builder's test change is judged on the builder's own change, so a test file written by shell is refused there too. Other refused paths rest on prose only (owner), in `agents/builder.md` and `agents/test-author.md`. A test-author's shell write of such a path is logged only (`author-diff`), in debt `refusal-route-around-guard` (no guard refuses a test-author that routes around a refusal).
 
 **Test paths and test config.** The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them.
 
