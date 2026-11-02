@@ -1097,6 +1097,17 @@ def case_past_ruling_debt_candidates():
           len(r.calls) == 1 and DEBT_SLUG in rest and DEBT_WHAT in rest, detail(r))
 
 
+def case_unshown_id_takes_the_unvetted_path():
+    # Index shape (spec, Nov 1 18:58 CST): a refusal whose reason cites a record id the index did not show is a model
+    # error, so it takes the Unvetted path and never stands as a plain refusal.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: this was already decided."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=bogus)
+    check("unshown id: a refusal citing an id not shown takes the Unvetted path, not a plain refusal",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason(),
+          detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1109,7 +1120,8 @@ def main():
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
                  case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
-                 case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates):
+                 case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
+                 case_unshown_id_takes_the_unvetted_path):
         try:
             case()
         except Exception as exc:
