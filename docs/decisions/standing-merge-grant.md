@@ -31,7 +31,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
   - After review round 3, a change that changes a guard or check gets the net-value test (`hold-unsafe-after-round-3`: the net-value hold after round 3). A held lane stays parked until the owner decides.
   - Batch lanes into one integration PR, the only PR that goes ready and runs CI
     (`git-integration-branch-merge`: how lanes join a batch).
-  - A pull request that GitHub reads as BLOCKED or BEHIND, when read just before the merge call, gets no merge call (merge:blocked-or-behind).
+  - A pull request that GitHub reads as BLOCKED or BEHIND, when read just before the merge call, gets no merge call (sweep row `blocked-or-behind`).
 - The merge tool retries a network error 3 times with a short pause (owner ruling 2026-10-13). A rate-limit wait follows a ladder of 60, 300 and 900 s (the orchestrator's call, 2026-10-16). The 3 retries stay (owner ruling 2026-10-16).
 - A rate wait is the exception to the 600 s lock cap. Before each rate wait the lock extends to now + wait + 300 s. If it cannot extend, the call stops as a network stop. `LOCK_MAX_HOLD`, 6 h from the take, bounds one run's hold (owner ruling 2026-10-17).
 - The lock-break path never waits or retries. A rate-limited delete of an expired lock is a network stop, because a late retry could delete another run's fresh lock (owner ruling 2026-10-17).

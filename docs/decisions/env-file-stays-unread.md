@@ -34,7 +34,7 @@ The printed refusal names no file. It names the shape of the access (`ENV_REDIRE
 `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`)
 and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Known false alarms: debt `env-file-rule-false-alarms`, a line in `docs/debts/notes.md`. The guard refuses
+Known false alarms: note `env-file-rule-false-alarms`, a line in `docs/debts/notes.md`. The guard refuses
 `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four
 are safe. None reads a file's contents.
 

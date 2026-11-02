@@ -31,17 +31,18 @@ lock for one base at once. Code: `confirm` in `merge/merge.py`.
   branch is named. It removes the lock whether its holder is live or not. It prints "removed", or "nothing
   to remove" when no lock is there.
 
-Stops, by name (the sweep's ids for them):
+Stops, by name. Each name is a row label of the refusal-vs-rule sweep, a plan record. The code
+carries no such label. The code raises the exception named in each item.
 
-- `Held` (merge:lock-held): a live lock whose holder is not dead, a live lock under the old name (`GitLock`
-  only), or a lost take race.
-- Lock unreadable (merge:lock-acquire-unreadable; `Stop`, or `NetStop` on a network error): the ref, the
-  lock commit or the base branch cannot be read, or the lock commit or the take cannot be made.
-- Extend failed (merge:lock-extend-failed; `NetStop`): the lock expired before the wait, the extension
-  would pass 6 h, or the push failed.
-- Rate wait unextendable (merge:rate-wait-unextendable; `NetStop`): a GitHub rate-limit wait needs the
-  lock extended first, and the extension fails. Code: `retry_net`.
-- Unlock failed (merge:unlock-failed; `NetStop` or `Stop`): the delete fails. On `GitLock` the
+- `Held` (sweep row `lock-held`): a live lock whose holder is not dead, a live lock under the old name
+  (`GitLock` only), or a lost take race.
+- Lock unreadable (sweep row `lock-acquire-unreadable`; `Stop`, or `NetStop` on a network error): the ref,
+  the lock commit or the base branch cannot be read, or the lock commit or the take cannot be made.
+- Extend failed (sweep row `lock-extend-failed`; `NetStop`): the lock expired before the wait, the
+  extension would pass 6 h, or the push failed.
+- Rate wait unextendable (sweep row `rate-wait-unextendable`; `NetStop`): a GitHub rate-limit wait needs
+  the lock extended first, and the extension fails. Code: `retry_net`.
+- Unlock failed (sweep row `unlock-failed`; `NetStop` or `Stop`): the delete fails. On `GitLock` the
   released-commit push fails too.
 
 Why: a claim, a check wait and a merge must not race another run on the same base. The claim runs under
