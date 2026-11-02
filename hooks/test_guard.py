@@ -16433,6 +16433,8 @@ def worktree_home_scratchpad_case():
         link_lane_b = os.path.join(pad, "to-lane-b")
         os.symlink(primary, link_primary)
         os.symlink(lane_b, link_lane_b)
+        brief = os.path.join(pad, "trial", "brief.md")   # a file in the scratchpad, in no checkout
+        write(brief, "brief\n")
         bash_echo = "cd %s && echo x > a.txt" % slash(wt_main)
 
         # 1. Incident 2, exact form. `git add` and `git commit` name no write target, so the exact
@@ -16485,6 +16487,28 @@ def worktree_home_scratchpad_case():
               sid=None, file_path=os.path.join(wt_main, "a.txt"), content="x")
         check("10b sessionless redirect into own scratchpad worktree", "deny", "Bash", primary,
               sid=None, command=bash_echo)
+
+        # a. Incident 2's shape, top-level. A leading variable names the own worktree, and the
+        # branch, mkdir, cp, add and commit run inside it, then the shell returns to the primary.
+        def incident_2(worktree):
+            return ('W=%s; cd "$W" && git branch --show-current && mkdir -p docs/plans/trial-briefs'
+                    ' && cp %s docs/plans/trial-briefs/q.md && git add docs/plans/trial-briefs/q.md'
+                    ' && git commit -m "x" 2>&1 | tail -2; git rev-parse --short HEAD; cd %s'
+                    % (slash(worktree), slash(brief), slash(primary)))
+
+        check("a incident 2's shape: variable names own scratchpad worktree, cp and commit in it",
+              "allow", "Bash", primary, command=incident_2(wt_main))
+        # b. The same shape with the variable naming another session's worktree: refused.
+        check("b the same shape, variable names another session's worktree", "deny", "Bash",
+              primary, command=incident_2(wt_other))
+        # c. Incident 4: an absolute cp into the own worktree, with no cd, then the same cp
+        # followed by git -C add and commit in that worktree.
+        cp_into_main = "cp %s %s" % (slash(brief), slash(os.path.join(wt_main, "docs", "q.md")))
+        check("c1 incident 4: absolute cp into own scratchpad worktree, no cd", "allow", "Bash",
+              primary, command=cp_into_main)
+        check("c2 incident 4: the cp, then git -C add and commit in that worktree", "allow", "Bash",
+              primary, command=cp_into_main + " && git -C %s add docs/q.md && git -C %s commit -m x"
+              % (slash(wt_main), slash(wt_main)))
     finally:
         for path in made:
             if os.path.exists(path):
