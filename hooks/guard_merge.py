@@ -9,10 +9,13 @@ import os
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    inline_script, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
+)
+from guard_push_delete import (
+    push_destinations, push_target, push_text,
 )
 
 
@@ -535,7 +538,11 @@ def _own_session_read(transcript: str, own_id: str):
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    tagged_after = True
+                    # Only a call that names the own session changes the own tags. A call with no readable
+                    # list of ids counts too: the safe reading is that it may have named this session.
+                    ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
+                    if not isinstance(ids, list) or own_id in ids:
+                        tagged_after = True
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     body = block.get("content")
                     if isinstance(body, list):
@@ -572,6 +579,86 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         except Exception:
             pass
         return "merge role " + tier
+    return ""
+
+
+# ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
+RECORD_WRITER_TIER = "triage"
+DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
+    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
+    "own turn, then retry."
+)
+
+
+def _own_tier_proved(transcript: str, tier: str) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+    except Exception:
+        pass
+    return False
+
+
+def _command_words(args):
+    """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
+    newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
+    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    words = []
+    for arg in args:
+        word = arg.rstrip(")&")
+        if word != arg:
+            if word:
+                words.append(word)
+            break
+        words.append(arg)
+    return words
+
+
+def _push_calls(segment: str, script: str, cwd: str):
+    """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
+    segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
+    `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
+    runs in the folder its segment's own `cd` or `git -C` names."""
+    for subcommand, args in git_calls(push_text(segment)):
+        if subcommand == "push":
+            where, overrides = push_target(segment, script, cwd)
+            yield _command_words(args), where, overrides
+    tokens = segment_tokens(segment)
+    inner = inner_commands(tokens) if tokens else []
+    if inner:
+        inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        for text in inner:
+            for part in split_segments(text):
+                yield from _push_calls(part, text, inner_cwd)
+
+
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
+    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
+    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
+    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
+    reaches the branch."""
+    for segment in split_segments(stripped):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if read_verb("push", args):
+                continue
+            top = _git(where, "rev-parse", "--show-toplevel") if where else None
+            root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else where
+            try:
+                record = record_branch_of(root)
+            except Exception:
+                record = DEFAULT_RECORD_BRANCH
+            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
+                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                return "git push to the record branch"
     return ""
 
 
