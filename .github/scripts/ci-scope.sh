@@ -55,7 +55,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*|actions/playwright-setup/*) on="$on code shoot " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
-      merge/merge.py) on="$on $M $W $X code guard " ;;
+      # clears.py and events.json: merge.py loads both when it loads (import, class body), so guard.py's load of merge.py needs them too.
+      merge/merge.py|actions/ci-alarm/clears.py|actions/ci-alarm/events.json) on="$on $M $W $X code guard " ;;
       lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;

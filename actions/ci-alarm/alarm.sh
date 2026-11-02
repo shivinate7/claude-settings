@@ -7,7 +7,9 @@
 # that has a candidate). Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY.
 # Exit 0 always: the alarm is the issue, not a red job. Prints "green", "red" or "unknown". A failed or
 # empty read of the runs, the workflows or the issue write is unknown, never red. A failed jobs read makes
-# only that red run unknown: a red run elsewhere still prints red, then unknown, then green (as merge.py).
+# only that red run unknown: red outranks unknown, which outranks green, so a red run elsewhere still files
+# the issue and prints red. merge.py's base_state differs: any failed read makes its whole verdict unknown,
+# which hides a red run elsewhere; the merge tool refuses on unknown as on red.
 set -o pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"

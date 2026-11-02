@@ -6,8 +6,9 @@ candidate(red, runs, groups): the runs that may clear the red run `red`. Runs ar
 workflow's identity: its file path or id), `event`, `status`, `conclusion` and `created_at` (ISO times compare as
 text). `groups` maps an event to its group (actions/ci-alarm/events.json); an event not in it is never judged. Per
 other group of the same workflow, the newest completed run is taken; it is a candidate when it succeeded and is
-newer than `red` by creation time. A newer run that is cancelled, red or still going is no candidate, and an older
-success behind it never stands in for it.
+newer than `red` by creation time. That is the same-group rule: the newest completed run decides. A newer run that
+is cancelled or red is its group's newest, so it is no candidate, and an older success behind it never stands in
+for it. A run still going is skipped and clears nothing itself, so the newest completed run behind it decides.
 
 clears(red_jobs, newer_jobs): a red run R is cleared by a candidate N when N ran every job R ran and each of them
 has the conclusion `success`. Jobs are dicts with `name` and `conclusion`. R's job set is the names of R's jobs

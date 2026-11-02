@@ -964,7 +964,9 @@ class Host:
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
         A red run R is cleared by a candidate run: the newest completed run of another group of the same file, newer than R (created_at), succeeded
         (`candidate`), that ran every job R ran, each with conclusion success (`clears`: R's job set is its non-skipped jobs, an empty set clears
-        nothing). A newer run that is cancelled, red or still going is no candidate, and its jobs are never read.
+        nothing). A newer run that is cancelled or red is no candidate, and no older success of its group stands in for it. Its jobs
+        are read only when it is judged as the latest run of its own group. A run still going is not in `done`: its jobs are never read,
+        and the newest completed run of its group decides.
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read; a red one costs one
         more for each newer successful run of another group (read once per run). A failed read is unknown."""
         try:
