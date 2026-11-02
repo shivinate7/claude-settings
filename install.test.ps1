@@ -1211,12 +1211,22 @@ try {
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
     try {
         $rtE1 = Invoke-InstallProc (Join-Path $rtEclone 'install.ps1') $RtEcfg $RtEhome $RtElogs
-        # main drops tile-windows. The folder keeps only an ignored file; ghost-skill was never tracked.
+        # main drops tile-windows. Run 2 reads the pinned checkout, not the clone, so the ignored-only
+        # leftovers go in the pin after it moves to main. The tracked .gitignore (*.local) hides them from git.
         git -C $rtEclone rm -q -r skills/tile-windows | Out-Null
         Save-RetiredClone $rtEclone 'retire tile-windows'
-        New-Item -ItemType Directory -Force -Path (Join-Path $rtEclone 'skills\tile-windows'), (Join-Path $rtEclone 'skills\ghost-skill') | Out-Null
-        Set-Content -Path (Join-Path $rtEclone 'skills\tile-windows\cache.local') -Value 'cache' -Encoding utf8
-        Set-Content -Path (Join-Path $rtEclone 'skills\ghost-skill\cache.local') -Value 'cache' -Encoding utf8
+        $rtEpin = "${rtEclone}-live"
+        New-Item -ItemType Directory -Force -Path (Join-Path $rtEpin 'skills\tile-windows'), (Join-Path $rtEpin 'skills\ghost-skill') | Out-Null
+        Set-Content -Path (Join-Path $rtEpin 'skills\tile-windows\cache.local') -Value 'cache' -Encoding utf8
+        Set-Content -Path (Join-Path $rtEpin 'skills\ghost-skill\cache.local') -Value 'cache' -Encoding utf8
+        Set-Content -Path (Join-Path $rtEpin 'hooks\cache.local') -Value 'cache' -Encoding utf8
+        # Without the ignore rule the leftovers count as shipped, so a red case would not mean the gate failed.
+        $rtEignored = $true
+        foreach ($rtEf in 'skills/tile-windows/cache.local', 'skills/ghost-skill/cache.local', 'hooks/cache.local') {
+            git -C $rtEpin check-ignore -q $rtEf | Out-Null
+            if ($LASTEXITCODE -ne 0) { $rtEignored = $false }
+        }
+        Check "retiredps1-e: the leftovers are ignored in the pinned checkout" $rtEignored
         $rtE2 = Invoke-InstallProc (Join-Path $rtEclone 'install.ps1') $RtEcfg $RtEhome $RtElogs
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
     Show-FailedRun 'retiredps1-e' 'run 1' $rtE1
@@ -1224,6 +1234,7 @@ try {
     Check "retiredps1-e: both runs exit 0" ($rtE1.Exit -eq 0 -and $rtE2.Exit -eq 0)
     Check "retiredps1-e: the old copy of tile-windows is removed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\tile-windows')))
     Check "retiredps1-e: ghost-skill, never tracked, is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\ghost-skill')))
+    Check "retiredps1-e: an ignored-only file in hooks is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'hooks\cache.local')))
 } finally {
     Remove-Item -Recurse -Force $RtEroot -ErrorAction SilentlyContinue
 }
