@@ -1,0 +1,9 @@
+{
+ "title": "Guard refusals stricter than their rule are narrowed to the rule's outcome",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21035,
+ "why": "Follow-ups from the refusal-versus-rule sweep (step refusal-matches-rule; owner Nov 1 20:57 CST).",
+ "note": "Items: command-in-item (any semicolon or pipe in a code span counts as a shell line); gh-login-switch (a str_replace that keeps the switch is refused); machine-wide-kill (lsof -ti list and pkill -P <own pid> refused); detached-launch (foreground nohup or setsid -w refused); impeccable-review-only (a semicolon in Skill args refused); builder-test-edit (scratchpad and docs/spec paths counted as tests); records-page (refused even when the page is unchanged); destructive-delete (a cat heredoc whose text names a delete is refused); merge preview-base-run (says --confirm refuses it, though --base-red-ok lifts it); the merge tool's \"No override lifts this refusal\" line, false for red-base and dropped-lane. Batch clause: step overlapping-batches; it reaches the guard's merge-checks rule through Host.head_read and needs a guard test there. Ready. Source: lane refusal-matches-rule, draft PR #1029, record docs/plans/refusal-vs-rule.md section \"Follow-up steps\", Nov 1 21:11 CST. Each item is one fix with its own red-first case; a lane may take any subset. Port: yes, the guards are shared.",
+ "updatedAt": "2026-11-02T03:13:00Z"
+}

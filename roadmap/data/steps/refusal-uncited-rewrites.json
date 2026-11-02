@@ -1,0 +1,9 @@
+{
+ "title": "Guard and merge refusals that cite no rule get a rule or record",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21035300000001,
+ "why": "Follow-ups from the refusal-versus-rule sweep (step refusal-matches-rule; owner Nov 1 20:57 CST).",
+ "note": "Items: a merge-lock decision (5 merge rows), pointer-head, env-file, config-edit, ln-over-directory, role-diff-main-checkout, role-diff-unresolved, merge pinned-mismatch, merge wait-base-changed, merge blocked-or-behind, merge claim-off-default-base. Write the record each one enforces, or delete the refusal if no incident or likely risk backs it (rule building-guard-needs-incident). Ready. Source: lane refusal-matches-rule, draft PR #1029, record docs/plans/refusal-vs-rule.md section \"Follow-up steps\", Nov 1 21:11 CST. Each item is one fix with its own red-first case; a lane may take any subset. Port: yes, the guards are shared.",
+ "updatedAt": "2026-11-02T03:13:00Z"
+}
