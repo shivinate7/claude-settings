@@ -420,7 +420,7 @@ key. It never reuses main's.
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
    `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
-   `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
+   `<title>` to "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST). Change nothing else. A republish keeps the title, and renames an old "Queue" or "Roadmap" title to "<repo> Cockpit" (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
 3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from

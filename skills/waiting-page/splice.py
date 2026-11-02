@@ -7,7 +7,8 @@
 The first form replaces the roadmap block. The second, --carry, is for a republish of a changed
 template: OUT.html is TEMPLATE.html with the live page's designData block, roadmap block and <title>
 text put in, byte for byte, in place of the template's own (a live page with no title leaves the
-template's). A live page with no roadmap marker outside script text
+template's). A live title of an old form (Queue, <X> Queue, <X> Queue \u00b7 Status, Roadmap, <X> Roadmap) is
+renamed to "<X> Cockpit" (PAGE_NAME); every other title carries as is. A live page with no roadmap marker outside script text
 predates the block: only its designData block goes in, and the template keeps its empty roadmap block.
 It refuses, and writes nothing, when the template lacks either block, when either file has an unclosed,
 doubled or unpaired roadmap block or a doubled designData block, or when the live page has no designData
@@ -32,6 +33,9 @@ import sys
 OPEN, CLOSE = "roadmap:data", "/roadmap:data"
 DESIGN = "designData"
 TITLE = "title"
+PAGE_NAME = "Cockpit"  # the one home of the page's name: its title is "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST)
+# A live title of an old form: an optional "<X> " prefix, then Queue, Queue · Status or Roadmap.
+OLD_TITLE = re.compile("(?P<prefix>.* )?(?:Queue(?: \u00b7 Status)?|Roadmap)", re.S)
 SVG_OPEN, SVG_CLOSE = "svg-open", "svg-close"
 SVG_TAG = re.compile(r"<(/?)svg(?=[\s/>])", re.I)
 DESIGN_ID = re.compile(r"""\bid\s*=\s*["']?designData["']?(?=[\s/>"'])""", re.I)
@@ -132,8 +136,17 @@ def title_span(text):
     return span
 
 
+def renamed_title(text):
+    """The live title text; an old-form title becomes its prefix and PAGE_NAME. Built by slicing, so live text is never a replacement string."""
+    found = OLD_TITLE.fullmatch(text)
+    if not found:
+        return text
+    return text[:found.end("prefix")] + PAGE_NAME if found.group("prefix") else PAGE_NAME
+
+
 def carry(template, live):
     """`template` with the live page's designData block, roadmap block and title text in place of its own, byte for byte.
+    A live title of an old form (Queue, <X> Queue, <X> Queue · Status, Roadmap, <X> Roadmap) is renamed to <X> PAGE_NAME; any other title is copied as is.
     A live page with no roadmap marker in its markup predates the block: it gives only its designData block,
     and the template keeps its empty roadmap block. A live page with no title keeps the template's."""
     t_design, l_design = design_span(template, "the template"), design_span(live, "the live page")
@@ -141,7 +154,7 @@ def carry(template, live):
     swaps = [(t_design, live[l_design[0]:l_design[1]])]
     t_title, l_title = title_span(template), title_span(live)
     if t_title and l_title:
-        swaps.append((t_title, live[l_title[0]:l_title[1]]))
+        swaps.append((t_title, renamed_title(live[l_title[0]:l_title[1]])))
     if markers(live):
         l_block = block_span(live, "the live page")
         swaps.append((t_block, live[l_block[0]:l_block[1]]))
