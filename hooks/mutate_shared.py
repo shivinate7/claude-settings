@@ -354,12 +354,12 @@ def ast_mutants(source: str, limit=None, seed: int = 0, lines=None):
     base = normalize(source)
     wanted = None if lines is None else set(lines)
     found = []
-    for position in range(len(_sites(ast.parse(source)))):
+    for position, (_kind, probe, _index) in enumerate(_sites(ast.parse(source))):
+        if wanted is not None and getattr(probe, "lineno", 0) not in wanted:
+            continue  # skipped before the re-parse below: a large file with a few wanted lines costs few parses
         tree = ast.parse(source)  # a fresh tree per site, so each mutant holds exactly one change
         kind, node, index = _sites(tree)[position]
         line = getattr(node, "lineno", 0)
-        if wanted is not None and line not in wanted:
-            continue
         what = _apply(tree, kind, node, index)
         text = ast.unparse(ast.fix_missing_locations(tree))
         if text != base:
