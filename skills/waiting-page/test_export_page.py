@@ -563,7 +563,8 @@ class Rebuild(Base):
 
     def test_a_crash_in_rebuild_exits_3_with_one_unknown_line(self):
         waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
-        write_text(os.path.join(waiting, "items", "deep.json"), DEEP)
+        # 100,000 levels: json.load raises RecursionError inside rebuild, and no Stop handler takes it, so it is a crash.
+        write_text(os.path.join(waiting, "items", "deep.json"), "[" * 100000 + "]" * 100000)
         r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
         self.assertEqual(r.returncode, 3, "a crash must exit 3, not %d. Output:\n%s" % (r.returncode, shown(r)))
         lines = verdict_lines(r)
