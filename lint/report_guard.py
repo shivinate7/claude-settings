@@ -331,11 +331,11 @@ def bare_cite(text):
 # are found as in prose_questions. A quote pairs only inside one line. A repo path is a token with `/` that has a
 # file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
 # The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
-# same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no one, nobody, never,
-# yet to.
+# same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
-ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno\s+one\b|\bnobody\b|\bnever\b|\byet\s+to\b", re.I)
+ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -368,13 +368,14 @@ def answered_problem(text):
     """The refusal for reply lines that say "answered" with no source on the line, else ''."""
     if not ANSWERED_RE.search(text):
         return ""
-    bad, fenced = [], False
+    bad, fence = [], ""
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
-        if body.startswith("```"):
-            fenced = not fenced
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
             continue
-        if fenced:
+        if fence or body.rstrip("*_)\"' ").endswith("?"):
             continue
         plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
         if not _claims_answered(plain):
