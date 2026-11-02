@@ -132,6 +132,10 @@ Other tools, in `judge` order:
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
                        `agent-<id>-<suffix>` red-run folder passes that act.
+                       A write or `cd` into a separate clone of the same repo (same origin, read
+                       from the config files) is refused too, as is a write from a cwd stranded
+                       in one while `CLAUDE_PROJECT_DIR` names the home clone; the temp folder,
+                       other repos, an unreadable origin and the home clone pass.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -918,6 +922,21 @@ OTHER_CHECKOUT_CD_REASON = (
     "Rule (other checkout): this command changes directory into another checkout of this clone, "
     "not the one this session stands in. "
     "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
+    "`cd`."
+)
+
+OTHER_CLONE_DETAIL = "write into another clone: "
+OTHER_CLONE_CD_DETAIL = "cd into another clone: "
+OTHER_CLONE_REASON = (
+    "Rule (other checkout): this command writes into a separate clone of this repo, not the checkout "
+    "this session stands in. "
+    "Remedy: write only inside your own checkout, or report the change to the session that owns "
+    "the other clone."
+)
+OTHER_CLONE_CD_REASON = (
+    "Rule (other checkout): this command changes directory into, or writes into, a separate clone of "
+    "this repo, not the checkout this session stands in. "
+    "Remedy: stay in your own checkout. To read another clone, use `git -C <dir>` or a path, never "
     "`cd`."
 )
 
@@ -3651,6 +3670,110 @@ def _checkout_root_by_stat(folder: str) -> str:
     return ""
 
 
+def _git_common_dir(root: str) -> str:
+    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
+    one, relative to `<dir>`. No git is spawned."""
+    dot = os.path.join(root, ".git")
+    try:
+        if os.path.isdir(dot):
+            return os.path.realpath(dot)
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+        if not first.startswith("gitdir:"):
+            return ""
+        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
+        try:
+            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
+                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
+        except OSError:
+            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
+        return os.path.realpath(git_dir)
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _clone_origin(common: str) -> str:
+    """The `[remote "origin"]` url in COMMON's config file, else '' (no file, no origin, no url)."""
+    try:
+        with open(os.path.join(common, "config"), encoding="utf-8") as handle:
+            lines = handle.read(1 << 20).splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    in_origin = False
+    for line in lines:
+        line = line.strip()
+        if line.startswith("["):
+            in_origin = re.fullmatch(r'\[remote\s+"origin"\]', line, re.IGNORECASE) is not None
+        elif in_origin:
+            named = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
+            if named:
+                return named.group(1).strip().strip('"')
+    return ""
+
+
+def _origin_local(url: str) -> str:
+    """The realpath a local-path origin names, else '' for a network url."""
+    if url.startswith("file://"):
+        url = url[len("file://"):]
+    if os.path.isabs(url):
+        return os.path.realpath(url)
+    return ""
+
+
+def _origin_key(url: str) -> str:
+    """The `owner/repo` of a network origin url, lower case, with a `.git` suffix and a trailing `/`
+    dropped, in any form (https, ssh `git@host:owner/repo`, a proxy url); '' when it names none."""
+    url = url.rstrip("/\\")
+    if url.endswith(".git"):
+        url = url[:-len(".git")].rstrip("/")
+    parts = [part for part in re.split(r"[/:\\]", url) if part]
+    return "/".join(parts[-2:]).lower() if len(parts) >= 2 else ""
+
+
+def _same_repo(common: str, other: str) -> bool:
+    """True when the clones with git common dirs COMMON and OTHER are the same repo: a local-path
+    origin that names the other clone, or two network origins naming one `owner/repo`. An origin
+    that is missing or unreadable on either side is unknown, never a match."""
+    urls = (_clone_origin(common), _clone_origin(other))
+    for url, theirs in ((urls[0], other), (urls[1], common)):
+        local = _origin_local(url) if url else ""
+        if local and local in (theirs, os.path.dirname(theirs)):
+            return True
+    return (all(urls) and not any(_origin_local(url) for url in urls)
+            and _origin_key(urls[0]) != "" and _origin_key(urls[0]) == _origin_key(urls[1]))
+
+
+def _separate_clone(path: str, tops, common: str) -> bool:
+    """True when PATH sits in a separate clone of the same repo as the checkouts TOPS, whose git
+    common dir is COMMON: the nearest `.git` above it is not inside a top (a submodule), not above
+    one (a dotfiles repo), names another common dir, and that clone has the same origin. Stat and
+    small file reads only."""
+    root = _checkout_root_by_stat(os.path.realpath(path))
+    if not root or not common:
+        return False
+    if any(path_is_inside(root, top) is True or path_is_inside(top, root) is True for top in tops):
+        return False
+    other = _git_common_dir(root)
+    return bool(other) and other != common and _same_repo(common, other)
+
+
+def _clone_scope(roots, own: str):
+    """(tops, common, stranded): the checkouts and common dir a path must sit in, to be no separate
+    clone. Normally this clone's own. When `CLAUDE_PROJECT_DIR` names a folder in a clone that is a
+    separate clone of the cwd's, the session is stranded: its home clone is the reference, and
+    `stranded` is True. An unset, unreadable or unrelated value is unknown, and changes nothing."""
+    home = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    try:
+        top = _checkout_root_by_stat(os.path.realpath(home)) if home else ""
+        common = _git_common_dir(top) if top else ""
+        if common and _separate_clone(own, [top], common):
+            return [top], common, True
+    except Exception:
+        pass
+    return roots, _git_common_dir(own), False
+
+
 def _cd_targets(tool: str, command: str, where: str):
     """The folder each real `cd`, `pushd` or `Set-Location` segment of COMMAND moves into, as a
     realpath. Read the way `_run_dir` reads the shell: heredoc bodies dropped first, one segment at a
@@ -3719,8 +3842,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
     `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
-    under another `.git` entry spends the git read.
-    Liftable by an owner override, unlike `worktree_home_hit`
+    under another `.git` entry spends the git read. A target in a separate clone of the same repo
+    (the nearest `.git` above it names another common dir with the same origin, read by file) is
+    refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     moves = []
@@ -3748,7 +3872,12 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if not own:
         return ""
 
-    def elsewhere(target, at):
+    tops, common, stranded = _clone_scope(roots, own)
+    import tempfile   # lazy: only a call that can write or move reaches here
+    temp = os.path.realpath(tempfile.gettempdir())
+    clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
+
+    def elsewhere(target, at, moving=False):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -3759,18 +3888,32 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         if not has_agent and under_session_scratchpad(resolved, session_id):
             return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
-        return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+        in_git = bool(owner) and path_is_inside(resolved, os.path.join(owner, ".git")) is True
+        if bool(owner) and owner != own and not in_git:
+            clone_hit[target] = False
+            return True
+        # The temp folder holds scratchpads and throwaway clones.
+        if path_is_inside(resolved, temp) is True:
+            return False
+        # A stranded cwd's own clone is the wrong place to write; a cd within it is no harm.
+        separate = ((stranded and not moving and bool(owner) and not in_git)
+                    or (not owner and _separate_clone(resolved, tops, common)))
+        clone_hit[target] = separate
+        return separate
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
-            return OTHER_CHECKOUT_CD_DETAIL + move
+        if (elsewhere(move, where, moving=True)
+                and not _cd_red_run(payload, roots, _owning_checkout(move, roots))):
+            return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
-        return "shell write into another checkout: " + hit if hit else ""
+        if not hit:
+            return ""
+        return ("shell write into another clone: " if clone_hit.get(hit) else
+                "shell write into another checkout: ") + hit
     for target in targets:
         if elsewhere(target, where):
-            return "write target in another checkout: " + target
+            return (OTHER_CLONE_DETAIL if clone_hit.get(target) else "write target in another checkout: ") + target
     return ""
 
 
@@ -4022,7 +4165,9 @@ def judge(payload) -> None:
                                    bool(payload.get("agent_id")))
     if other_hit:
         refuse(tool, "deny", "other-checkout",
-               OTHER_CHECKOUT_CD_REASON if other_hit.startswith(OTHER_CHECKOUT_CD_DETAIL)
+               OTHER_CLONE_CD_REASON if other_hit.startswith(OTHER_CLONE_CD_DETAIL)
+               else OTHER_CLONE_REASON if "into another clone: " in other_hit[:40]
+               else OTHER_CHECKOUT_CD_REASON if other_hit.startswith(OTHER_CHECKOUT_CD_DETAIL)
                else OTHER_CHECKOUT_REASON, other_hit)
     # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
     # override lifts it, and it is not in never_lifted: the owner may mean the write.
