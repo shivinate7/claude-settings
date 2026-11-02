@@ -364,9 +364,11 @@ COMMAND_REASON = ("A step never sends the owner to a file for a command, and nev
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
-# is not a press, and neither is a press of the waiting page's own buttons: it needs no link.
-_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
-_PAGE_BUTTON = r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b)"
+# is not a press, and neither is a press of the waiting page's own buttons or of this item on the
+# page: it needs no link. "this item's" link may lead off the page, so it stays a press.
+_CLAUSE = r"(?:^\s*|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
+_PAGE_BUTTON = (r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b"
+                r"|\s+this\s+item\b(?!['’]s))")
 # An item or step number on the page, "item #47" or "step #2", is not a PR ref.
 _REF = r"(?<!\bitem\s)(?<!\bstep\s)(?<!\bitem)(?<!\bstep)#\s*(\d+)"
 PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
@@ -435,12 +437,29 @@ def _flat_text(value) -> str:
 
 
 # A clause whose subject is the session ("The session merges it after your pick.") and that names
-# no `you`: the session makes that press, so the owner presses nothing. Only that clause is excused. A
-# press in another clause stays ("..., then press Merge"), and so does a clause that names `you`.
+# no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
+# that press, so the owner presses nothing. Only that clause is excused. A press in another clause
+# stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
+# act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
+# press of the page's own button ("after he hits Send") ask the owner for nothing.
 SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|(?<=[.!?])\s+|\n|\b(?:then|and)\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+# The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
+# "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
+_CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
+OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
+# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
+# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
+OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+                       r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
+
+
+def _owner_acts(clause) -> bool:
+    """True when an owner's name in `clause` is the subject of a present or future press or act."""
+    return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
 
 
 def _owner_press_text(label, how) -> tuple:
@@ -451,15 +470,16 @@ def _owner_press_text(label, how) -> tuple:
     after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
-    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)]
+    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
+               and not _owner_acts(c)]
     if not session:
         return text, text
     done = " ".join(session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
-    rest = [c for c in clauses if c not in session]
-    return text, " ".join(([] if label_ok else [label]) + rest)
+    rest = _CLAUSE_JOIN.join(c for c in clauses if c not in session)
+    return text, ("" if label_ok else label + ".\n") + rest
 
 
 def _press_field_ok(text, links, context="", press_text=None) -> bool:

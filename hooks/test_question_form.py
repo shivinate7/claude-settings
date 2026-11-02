@@ -480,6 +480,46 @@ def case_line_order_and_prose():
 
 # ------------------------------------------------------------------ a press the session makes needs no link
 
+# Decision act-in-place: a session clause that hides an owner press. The press is the owner's, so the option
+# needs a link.
+HIDDEN_OWNER_PRESS = [
+    "The session merges PR #374 after the owner clicks Approve.",
+    "The session merges PR #374 but click Merge first.",
+    "The session merges PR #374, so click Merge.",
+    "The session merges PR #374: press Merge.",
+    "The session merges PR #374 - press Merge on GitHub.",
+    "The session merges PR #374 (press Merge).",
+    "The session merges PR #374 after Shivam approves it on GitHub.",
+    "The session merges PR #374 so you hit Merge on GitHub.",
+    "The session merges PR #374 but you approve it on GitHub.",
+    "The session merges PR #374: you approve it on GitHub.",
+]
+# A session clause with no press in it, and a press the session makes after the pick: both pass. An owner
+# word (the owner, he, Shivam) in a clause with no press verb asks the owner for nothing, so it passes too.
+SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merges PR #374.",
+                "The session merges PR #374 as the owner asked.",
+                "The session merges PR #374 once the owner's approval is in.",
+                "The session merges PR #374 as he asked.",
+                "The session merges PR #374 after Shivam's OK.",
+                "The session merges PR #374 so CI reruns."]
+# The how-text of an option labelled "Go": a split cuts the mark-ready press, so it is refused. The waiting
+# page's own button, or a past act, asks the owner for no web press: each passes, with the label "Merge the PR".
+GO_SPLIT_PRESS = [
+    "The session merges it after your pick. Mark the PR (#12) ready for review.",
+    "The session merges it after your pick. Mark PR #12: ready for review.",
+    "The session merges it after your pick. Mark PR #12 - ready for review.",
+    "The session merges it after your pick. Mark PR #12, ready for review.",
+    "The session merges it after your pick. Mark the draft PR and ready on GitHub.",
+]
+PAGE_BUTTON_OR_PAST_ACT = [
+    "The session merges it after Shivam hits Take my pick.",
+    "The session merges it after he hits Send.",
+    "The session merges it after Shivam approves this item.",
+    "The session merges it after he has merged the base PR.",
+    "The session merges it after the owner approved the plan.",
+]
+
+
 def case_session_press_needs_no_link():
     # Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes
     # the press, after the owner's pick, asks him for no press, so it needs no link. An option that asks him to
@@ -511,6 +551,32 @@ def case_session_press_needs_no_link():
                                                                     "Lose: nobody reads it first."},
                            {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
          ("press-link", None))
+    # Decision act-in-place: a session clause that names the owner, or a press set off by a colon, dash,
+    # parenthesis, `but` or `so`, is no session act. The press in it is the owner's and needs a link.
+    def chat_of(option):
+        return {"label": option["label"],
+                "description": "%s Gain: %s Lose: %s" % (option["how"], option["gain"], option["lose"])}
+
+    for how in HIDDEN_OWNER_PRESS:
+        page("a session clause that hides an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_ONLY:
+        page("a session clause with no press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause with no press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in GO_SPLIT_PRESS:
+        page("a split that cuts a mark-ready press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, label="Go", how=how), keep])), ("press-link", None))
+        chat("a split that cuts a mark-ready press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, label="Go", how=how)), chat_of(keep)]), ("press-link", None))
+    for how in PAGE_BUTTON_OR_PAST_ACT:
+        page("a page-button press or a past act, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
+        chat("a page-button press or a past act, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
 
 
 # ------------------------------------------------------------------ a press in the how-text only
