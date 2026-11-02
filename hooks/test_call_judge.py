@@ -104,7 +104,7 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None):
+def make_repo(name, decisions=None, steps=None, debts=None):
     if name in REPOS:
         return REPOS[name]
     repo = os.path.join(ROOT, "repo-" + name)
@@ -121,6 +121,14 @@ def make_repo(name, decisions=None, steps=None):
                 f.write("# %s\n\n## The ruling\n\n%s\n" % (slug, ruling))
         git(repo, "add", "docs")
         git(repo, "commit", "-q", "-m", "decision records")
+    if debts:
+        folder = os.path.join(repo, "docs", "debts")
+        os.makedirs(folder)
+        for slug, what in debts.items():
+            with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
+                f.write("# %s\n\nWhat: %s\n" % (slug, what))
+        git(repo, "add", "docs")
+        git(repo, "commit", "-q", "-m", "debt records")
     if steps:
         git(repo, "checkout", "-q", "-b", "roadmap")
         folder = os.path.join(repo, "roadmap", "data", "steps")
@@ -680,11 +688,9 @@ def case_page_override():
 
 def case_page_model_failure_fails_open():
     r = run_hook(page_input("set", good_page_item()), answer=PAGE_FLAG, model_fail=True)
-    errs = failed_open_lines(r)
-    check("page fail open: a model failure on an item write allows, after one model call",
-          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
-    check("page fail open: one stderr line from the hook", len(errs) == 1 and r.code == 0
-          and "can't open file" not in errs[0], detail(r))
+    check("page unvetted: a model failure on an item write refuses once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
 
 
 def case_page_str_replace_judged():
@@ -840,7 +846,6 @@ def case_page_reads_and_other_collections_skip_question_form():
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
-        ("a model failure on a question", question_input(), {"model_fail": True}),
         ("an odd answer", spawn_input("builder", model="sonnet"), {"answer": '{"ok": "maybe"}'}),
         ("unreadable stdin", "not json", {}),
         ("an empty payload", "{}", {}),
@@ -1037,6 +1042,61 @@ def case_past_ruling_cost():
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
 
 
+# ------------------------------------------------------------------ unvetted marker and docs/debts (owner ruling Nov 1 18:48 CST)
+#
+# When the model review cannot run (a model error, or a decisions folder or roadmap ref that cannot be read), a question
+# is refused once, and its remedy adds an `Unvetted: <reason>` line. A question with that line passes with no model call.
+# The closed page items notice alone never triggers it. docs/debts/*.md records reach the candidates, one line each.
+UNVETTED_LINE = "Unvetted: the model review could not run, so the owner reads this question unchecked."
+DEBT_SLUG = "settled-question-unchecked"
+DEBT_WHAT = "a settled question reached the owner with no past-ruling check. Marker debt-9d3e."
+FULL_REPO = make_repo("full", decisions={APPS_SLUG: APPS_RULING}, steps={CI_STEP_ID: CI_STEP_SENTENCE})
+DEBTS_REPO = make_repo("debts", decisions={APPS_SLUG: APPS_RULING}, steps={CI_STEP_ID: CI_STEP_SENTENCE},
+                       debts={DEBT_SLUG: DEBT_WHAT})
+
+
+def case_unvetted_marker():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted box: a model error refuses the question once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    marked = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    marked["questions"][0]["question"] += "\n" + UNVETTED_LINE
+    r = run_hook(question_input(box=marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted box: the same question with an Unvetted: line passes with no model call",
+          r.code == 0 and r.out == "" and r.calls == [] and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_unvetted_page_marker():
+    item = good_page_item()
+    r = run_hook(page_input("set", item, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted page: a model error refuses the item write once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    marked = good_page_item(context=item["context"] + "\n" + UNVETTED_LINE)
+    r = run_hook(page_input("set", marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted page: the same item with an Unvetted: line in context passes with no model call",
+          r.code == 0 and r.out == "" and r.calls == [] and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_unvetted_not_for_closed_items():
+    # Every source reads (decisions and roadmap). Only the closed page items notice is unknown, so it never refuses.
+    r = run_hook(question_input(box=good_box(), cwd=FULL_REPO), answer=ALLOW)
+    check("unvetted: the closed page items notice alone does not refuse, the call is allowed",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log and "Unvetted" not in r.err,
+          detail(r))
+
+
+def case_past_ruling_debt_candidates():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DEBTS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    rest = without_call(prompt, box)
+    check("past ruling debts: a docs/debts record's slug and What line reach the candidates",
+          len(r.calls) == 1 and DEBT_SLUG in rest and DEBT_WHAT in rest, detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1048,7 +1108,8 @@ def main():
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
-                 case_past_ruling_cost):
+                 case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
+                 case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates):
         try:
             case()
         except Exception as exc:
