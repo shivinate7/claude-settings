@@ -32,6 +32,19 @@ A reply that holds Input Needed or a prose line ending in `?` also gets the past
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+On landed turns it also refuses a reply sentence that says a decision was rewritten (rewritten, rewrote,
+rewrites, rewrite of) for a ruling when that decision's record was last committed before the ruling, on
+every local branch, every remote branch and HEAD (`rewrite-cite-predates-ruling`, named incident F119:
+a report said a decision was rewritten for a ruling that its record's last commit predates). A cited id is a word next to the rewrite word that names a file in the
+decisions folder; no "decision" word is needed, and an id after under, by, per, following or see is not
+checked. A queued sentence (pending, queued), or a rewrite word just after a negation or a modal (not,
+no, never, will, should, must, can, may, could, needs and the like), claims no rewrite. The ruling time is
+the stamp next to the word "ruling" ("the <stamp> ruling", "ruling at <stamp>", "ruling of <stamp>"):
+`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's Central date, the day before when that is
+later than the turn. With no such stamp the sentence passes. "In place" alone does not trigger. An id
+with no record file or a failed git read passes. Cost: one regex read of the reply, and only on a reply
+that matches it, one `git log -1` process per distinct cited id with a record file in the reply, at most
+REWRITE_CAP; no file written, no timer, no log.
 
 The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
 that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
@@ -758,6 +771,154 @@ def pick_has_a_control(records, text, cwd):
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
+# rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
+REWRITE_RE = re.compile(r"\b(?:rewrote|rewritten|rewrites|rewrite\s+of)\b", re.I)
+# A negation or a modal just before the rewrite word: "not rewritten yet", "no rewrite of", "will be rewritten",
+# "should be rewritten", "needs a rewrite of". No rewrite has happened.
+REWRITE_UNDONE_RE = re.compile(
+    r"(?:(?<![\w-])(?:not|never|no|will|would|shall|should|must|can|may|could|needs?|yet)(?![\w-])|n't\b"
+    r"|\bto\s+be\b|\bgoing\s+to\b)"
+    r"[\w\s'`-]{0,20}$", re.I)
+# A status word anywhere in the sentence: the rewrite waits in a queue.
+REWRITE_QUEUED_RE = re.compile(r"(?<![\w-])(?:pending|queued)(?![\w-])", re.I)  # a hyphen keeps an id like no-x whole
+REWRITE_CAP = 5  # most distinct records one reply may make this check read
+SLUG = r"`?[a-z0-9]+(?:-[a-z0-9]+)*`?"
+SLUG_RE = re.compile(r"(?<![\w-])[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+# The ids right before a rewrite word: "decision X was rewritten", "Decisions X and Y were rewritten".
+IDS_BEFORE_RE = re.compile(
+    r"(?<![\w-])(%s(?:\s*,\s*(?:and\s+)?%s|\s+and\s+%s)*)\s+(?:(?:decisions?|records?|was|were|is|are|has|have|been|now|also|both)\s+)*$"
+    % (SLUG, SLUG, SLUG))
+# The ids right after a rewrite word: "rewrote decision X", "the rewrite of X and Y". An id after under, by,
+# per, following or see is never next to the rewrite word, so it is not checked.
+IDS_AFTER_RE = re.compile(
+    r"^\s*(?:(?:of|the|a|an|decisions?|records?)\s+)*(%s(?:\s*,\s*(?:and\s+)?%s|\s+and\s+%s)*)(?![\w-])"
+    % (SLUG, SLUG, SLUG))
+STAMP_FULL_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+STAMP_CLOCK_RE = re.compile(r"(?<![\d:-])(\d{1,2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+RULING_WORD_RE = re.compile(r"\brulings?\b", re.I)
+STAMP_AFTER_RULING_RE = re.compile(r"^\s+(?:at|of)\s+$", re.I)  # "ruling at <stamp>", "ruling of <stamp>"
+STAMP_BEFORE_RULING_RE = re.compile(r"^\s*(?:owner(?:'s)?\s+)?$", re.I)  # "the <stamp> ruling"
+STAMP_ZONE_HOURS = {"CST": -6, "CDT": -5, "UTC": 0, "GMT": 0}
+FENCE_RE = re.compile(r"```.*?```", re.S)
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+
+
+def _central(at):
+    """`YYYY-MM-DD HH:MM CST` (or CDT) for an instant, from the time hook's own clock."""
+    import local_time
+    return " ".join(local_time.line(lambda: at).split()[2:5])
+
+
+def _parse_iso(value):
+    from datetime import datetime, timezone
+    at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _claims_a_rewrite(sentence):
+    """True when the sentence is not queued, and a rewrite word in it has no negation or modal just before it."""
+    if REWRITE_QUEUED_RE.search(sentence):
+        return False
+    return any(not REWRITE_UNDONE_RE.search(sentence[max(0, m.start() - 40):m.start()])
+               for m in REWRITE_RE.finditer(sentence))
+
+
+def _rewritten_ids(sentence):
+    """The words next to each rewrite word that may name a record, in order, with no repeat."""
+    found = []
+    for m in REWRITE_RE.finditer(sentence):
+        if REWRITE_UNDONE_RE.search(sentence[max(0, m.start() - 40):m.start()]):
+            continue
+        for near in (IDS_BEFORE_RE.search(sentence[max(0, m.start() - 200):m.start()]),
+                     IDS_AFTER_RE.match(sentence[m.end():])):
+            if near:
+                found += [w for w in SLUG_RE.findall(near.group(1).replace("`", " ")) if w not in found]
+    return found
+
+
+def _ruling_stamp(sentence):
+    """(day, clock, zone) of the stamp next to the word "ruling" in `sentence`, else None. The stamp sits right
+    before the word ("the YYYY-MM-DD HH:MM CST ruling"), or follows it after "at" or "of" ("ruling of
+    YYYY-MM-DD HH:MM CST"). Any other stamp, such as a merge time, is not the ruling time. `day` is None for a
+    clock-only stamp."""
+    stamps = [(m.start(), m.end(), m.groups()) for m in STAMP_FULL_RE.finditer(sentence)]
+    for m in STAMP_CLOCK_RE.finditer(sentence):
+        if not any(s <= m.start() < e for s, e, _ in stamps):
+            stamps.append((m.start(), m.end(), (None,) + m.groups()))
+    for word in RULING_WORD_RE.finditer(sentence):
+        for start, end, groups in sorted(stamps):
+            if start >= word.end() and STAMP_AFTER_RULING_RE.match(sentence[word.end():start]):
+                return groups
+            if end <= word.start() and STAMP_BEFORE_RULING_RE.match(sentence[end:word.start()]):
+                return groups
+    return None
+
+
+def _stamp_time(stamp, human_ts):
+    """The instant a (day, clock, zone) stamp names. A clock-only stamp takes the turn's Central date: the last
+    human record's timestamp, else the hook's clock. A clock later than the turn names the day before."""
+    from datetime import datetime, timedelta, timezone
+    day, clock, zone = stamp
+    tz = timezone(timedelta(hours=STAMP_ZONE_HOURS[zone]))
+    hour, minute = (int(x) for x in clock.split(":"))
+    if day is not None:
+        year, month, date = (int(x) for x in day.split("-"))
+        return datetime(year, month, date, hour, minute, tzinfo=tz)
+    import local_time
+    try:
+        turn = _parse_iso(human_ts)
+    except (TypeError, ValueError):
+        turn = local_time.clock()
+    year, month, date = (int(x) for x in _central(turn).split()[0].split("-"))
+    at = datetime(year, month, date, hour, minute, tzinfo=tz)
+    return at - timedelta(days=1) if at > turn else at
+
+
+def rewrite_stamp_problem(text, human_ts, cwd):
+    """The refusal text when a sentence says a decision was rewritten for a ruling that is later than the
+    record's last commit on every local branch, every remote branch and HEAD, else ''. A cited id is a word next
+    to the rewrite word that names a file in the decisions folder of the checkout. Fails open on any unknown: no
+    record file, no stamp next to "ruling", a failed read. Git runs once per distinct cited id in the reply, and
+    not at all for an id with no record file. A shallow clone shows a later last commit than the real one, so
+    it can miss a stale rewrite and never refuses a fresh one."""
+    sentences = [s for s in SENTENCE_SPLIT_RE.split(FENCE_RE.sub(" ", text))
+                 if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
+    if not sentences:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from datetime import datetime, timezone
+    root = repo_root(cwd)
+    if not root:
+        return ""
+    folder = layout.path(root, "decisions")
+    reasons, epochs = [], {}
+    for sentence in sentences:
+        ids = [d for d in _rewritten_ids(sentence)
+               if os.path.isfile(os.path.join(root, *folder.split("/"), d + ".md"))]
+        stamp = _ruling_stamp(sentence) if ids else None
+        if stamp is None:
+            continue
+        ruling = _stamp_time(stamp, human_ts)
+        import git_reads
+        for d in ids:
+            if d not in epochs:
+                if len(epochs) >= REWRITE_CAP:
+                    continue
+                epochs[d] = git_reads.last_commit_epoch(root, "%s/%s.md" % (folder, d))
+            d_epoch = epochs[d]
+            if d_epoch is None or d_epoch >= ruling.timestamp():
+                continue
+            reason = (
+                "Rewrite-stamp guard: decision `%s` was last committed %s, on every branch and HEAD, before the "
+                "ruling %s that it is said to be rewritten for. Rewrite the record, fetch the branch that holds "
+                "the rewrite, or say it is not rewritten yet."
+                % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)),
+                   ruling.strftime("%Y-%m-%d %H:%M ") + stamp[2]))
+            if reason not in reasons:
+                reasons.append(reason)
+    return " ".join(reasons)
+
+
 def names_tool(section, tool):
     """True when the Input Needed text names `tool`. A built-in tool (Edit, Bash) is an English word,
     so only its backticked name counts. An MCP tool counts by its full name, in backticks or not;
@@ -1188,6 +1349,12 @@ def main():
     except Exception:
         pass
     reasons += [r for r in relay if r]
+    try:
+        rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
+        if rewrite:
+            reasons.append(rewrite)
+    except Exception:
+        pass
     try:
         recovered = recovered_problem(records, text) if shape_ok else ""
         if recovered:

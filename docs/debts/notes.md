@@ -985,6 +985,10 @@
 - no-direction-rule-no-candidate-test: NONE_DIRECTION_RULE says the reason names no target. Item 8 says the reason names the listed id. No test covers a re-ask that has candidates. The re-ask cases use PAGE_REPO, which lists none (hooks/test_call_judge.py PAGE_REPO). Decision: question-form
 - call-judge-unreadable-source-untested: No case reaches the unreadable-source branch of past_ruling_context (hooks/call_judge.py). Decision: question-form
 - call-judge-docstring-write-stale: The hooks/call_judge.py docstring line "no other write changes the prompt" is stale. Decision: question-form
+- rewrite-stamp-binds-to-sentence: the ruling stamp binds to the sentence, not the clause. "The <stamp A> ruling changed Y, and x was rewritten for the <stamp B> ruling" reads stamp A (lint/report_guard.py _ruling_stamp). Decision: rewrite-cite-predates-ruling
+- rewrite-stamp-utc-clock-date: a clock-only UTC or GMT stamp takes the Central date, so the ruling can read a day early, a miss only (lint/report_guard.py _stamp_time). Decision: rewrite-cite-predates-ruling
+- rewrite-stamp-recall-forms: "ruling (<stamp>)", "ruling, <stamp>" and "ruling <stamp>" are not read, so the claim passes (lint/report_guard.py _ruling_stamp). Decision: rewrite-cite-predates-ruling
+- rewrite-unfetched-lane-refused: a true report about a lane branch that is not fetched is refused until the branch is fetched; cost one turn. Decision: rewrite-cite-predates-ruling
 - pair-title-quotes-short-id: a pull title names every step id it quotes, such as "Revert r5 and c91". So a todo r5 goes red. False-alarm risk; it becomes a debt on a real incident (skills/roadmap/build.py).
 - new-feature-mutant-no-return-step: P3 has the test-author make a mutant after the build, but no line sends it back, and none says it goes on a scratch copy outside the repo. The guard refuses a test-author write to product files. Decision: test-practices.
 - owner-ruling-only-in-p11: the owner ruling of 2026-11-01 20:57 CST lives only in P11; decision no-merge-during-batch-ci still describes the stricter refusal, and roadmap step overlapping-batches owns the fix. Decision: test-practices.
