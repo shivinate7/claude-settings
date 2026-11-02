@@ -4,7 +4,7 @@
 
 Owner, 2026-11-02 11:00 CST (waiting-page gripe, via the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item.
 
-The owner said not to take the ask verbatim, but the gripe is real. Rule `waiting-data-in-repo` holds the outcome.
+The owner said not to take the ask verbatim, but the gripe is real. The id `waiting-data-in-repo` names this decision. The writer's step lives in the waiting-page skill, not in a rule.
 
 - The copy lives on the record branch, not on main. The record branch is the repo's `roadmap` branch by default. It is an orphan branch with no pull request and no CI run. Main moves only by pull request (rule `git-main-only-by-pr`). Process-only: the lane orchestrator chose the record branch.
 - The copy is folder `waiting/` on that branch. It holds five collections: `items`, `answers`, `groups`, `asks` and `meta`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`).
@@ -30,4 +30,4 @@ Incidents:
 - Date not recorded. The waiting page moved to another org, and Claude Code lost read access to it. 80 items were rebuilt from old transcripts. No repo held a copy of the page's database.
 
 Kind: process
-Home: rule:waiting-data-in-repo
+Home: skills/waiting-page/SKILL.md
