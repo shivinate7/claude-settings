@@ -1358,6 +1358,15 @@ MUTATIONS = [
      "        if not has_agent and under_session_scratchpad(resolved, session_id):",
      "        if under_session_scratchpad(resolved, session_id):",
      "guard", "a write into a worktree in the session's own scratchpad"),
+    # RULE 0, other-checkout, the separate-clone act: `_same_repo` and the stranded arm of `_clone_scope`.
+    ("other-checkout: no two clones read as the same repo, so a separate clone of this repo passes",
+     "    urls = (_clone_origin(common), _clone_origin(other))",
+     "    return False\n    urls = (_clone_origin(common), _clone_origin(other))",
+     "guard", "a Write into a separate clone of the same repo is refused"),
+    ("other-checkout: a cwd is never stranded, so its relative write into a separate clone passes",
+     "        if common and _separate_clone(own, [top], common):",
+     "        if False and _separate_clone(own, [top], common):",
+     "guard", "a cwd stranded in a separate clone refuses a relative Write"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
