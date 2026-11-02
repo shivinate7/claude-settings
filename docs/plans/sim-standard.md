@@ -11,6 +11,7 @@ Make claude-settings the one home of iPhone simulator use on this Mac. Today eac
 - 2026-11-02 13:17 CST: erase the shared Duo (done 13:18; it did not help, see below).
 - 2026-11-02 13:49 CST: "this mac can only have one sim and it needs to be shared across the repos". No repo makes its own simulator (Degen included). The one simulator is the shared iPhone Duo AC2E94F9. The standard should drop "when a lane may make its own" and any per-lane device.
 - 2026-11-02 13:51 CST: "Home can have an iphone 18 pro run only if the duo sim is turned off (ie only one phone sim at a time, across phones is still fine)". So the lease is one slot for the whole Mac: the shared Duo or the shared iPhone 18 Pro, never both booted. This replaces the guard's boot cap of 2 for phones. `sim-test`'s optional 18 Pro run must shut the Duo down first.
+- 2026-11-02 14:23 CST: "If load is comfortable we can have two duo sims at once". A second shared Duo now exists: "iPhone Duo 2" 801F55F4-F666-4C6D-AB04-7DF77C953974 (iOS 27.1). So the lease has two Duo slots, and slot 2 opens only under a load bar. The gatekeeper set a provisional bar, unmeasured: a 5-minute load under 20 while slot 1 is in use. Measure the bar and set it in the standard. The 18 Pro may run only when no Duo is booted.
 - 2026-11-02 13:26 CST: reinstall the iOS 27.1 runtime (done 13:31; it fixed the Duo, see below).
 
 ## Repos and who uses a simulator
