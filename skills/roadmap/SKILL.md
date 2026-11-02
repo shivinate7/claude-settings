@@ -76,13 +76,15 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags"}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
-- `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
+- `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
+  optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
+  unknown. `branches`: lane branches with no open pull request.
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
   The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
   Live work.
@@ -105,6 +107,16 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
   conflict marker. The builder names each file and line, and writes no page. Resolve, then build again.
 - The checkout is not on the record branch and no `--out` is given.
+
+## The red line
+
+The build exits 1 when a `todo` step is named by an open pull request. It prints
+`todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
+step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
+fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
+`pulls` (the `sessions` list is not needed), the line reads
+`todo step with an open PR: unknown (<why>)` and the build exits 0. The conflict-marker refusal also
+exits 1. The printed line tells the two apart.
 
 ## Upkeep list
 
@@ -138,6 +150,13 @@ After each build the builder prints the upkeep list for the triage thread. It na
   - the repo's GitHub name cannot be read;
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old (an old list counts a dead
     lane as live), or is more than 5 minutes ahead;
+- `todo` steps whose note has the sentence `Ready.`, in the row `ready todo steps`. A live phase is not
+  needed. Each entry is the step id;
+- draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
+  lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
+  live session step equals its branch exactly (the same rule as the in-progress row). Each entry is `#N (<branch or
+  title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
+  live file the row reads one `unknown (<why>)` entry;
 - `Step:` trailers that name no step.
 
 ## Cost
@@ -146,6 +165,9 @@ About six git processes and one file written per build. With `--live`, the publi
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The builder adds no git process, file, timer or log for it.
+The red line and the two stale-ready rows read the live file the build already reads, and add no
+process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
+list call it already makes.
 No watcher, no timer, no log.
 
 ## Tests

@@ -453,7 +453,9 @@ The roadmap build makes the Status tab's data, the roadmap block. The waiting-pa
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
-   (add `--live <file>` as the skill roadmap says).
+   (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
+   `created_at`). Exit 1 with `todo step with an open PR` lines still writes a valid block: splice and
+   publish as usual, then set each named step to `doing`.
 2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
    older copy: the live page holds the designs for the items still open.
 3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
