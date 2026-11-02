@@ -13851,7 +13851,8 @@ ol("an option keyed a labelled B) a strip is denied", "deny", ol_item(options=ol
 ol("an option keyed a labelled B — a strip is denied", "deny", ol_item(options=ol_opt(0, label="B — a strip")))
 ol("an option keyed a labelled Option B — a strip is denied", "deny",
    ol_item(options=ol_opt(0, label="Option B — a strip")))
-ol("an option keyed a labelled a strip, Option B is denied", "deny", ol_item(options=ol_opt(0, label="a strip, Option B")))
+ol("an option keyed a labelled a strip, Option B is allowed (a reference at label end is not a tag)", "allow",
+   ol_item(options=ol_opt(0, label="a strip, Option B")))
 ol("an option keyed a labelled b: a strip is denied", "deny", ol_item(options=ol_opt(0, label="b: a strip")))
 ol("an option keyed b labelled A rail on the left is allowed", "allow", ol_item(options=ol_opt(1, label="A rail on the left")))
 ol("an option keyed c labelled I think the lint job is allowed", "allow",
@@ -13875,6 +13876,58 @@ ol("an option keyed a with design rail, and that design labelled Option A: a rai
    ol_item(options=ol_opt(0, design="rail"), designs=[{"slug": "rail", "label": "Option A: a rail"}]))
 ol("a design that no option names, labelled Option C: a rail, is not judged", "allow",
    ol_item(designs=[{"slug": "rail", "label": "Option C: a rail"}]))
+
+# A reference to another option, at label end or mid-label, is not a tag: only the label's start counts.
+ol("an option keyed b labelled Same as option A is allowed", "allow", ol_item(options=ol_opt(1, label="Same as option A")))
+ol("an option keyed a labelled keep, see option B is allowed", "allow",
+   ol_item(options=ol_opt(0, label="keep, see option B")))
+ol("an option keyed a labelled Option A or B is allowed", "allow", ol_item(options=ol_opt(0, label="Option A or B")))
+ol("an option keyed a labelled Plan B: fallback is allowed", "allow", ol_item(options=ol_opt(0, label="Plan B: fallback")))
+ol("an option keyed a labelled A rail is allowed", "allow", ol_item(options=ol_opt(0, label="A rail")))
+ol("an option keyed a labelled A: rail with design rail labelled A: rail is allowed", "allow",
+   ol_item(options=ol_opt(0, label="A: rail", design="rail"), designs=[{"slug": "rail", "label": "A: rail"}]))
+
+# The option's label and its design's label are each judged: a matching option label does not pass a
+# design label for another letter.
+ol("an option keyed a labelled A: rail, with design rail labelled B: rail, is denied", "deny",
+   ol_item(options=ol_opt(0, label="A: rail", design="rail"), designs=[{"slug": "rail", "label": "B: rail"}]))
+ol("an option keyed a labelled rail, with design rail labelled B: rail, is denied", "deny",
+   ol_item(options=ol_opt(0, label="rail", design="rail"), designs=[{"slug": "rail", "label": "B: rail"}]))
+
+# A design or a slug that is not a string, or a designs entry that is not an object, does not crash the
+# guard: the item is judged on what it can read, and these designs name no option, so they are allowed.
+ol("an option whose design is a list, not a slug, is allowed and does not crash the guard", "allow",
+   ol_item(options=ol_opt(0, label="rail", design=["x"]), designs=[{"slug": "rail", "label": "B: rail"}]))
+ol("a designs entry whose slug is a list is allowed and does not crash the guard", "allow",
+   ol_item(options=ol_opt(0, label="rail", design="rail"), designs=[{"slug": ["r"], "label": "B: rail"}]))
+ol("a designs entry that is a string, not an object, is allowed and does not crash the guard", "allow",
+   ol_item(options=ol_opt(0, label="rail", design="rail"), designs=["junk"]))
+
+# Bold, bracket, no-space and "Option B" starts are tags for another letter, so they are denied at key a.
+ol("an option keyed a labelled **B:** a rail is denied", "deny", ol_item(options=ol_opt(0, label="**B:** a rail")))
+ol("an option keyed a labelled [B] a rail is denied", "deny", ol_item(options=ol_opt(0, label="[B] a rail")))
+ol("an option keyed a labelled B:a rail with no space is denied", "deny", ol_item(options=ol_opt(0, label="B:a rail")))
+ol("an option keyed a labelled Option B keeps the rail is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B keeps the rail")))
+ol("an option keyed a labelled **B.** a strip is denied", "deny", ol_item(options=ol_opt(0, label="**B.** a strip")))
+
+# Unicode dashes after a letter tag count as the dash: each form is denied at key a.
+ol("an option keyed a labelled B with a figure dash, U+2012, is denied", "deny",
+   ol_item(options=ol_opt(0, label="B ‒ rail")))
+ol("an option keyed a labelled B with a horizontal bar, U+2015, is denied", "deny",
+   ol_item(options=ol_opt(0, label="B ― rail")))
+ol("an option keyed a labelled B with a minus sign, U+2212, is denied", "deny",
+   ol_item(options=ol_opt(0, label="B − rail")))
+ol("an option keyed a labelled B with a Unicode hyphen, U+2010, is denied", "deny",
+   ol_item(options=ol_opt(0, label="B ‐ rail")))
+ol("an option keyed a labelled Option B with a non-breaking hyphen, U+2011, is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B ‑ rail")))
+
+# Known limit: "I" reads as a letter tag, so a label that opens with a word "I" is refused for now.
+ol("an option keyed a labelled I — keep the rail is denied (known limit: I reads as a tag)", "deny",
+   ol_item(options=ol_opt(0, label="I — keep the rail")))
+ol("an option keyed a labelled I. T. support is denied (known limit: I. reads as a tag)", "deny",
+   ol_item(options=ol_opt(0, label="I. T. support")))
 
 # Item text: an option named by a letter-and-digit key, after option, options, pick or key.
 ol("a context that says option e2 is safer, keys a, b and c, is denied", "deny", ol_item(context="option e2 is safer"))
