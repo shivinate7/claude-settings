@@ -28,6 +28,8 @@ unless the same main-session turn opened the question box (AskUserQuestion), or 
 waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
 waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
+`past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 """
@@ -583,6 +585,119 @@ def write_marker(hook, idx):
         pass
 
 
+# A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
+# a prose line that ends in `?`, so neither gate in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
+# the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
+# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+RELAY_RULE_REASON = (
+    "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
+    "that names that ruling and says why the owner is asked again.")
+UNVETTED_REASON = (
+    "Unvetted guard: the past-ruling check could not run (%s), so this question would reach the owner unchecked. "
+    "Add the line `Unvetted: <why it could not be checked>` to the question and send it again.")
+KEYS_REASON = (
+    "Question-keys guard (rule question-keys): two questions to the owner use the option key(s) %s, so his answer "
+    "could mean either. Give each question its own keys, such as 1a/1b for the first and 2a/2b for the second, and "
+    "send the questions again.")
+ASK_TEXT_MAX = 6000
+
+
+def prose_questions(text):
+    """The reply's own prose lines that end in `?`, outside code fences. A blockquote line counts."""
+    found, fenced = [], False
+    for line in text.splitlines():
+        body = line.strip().lstrip(">").strip()
+        if body.startswith("```"):
+            fenced = not fenced
+        elif not fenced and body.rstrip("*_)\"' ").endswith("?"):
+            found.append(body)
+    return found
+
+
+def asked_text(text):
+    """The text of what the reply asks the owner: its Input Needed item and its prose question lines, else ''."""
+    prose = prose_questions(text)
+    asks = bool(prose)
+    if not asks and "input needed" in text.casefold():
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from reply_judge import has_input_needed  # the one reader of "Input Needed holds an item"
+        asks = has_input_needed(text)
+    if not asks:
+        return ""
+    return ("\n".join([input_needed_section(text)] + prose).strip() or text)[:ASK_TEXT_MAX]
+
+
+def past_ruling_problem(text, cwd):
+    """The refusal text for a reply whose question a past ruling settles, or one that could not be checked, else ''."""
+    asked = asked_text(text)
+    if not asked:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    if question_form.has_unvetted(text):
+        return ""
+    candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
+    print(question_form.unknown_line(unknown), file=sys.stderr)
+    unreadable = question_form.unreadable_sources(unknown)
+    if unreadable:
+        return UNVETTED_REASON % "; ".join(unreadable)
+    import call_judge  # the one home of item 8, its model and its time limit
+    import decision_watch
+    prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
+              + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
+              "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
+              "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
+              + question_form.candidates_block(candidates, unknown))
+    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
+                                                 timeout=call_judge.PAST_RULING_TIMEOUT,
+                                                 shape=call_judge.OK_SHAPE, effort=None)
+    if error:
+        return UNVETTED_REASON % " ".join(str(error).split())
+    if verdict.get("ok") is not False:
+        return ""
+    reason = verdict.get("reason")
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
+    if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
+        return UNVETTED_REASON % "the review cited a record that was not in the list"
+    return RELAY_RULE_REASON % reason
+
+
+def earlier_replies(after, text):
+    """The assistant text replies since the last human message, without the reply being judged."""
+    texts = []
+    for rec in after:
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "assistant" or rec.get("isSidechain") or not isinstance(content, list):
+            continue
+        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        if parts:
+            texts.append("\n".join(parts))
+    if texts and texts[-1].strip() == text.strip():
+        texts.pop()
+    return texts
+
+
+def question_keys_problem(after, text):
+    """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
+    if "input needed" not in text.casefold():
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    clash = question_form.key_overlap(text, earlier_replies(after, text))
+    return KEYS_REASON % clash if clash else ""
+
+
+def relay_reasons(after, text, cwd):
+    """Refusals for the questions the reply relays to the owner. Each check fails open on its own error."""
+    reasons = []
+    for check in (lambda: question_keys_problem(after, text), lambda: past_ruling_problem(text, cwd)):
+        try:
+            reasons.append(check())
+        except Exception:
+            pass
+    return [r for r in reasons if r]
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -633,6 +748,7 @@ def main():
 
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
+    relay = relay_reasons(after, text, hook.get("cwd"))
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
@@ -646,6 +762,7 @@ def main():
             pick.append(departs_problem(text))
         except Exception:
             pass
+        pick += relay
         try:
             pick = [r for r in pick if r]
             if pick:
@@ -679,6 +796,7 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
+    reasons += relay
     cite = bare_cite(text)
     if cite:
         reasons.append(

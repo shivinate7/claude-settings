@@ -8,15 +8,15 @@ Owner rulings, 2026-10-22 10:18 CDT:
 - The model is a full Opus id, pinned in `hooks/call_judge.py`. Opus runs by the owner's standing grant of 2026-10-21, given at class level for this hook (row in `agent-model-cap`).
 - The rubric is the prompt in `hooks/call_judge.py`. There is no `agents/` file and no Read allow rule. A question with one option or none passes. A page write is judged only for the fields it carries. The form lines, their order and the marks on each option are code's (`question-form`). The model keeps seven items. The Goal is in the owner's terms; Problem, premises, gain and lose are plain; no id goes unexplained; nothing points outside the box; one option is recommended.
 - One task rule joins the seven, for a task's `steps` and `context` (the whole-unit rule). A step that tells the owner to replace text quotes the whole line or value it replaces, and shows the line after the change in full. The incident is waiting item 99 (2026-11-01). Its step said to change `GUARD_SHELL_SKIP=` to `GUARD_SHELL_SKIP=tree`, but the real line was `GUARD_SHELL_SKIP= scripts/guard-shell.py --hook`. Following the step dropped the script call. The rule is in the one prompt constant `PAGE_PROMPT`; the seven items stay one constant, `JUDGE_ITEMS`.
-- Premises show in the box as `Based on:` lines. Code checks that the lines exist and name a source kind, one of `PREMISE_KINDS` (decision `premise-format`). No check tests a premise against `docs/decisions/`.
-- A failed or timed-out model call lets the question through. A code refusal stands.
+- Premises show in the box as `Based on:` lines. Code checks that the lines exist and name a source kind, one of `PREMISE_KINDS` (decision `premise-format`). Item 8 tests the question and its premises against the decision records, the debt records and the step rulings (decision `question-form`).
+- A failed or timed-out model call on a question refuses once, with the `Unvetted:` remedy (decision `question-form`). A code refusal stands.
 - The reviewer judges the box alone. Whether the agent can read the chat, or `transcript_path`, is unmeasured.
 - `lint/test_settings_matcher.py` (class `QuestionReviewer`) pins the hook: one command hook that runs `call_judge.py`, an Opus id, the seven prompt items, and no premise kinds in the prompt.
 
 Dropped with the old judges, by the same ruling:
 
 - the goal-match and option-serves-goal asks, which need the chat
-- the settled-question check, which finds a question that a decision or a debt already settles. No check runs (`settled-question-unchecked`, no hook checks for a question a record settles).
+- the settled-question check. It came back as the past-ruling check, item 8 of the judge prompt (decision `question-form`, owner ruling 2026-11-01 18:48 CST: every question is vetted).
 - the "better option missing" ask
 - the refuse-then-pass loop breaker
 - the fixture suite for `question_outcome.py`

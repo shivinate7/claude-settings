@@ -27,7 +27,12 @@ practice (note page-judge-dead-fragment-fields).
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
 
-Fail open. Any model error, odd answer or unreadable input allows, with one stderr line.
+A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
+adds the decision, debt and step rulings to the same one model call. A question with an `Unvetted:` line passes with no
+call. A model error, or a source that exists and cannot be read, refuses once with the Unvetted remedy; a refusal that
+cites a record the model was not shown counts as a model error. An absent source allows, with one stderr line.
+
+Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 """
 import json
 import os
@@ -67,7 +72,19 @@ SPAWN_PROMPT = (
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
-# The seven items a question to the owner is judged on: one text, for the chat box and the page.
+# Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
+# question). The candidate rulings follow the reply line, built by question_form.candidates_block.
+PAST_RULING_ITEM = (
+    "Past rulings. The text after the reply line lists past rulings, one per line as `<id>: <text>`. Refuse when "
+    "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
+    "something a standing decision already explains (such as asking what a rule means when a decision says why "
+    "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
+    "a re-ask the ruling allows is fine. This item never applies to a task, and passes when no list follows. "
+    "When you refuse, the reason starts with the listed id, such as decisions/<name>, and gives the ruling's date."
+)
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
     "2. The Problem is one plain sentence that says why it needs his word.\n"
@@ -76,6 +93,7 @@ JUDGE_ITEMS = (
     "5. No unexplained ids: explain every decision id, branch, sha, key or rule name in plain words.\n"
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
+    "8. " + PAST_RULING_ITEM + "\n"
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
@@ -164,6 +182,24 @@ def refuse(payload, tool, args, rule, reason):
     return 0
 
 
+UNVETTED_REMEDY = (
+    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Add the line "
+    "`Unvetted: <why it could not be checked>` to the question (a page item: to `context`) and send it again. "
+    "The owner then reads it marked as unchecked.")
+
+
+def past_ruling_context(payload, units):
+    """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
+    the sources not searched. The only process of a judged call besides the model runs here."""
+    import question_form
+    cwd = payload.get("cwd") or ""
+    candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
+                                                     question_form._git_root_of(cwd) or cwd or os.getcwd())
+    print(question_form.unknown_line(unknown), file=sys.stderr)
+    return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
+            question_form.unreadable_sources(unknown))
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
@@ -173,6 +209,7 @@ def main():
         if not isinstance(args, dict):
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
+        units = []  # (Unvetted marker text, words) of each question this call asks the owner
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -180,6 +217,7 @@ def main():
                 reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
+            units = question_form.chat_units(args)
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
@@ -189,19 +227,35 @@ def main():
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)
+            units = question_form.page_units(judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
-        verdict, error = invoke_model(prompt % shown, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        tail, ids = "", []
+        if units:
+            if all(question_form.has_unvetted(marker) for marker, _ in units):
+                return 0  # sent knowingly unchecked: the owner reads the Unvetted line
+            tail, ids, unreadable = past_ruling_context(payload, units)
+            if unreadable:
+                return refuse(payload, tool, args, rule, UNVETTED_REMEDY % "; ".join(unreadable))
+        verdict, error = invoke_model((prompt % shown) + tail, model=model, timeout=timeout, shape=OK_SHAPE,
+                                      effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
         return 0
+    if error and units:  # a question is never judged silently: no verdict means Unvetted
+        return refuse(payload, tool, args, rule, UNVETTED_REMEDY % " ".join(str(error).split()))
     if error:
         print("call judge failed open: %s" % " ".join(str(error).split()), file=sys.stderr)
         return 0
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
-        return refuse(payload, tool, args, rule, reason if isinstance(reason, str) and reason.strip() else fallback)
+        reason = reason if isinstance(reason, str) and reason.strip() else fallback
+        cite = question_form.ruling_cite(reason, ids) if units else ""
+        if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
+            return refuse(payload, tool, args, rule,
+                          UNVETTED_REMEDY % "the review cited a record that was not in the list")
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
     return 0
 
 
