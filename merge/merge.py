@@ -8,6 +8,13 @@
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
+                          the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
+                          --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
+                          commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
+                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
+                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
+                          measured once on one PR head), one worktree.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -1012,7 +1019,7 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clear in base_state. The CI alarm reads the same file and the same clear rule
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a failed run, a cancelled run). The CI alarm reads the same file and the failed-run clear; a cancelled run never alarms
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
@@ -1021,11 +1028,14 @@ class Host:
         with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
         run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
         skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
-        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
-        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
+        when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
-        A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
-        run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
+        A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older
+        run (the twin rule of judge_runs would reach across commits here), unless a run N clears it. R is then on a commit older than the base's
+        head, since runs on the base are made at its head. N clears it when it is such a candidate (as above) on another head than R's, every job
+        R ran (not skipped) is in N by exact name with every entry of that name success, and every job R skipped is in N. An R with no jobs stays
+        unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
@@ -1042,17 +1052,21 @@ class Host:
             newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
             age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
 
-            def cleared(r):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
+            def cleared(r, cancelled=False):
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job,
+                or, with `cancelled`, for an r cancelled with no red job: the run must then also be on another head than r's, pass every job r ran
+                (not skipped) and contain every job r skipped."""
                 names = {j["name"] for j in jobs_of(r)}
+                need = {j["name"] for j in jobs_of(r) if j.get("conclusion") != "skipped"} if cancelled else names
                 for n in newest.values():
                     if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
-                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"):
+                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"
+                            or (cancelled and (not r.get("head_sha") or n.get("head_sha") == r["head_sha"]))):
                         continue
                     theirs = {}
                     for j in jobs_of(n):
                         theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
-                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in names):
+                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need) and all(x in theirs for x in names):
                         return True
                 return False
             for r in newest.values():
@@ -1068,7 +1082,8 @@ class Host:
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
-                    unknown.append(f"{where} was cancelled with no red job")
+                    if not cleared(r, cancelled=True):
+                        unknown.append(f"{where} was cancelled with no red job")
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
@@ -2182,9 +2197,13 @@ def open_worktree(root, info, base):
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
+    return add_worktree(root, info["head"])
+
+def add_worktree(root, head):
+    """Make a detached, locked worktree at `head`. -> (tmp, wt). The one home of the temporary tree: open_worktree and lane_lint call it."""
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
-    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, info["head"])  # a locked tree survives the janitor sweep
+    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, head)  # a locked tree survives the janitor sweep
     if c:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Stop("cannot make the worktree: " + out)
@@ -2195,6 +2214,73 @@ def drop_worktree(root, tmp, wt):
     git(root, "worktree", "remove", "--force", wt)
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
+
+LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes."
+
+def lane_head_and_base(root, target, base):
+    """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
+    The base is fetched, and the target too when this clone lacks it."""
+    base = base or "main"
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    if c:
+        raise Stop(f"git fetch origin {base} failed: {out}")
+    if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")  # a name that is no branch on origin fails here, and is judged below
+        c, pushed = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{target}^{{commit}}")
+        local = git(root, "rev-parse", "--verify", "-q", f"refs/heads/{target}^{{commit}}")
+        if not local[0] and c:
+            raise Stop(f"{target} exists only as a local branch, and the batch runner can join only a pushed head. Push {target}, or pass its sha.")
+        if not local[0] and local[1] != pushed:
+            raise Stop(f"local {target} is {local[1][:9]} but origin/{target} is {pushed[:9]}, so the lint cannot say which head the batch runner would join. "
+                       f"Push {target}, or pass the sha to lint (or origin/{target}).")
+        if not c:
+            return pushed, base
+    want = f"{target}^{{commit}}"
+    c, head = git(root, "rev-parse", "--verify", "-q", want)
+    if c:
+        git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+        c, head = git(root, "rev-parse", "--verify", "-q", want)
+    if c:
+        raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin")
+    return head, base
+
+def lane_lint(root, target, host, base="", unknown_ok=""):
+    """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
+    in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    if target.isdigit():
+        info = (host or Host()).pr(int(target))
+        head, base = info["head"], info["base"]
+        tmp, wt = open_worktree(root, info, base)
+    else:
+        head, base = lane_head_and_base(root, target, base)
+        tmp, wt = add_worktree(root, head)
+    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+        try:
+            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise Stop(f"the lint of {head[:9]} did not finish in {LINT_SECONDS} s, so it is unknown, not a pass. {LANE_LINT_REMEDY}")
+    finally:
+        drop_worktree(root, tmp, wt)
+    lines = out.splitlines()
+    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too, but a heartbeat can follow it
+    fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
+    unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
+    short = head[:9]
+    if c == 0:
+        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        return 0
+    if c == 1:
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *(fails or [f"(no FAIL line read; ci-job exit {c})"]), *log, LANE_LINT_REMEDY]))
+    if c == 2:
+        if unknown_ok.strip():
+            say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknown, *log)
+            return 0
+        raise Liftable("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
+                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+    raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 def ignore_checks(cfg):
     """merge.ignoreChecks -> {name: reason}. An entry without a name or a non-empty reason refuses the config."""
@@ -2539,7 +2625,7 @@ def role_path():
 
 def read_merge_role():
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
-    Every failure is None, so the gate fails closed. An absent id never equals an absent record."""
+    Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
         return None
@@ -2560,7 +2646,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set.")
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first, then hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -2574,8 +2660,11 @@ def write_merge_role(tier):
 
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
-    p.add_argument("pr", nargs="?", type=int)
+    p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
+    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -2584,18 +2673,32 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if a.role is not None:
+    if not a.lane_lint:
+        if a.base or a.lint_unknown_ok:
+            p.error("--base and --lint-unknown-ok go with --lane-lint")
+        if a.pr is not None and not a.pr.isdigit():
+            p.error(f"argument pr: invalid int value: {a.pr!r}")
+    if a.lane_lint:
+        if a.pr is None or a.confirm or a.unlock is not None or a.role is not None:
+            p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
+    elif a.role is not None:
         if a.pr is not None or a.confirm or a.unlock is not None:
             p.error("--role stands alone")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, or --role TIER")
     try:
+        if a.lane_lint:
+            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            if c:
+                raise Stop("not in a git checkout")
+            with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
+            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first, then hand the pull request number and its head to the batch runner.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -2608,6 +2711,7 @@ def main(argv, host=None, lock=None):
             say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
         h = host or Host()
+        a.pr = int(a.pr)
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
         refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
         cfg = load_config(root, info["base"], a.config)

@@ -27,7 +27,11 @@ def own_session_read(transcript, own_id):
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    tagged_after = True
+                    # Only a call that names the own session changes the own tags. A call with no readable
+                    # list of ids counts too: the safe reading is that it may have named this session.
+                    ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
+                    if not isinstance(ids, list) or own_id in ids:
+                        tagged_after = True
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     body = block.get("content")
                     if isinstance(body, list):
