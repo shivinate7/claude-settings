@@ -6349,19 +6349,19 @@ for _name, _command in (
     ("everything in the working directory as ./*", "rm -rf ./*"),
 ):
     sh("delete: " + _name, _command, "deny", "destructive-delete", cwd=NOGIT)
-# THE SHELL SPELLINGS OF THE WORKING FOLDER. `$(pwd)` and `$PWD` name the working folder, so a
-# recursive delete of everything in it is the `./*` delete and gets its verdict. A named folder
-# through either spelling is the `./build` delete and passes. `"$PWD"/*` is pinned already by the
-# rm-var cases above, so it is not repeated here. Today `$PWD/*` is refused by rm-var-unguarded, not
-# by this rule, so that row is red on the rule name alone; the decision on which rule owns `$PWD`
-# is open.
+# THE SHELL SPELLINGS OF THE WORKING FOLDER. `$(pwd)` names the working folder, so a recursive
+# delete of everything in it is the `./*` delete and gets its verdict. A named folder through
+# `$(pwd)` or `$PWD` is the `./build` delete and passes. `$PWD` belongs to the variable rule
+# (rm-var-unguarded), which refuses `$PWD/*` today and keeps it, so that row expects its rule.
+# `"$PWD"/*` is pinned by the rm-var cases above, so it is not repeated here.
 for _name, _command in (
     ("quoted $(pwd) before a glob", 'rm -rf "$(pwd)"/*'),
     ("unquoted $(pwd) before a glob", "rm -rf $(pwd)/*"),
-    ("unquoted $PWD before a glob", "rm -rf $PWD/*"),
 ):
     sh("looser-git-acts: delete: everything in the working folder, " + _name + ", is denied",
        _command, "deny", "destructive-delete", cwd=NOGIT)
+sh("looser-git-acts: delete: everything in the working folder, unquoted $PWD before a glob, is denied",
+   "rm -rf $PWD/*", "deny", "rm-var-unguarded", cwd=NOGIT)
 for _command in ('rm -rf "$(pwd)"/build', "rm -rf $(pwd)/build", 'rm -rf "$PWD"/dist', "rm -rf $PWD/dist"):
     sh("looser-git-acts: delete: a named folder as " + _command + " is allowed", _command,
        "allow", cwd=NOGIT)
