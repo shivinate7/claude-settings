@@ -7556,6 +7556,23 @@ sh("env: heredoc-refuse: a hash in quotes before a bash heredoc with an env read
 sh("env: heredoc-allow: a multi-line backtick span crossing a header line in a cat write body, is allowed",
    "cat > /tmp/b.md <<'EOF'\nconst s = `one\nbash <<EOF cat " + ENV + "\n`;\nEOF", "allow", cwd=NOGIT)
 
+# A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
+# read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
+sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
+   "cat > /tmp/x.txt <<'OUT'\nbash <<EOF\ncat " + ENV + "\nEOF\nOUT\nsh /tmp/x.txt", "deny", "env-file", cwd=NOGIT)
+chained_ask("env: heredoc-r2: a data body with bash <<EOF and a force push, then sh of that file, denies",
+            "cat > /tmp/x.txt <<'OUT'\nbash <<EOF\ngit push --force origin main\nEOF\nOUT\nsh /tmp/x.txt",
+            cwd=NOGIT)
+chained_ask("env: heredoc-r2: an unquoted cat write with bash <<X and a force push in a substitution, denies",
+            "cat > x.md <<EOF\nbash <<X\n$(git push --force origin main)\nEOF", cwd=NOGIT)
+sh("env: heredoc-r2: a python body that runs cat of an env file through subprocess, denies",
+   "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: heredoc-r2: a ruby body with a %x| env read, denies",
+   "ruby - <<'EOF'\nputs %x|cat " + ENV + "|\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-r2: a python body with a qx() string that names an env read, is allowed",
+   "python3 - <<'EOF'\nx = \"qx(cat " + ENV + ")\"\nEOF", "allow", cwd=NOGIT)
+
 
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
