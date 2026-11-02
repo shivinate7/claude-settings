@@ -5,7 +5,7 @@ from `roster.md`.
 
 ## Session tiers
 
-Every session that starts agents is an orchestrator. The tiers below are kinds of orchestrator.
+Every session that starts agents is an orchestrator. A session's tier is its identity.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
@@ -14,14 +14,14 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
-- **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
-  merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
+- **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
+  merges two steps, changes the work order, or closes a step. Where triage runs, only triage writes the waiting page.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
   `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
-  `id`, `session_status` and `tags`. The builder reads it to list steps in progress with no live lane.
-  Each pull row carries `createdAt`, so the builder can list a stale draft.
+  `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
+  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft.
   Triage, as the waiting-page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit

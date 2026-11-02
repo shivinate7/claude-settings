@@ -1156,3 +1156,4 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- retired-advisor-reader: the retired terminal advisor still names a log reader (hooks/reply_judge.py:31, docs/decisions/reply-judge-samples-never-refuses.md:8). The log has no live reader.
