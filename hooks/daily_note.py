@@ -15,7 +15,7 @@ path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
 There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
-A line's day is the date its timestamp is written with: guard.log holds Central wall time.
+A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
 
 Seam: CLAUDE_DAILY_NOTE_NOW, an ISO-8601 instant with its UTC offset, in place of the clock.
 Advisory, fail-open: any error prints one stderr line and exits 0.

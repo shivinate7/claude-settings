@@ -653,6 +653,24 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
 .rfoot .btn { min-width: 7.5rem; justify-content: center; }
+/* A seen item (open, asked before the owner's last Send, no answer) sinks under the new ones in its tier. A divider marks the line, the card is quieter, and its answer parts fold. */
+.seenhead { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; min-height: 24px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.seenhead > svg { flex: none; color: var(--faint); }
+.seenhead > .seenrule { flex: 1 1 0; min-width: 24px; border-top: 2px dotted var(--faint); }
+.card[data-seen="true"]:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+/* The fold control. All three labels share one grid cell, so the box keeps the widest label in every state and a press moves nothing beside it. */
+.unfold { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--surface); color: var(--acc); font-weight: 600; font-size: 15px; line-height: 1.35; text-align: left; cursor: pointer; }
+.unfold:hover { border-color: var(--acc); background: var(--acc-soft); }
+.unfold .chev { flex: none; width: 1em; text-align: center; }
+.unfold[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.unfold[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.unfold .uf-labels { display: grid; min-width: 0; }
+.unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
+.unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
+/* Locked open: the card holds an answer Send would submit, so the fold cannot close. */
+.unfold[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; }
+.foldbody { display: grid; gap: 14px; min-width: 0; }
+.foldbody[hidden] { display: none; }
 </style>
 
 <header class="hdr"><div class="in">
@@ -705,7 +723,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -866,6 +884,19 @@ const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by &&
 const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
+// Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
+// and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
+// A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
+const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
+const feed = { items: false, answers: false, all: [] };
+function freezeSeen() {
+  if (state.seen || !feed.items || !feed.answers) return;
+  // The last Send is the newest answer anywhere, a closed item's last answer included.
+  const times = [...Object.values(state.answers).map((a) => a && a.at), ...feed.all.map((i) => i && lastOf(i) && lastOf(i).at)].map(ts).filter(Number.isFinite);
+  const last = times.length ? Math.max(...times) : -Infinity;
+  const old = (it) => !isRuling(it) && !state.answers[it.id] && ts(it.added) < last;
+  state.seen = new Set(state.items.filter(old).map((it) => it.id));
+}
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [] };
   state.items.forEach((it) => by[tierOf(it)].push(it));
@@ -875,10 +906,12 @@ function sorted() {
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
-  by.holds.sort((a, b) => byRank(a, b) || byAge(a, b));
-  by.due.sort((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b));
-  by.calm.sort((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
-  by.stands.sort((a, b) => byRank(a, b) || byAge(a, b));
+  // Inside a tier, new items come before seen ones; each part keeps the order above.
+  const part = (f) => (a, b) => (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
+  by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
+  by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
+  by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
+  by.stands.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   return by;
 }
 
@@ -1232,10 +1265,27 @@ function buildRuling(it) {
       h("button", { class: "btn dash overturn", type: "button", id: "b-over-" + it.id, disabled: blocked(it), "aria-pressed": String(armed), "aria-label": "Overturn the ruling on No. " + it.n, onclick: () => { edited(); setDraft(it, { choice: armed ? null : OVERTURN }); repaint(it); } }, "Overturn")));
   return card;
 }
+// The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
+// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen card's fold stays open and its control is locked.
+const foldLocked = (it) => !!eff(it) || withdrawing(it);
+function unfoldBtn(it, open, locked, ncmd) {
+  const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
+  const nopts = (it.options || []).length, nsteps = (it.steps || []).length, cmdWord = ncmd > 1 ? "commands" : "command";
+  // A task with no steps and no command folds only its links, the ready line, Mark done and the note box.
+  const rest = ncmd ? "the " + cmdWord : "Mark done and the note";
+  const show = dec ? "Show the " + nopts + (nopts === 1 ? " option" : " options") : nsteps ? "Show the " + nsteps + (nsteps === 1 ? " step" : " steps") + tail : "Show " + rest;
+  const hide = dec ? "Hide the " + (nopts === 1 ? "option" : "options") : nsteps ? "Hide the " + (nsteps === 1 ? "step" : "steps") + (ncmd > 1 ? " and the commands" : tail) : "Hide " + rest;
+  // The lock is read at the press: a note typed after the build flips it in place (see the note's input handler).
+  return h("button", { class: "unfold", type: "button", id: "unfold-" + it.id, "aria-expanded": String(open), "aria-controls": "fold-" + it.id, "aria-disabled": locked ? "true" : null,
+    onclick: () => { if (foldLocked(it)) return; state.unfold[it.id] = !open; repaint(it); } },
+    h("span", { class: "chev", "aria-hidden": "true" }),
+    h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
+    h("span", { class: "sr" }, " for No. " + it.n));
+}
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
-  const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
+  const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
     saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
@@ -1262,6 +1312,8 @@ function buildCard(it) {
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
+  // A seen card folds every part the owner answers with, behind one control. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
+  let ncmd = 0; const fold = isSeen(it) ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
   const multi = isMulti(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
@@ -1269,15 +1321,16 @@ function buildCard(it) {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
     const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : "") + (hasOptLinks(it) ? " olinks" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
-    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
+    if (multi) put(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
+    put(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these")));
   } else {
-    card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
-    card.append(...cmdBlocks(it));
-    if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
-    card.append(ready, h("div", { class: "alts" },
+    const cmds = cmdBlocks(it); ncmd = cmds.length;
+    put(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
+    put(...cmds);
+    if (linksOf(it).length) put(h("div", { class: "links" }, linksOf(it).map(linkEl)));
+    put(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done")));
   }
   const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
@@ -1286,12 +1339,19 @@ function buildCard(it) {
   ta.addEventListener("input", () => {
     edited(); setDraft(it, { note: ta.value });
     nb.classList.toggle("need", need && !ta.value.trim());
-    const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
+    const cardEl = ta.closest(".card"), rd = cardEl.querySelector(".ready"), ub = cardEl.querySelector(":scope > .unfold");
     rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
+    // The note is not in signature(), so a push never rebuilds this box under the owner's typing. The lock flips here, in place.
+    if (ub) { if (foldLocked(it)) ub.setAttribute("aria-disabled", "true"); else ub.removeAttribute("aria-disabled"); }
     renderRail(); renderBar();
   });
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
-  card.append(nb);
+  put(nb);
+  if (fold) {
+    const locked = foldLocked(it);
+    if (locked) state.unfold[it.id] = true;
+    card.append(unfoldBtn(it, !!state.unfold[it.id], locked, ncmd), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, fold));
+  }
   if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
@@ -1349,7 +1409,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1399,7 +1459,21 @@ function reconcile(parent, want) {
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
   while (parent.children.length > want.length) parent.lastElementChild.remove();
 }
-const tierEls = {}, bundleEls = {};
+const tierEls = {}, bundleEls = {}, seenHeads = {};
+// Not "not answered": a seen card answered by a Send stays below the divider until reload.
+const SEEN_WORDS = "Asked before";
+// The line between a tier's new and seen items. The first one on the page shows the words; the others keep them for a screen reader (ux-label-once).
+function seenHead(k, first) {
+  let e = seenHeads[k];
+  if (!e) {
+    const d = document.createElement("span");
+    d.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    e = seenHeads[k] = h("p", { class: "seenhead" }, d.firstChild, h("span", {}, SEEN_WORDS), h("span", { class: "seenrule", "aria-hidden": "true" }));
+  }
+  e.children[1].className = first ? "w" : "sr";
+  if (first) { e.id = "seen-div"; e.removeAttribute("title"); } else { e.removeAttribute("id"); e.title = SEEN_WORDS; }
+  return e;
+}
 function tierEl(T) {
   if (!tierEls[T.k]) {
     const count = h("span", { class: "ct" });
@@ -1440,12 +1514,15 @@ function renderList() {
     want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
+  let wordsShown = false;
   TIERS.forEach((T) => {
     const items = by[T.k]; if (!items.length) return;
     const te = tierEl(T), body = [], done = new Set();
     te.count.textContent = String(items.filter((i) => !isSaved(i)).length);
+    let lined = false;
     items.forEach((it) => {
       if (done.has(it.id)) return;
+      if (!lined && isSeen(it)) { lined = true; body.push(seenHead(T.k, !wordsShown)); wordsShown = true; }
       const m = it.group ? items.filter((x) => x.group === it.group) : [it];
       if (m.length < 2) { done.add(it.id); body.push(cardFor(it)); return; }
       m.forEach((x) => done.add(x.id));
@@ -1876,9 +1953,10 @@ render();
   db.collection("items").onSnapshot((s) => {
     const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
     // A closed item stays hidden, unless the arbiter's writer filed it as a ruling.
-    state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true; render();
+    state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true;
+    feed.items = true; feed.all = all; freezeSeen(); render();
   }, () => {});
-  db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
+  db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; applyIdentity(); render(); }, () => {});

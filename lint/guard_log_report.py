@@ -10,13 +10,19 @@ first line in the whole log, whatever --days says, or "never". A line of any dec
 fired; a combined STE line (`STE007,STE008`) credits each code; an id only the log holds keeps its row,
 and so does every whole STE code with a first line in the log (no hook writes one now).
 A line ends in the hook's session_id as a sixth field; a five-field line, or "-", is "unknown
-session". --session <id> keeps one session's lines. --by-session adds counts per session."""
+session". --session <id> keeps one session's lines. --by-session adds counts per session.
+A line starts with its time and UTC offset (2026-11-01T12:00:00+05:00). `Row.when` is that instant as
+a naive time on the reading machine's clock; `Row.at` is the aware instant. A line from before the offset
+was written has no zone: `when` is its naked time and `at` is None, never assumed Central.
+--between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
+count of old lines that could fall in it under some zone, for the batch pace read (window()).
+--rule narrows --between to one rule id (the pace read uses load-brake)."""
 import argparse
 import os
 import re
 import sys
 from collections import namedtuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
@@ -29,7 +35,8 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BY_SESSION_ROWS = 200
-Row = namedtuple("Row", "line when tool decision rule matched session")
+Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
+MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
 COMBINED_CODE = re.compile(r"STE\d+")
 WHOLE_CODE = re.compile(r"STE\d{3}")  # a whole STE code: STE and three digits
 
@@ -50,6 +57,9 @@ def parse_line(raw):
     """Return the Row for one guard.log line, or None when it is unreadable.
 
     The one reader of guard.log lines. Both shapes: five tab fields, or six with the session last.
+    The time is ISO 8601, with a UTC offset or without. `at` is the aware instant for an offset
+    time, None for an old one; `when` is naive reader-local: an offset line is
+    converted to the reader's clock, an old line keeps its wall time as written.
     `session` is field 6 alone, or UNKNOWN for a five-field line, an empty field or the
     placeholder. A tab beyond field 6 stays in `matched`, never in `session`. Unreadable: fewer
     than four fields, or a bad timestamp.
@@ -65,7 +75,33 @@ def parse_line(raw):
     parts += [""] * (6 - len(parts))
     session = parts[5] if parts[5] not in ("", SESSION_LOG_PLACEHOLDER) else UNKNOWN
     matched = "\t".join([parts[4]] + parts[6:])
-    return Row(line, when, parts[1], parts[2], parts[3], matched, session)
+    at = None
+    if when.tzinfo is not None:
+        at = when
+        when = when.astimezone().replace(tzinfo=None)
+    return Row(line, when, parts[1], parts[2], parts[3], matched, session, at)
+
+
+def window(lines, start, end, rule=None):
+    """Return (rows whose `at` is in [start, end], unknown_count). `start` and `end` are aware.
+
+    An old line has no zone, so it is never a row. It counts as unknown when its naked time, read as
+    wall time against the bounds' UTC wall time, is within MAX_ZONE_HOURS of the window: some zone
+    could put it inside. `rule` keeps one rule id; a line of another rule counts nowhere.
+    """
+    rows, unknown = [], 0
+    low = start.astimezone(timezone.utc).replace(tzinfo=None) - timedelta(hours=MAX_ZONE_HOURS)
+    high = end.astimezone(timezone.utc).replace(tzinfo=None) + timedelta(hours=MAX_ZONE_HOURS)
+    for raw in lines:
+        row = parse_line(raw)
+        if row is None or (rule is not None and row.rule != rule):
+            continue
+        if row.at is not None:
+            if start <= row.at <= end:
+                rows.append(row)
+        elif low <= row.when <= high:
+            unknown += 1
+    return rows, unknown
 
 
 def summarize(lines, days, now, session=None):
@@ -169,9 +205,14 @@ def main(argv):
                     help="list every rule id the guard and the other guards can emit, with its first-line date or never")
     ap.add_argument("--session", help="keep only this session's lines (exact id)")
     ap.add_argument("--by-session", action="store_true", help="add counts per session")
+    ap.add_argument("--between", nargs=2, metavar=("START", "END"), type=datetime.fromisoformat,
+                    help="print the rows inside this window (aware ISO 8601 times) and the old-line unknown count")
+    ap.add_argument("--rule", help="with --between: keep one rule id")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):  # absent when stdout is redirected to StringIO
         sys.stdout.reconfigure(errors="replace")
+    if args.between and any(t.tzinfo is None for t in args.between):
+        ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
     ids = None
     if args.all_rules:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script folder off the path
@@ -179,6 +220,11 @@ def main(argv):
         ids = rule_audit.emitted_rule_ids()
     try:
         with open(args.log, encoding="utf-8", errors="replace") as handle:
+            if args.between:
+                rows, unknown = window(handle, args.between[0], args.between[1], args.rule)
+                print("\n".join(row.line for row in rows))
+                print("unknown (old lines with no zone that could fall inside): %d" % unknown)
+                return 0
             print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
     except FileNotFoundError:
         print("unreadable: log not found")
