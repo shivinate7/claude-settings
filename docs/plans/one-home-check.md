@@ -12,7 +12,7 @@ Before then, the rules are the working text here.
 ### The incident
 
 - The STE output rule (`output-write-in-ste`) was reworded in commit 9d577ab4 (the plain-prose
-  lint commit, 2026-10-17). Its old sentence was:
+  lint commit, 2026-10-17). The removed sentence reads, in full:
 
 ```
 **Output.** Write in Simplified Technical English by default, to me and between agents,
@@ -195,7 +195,7 @@ trusted only after it goes red on the defect it guards (`verification-trust-guar
 8. Re-flow, red. The old sentence, wrapped at a different point from the pre-9d577ab4 wrap, is
    copied. COPY001 fires. The line-based copy finder misses this case.
 9. Scanner, correct result. An anchor in an inline code span is text, not a source. A lone
-   apostrophe in "Don't" does not change the word run. A `//` or `/*` inside a rule sentence does
+   apostrophe in ordinary text does not change the word run. A `//` or `/*` inside a rule sentence does
    not hide a copy.
 10. Child exception. (i) A reason and a copy in the same file: green. (ii) An empty reason: red.
     (iii) A rule id that the parent lacks: red. (iv) No copy in the file: red.
