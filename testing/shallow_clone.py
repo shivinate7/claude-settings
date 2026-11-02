@@ -9,11 +9,15 @@ fetched at depth 1.
     error = shallow_clone.make(source, dest, pin)        # "" when both git calls worked
     facts = shallow_clone.facts(dest, pin)               # shallow, pin_present, ancestor_rc (1 in the bug shape)
 """
-import subprocess
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 
 def _git(where, *args):
-    return subprocess.run(["git", "-C", where, *args], capture_output=True, text=True)
+    return _nowindow.run(["git", "-C", where, *args], capture_output=True, text=True)
 
 
 def make(source, dest, pin):
@@ -21,7 +25,7 @@ def make(source, dest, pin):
     depth 1. Sets `uploadpack.allowAnySHA1InWant` on `source`, which the fetch of a bare sha needs. Returns the git
     error text, "" when both calls worked."""
     _git(source, "config", "uploadpack.allowAnySHA1InWant", "true")
-    made = subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-local", source, dest], capture_output=True, text=True)
+    made = _nowindow.run(["git", "clone", "-q", "--depth", "1", "--no-local", source, dest], capture_output=True, text=True)
     if made.returncode:
         return made.stderr.strip() or "git clone failed"
     fetched = _git(dest, "fetch", "-q", "--depth", "1", "origin", pin)
