@@ -2,9 +2,9 @@
 
 ## The ruling
 
-No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, a write tool call that names the file, and a Read call on it. A runner may load the file into its own process with its loader flag. A runner prints nothing, so no value reaches the session.
+No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, and a write tool call that names the file. The settings deny list refuses a Read call on it. A runner may load the file into its own process with its loader flag. A runner prints nothing, so no value reaches the session.
 
-One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. Every form reads one shared basename matcher in guard_env.
+One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. The guard's forms read one shared basename matcher in guard_env (`names_env_file`).
 
 Ruling: coordinator, 2026-11-01 22:42 CST. Process-only. The owner may reverse it. Reason: `.envrc` often holds exported secrets. That is the likely risk named below.
 
@@ -16,7 +16,7 @@ Shell form. `judge_shell` calls `env_refusal` and `env_heredoc_refusal`. A name 
 
 Write form. In `judge`, a write tool call (Write, Edit, MultiEdit or NotebookEdit) whose target name is in the scope is refused (`is_env`). It reads the same matcher as the shell form.
 
-Read form. The same scope applies. The settings deny list holds `Read(.env)` and `Read(.env.*)`. The guard refuses a Read call on any other name in the scope.
+Read form. The guard does not judge Read. It returns early for Read and Grep. The settings deny list refuses a Read call on a name that starts with `.env`, at any depth. Its `!` carve-outs keep `.env.example` readable.
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
