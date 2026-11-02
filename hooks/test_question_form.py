@@ -463,6 +463,14 @@ def case_session_press_needs_no_link():
          entry_of(page_item(options=[session, keep])), None)
     page("an owner press of Merge PR #374 in GitHub, with no link, is refused as press-link", "set",
          entry_of(page_item(options=[owner, keep])), ("press-link", None))
+    # Decision act-in-place: an option whose label asks him to press is an owner press, whatever its how says.
+    for label, how in (("Approve on GitHub", "The session records your pick and reruns CI."),
+                       ("Pick this", "The session opens PR #374 after your pick, then press Merge."),
+                       ("Click Merge on GitHub", "The session merges after your pick.")):
+        page("an owner press labelled %r, with no link, is refused as press-link" % label, "set",
+             entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+    page("a session press after the pick, with no link, passes when the pick comes first", "set",
+         entry_of(page_item(options=[dict(session, how="After the pick, the session merges PR #374."), keep])), None)
     chat("a press the session makes after the pick, with no url, passes",
          chat_box(options=[{"label": "Merge PR #374", "description": "The session merges PR #374 after your pick. "
                                                                     "Gain: it lands at once. Lose: nobody reads it first."},
@@ -753,6 +761,14 @@ def case_gh_login_switch_on_the_page():
          "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
                          "old_str": "gh pr view 3", "new_str": "gh pr view 3\ngh pr merge 3"},
          ("gh-login-switch", None))
+    # An edit that names a shivinate7 repo on a gh line keeps no switch, so it is refused as its full text is.
+    page("gh login switch: a str_replace that adds a -R shivinate7/ repo to a gh line is refused, as a full write is",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 3 -R shivinate7/repo"},
+         ("gh-login-switch", None))
+    page("gh login switch: a full write of a gh line that names a shivinate7/ repo with no switch is refused",
+         "set", entry_of(gh_task("gh pr view 3 -R shivinate7/repo", "gh pr view 3 -R shivinate7/repo")),
+         ("gh-login-switch", None))
 
 # ------------------------------------------------------------------ a step's span or fence holds a shell line only as a command
 
@@ -779,6 +795,15 @@ def case_command_in_item_spans():
             ("a comment opener span does not hide a git log pipe after it",
              ["Run `// note` then `git log | head`"], ("command-in-item", "shell line"))):
         page(name, "set", entry_of(task_item(steps)), want)
+    # A span whose first word is no program in the list still holds a second command after an operator: the
+    # reader must see past it. Each of these is refused on main.
+    for span in ("grep -n x a.py | head", "find . -name x | xargs rm", "yarn install && yarn test",
+                 "dir | findstr x", "get-process | sort", "env git log | head", "time git log | head",
+                 "$(git log) | head", "cmd /c git log | head"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    page("a fence holding grep x a | head is refused as a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
