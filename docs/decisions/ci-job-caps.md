@@ -6,7 +6,7 @@ Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when somethi
 
 The two numbers do not conflict. The setting is a cap of about 2x the job's slowest run in the last 30 runs. The check is that the slowest run stays under 80% of that cap. A 2x cap puts the slowest run at about 50%, inside the check. A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5). A cap rises only with a measured figure in the comment beside it.
 
-Stopgap: the wide caps keep a run from timing out while its timing-bound tests remain. They stay wide until `test-strategy-reset` removes those tests (rule 2: no fixed sleep or wall-clock bound). Do not narrow a cap ahead of that removal.
+Stopgap (owner, 2026-11-01 18:44 CST, with step c39): the caps are generous on purpose. A step here (`test-strategy-reset`) replaces time-pinned tests with tests that check outcomes, not time taken. Until those fixes reach a repo, its time-pinned tests stay, so each repo raises its caps generously in the meantime. Do not narrow a cap, or ask whether a cap means "about 2x" or "under 80%", before that removal reaches the repo.
 
 ## The table
 
