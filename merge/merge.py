@@ -7,6 +7,13 @@
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
+                          the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
+                          --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
+                          commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
+                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
+                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
+                          measured once on one PR head), one worktree.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -2061,9 +2068,13 @@ def open_worktree(root, info, base):
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
+    return add_worktree(root, info["head"])
+
+def add_worktree(root, head):
+    """Make a detached, locked worktree at `head`. -> (tmp, wt). The one home of the temporary tree: open_worktree and lane_lint call it."""
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
-    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, info["head"])  # a locked tree survives the janitor sweep
+    c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, head)  # a locked tree survives the janitor sweep
     if c:
         shutil.rmtree(tmp, ignore_errors=True)
         raise Stop("cannot make the worktree: " + out)
@@ -2074,6 +2085,62 @@ def drop_worktree(root, tmp, wt):
     git(root, "worktree", "remove", "--force", wt)
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
+
+LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes."
+
+def lane_head_and_base(root, target, base):
+    """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
+    The base is fetched, and the target too when this clone lacks it."""
+    base = base or "main"
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    if c:
+        raise Stop(f"git fetch origin {base} failed: {out}")
+    want = f"{target}^{{commit}}"
+    c, head = git(root, "rev-parse", "--verify", "-q", want)
+    if c:
+        git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+        c, head = git(root, "rev-parse", "--verify", "-q", want)
+    if c:
+        raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin")
+    return head, base
+
+def lane_lint(root, target, host, base="", unknown_ok=""):
+    """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
+    in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    if target.isdigit():
+        info = (host or Host()).pr(int(target))
+        head, base = info["head"], info["base"]
+        tmp, wt = open_worktree(root, info, base)
+    else:
+        head, base = lane_head_and_base(root, target, base)
+        tmp, wt = add_worktree(root, head)
+    try:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+        try:
+            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise Stop(f"the lint of {head[:9]} did not finish in {LINT_SECONDS} s, so it is unknown, not a pass. {LANE_LINT_REMEDY}")
+    finally:
+        drop_worktree(root, tmp, wt)
+    lines = out.splitlines()
+    log = [l for l in lines[-1:] if l.startswith("log=")]
+    fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
+    unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
+    short = head[:9]
+    if c == 0:
+        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        return 0
+    if c == 1:
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *(fails or [f"(no FAIL line read; ci-job exit {c})"]), *log, LANE_LINT_REMEDY]))
+    if c == 2:
+        if unknown_ok.strip():
+            say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknown, *log)
+            return 0
+        raise Stop("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
+                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+    raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 def ignore_checks(cfg):
     """merge.ignoreChecks -> {name: reason}. An entry without a name or a non-empty reason refuses the config."""
@@ -2423,7 +2490,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set.")
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first, then hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -2437,8 +2504,11 @@ def write_merge_role(tier):
 
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
-    p.add_argument("pr", nargs="?", type=int)
+    p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
+    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (coordinator or batch-runner)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -2447,18 +2517,31 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if a.role is not None:
+    if not a.lane_lint:
+        if a.base or a.lint_unknown_ok:
+            p.error("--base and --lint-unknown-ok go with --lane-lint")
+        if a.pr is not None and not a.pr.isdigit():
+            p.error(f"argument pr: invalid int value: {a.pr!r}")
+    if a.lane_lint:
+        if a.pr is None or a.confirm or a.unlock is not None or a.role is not None:
+            p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
+    elif a.role is not None:
         if a.pr is not None or a.confirm or a.unlock is not None:
             p.error("--role stands alone")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, or --role TIER")
     try:
+        if a.lane_lint:
+            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            if c:
+                raise Stop("not in a git checkout")
+            return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role gate and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
+            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first, then hand the pull request number and its head to the batch runner.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -2471,6 +2554,7 @@ def main(argv, host=None, lock=None):
             say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
         h = host or Host()
+        a.pr = int(a.pr)
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
         refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
         cfg = load_config(root, info["base"], a.config)
