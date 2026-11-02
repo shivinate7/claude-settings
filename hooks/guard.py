@@ -3354,7 +3354,8 @@ COORDINATOR_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo
 COORDINATOR_SCOPE_MODE = "deny"
 COORDINATOR_SCOPE_REASON = (
     "Rule (Roles): a coordinator briefs lanes and writes records. It does not change a repository's code, "
-    "settings or instructions itself. "
+    "settings or instructions itself "
+    "(decision session-tiers, a coordinator stays in its tier and a guard enforces it). "
     "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
