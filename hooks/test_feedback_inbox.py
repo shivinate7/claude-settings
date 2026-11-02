@@ -1742,7 +1742,7 @@ PARKED_NOTE = "Wait until the mutation job is split."
 
 
 def parked_answer_data():
-    """A parked act's record, as the waiting page saves it: its note is the entry's own text, not the owner's word."""
+    """A parked act's record, as the waiting page saves it: its note is the entry's own text, not the owner's words."""
     return {"parked": True, "id": "ci-cap-raise", "act": "unpark", "ref": "Step ci-cap-raise, a 20-minute cap",
             "note": PARKED_NOTE, "at": PAGE_AT}
 
