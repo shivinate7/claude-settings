@@ -2760,7 +2760,7 @@ class PastRulingRelay(unittest.TestCase):
         self.assertEqual(len(self.model_calls()), 1)
 
     def test_an_unvetted_line_beside_a_prose_question_passes_when_the_model_fails(self):
-        # Review round 2: a prose question with no Input Needed item. The Unvetted line beside the question passes it,
+        # A prose question with no Input Needed item. The Unvetted line beside the question passes it,
         # whether it sits on its own line, in a blockquote, or on the question line.
         beside = ("Should the GitHub apps keep their access to claude-settings?\n" + UNVETTED,
                   "> Should the GitHub apps keep their access to claude-settings?\n> " + UNVETTED,
