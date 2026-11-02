@@ -14,6 +14,8 @@
       "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
       "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
     ],
-    "summary_fraction_default": 0.2
+    "summary_fraction_default": 0.2,
+    "blocking_margin": 13000,
+    "output_reserve": 20000
   }
 }
