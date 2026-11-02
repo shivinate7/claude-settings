@@ -898,3 +898,12 @@
 - none-direction-bare-step: a bare "step" stays where a repo may have no roadmap; GLOSSARY.md makes step a roadmap step. Say "a roadmap step, or a todo record where no roadmap" (skills/waiting-page/SKILL.md, hooks/call_judge.py NONE_DIRECTION_RULE, docs/decisions/questions-go-to-owner.md, rework-leaves-page.md). Decision: questions-go-to-owner
 - none-direction-task-done: `is_reask` reads a task `lastAnswer` `{done: false, note}` written with new `options` as a re-ask, so the page judge gets the none rule there; return False when `done` is present (hooks/call_judge.py). Decision: question-reviewer-agent-hook
 - none-direction-doc-drift: the skill, the rule text and the record say "new options plus a lastAnswer note", but `is_reask` also needs no picked choice; add "with no picked choice" (skills/waiting-page/SKILL.md, hooks/call_judge.py, docs/decisions/question-reviewer-agent-hook.md). Decision: question-reviewer-agent-hook
+- feel-step-set-done-untried: triage can set a feel step to done with no device trial, and the step then leaves every upkeep row (skills/roadmap/build.py upkeep). Decision: feel-fix-waits-device-check.
+- feel-rename-half-similar: a rename under 50% similar, or with diff.renames off, reads as a delete: safe fail, wrong message (lint/check_record_slugs.py).
+- feel-edit-swap-message: an edit that drops `**Feel.**` and adds a valid device trial fails with a misleading message (lint/check_record_slugs.py).
+- feel-trial-time-space: a device-trial time with a space instead of `T` fails, though step JSON takes it (lint/check_record_slugs.py).
+- feel-lint-says-device-check: the lint message says "device check" where prose says "device trial" (lint/check_record_slugs.py).
+- feel-probe-skips-debt-check: the compliance probe in other repos does not run the debt check (lint/compliance_probes.py).
+- feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
+- feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
+- feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
