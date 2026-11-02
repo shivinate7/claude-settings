@@ -387,7 +387,7 @@ def _worktree_entries(where: str, paths):
         if len(blobs) != len(hashed):
             return None
         for path, blob in zip(hashed, blobs):
-            executable = os.stat(os.path.join(where, path)).st_mode & 0o111
+            executable = os.stat(os.path.join(where, path)).st_mode & 0o100
             entries[path] = ("100755" if executable else "100644", blob)
     return entries
 
