@@ -1886,28 +1886,36 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
-def marker_hits(brief) -> set:
-    """The {(kind, n)} markers of a brief, read from BRIEF_MARKERS: the one marker scanner. A "line-start" row reads
-    every line of the brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None
-    for a row with none (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file.
-    The two positions differ by the owner's ruling (decision agent-model-cap); BRIEF_MARKERS says how."""
+def marker_scan(brief) -> list:
+    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
+    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions differ
+    by the owner's ruling (decision agent-model-cap); BRIEF_MARKERS says how."""
     if not isinstance(brief, str):
-        return set()
+        return []
     first = brief_first_line(brief)
-    hits = set()
+    starts, leads = [], []
     for kind, rx, position in _MARKER_ROWS:
         if position == "line-start":
             found = list(rx.finditer(brief))
+            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
         else:
             hit = rx.search(first)
             found = [hit] if hit else []
-        hits.update((kind, hit.group(1) if rx.groups else None) for hit in found)
-    return hits
+            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return [(kind, n) for _, kind, n in sorted(starts)] + leads
+
+
+def marker_hits(brief) -> set:
+    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
+    return set(marker_scan(brief))
 
 
 def brief_markers(brief) -> list:
-    """The [(kind, n)] round and try markers of a brief: marker_hits without the audit marker, which has no n."""
-    return sorted((kind, n) for kind, n in marker_hits(brief) if n is not None)
+    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
+    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
+    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
 
 
 def builder_third_round(brief) -> bool:

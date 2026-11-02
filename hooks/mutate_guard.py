@@ -838,7 +838,7 @@ MUTATIONS = [
     ("step-up: the line-start rows read the first line only, so a round line after the first line walks past",
      '            found = list(rx.finditer(brief))',
      '            found = list(rx.finditer(first))', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
-    ("step-up: the first-line marker search is dropped, so a Round 3 of 3 behind a role word on line one asks",
+    ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
