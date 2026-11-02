@@ -83,7 +83,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   lane-closes-after-records
                        deny. An archive_session of a lane (newest get_session record of the target, read from the
                        transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
-                       that holds its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
+                       equal to its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
                        and a read of the open list that fails (gh missing too) are refusals. A target with no lane
                        tag passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)

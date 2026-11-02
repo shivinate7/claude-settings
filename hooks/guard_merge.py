@@ -631,7 +631,7 @@ _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 def archive_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
-    while any open pull request of its cs-repo has a head ref that holds its cs-step slug. Fails closed:
+    while any open pull request of its cs-repo has a head ref equal to its cs-step slug. Fails closed:
     any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if tool != ARCHIVE_TOOL:
         return None
@@ -658,7 +658,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
                 rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
             for row in rows:
                 ref = str(row["head"]["ref"])
-                slug = next((s for s in slugs if s in ref), None)
+                slug = next((s for s in slugs if s == ref), None)
                 if slug:
                     return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
     except (Exception, SystemExit):
