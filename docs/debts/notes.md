@@ -875,3 +875,6 @@
 - ps1-copy-skill-prune-no-backup: in copy mode, install.ps1 prunes files inside a copied skill in place, while install.sh backs the copy up first (install.ps1 Install-Dir). Decision: copy-mode-overwrites-no-backup
 - install-sh-unchecked-skill-mv: install.sh moves an old skill backup with an unchecked `mv` (install.sh move_old_skill_baks). Decision: install-manifest-prunes
 - install-tarball-no-prune: an install from a source with no .git counts every file in the extracted tree as shipped, so a file main removed stays in place (install.sh tarball fallback). Decision: install-manifest-prunes
+- install-first-run-rm-no-retry: on the first run with no manifest, a failed delete of a listed link into the clone is not held back, so the manifest is written and the link is never retried (install.sh retire_listed). Decision: install-manifest-prunes
+- install-ps1-nonascii-names: the install.ps1 post-merge hook reads git without -z and the installer decodes -z output with the console encoding, so a non-ASCII shipped name could be skipped. No such name ships now. Decision: install-manifest-prunes
+- install-manifest-test-gaps: no test runs install.ps1's manifest code outside CI, none feeds git a failure mid-install, and none uses odd file names. Decision: install-manifest-prunes
