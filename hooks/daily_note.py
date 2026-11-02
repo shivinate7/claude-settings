@@ -15,7 +15,7 @@ path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
 There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
-A line's day is the date its timestamp is written with: guard.log holds Central wall time.
+A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
 
 Before the done-today stamp check, at every start, it also prints the one line of
 precompact_handoff.cc_version_check(): the installed Claude Code changed a compaction fact the
