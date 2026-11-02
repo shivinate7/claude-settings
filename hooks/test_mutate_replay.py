@@ -32,6 +32,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
 from unittest import mock
@@ -935,6 +936,18 @@ PW_RECEIVED = ("Running 1 test using 1 worker\n\n"
                "      5 | });\n\n"
                "  1 failed\n    [chromium] › unit/band.unit.ts:4:5 › band › grades\n")
 PW_PASS = "Running 1 test using 1 worker\n\n  1 passed (1.2s)\n"
+# A web-first matcher that times out prints the timeout, then its own expect error and call log.
+PW_TIMEOUT_MATCHER = ("Running 1 test using 1 worker\n\n" + PW_HEADER + "\n"
+                      "    Test timeout of 30000ms exceeded.\n\n"
+                      "    Error: expect(locator).toBeVisible() failed\n\n"
+                      "    Locator: getByRole('button', { name: 'Save' })\n"
+                      "    Expected: visible\n"
+                      "    Received: <element(s) not found>\n"
+                      "    Call log:\n"
+                      "      - expect.toBeVisible with timeout 5000ms\n\n" + PW_FRAME + PW_SUMMARY)
+PW_CLOSED_MATCHER = ("Running 1 test using 1 worker\n\n" + PW_HEADER + "\n"
+                     "    Error: Target page, context or browser has been closed\n\n"
+                     "    Error: expect(page).toHaveURL(expected) failed\n\n" + PW_FRAME + PW_SUMMARY)
 
 
 class PlaywrightClassifyTests(unittest.TestCase):
@@ -946,6 +959,12 @@ class PlaywrightClassifyTests(unittest.TestCase):
 
     def test_a_test_timeout_under_an_expect_frame_is_not_a_kill(self):
         self.assertIn(api("classify_playwright")(1, PW_TIMEOUT, False), ("crash", "timeout"))
+
+    def test_a_test_timeout_inside_a_web_first_matcher_is_not_an_assert(self):
+        self.assertIn(api("classify_playwright")(1, PW_TIMEOUT_MATCHER, False), ("crash", "timeout"))
+
+    def test_a_closed_target_followed_by_an_expect_page_line_is_a_crash(self):
+        self.assertEqual(api("classify_playwright")(1, PW_CLOSED_MATCHER, False), "crash")
 
     def test_a_received_expected_failure_is_an_assert(self):
         self.assertEqual(api("classify_playwright")(1, PW_RECEIVED, False), "assert")
@@ -1035,6 +1054,36 @@ class InstallTimeoutTests(unittest.TestCase):
                         os.kill(pid, signal.SIGKILL)  # only the pids this case logged
                     except OSError:
                         pass
+
+
+class RequestStopTests(unittest.TestCase):
+    """request_stop is the handler of SIGTERM and SIGINT. A signal that lands on the thread holding _LIVE_LOCK
+    (an install's Popen) must return, not wait on a lock its own thread holds."""
+
+    def test_request_stop_called_under_the_held_live_lock_returns(self):
+        stop, live_lock = api("request_stop"), api("_LIVE_LOCK")
+        returned = []
+
+        def hold_and_stop():
+            try:
+                with live_lock:
+                    stop()
+                returned.append(True)
+            except RuntimeError:
+                pass  # a stuck thread that the release below frees ends its `with` here; returned stays empty
+
+        # Patched, so a stop sets a flag of this case and signals no real child group.
+        with mock.patch.object(mutate_shared, "_STOP", threading.Event()):
+            with mock.patch.object(mutate_shared, "_LIVE_GROUPS", set()):
+                worker = threading.Thread(target=hold_and_stop, daemon=True)
+                worker.start()
+                worker.join(5)
+                alive = worker.is_alive()
+                if alive:
+                    live_lock.release()  # a plain Lock has no owner: free it, so later cases can take it
+                    worker.join(5)
+        self.assertFalse(alive, "request_stop waited on _LIVE_LOCK, which its own thread held")
+        self.assertTrue(returned, "request_stop did not return")
 
 
 class FixtureSanityTests(unittest.TestCase):
