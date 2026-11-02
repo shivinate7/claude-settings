@@ -11111,8 +11111,9 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id):
-    """Run commit, push and stop for one agent in `repo`. Returns (stdout seen, guard.log rows)."""
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    Returns (stdout seen, guard.log rows)."""
     materialize(repo)
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -11123,7 +11124,7 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
-               "agent_id": agent_id, "agent_type": agent_type} for c in (COMMIT, PUSH)]
+               "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
                    "agent_type": agent_type})
     out = ""
@@ -12124,30 +12125,33 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that rebases onto a lane tip
 
 
 def two_bases_reason_case():
-    """A deny on two received bases names every remaining base: the lane tip and main's tip. The cut point
-    is no remaining base, since the ancestor filter drops it, so the reason names it not."""
+    """A deny on a test edit that matches neither of two received bases names no path and no commit, and its
+    one reason gives both undo routes: restore a changed test file, and delete a new one. The rule reads no
+    bases, so the reason cannot name one."""
     out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-two"), _bd_two, "builder", "bld1")
     answers = _guard_answers(out)
     if not answers:
         return False, "no guard answer for the commit"
     decision, reason = answers[0]
     main = _bd_two + "-main"
-    lane = run_vcs(main, "rev-parse", "lane").stdout.strip()
-    tip = run_vcs(main, "rev-parse", "main").stdout.strip()
-    cut = run_vcs(main, "rev-parse", "main~1").stdout.strip()
+    commits = [run_vcs(main, "rev-parse", rev).stdout.strip() for rev in ("lane", "main", "main~1")]
     problems = []
     if decision != "deny":
         problems.append("expected deny at commit, got %r" % decision)
-    for sha, name in ((lane, "the lane tip"), (tip, "main's tip")):
-        if sha[:12] not in reason:
-            problems.append("the reason does not name %s, a remaining base: %s" % (name, sha[:12]))
-    if cut[:12] in reason:
-        problems.append("the reason names the cut point, which is no remaining base")
-    return (not problems), ("; ".join(problems) or "the reason names every remaining base, the lane tip and main's tip")
+    for sha in commits:
+        if sha[:12] in reason:
+            problems.append("the reason names a commit, %s" % sha[:12])
+    for word in ("tests/", "test_a"):
+        if word in reason:
+            problems.append("the reason names a test path: %r" % word)
+    for route in ("restore", "delete"):
+        if route not in reason.lower():
+            problems.append("the reason gives no %r undo route" % route)
+    return (not problems), ("; ".join(problems) or "the deny names no path and no commit, and gives both undo routes")
 
 
-LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on two received bases names every remaining base and no older one",
-                         two_bases_reason_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on a test edit that matches neither of two received bases names no "
+                         "path or commit, and gives both undo routes", two_bases_reason_case))
 # A pull of a test-author's fast-forward onto the builder's own product commit is a received base.
 diff_repo("bd-f1-pull", _f1_pull)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that pulls a test-author's fast-forward over its own product "
@@ -12195,7 +12199,24 @@ def logged_builder_case(label):
     return case
 
 
-# Allow: a merge result, a replayed or cherry-picked test-author commit, and a squash are git's, not the builder's.
+def refused_push_and_stop_case(label):
+    """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
+    writes a builder-diff line. The commit check is left out: the row names push and stop only."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1", commit=False)
+        decisions = [decision for decision, _reason in _guard_answers(out)]
+        denied = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == BDIFF]
+        if decisions != ["deny", "deny"]:
+            return False, "expected a deny at push and at the first stop, got %r" % decisions
+        if len(denied) != 2:
+            return False, "expected two builder-diff deny lines, got %d" % len(denied)
+        return True, "denied at push and at the first stop; two builder-diff deny lines"
+    return case
+
+
+# Allow: a merge result and a plain cherry-pick of a test-author commit are git's, not the builder's. A commit
+# the builder makes from a staged pick or a squash is its own (the rows below).
 # The commit check runs in the state the builder stops in; push and stop run after the commit.
 _bd_c1_pre = diff_repo("bd-c1-pre", _c1_mid_merge)
 sh("builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit",
@@ -12218,15 +12239,16 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-auth
 _bd_b1b = diff_repo("bd-b1b-staged", _b1b_cherry_staged)
 sh("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit",
    COMMIT, "allow", cwd=_bd_b1b, agent_id="bld1", agent_type="builder")
+# A staged cherry-pick that the builder commits, and a squash the builder commits, are plain commits of its own.
+# Their test file is refused at push and stop. A squash commit cannot be told apart from the builder's own commit,
+# so this is a known gap, named in docs/debts/notes.md (builders-squash-cherry-pick-n).
 diff_repo("bd-b1b-committed", _b1b_cherry_committed)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit, then a "
-                         "commit, is allowed at push and stop, and logs no builder-diff line",
-                         clean_builder_case("bd-b1b-committed")))
-# Squash: git writes .git/SQUASH_MSG until the commit, and removes it after. After the commit the guard can read no
-# marker, so the squash commit is logged only, not refused.
+                         "commit, is denied at push and at the first stop",
+                         refused_push_and_stop_case("bd-b1b-committed")))
 diff_repo("bd-j1-squash", _j1_squash)
-LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is logged only, never refused",
-                         logged_builder_case("bd-j1-squash")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at "
+                         "the first stop", refused_push_and_stop_case("bd-j1-squash")))
 
 # Log-only: a rebase pick, and a write after a rebase, change a test file, and the guard logs them for the reviewer.
 diff_repo("bd-h1r-restore", _h1r_restore)
