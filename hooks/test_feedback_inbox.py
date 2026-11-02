@@ -126,8 +126,9 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     passes, and so does a pick in a repo with no waiting page, and "1 y, 2 n", whose letters are no pick.
   - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
     granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead; whole
-    words, any case) and, in the same message outside any fence, an act or scope word (merge, push, ready,
-    delete, close, deploy, release, publish, any, all, always, every, standing, from now on) blocks unless
+    words, any case) and, in the same message outside any fence, an act or scope word (merge, push, delete,
+    deploy, release, publish, always, standing, from now on, and all, any or every before repo, repos, PR,
+    PRs, branch or branches) blocks unless
     the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
     `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or .claude/CLAUDE.md
     at the repo root, each tracked; a plain ruling there still blocks. Bare "permission" is no grant word,
@@ -1259,7 +1260,8 @@ GRANT_WORDS = (  # one lone message per grant word, each with an act word: a gra
     "I approve the merge.", "Approved to merge.", "The approval is in for the merge.",
     "This is my grant to merge.", "Granted to push the lane.", "Permission to merge.", "Permissions to merge.",
     "I authorize the merge.", "You are authorized to merge.", "Go ahead and merge.",
-    "You have my go-ahead to merge.", "Authorised to merge.")
+    "You have my go-ahead to merge.", "Authorised to merge.", "Go ahead and merge it.",
+    "Approved for all repos.", "Approved for every PR.", "Approved from now on.")
 F47_TEXT = "YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC."
 GRANT_SCANNER = ("Approved for the merge.\n"
                  "/* a comment opener inside a string */ and // a line comment opener\n"
@@ -1488,6 +1490,18 @@ def case_grant_needs_an_act_word_passes():
     for text in ("Go ahead and fix the typo.", "The grant check misses closed items.", "Authorized: true."):
         expect_silent("grant home: %r has a grant word and no act word, passes" % text,
                       homed(new_cfg(), "no-act", (), text=text))
+
+
+def case_grant_act_words_narrowed_passes():
+    """The act and scope words are merge, push, delete, deploy, release, publish, always, standing, from now on,
+    and all, any or every before a scope noun (repo, repos, PR, PRs, branch, branches). "ready" and "close" are
+    no act word, and "all" or "any" before a plain noun is no scope. Each row holds a grant word and no act or
+    scope word, so each passes. Red now: today's act list still holds these words."""
+    for text in ("go ahead and run all the tests", "yes go ahead, it's ready",
+                 "looks good, go ahead with the fix for any remaining failures",
+                 "Why did you close the PR without approval?"):
+        expect_silent("grant home: %r has a grant word and no act or scope word, passes" % text,
+                      homed(new_cfg(), "narrowed", (), text=text))
 
 
 def case_pick_letters_a_to_h_passes():
@@ -2237,6 +2251,7 @@ CASES = (
     case_grant_words_as_parts_of_words_pass,
     case_grant_fenced_text_is_not_scanned_passes,
     case_grant_needs_an_act_word_passes,
+    case_grant_act_words_narrowed_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_page_check_reads_no_transcript_for_other_blocks,
