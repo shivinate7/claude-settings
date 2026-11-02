@@ -36,7 +36,8 @@ Known limits:
 - A drive name such as "the A: drive and the B: drive" reads as two lettered markers.
 - An owner message clears every open pick asked before it, not only the one it answers. A pick the next report still lists is asked again, with a fresh clock.
 - Any send in the asking turn counts as the send of that pick. A lane's pick passes on any send in the turn, not only one to its parent.
-- A lane send made before a peer message in the same turn does not count: the peer message starts a new turn.
+- A send made before a peer message, a task notice or a queued message does not count for a pick asked after it: each of those starts a new turn.
+- A meta record, such as Stop hook feedback, is never an owner message, so it clears no pick.
 - A lane with no get_session record of its own reads as owner-facing.
 
 Cost: no new process, timer or log. One layout read per turn whose Input Needed offers a pick and that opened no box. One JSON file per owner-facing session, `<handoffs dir>/<session_id>.picks`, written only at a Stop that records or clears a pick, and deleted when empty. It also keeps each sent pick's key for 24 hours, so a repeat of a sent pick is not asked again. One stat and one module import (`local_time`) per Stop otherwise. No extra transcript read: the Stop guard reads it already. Test: a Stop whose reply has no pick writes no file.
