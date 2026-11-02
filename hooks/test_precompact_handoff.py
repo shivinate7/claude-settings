@@ -1840,9 +1840,7 @@ def case_digest_plain_errors_are_not_refusals():
         c.cleanup()
 
 
-# F5: a failed tool result is a refusal when its first line is one of the three refusal shapes
-# Claude Code writes (a hook error, a user rejection, a permission denial). A network error, an OS
-# permission error, prose that only says "refused", and a plain exit code are not refusals.
+# F5: only the three refusal shapes make a failed tool result a refusal; the rest are not.
 REFUSAL_ROWS = (
     ("PreToolUse:Bash hook error: [guard] blocked", True),
     ("The user doesn't want to proceed with this tool use. The tool use was rejected", True),
@@ -1855,19 +1853,17 @@ REFUSAL_ROWS = (
 
 
 def case_digest_refusal_shapes():
-    """F5: each row's first line is listed exactly when the row says so. Each line carries its own
-    marker, so a listed line is found by its marker."""
+    """F5: each row's text, alone in its own transcript, is the one listed line when the row says
+    so, and no refused-acts section at all when it does not."""
     c = Case("dgshape")
     try:
         since = epoch(SINCE_ISO)
-        lines = [tool_result("%s SHAPEMARK%d" % (text, i), AFTER_ISO)
-                 for i, (text, _) in enumerate(REFUSAL_ROWS)]
-        d, err = digest_at(c, lines, since)
-        listed = refused_lines(d)
-        for i, (text, want) in enumerate(REFUSAL_ROWS):
-            got = any("SHAPEMARK%d" % i in ln for ln in listed)
+        for text, want in REFUSAL_ROWS:
+            d, err = digest_at(c, [tool_result(text, AFTER_ISO)], since)
+            listed = refused_lines(d)
+            ok = listed == [text] if want else "## Refused acts" not in (d or "")
             check("refused shape: %r is %s" % (text, "listed" if want else "not listed"),
-                  got == want, err or "section: %r" % (listed,))
+                  ok, err or "section: %r" % (listed,))
     finally:
         c.cleanup()
 
