@@ -145,7 +145,16 @@ class Layout(unittest.TestCase):
     def test_this_repo_is_in_shape(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         done = subprocess.run([sys.executable, PROBES, "layout", root], capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stdout.strip()), (0, "layout: in shape"))
+        out = done.stdout.strip()
+        if done.returncode == 2 and out.startswith("layout: unknown - waiting copy:"):
+            # Unknown is accepted only where the record branch is absent, as in a shallow clone (decision waiting-data-in-repo).
+            branch = layout.record_branch(root)
+            here = any(subprocess.run(["git", "-C", root, "rev-parse", "--verify", "-q", ref + "^{commit}"],
+                                      capture_output=True).returncode == 0
+                       for ref in ("refs/heads/" + branch, "refs/remotes/origin/" + branch))
+            self.assertFalse(here, "the record branch is here, so the copy must be read: " + out)
+            return
+        self.assertEqual((done.returncode, out), (0, "layout: in shape"))
 
     def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -158,6 +167,9 @@ class Layout(unittest.TestCase):
             self.assertNotIn("*", where, name)
             self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
         repo = Repo(self).core().write(EXTRAS, text)
+        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
+        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+        repo.commit("waiting copy").git("checkout", "-q", "-")
         for kind in kinds.values():
             repo.write(kind["path"].strip("/") + "/a.x")
         self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
