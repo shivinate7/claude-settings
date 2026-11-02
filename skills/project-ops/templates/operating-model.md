@@ -89,6 +89,8 @@ parent, or miss a message while busy.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
   A lane never rebases onto main and never merges.
+- Until `merge --reviewed` lands, the handoff message is the record body: the message that passes a
+  PR on carries the review record body (claude-settings record `pr-review-record`).
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
   runs the merge tool on it. The owner is not asked.

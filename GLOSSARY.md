@@ -35,6 +35,7 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | `gate` |
 | check | A lint, test or CI job that passes or fails a change. A check never asks. `lint/rule_audit.py` gives a rule that a check holds the kind `check`. | `docs/decisions/guard-guards-mistakes-only.md` | `gate`, `merge gate` |
 | record | One file in `docs/decisions/`, `docs/debts/` or `docs/plans/`, or one rule in `CLAUDE.md`. Its slug is its id. | `rule:git-record-own-file-per-kind`, `rule:git-one-record-per-question` | `entry (this sense)` |
+| review record | The comment on a PR that holds the review rounds, verdicts and net value for one head sha. The comment is the record, not a file. | `docs/decisions/pr-review-record.md` | — |
 | finding | Anything a reviewer or an audit reports. An open finding becomes a debt or a note. | `rule:roles-findings-are-debts-or-notes` | `issue (this sense)` |
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-statements` | `bug` |
 | round | One review and the fix after it. A change gets at most three. The builder brief for the fix after review round N-1 still carries the marker `Round N of 3`, which the guard reads on a line that starts with it, or as the leftmost marker in a first line that starts with none. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | — |
