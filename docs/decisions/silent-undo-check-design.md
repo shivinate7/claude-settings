@@ -25,7 +25,8 @@
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
-reason. No switch turns the check off.
+reason. No switch turns the check off. The lane undo read takes the same line: one excuse line, and
+no second name (owner, 2026-11-02 10:52 CST, page item 165, pick a).
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
