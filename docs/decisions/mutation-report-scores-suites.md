@@ -11,7 +11,11 @@ Two counts are held shut:
 - A crash is not a kill. A mutant is killed only when a suite prints a `FAIL` line. A throw, an import error and a timeout leave no `FAIL` line, or end at the timeout, so they count as crashed.
 - A suite that is not green on the clean source is not a killer. Each suite first runs on the clean source after the same parse and unparse that every mutant carries. A suite that is red there is listed as unusable for that file. A file with no usable suite, a parse error or a missing target reads UNKNOWN, never a rate.
 
-The report refuses nothing. No timer starts it, it starts no long-lived process, and it is not a required CI job. `hooks/test_mutate_report.py` pins the two counts (fixture suites that pin nothing, catch a mutant, crash, are red on the clean source, and an unrunnable file).
+`--report` still makes its mutants with `ast_mutants` only. The JS engine is for the mutation replay (PR 2 of lane tci-6), and no `--report` target uses it yet. For a JavaScript or TypeScript file the engine makes the same kinds of mutant, from `hooks/mutate_js.mjs`, run by `js_mutants` in `hooks/mutate_shared.py`. The engine parses with the TypeScript compiler API, loaded only through the plain-english-map loader (`lazy-typescript.mjs`, the one home of that import). It reads sites from the parse tree. A string, a template literal, a comment or JSX text that holds `a === b` gets no mutant. Each mutant is one text edit on the original source, and nothing else is reprinted. `js_mutants` samples as `ast_mutants` does. `classify_node_tap` reads a `node --test` run as `classify_run` reads a Python suite: only an assertion in a `not ok` block is a kill, and any other red is a crash.
+
+Both engines take a `lines` filter. `changed_lines` lists the lines that a commit range adds to a file, so a run can mutate only the code a change touched.
+
+The report refuses nothing. No timer starts it, it starts no long-lived process, and it is not a required CI job. `hooks/test_mutate_report.py` pins the two counts (fixture suites that pin nothing, catch a mutant, crash, are red on the clean source, and an unrunnable file). `hooks/test_mutate_js.py` pins the JS engine, the filter and the TAP classes.
 
 ## The scores
 
@@ -39,7 +43,7 @@ Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/t
 
 ## Cost
 
-One full report run, measured: 41.5 minutes on 4 cores with `--jobs 3`. About 155 suite process starts and 5 `git init` starts. The slowest suite, `hooks/test_stall_watch.py`, takes 150 s a run. Files written: temporary copies of the repository (about 13 MB each; the clean copy and up to 3 mutant copies at a time) in the system temp folder, all removed at the end. Nothing is written to the repository. `--limit N` and `--only TEXT` bound a run. A run stopped before its end keeps the rows already printed, because each file's row prints as that file ends.
+One full report run, measured: 41.5 minutes on 4 cores with `--jobs 3`. About 155 suite process starts and 5 `git init` starts. The slowest suite, `hooks/test_stall_watch.py`, takes 150 s a run. The JS engine is not in this run. In the replay it adds one `node` start per file mutated. Files written: temporary copies of the repository (about 13 MB each; the clean copy and up to 3 mutant copies at a time) in the system temp folder, all removed at the end. Nothing is written to the repository. `--limit N` and `--only TEXT` bound a run. A run stopped before its end keeps the rows already printed, because each file's row prints as that file ends.
 
 Kind: process
 Home: hooks/mutate_shared.py

@@ -31,6 +31,7 @@ functions, each shaped by its own file's `MUTATIONS`.
 import ast
 import glob
 import hashlib
+import json
 import os
 import random
 import re
@@ -332,26 +333,89 @@ def normalize(source: str) -> str:
     return ast.unparse(ast.parse(source))
 
 
-def ast_mutants(source: str, limit=None, seed: int = 0):
-    """Return up to `limit` [(label, mutated source)], one mutation each, repeatable for one seed.
-
-    A mutant whose text equals the normalized source is equivalent and is left out. Raises SyntaxError
-    when `source` does not parse: the caller reads that as UNKNOWN.
-    """
-    base = normalize(source)
-    found = []
-    for position in range(len(_sites(ast.parse(source)))):
-        tree = ast.parse(source)  # a fresh tree per site, so each mutant holds exactly one change
-        kind, node, index = _sites(tree)[position]
-        what = _apply(tree, kind, node, index)
-        line = getattr(node, "lineno", 0)
-        text = ast.unparse(ast.fix_missing_locations(tree))
-        if text != base:
-            found.append(("L%d %s" % (line, what), text))
+def _sample(found, limit, seed):
+    """Up to `limit` of `found`, in order, drawn the same way for every engine, so one seed keeps the
+    same mutants on a .py file and on a .ts file."""
     if limit is not None and len(found) > limit:
         keep = sorted(random.Random(seed).sample(range(len(found)), limit))
         found = [found[i] for i in keep]
     return found
+
+
+def ast_mutants(source: str, limit=None, seed: int = 0, lines=None):
+    """Return up to `limit` [(label, mutated source)], one mutation each, repeatable for one seed.
+
+    `lines`, when given, keeps only the sites whose node starts on one of those 1-based lines; the
+    sample is drawn from what is kept. A mutant whose text equals the normalized source is
+    equivalent and is left out. Raises SyntaxError when `source` does not parse: the caller reads
+    that as UNKNOWN.
+    """
+    base = normalize(source)
+    wanted = None if lines is None else set(lines)
+    found = []
+    for position in range(len(_sites(ast.parse(source)))):
+        tree = ast.parse(source)  # a fresh tree per site, so each mutant holds exactly one change
+        kind, node, index = _sites(tree)[position]
+        line = getattr(node, "lineno", 0)
+        if wanted is not None and line not in wanted:
+            continue
+        what = _apply(tree, kind, node, index)
+        text = ast.unparse(ast.fix_missing_locations(tree))
+        if text != base:
+            found.append(("L%d %s" % (line, what), text))
+    return _sample(found, limit, seed)
+
+
+# The JavaScript and TypeScript engine runs in its own process, because its parser is the typescript
+# package (hooks/mutate_js.mjs). Cost: one `node` start per file mutated.
+JS_ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mutate_js.mjs")
+JS_ENGINE_TIMEOUT = 120
+
+
+def js_mutants(path: str, limit=None, seed: int = 0, lines=None):
+    """Return up to `limit` [(label, mutated source)] for one .js/.mjs/.cjs/.jsx/.ts/.mts/.cts/.tsx
+    file, sampled as `ast_mutants` samples. `lines` keeps only the sites that start on those lines.
+    Raises ValueError when the engine cannot run or the file does not parse: the caller reads that
+    as UNKNOWN, as it reads a SyntaxError from `ast_mutants`.
+    """
+    import _nowindow  # lazy: this module defines names only at import (see the docstring)
+    if lines is not None and not set(lines):
+        return []  # no line wanted: the engine would reject an empty list, and nothing could match
+    node = shutil.which("node")
+    if not node:
+        raise ValueError("node is not on PATH")
+    command = [node, JS_ENGINE, path]
+    if lines is not None:
+        command += ["--lines", ",".join(str(number) for number in sorted(set(lines)))]
+    try:
+        done = _nowindow.run(command, capture_output=True, text=True, encoding="utf-8",
+                             stdin=subprocess.DEVNULL, timeout=JS_ENGINE_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("the JS engine did not run: %s" % error)
+    if done.returncode != 0:
+        raise ValueError(done.stderr.strip() or "the JS engine exited %d" % done.returncode)
+    try:
+        found = [(item["label"], item["text"]) for item in json.loads(done.stdout)]
+    except (ValueError, KeyError, TypeError) as error:
+        raise ValueError("the JS engine printed no mutant list: %s" % error)
+    return _sample(found, limit, seed)
+
+
+def changed_lines(repo: str, base: str, head: str, path: str) -> set:
+    """The 1-based lines of `path` (repository-relative) that `head` adds or rewrites against `base`.
+    A deleted line adds none. Raises ValueError when the diff cannot be read."""
+    import _nowindow
+    done = _nowindow.run(["git", "-C", repo, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames",
+                          base, head, "--", path], capture_output=True, text=True, encoding="utf-8",
+                         stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        raise ValueError("git diff failed: %s" % done.stderr.strip())
+    lines = set()
+    for hunk in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", done.stdout, re.M):
+        first = int(hunk.group(1))
+        count = 1 if hunk.group(2) is None else int(hunk.group(2))
+        lines.update(range(first, first + count))
+    return lines
 
 
 def classify_run(code, output: str, timed_out: bool) -> str:
@@ -362,6 +426,27 @@ def classify_run(code, output: str, timed_out: bool) -> str:
     if code == 0:
         return "pass"
     return "assert" if FAIL_LINE.search(output) else "crash"
+
+
+_TAP_ENTRY = re.compile(r"^\s*(?:not ok|ok)\b|^\s*1\.\.\d|^\s*# Subtest:", re.M)
+_ASSERT_MARK = re.compile(r"^\s*(?:code: 'ERR_ASSERTION'|name: 'AssertionError')", re.M)
+
+
+def classify_node_tap(code, output: str, timed_out: bool) -> str:
+    """One `node --test --test-reporter=tap` run: "pass", "assert" (an assertion went red: a `not ok`
+    block has the keyed line `code: 'ERR_ASSERTION'` or `name: 'AssertionError'`), "crash" (any other
+    red: an import error, a throw, an error text that only names AssertionError) or "timeout". Only "assert" is evidence a mutant was caught. A block runs from a test line to the
+    next one, so an `ok` block that names an assertion (a test that expects one) does not count."""
+    if timed_out:
+        return "timeout"
+    if code == 0:
+        return "pass"
+    starts = [m.start() for m in _TAP_ENTRY.finditer(output)] + [len(output)]
+    for begin, end in zip(starts, starts[1:]):
+        block = output[begin:end]
+        if re.match(r"\s*not ok\b", block) and _ASSERT_MARK.search(block):
+            return "assert"
+    return "crash"
 
 
 def run_suite_file(folder: str, rel: str, timeout: float):
