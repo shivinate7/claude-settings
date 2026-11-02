@@ -1,0 +1,9 @@
+{
+ "title": "The session-start hook reads a repo's visibility correctly",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21015,
+ "why": "The session-start hook prints \"repo caution: public\" for private repos. Measured Nov 1 19:30-19:52 CST: degen and joyous are private (gh api .private is true), but the hook said public, and a degen lane built a wrong premise on it, about spend.",
+ "note": "Hook file(s) found by grep \"repo caution\": /home/user/claude-settings/hooks/session_start.sh /home/user/claude-settings/hooks/test_session_start.py . Red first: a fixture private repo prints private; a public one prints public; a read that fails prints unknown, never public (verification-report-unknown-reads). Port: yes, the hook runs in every session. Ready: no open question.",
+ "updatedAt": "2026-11-02T01:57:00Z"
+}
