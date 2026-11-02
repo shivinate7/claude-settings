@@ -19,7 +19,7 @@ A line carries its UTC offset (an old line has none). Its day is the date of the
 
 Before the done-today stamp check, at every start, it also prints the one line of
 precompact_handoff.cc_version_check(): the installed Claude Code changed a compaction fact the
-handoff hooks rely on (docs/decisions/precompact-handoff.md, item 11). That check reads the binary
+handoff hooks rely on (docs/decisions/precompact-handoff.md, item 12). That check reads the binary
 only when its path, size or mtime is new, so a normal start costs a cache read and one stat. It prints nothing
 when the facts match, and it starts no process.
 

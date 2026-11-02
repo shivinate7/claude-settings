@@ -74,7 +74,7 @@ size, mtime; one cache entry per path), by anchor strings (setting keys, env nam
 cc_facts() gives each fact or "unknown"; the facts are cached in <config dir>/cc-behavior.json and
 compared with hooks/cc_compaction_baseline.json. A changed fact prints one line, for the
 session to name under Input Needed. Starts no process. Spec: docs/decisions/precompact-handoff.md,
-item 11.
+item 12.
 
 Never exits 2 and never refuses compaction: every failure is caught, logged to stderr,
 and the hook still exits 0 (case_precompact_error_is_ok_false).
@@ -804,7 +804,7 @@ CC_SETTINGS_KEYS = ("idleCompaction", "autoCompactWindow", "autoCompactEnabled",
                     "precomputeCompactionEnabled")
 CC_ENV_VARS = ("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
 CC_TAIL = (". Name this under Input Needed in your report. Read: decision precompact-handoff, "
-           "item 11; step cc-update-behavior-diff.")
+           "item 12; step cc-update-behavior-diff.")
 _CC_IDENT = rb"[A-Za-z_$][\w$]*"
 _CC_NUMBER = re.compile(rb"(\d+(?:\.\d+)?|\.\d+)(?=[;,)])")
 _CC_WORD = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$")
