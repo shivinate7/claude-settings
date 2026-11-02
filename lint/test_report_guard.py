@@ -2957,14 +2957,14 @@ class OwnerPickTests(OpenPickCase):
         self.assertFalse(s.state_exists(), "a pick that opened the box was kept as unsent")
         self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after a box turn")
 
-    def test_oq_a_subagent_box_does_not_answer_the_pick(self):
+    def test_oq_an_agent_box_does_not_answer_the_pick(self):
         control = OpenSession()
         control.turn(T0, OWNER_PICK, owner="decide")
         self.assertBlocked(control.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "the control")
         s = OpenSession()
         s.turn(T0, OWNER_PICK, owner="decide")
         self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_box(sidechain=True)]))
-        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "a subagent's box is not the owner's route")
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "an agent's box is not the owner's route")
 
     def test_oq_an_owner_message_after_the_ask_answers_it(self):
         control = OpenSession()
@@ -3016,6 +3016,30 @@ class OwnerPickTests(OpenPickCase):
         via_sendmessage.turn(T0, OWNER_PICK, owner="decide")
         via_sendmessage.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Pick %s: fold it?" % item_id, tool="SendMessage")])
         self.assertNotBlocked(via_sendmessage.turn(T0 + 400, PLAIN), "after a SendMessage that names the id")
+
+    def test_oq_a_send_to_the_writer_earlier_in_the_pick_turn_answers_it(self):
+        # The send came before the pick's Stop in the same turn: it is stamped at the ask time, not after it.
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertBlocked(control.turn(T0 + 301, PLAIN), "the control, with no send")
+        s = OpenSession()
+        self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide",
+                                 seq=[op_writer(), op_send(WRITER, "Which way for the pick check?")]),
+                          "the pick turn with an earlier send blocked at its Stop")
+        self.assertNotBlocked(s.turn(T0 + 301, PLAIN), "a send to the writer earlier in the pick's own turn was missed")
+
+    def test_oq_a_send_naming_the_item_id_earlier_in_the_pick_turn_answers_it_with_no_writer(self):
+        # No writer is known. The probe gets the same item id: an id depends on the question text, not the session.
+        probe = OpenSession()
+        probe.turn(T0, OWNER_PICK, owner="decide")
+        item_id = self.only_item(probe)["id"]
+        self.assertBlocked(probe.turn(T0 + 301, PLAIN), "the control, with no send")
+        s = OpenSession()
+        self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide",
+                                 seq=[op_send(OTHER, "Pick %s: fold the guard or add a hook?" % item_id)]),
+                          "the pick turn with an earlier send blocked at its Stop")
+        self.assertNotBlocked(s.turn(T0 + 301, PLAIN),
+                              "a send naming the item id earlier in the pick's own turn was missed")
 
     def test_oq_the_item_id_must_be_a_whole_token(self):
         s = OpenSession()
@@ -3153,7 +3177,7 @@ class LanePickTests(OpenPickCase):
         s = OpenSession()
         s.lane()
         out = s.turn(T0, LANE_PICK, owner="decide", seq=[op_box(sidechain=True)])
-        self.assertBlocked(out, "a subagent's box answered a lane")
+        self.assertBlocked(out, "an agent's box answered a lane")
         self.assertIn("Lane pick guard", out["reason"])
 
     def assert_send_must_follow_the_boundary(self, make, label):
