@@ -4461,7 +4461,7 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_stops(rc, out, before)
 
-# The run ids of PR 1003 of q_max (Nov 1): the cancelled run and the newer run of one head, and a run of another workflow on that head.
+# Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 
 def job_link(run, job):
@@ -4485,8 +4485,8 @@ class SupersededRuns(Env):
         A run is (name, status, conclusion, run id). The newest run comes first, as gh lists it."""
         self.set(checks_seq=[list(rows)], runs_seq=[list(runs)])
 
-    def pr_1003_head(self):
-        """The head of PR 1003. The old run's fan-in job ran (always()) and failed; the concurrency group then cancelled the rest of that run.
+    def superseded_head(self):
+        """A head whose old run was cancelled by concurrency. Its fan-in job ran (always()) and failed.
         The newer run passed every job. The three forms: a failed fan-in job, a job cancelled in the old run beside a pass, and a job cancelled
         in the old run beside a skip in the newer run."""
         self.head_rows(
@@ -4502,7 +4502,7 @@ class SupersededRuns(Env):
         return red, pending
 
     def test_a_failed_fan_in_job_of_a_cancelled_older_run_under_a_green_newer_run_is_green(self):
-        self.pr_1003_head()
+        self.superseded_head()
         self.assertEqual(self.judged(["all-jobs-passed"]), ([], []))
         rc, out = self.go(required=["all-jobs-passed"])
         self.assertEqual(rc, 0, out)
@@ -4589,13 +4589,13 @@ class SupersededRuns(Env):
         self.assertFalse(any(r.startswith("lint:") for r in red), red)
 
     def test_head_read_and_head_state_show_the_newer_green_run_green(self):
-        # The guard reads the head with head_read, and the preview with head_state. Both judge PR 1003's head green.
-        self.pr_1003_head()
+        # The guard reads the head with head_read, and the preview with head_state. Both judge this head green.
+        self.superseded_head()
         self.assertEqual(self.gh_host(required=["all-jobs-passed"]).head_read(7), ("green", ""))
         self.assertEqual(self.gh_host(required=["all-jobs-passed"]).head_state(7), "green")
 
     def test_a_failed_or_missing_runs_read_drops_nothing(self):
-        self.pr_1003_head()
+        self.superseded_head()
         for runs in ([], [("checks", "completed", "success", NEW_RUN)]):  # no run listed, then the old run not listed
             with self.subTest(listed=[r[3] for r in runs]):
                 self.set(runs_seq=[list(runs)])
