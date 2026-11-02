@@ -90,10 +90,11 @@ parent, or miss a message while busy.
 - A lane posts its review record on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. A lane never rebases onto main and never merges.
 - Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
-  result is back. This does not let a lane push a round-1 fix on a `delete-only` change with Guard or
-  check `no`, because a round-1 FAIL on that change reads done (claude-settings record
-  `pr-review-record`). When the repo holds a standing merge grant, the batch runner merges under it.
-  The owner is not asked.
+  result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
+  `delete-only` change with Guard or check `no`, which reads done (claude-settings record
+  `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
+  new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
+  not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
