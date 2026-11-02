@@ -989,8 +989,9 @@ class RenamedFile(unittest.TestCase):
         self.r.commit("bump a pin")
         self.assertEqual(self.r.verdict(), [])
 
-    def conflicted_limit(self, renamed):
-        """Main moves the limit 10 to 15; the branch moves it to 20, renamed or not; the merge resolves to 30, a third value."""
+    def conflicted_limit(self, renamed, main_renames=False):
+        """Main moves the limit 10 to 15, renaming the file first when main_renames; the branch moves it to 20, renamed
+        or not; the merge resolves to 30, a third value, at the name the merge keeps."""
         r, limit = self.r, lambda n: workflow(t_build="    timeout-minutes: %d\n" % n)
         r.put(self.OLD, limit(10))
         r.commit("set a limit")
@@ -1001,12 +1002,14 @@ class RenamedFile(unittest.TestCase):
         r.put(self.NEW if renamed else self.OLD, limit(20))
         r.commit("move the limit to 20")
         r.sh("checkout", "-q", "main")
-        r.put(self.OLD, limit(15))
+        if main_renames:
+            r.sh("mv", self.OLD, self.NEW)
+        r.put(self.NEW if main_renames else self.OLD, limit(15))
         r.commit("move the limit to 15")
         r.push()
         r.sh("checkout", "-q", "ren")
         r.sh("merge", "--no-edit", "origin/main", ok=False)  # both sides moved the line: a conflict
-        r.put(self.NEW if renamed else self.OLD, limit(30))
+        r.put(self.NEW if renamed or main_renames else self.OLD, limit(30))
         r.sh("add", "-A")
         r.sh("commit", "-q", "--no-edit")
 
@@ -1018,6 +1021,15 @@ class RenamedFile(unittest.TestCase):
 
     def test_the_same_merge_with_a_third_value_in_place_is_green(self):  # control
         self.conflicted_limit(renamed=False)
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_main_renames_then_a_merge_that_resolves_a_changed_line_to_a_third_value_is_green(self):
+        """The mod read for a path main renamed. The base holds the limit only under the old name, so main's edit reads
+        across the two names, and the rewrite excuse holds as it does in place (the control above). Read at the new
+        name, the base has no such file, the excuse fails, and the merge is refused."""
+        self.conflicted_limit(renamed=False, main_renames=True)
+        self.assertEqual(self.r.sh("ls-tree", "--name-only", "origin/main", "--", self.OLD), "", "main must rename the file")
+        self.assertIn("timeout-minutes: 30", self.r.sh("show", "HEAD:" + self.NEW))
         self.assertEqual(self.r.verdict(), [])
 
 
@@ -1050,7 +1062,8 @@ class RenamedPinComment(PinComment, unittest.TestCase):
     and bumped a pin. The merge of main must carry the date to the new path. Incident (joyous, merge 1870ab6ee, refused
     Nov 1): git paired the rename at 90 percent both ways, and the merge wrote the older date (29) where main wrote 30.
     Kept line: green. Twin: a merge that drops the line: refused. The last case is the incident's shape, a merge that
-    writes the older date: refused by the line rule today. The owner decides whether comment-only drift is a false alarm."""
+    writes the older date: refused by the line rule today. A comment-only change stays a drop, as on main (coordinator
+    ruling, Nov 1 17:53 CST)."""
 
     def setUp(self):
         r = self.r = Repo()
