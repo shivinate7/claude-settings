@@ -2,6 +2,8 @@
 
 Written by coordinator session_013NEJL2pASwRjgJDnsvnpNe at 13:30 CST, 2026-11-02. The lane plan is in `handoffs/next-coordinator-lanes.md`. The findings are in `handoffs/load-balance-findings.md`.
 
+Read first: next-coordinator-review-outcomes.md (what is on-outcome and what is straying, the freeze, first lanes) and next-coordinator-review-terms.md (term conflicts).
+
 ## Rulings with no home yet
 
 - fb-1310-1 (owner 13:10 CST): every clock time given to the owner names its zone, 24-hour. Follow now. A record-writer agent writes the record on branch time-zone-every-time (decision local-time-central, style time-central-24h). Draft PR #1104 (time zone in every time) is open. Roadmap step time-zone-every-time holds the guard check.
