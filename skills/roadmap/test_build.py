@@ -842,6 +842,17 @@ class PageRulings(Fixture):
         count, entries = self.rulings(self.out_with_live())
         self.assertEqual((count, self.listed(entries)), (1, ["c153 (page item 10)"]))
 
+    def test_a_list_of_items_cites_only_the_number_right_after_item(self):
+        """Pins current behaviour: "page items 9 and 10" cites neither item, because the cite needs `item`
+        directly before the number. "item 9 and 10" cites 9 only, so 10 still lists."""
+        self.commit_step("c1", note="page items 9 and 10")
+        self.commit_step("c2", note="item 9 and 10", order=2)  # both steps written before the build, which checks out main
+        self.publish(items=[self.item(9, home="c1"), self.item(10, home="c1"),
+                            self.item(9, home="c2"), self.item(10, home="c2")])
+        count, entries = self.rulings(self.out_with_live())
+        self.assertEqual((count, self.listed(entries)),
+                         (3, sorted(["c1 (page item 9)", "c1 (page item 10)", "c2 (page item 10)"])))
+
     def test_open_item_is_never_listed(self):
         self.commit_step("c153", note="Waiting.")
         self.commit_step("c154", note="Waiting.", order=2)  # control: closed, so an empty row cannot pass
