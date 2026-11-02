@@ -9,8 +9,9 @@ A commit that adds lines to a test path carries a trailer line in its message:
     Red-run: none: <reason>                       reason non-empty
 
 The check reads the non-merge commits in <base>..HEAD, from --base <sha>, else env BASE_SHA. A test
-path is one that hooks/guard.py is_test_rel judges. A commit whose parent tree has no
-lint/check_red_run.py predates the check, so it is not judged.
+path is one that hooks/guard.py is_test_rel judges. When HEAD holds lint/check_red_run.py, a commit whose
+parent tree lacks it predates the check, so it is not judged. A repo without the file at HEAD gets no such
+exemption: every non-merge commit that is not a revert is judged.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit, then
 change commits on top. The check runs as the copy at lint/check_red_run.py in that repo. The cwd and
@@ -138,8 +139,8 @@ class CheckCase(Fixture):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_red_run.py")
         super().setUp()
 
-    def assertClean(self, args=None, env=None):
-        rc, out = self.lint(args, env)
+    def assertClean(self, args=None, env=None, script=None, cwd=None):
+        rc, out = self.lint(args, env, script, cwd)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out, out)
 
@@ -152,10 +153,19 @@ class CheckCase(Fixture):
         self.assertTrue(any(short in line and rel in line for line in out.splitlines()),
                         "no line names %s with %s:\n%s" % (short, rel, out))
 
-    def assertFlagged(self, sha, subject, rel):
-        rc, out = self.lint()
+    def assertFlagged(self, sha, subject, rel, script=None, cwd=None):
+        rc, out = self.lint(script=script, cwd=cwd)
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, subject, rel)
+
+    def scratch_repo_test_commit(self, red=None):
+        """One test commit in a repo that lacks the gate file at HEAD, the shape of any repo but claude-settings.
+        The tree's disk copy of the script is untracked, so the case also rejects a gate read from disk."""
+        self.base(check=False)
+        rel = self.new_test_path()
+        sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)
+        self.assertFalse(self.has_file("HEAD", CHECK_REL))
+        return rel, sha
 
     def test_untrailered_test_commit_is_flagged(self):
         self.base()
@@ -266,6 +276,16 @@ class CheckCase(Fixture):
         self.assertEqual(rc, 1, out)
         self.assertGap(out, later, "add a second widget test", rel)
         self.assertNotIn(landed[:7], out, out)
+
+    def test_untrailered_test_commit_in_repo_without_gate_is_flagged(self):
+        """No rollout exemption without the gate file at HEAD. The script runs by its absolute path, from the scratch repo."""
+        rel, sha = self.scratch_repo_test_commit()
+        self.assertFlagged(sha, "add widget tests", rel, script=MODULE, cwd=self.tree)
+
+    def test_trailered_test_commit_in_repo_without_gate_passes(self):
+        """The same scratch repo, with a valid trailer on its test commit, is green. The script runs by its absolute path."""
+        self.scratch_repo_test_commit(red=GOOD)
+        self.assertClean(script=MODULE, cwd=self.tree)
 
     def test_files_that_only_look_like_tests_are_not_judged(self):
         self.base()
