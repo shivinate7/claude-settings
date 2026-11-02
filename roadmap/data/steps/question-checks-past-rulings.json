@@ -1,0 +1,9 @@
+{
+ "title": "Before a question reaches the owner, past rulings on it are found and cited",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21003,
+ "why": "Owner, Nov 1 18:39 CST: so many things are misremembered. Incidents today: item 145 re-asked the Oct 28 keep-the-apps ruling; item 133 was written twice without the Oct 27 milestone-runs ruling; earlier, home's items 48 and 49 were re-asked.",
+ "note": "Cause, read Nov 1 18:42 CST: these rulings live only in roadmap step notes or closed page items (the milestone ruling is in step c95's note; no decision record names milestone runs), and the sessions writing questions search docs/decisions and the repo, not step notes or closed items. Shape: (1) every ruling in a step note or closed page item moves to its decision record (start with c95's milestone ruling and c153's keep-the-apps ruling); (2) before a question is written, a model searches decisions, step notes and closed page items by meaning, and the question judge refuses a question that does not cite a matching past ruling. Related: page-ruling-reaches-step, feedback-repeat-detect. Guard basis: named incidents. Ready: no open question. Port: yes.",
+ "updatedAt": "2026-11-02T00:45:00Z"
+}
