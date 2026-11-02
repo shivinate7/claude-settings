@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Red run with a fake `gh`. Each (workflow, event group) judges its newest run: a red group opens the
-# issue, and a green run of another group never hides it. Runs of an event not in events.json, and of
-# a deleted or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
+# issue, unless a newer completed run of the other group passed every job the red run ran (`gh run view`
+# gives the jobs). Runs of an event not in events.json, and of a deleted or absent workflow, are not
+# judged. A failed read or write prints `unknown` and exits 0.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -12,7 +13,7 @@ trap 'rm -rf "$work"' EXIT
 tmp="$work/case"; mkdir -p "$tmp/bin"
 # Fake gh. FAIL is a glob over "$1 $2"; a call that matches it exits 1. EMPTY is a glob too; a call
 # that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for,
-# as gh does; unparsable runs are echoed raw.
+# as gh does; unparsable runs are echoed raw. `run view` prints the jobs fixture of the run id it is given.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
@@ -22,6 +23,9 @@ case "$1 $2" in
     want="$(printf '%s\n' "$@" | sed -n '/^--json$/{n;p;}')"
     jq --arg want "$want" '[.[] | with_entries(select(.key as $k | $want | split(",") | any(. == $k)))]' "$RUNS" 2>/dev/null || cat "$RUNS" ;;
   api*) cat "$WORKFLOWS" ;;
+  "run view")
+    rid="$(printf '%s\n' "$@" | grep -m1 -E '^[0-9]+$')"
+    cat "$JOBS/$rid.json" 2>/dev/null || { echo "gh: no jobs fixture for run $rid (fake)" >&2; exit 1; } ;;
   "issue list") echo "${OPEN:-}" ;;
   "issue create") echo "ISSUE $*" >> "$LOG" ;;
   "issue comment") echo "COMMENT $*" >> "$LOG" ;;
@@ -31,14 +35,24 @@ chmod +x "$tmp/bin/gh"
 # Fixture, one home. gh_run prints one run as `gh run list --json` returns it: args are workflow,
 # conclusion, createdAt, url, event. Ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
 # gone 6 (absent from the list), late 7 (on page two of the workflows list), dman 8 and dinact 9
-# (disabled, on page two).
+# (disabled, on page two). databaseId is the run's own id: 100 plus the number in its url tag
+# (u1 is run 101), so jobs_of keys a run's jobs on the same tag.
+run_id() { echo $((100 + ${1#u})); }
 gh_run() {
   local id
   case "$1" in ci) id=1 ;; deploy) id=2 ;; alarm) id=3 ;; pages) id=4 ;; old) id=5 ;; gone) id=6 ;; late) id=7 ;;
     dman) id=8 ;; dinact) id=9 ;; esac
-  printf '{"workflowName":"%s","workflowDatabaseId":%s,"conclusion":"%s","createdAt":"%s","url":"%s","event":"%s"}\n' "$1" "$id" "$2" "$3" "$4" "$5"
+  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":"%s","createdAt":"%s","url":"%s","event":"%s"}\n' "$1" "$id" "$(run_id "$4")" "$2" "$3" "$4" "$5"
 }
-runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; }
+# A new set of runs drops the jobs of the last case, so a fixture cannot leak into the next one.
+runs_are() { rm -rf "$tmp/jobs"; printf '%s\n' "$@" | jq -s . > "$tmp/runs"; }
+# The jobs of one run, as `gh run view <id> --json jobs` prints them. Args: the run's url tag, then one
+# name:conclusion per job.
+jobs_of() {
+  local tag="$1"; shift
+  mkdir -p "$tmp/jobs"
+  jq -n -c --args '{jobs: [$ARGS.positional[] | split(":") | {name: .[0], conclusion: .[1], status: "completed"}]}' "$@" > "$tmp/jobs/$(run_id "$tag").json"
+}
 # The workflows list as `gh api --paginate` prints it: one JSON document per page.
 cat > "$tmp/workflows" <<'JSON'
 {"total_count": 7, "workflows": [
@@ -55,7 +69,7 @@ JSON
 bad=0
 t() { # want label [FAIL glob for the fake gh] [EMPTY glob for the fake gh]
   : > "$tmp/log"
-  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" FAIL="${3:-}" EMPTY="${4:-}" \
+  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" LOG="$tmp/log" FAIL="${3:-}" EMPTY="${4:-}" \
     GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
@@ -76,14 +90,70 @@ runs_are "$(gh_run alarm failure 2026-01-02 u1 push)"
 t green own-workflow-is-ignored
 runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run deploy timed_out 2026-01-01 u2 push)"
 t red one-red-workflow-among-green
+# A red run is cleared by a newer completed run of the other event group that passed every job the red run
+# ran. Each case sets the jobs of both runs after runs_are, as name:conclusion.
 runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:success nightly:failure
+jobs_of u1 checks:success nightly:skipped
 t red red-schedule-is-not-cleared-by-a-newer-green-push
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 scope:success
 t red red-schedule-is-not-cleared-by-a-newer-green-dispatch
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 push)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success
 t green red-push-is-cleared-by-a-newer-green-dispatch
+runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 readme-links:failure checks:success
+jobs_of u1 readme-links:success checks:success
+t green red-schedule-is-cleared-by-a-newer-green-dispatch-with-the-same-jobs
+runs_are "$(gh_run ci success 2026-01-02 u1 schedule)" "$(gh_run ci failure 2026-01-01 u0 push)"
+jobs_of u0 readme-links:failure checks:success
+jobs_of u1 readme-links:success checks:success
+t green red-push-is-cleared-by-a-newer-green-schedule-with-the-same-jobs
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success scope:success
+t green red-schedule-is-cleared-by-a-newer-green-push-with-extra-jobs
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure scope:skipped
+jobs_of u1 checks:success
+t green red-schedule-skipped-job-is-not-needed-in-the-newer-run
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure checks-macos:cancelled
+jobs_of u1 checks:success
+t red red-schedule-cancelled-job-must-pass-in-the-newer-run
+runs_are "$(gh_run ci cancelled 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success
+t red red-schedule-is-not-cleared-by-a-newer-cancelled-push
+runs_are "$(gh_run ci failure 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:failure
+t red red-schedule-is-not-cleared-by-a-newer-red-push
+runs_are "$(gh_run ci "" 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+t red red-schedule-is-not-cleared-by-a-newer-push-in-progress
+runs_are "$(gh_run ci failure 2026-01-02 u0 schedule)" "$(gh_run ci success 2026-01-01 u1 push)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success
+t red red-schedule-is-not-cleared-by-an-older-green-push
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks-macos:success
+t red red-schedule-is-not-cleared-by-a-job-whose-name-only-starts-with-it
+runs_are "$(gh_run ci success 2026-01-02 u1 push)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 checks:failure
+jobs_of u1 checks:success checks:failure
+t red red-schedule-is-not-cleared-by-a-newer-push-with-a-failed-duplicate-job
+runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch)" "$(gh_run ci failure 2026-01-01 u0 schedule)"
+jobs_of u0 readme-links:failure checks:success
+jobs_of u1 readme-links:success checks:success
+t unknown jobs-read-fails-is-unknown "run view"
+t unknown jobs-read-with-empty-stdout-is-unknown "" "run view"
 runs_are "$(gh_run pages failure 2026-01-02 u1 dynamic)"
 t green failed-pages-build-is-not-judged
 runs_are "$(gh_run old failure 2026-01-02 u1 push)"
