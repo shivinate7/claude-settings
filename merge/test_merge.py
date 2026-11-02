@@ -128,7 +128,7 @@ class FakeHost:
     def required_names(self):
         return ["checks"]
 
-    def batch_running(self, n, base):  # the other ready pull requests on base with a pending required check; a case sets batch
+    def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
         if self.batch_error:
             raise self.batch_error
@@ -2602,7 +2602,7 @@ class BaseAware(Env):
                 h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
             def required_names(h): return ["checks"]
-            def batch_running(h, n, base): return []  # no other pull request here: its gh reads are not this case's subject
+            def batch_running(h, n, base, head=None): return []  # no other pull request here: its gh reads are not this case's subject
             def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
             def runs(h, sha): return []
             def base_state(h, base, flows): return "green", ""
@@ -3044,6 +3044,9 @@ try:
         if m_run:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+
+    elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
+        finish(one({"status": "diverged"}, jq), 0, include)
 
     elif method == "GET" and rel == "actions/runs":
         runs = S.get("base_runs", [])
@@ -6340,7 +6343,7 @@ class ClockedHost(merge.Host):
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
 
-    def batch_running(self, n, base):  # no gh here, and no other pull request in these cases
+    def batch_running(self, n, base, head=None):  # no gh here, and no other pull request in these cases
         return []
 
     def checks(self, n, *a, **k):
@@ -9308,7 +9311,7 @@ class BatchRunningReads(unittest.TestCase):
 
     def test_a_running_workflow_blocks_before_its_required_check_reports(self):
         # scope runs first and checks needs it: the workflow is in progress, no required row exists yet, only the non-required scope row is pending
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
                          workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "in_progress", "conclusion": None}]})
         blockers = host.batch_running(1, "main")
         self.assertEqual(len(blockers), 1, blockers)
@@ -9316,7 +9319,7 @@ class BatchRunningReads(unittest.TestCase):
         self.assertIn("ci-checks", blockers[0])
 
     def test_a_queued_workflow_with_no_check_rows_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {},
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {},
                          workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "queued", "conclusion": None}]})
         blockers = host.batch_running(1, "main")
         self.assertEqual(len(blockers), 1, blockers)
