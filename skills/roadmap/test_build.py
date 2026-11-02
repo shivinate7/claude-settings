@@ -539,21 +539,16 @@ class LiveWork(Fixture):
         self.assertNotIn("</script><!--", page)
 
 
-class StaleInProgress(Fixture):
-    """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
-    `<id> (set to todo)`, `<id> (set to done: landed in #N)`, or one `unknown (<why>)` when unreadable."""
+class UpkeepFixture(Fixture):
+    """The one home of the upkeep helpers: a fixture repo whose GitHub name is set, steps committed on the
+    record branch, a --live file, and a reader of the upkeep rows. Each upkeep class extends it."""
 
-    ROW = "in progress with no live lane or open PR"
     SLUG = "owner/fixture"
     REPO = "cs-repo:" + SLUG
 
     def setUp(self):
         super().setUp()
         self.use_origin(self.SLUG)
-
-    def session_in_repo(self, sid, status, *tags):
-        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
-        return session_row(sid, status, self.REPO, *tags)
 
     def commit_step(self, sid, **fields):
         """Write a step on the record branch and commit it, where a build from main reads it."""
@@ -573,13 +568,35 @@ class StaleInProgress(Fixture):
         _, out = self.build_from_main("--live", str(self.live))
         return out
 
+    def summary_counts(self, out):
+        """{row label: count} in the order the upkeep line prints them. Fails when the output has no upkeep line."""
+        line = re.search(r"^upkeep: (.*)$", out, re.M)
+        if line is None:
+            self.fail("the output has no upkeep line:\n%s" % out)
+        return {seg.rsplit(": ", 1)[0]: int(seg.rsplit(": ", 1)[1]) for seg in line.group(1).split("; ")}
+
+    def row(self, out, label):
+        """(count, detail) of one upkeep row. The detail is "" when the row prints no line. Fails when the row is absent."""
+        counts = self.summary_counts(out)
+        if label not in counts:
+            self.fail("the upkeep output has no %r row:\n%s" % (label, out))
+        detail = re.search(r"^  %s: (.*)$" % re.escape(label), out, re.M)
+        return counts[label], (detail.group(1) if detail else "")
+
+
+class StaleInProgress(UpkeepFixture):
+    """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
+    `<id> (set to todo)`, `<id> (set to done: landed in #N)`, or one `unknown (<why>)` when unreadable."""
+
+    ROW = "in progress with no live lane or open PR"
+
+    def session_in_repo(self, sid, status, *tags):
+        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
+        return session_row(sid, status, self.REPO, *tags)
+
     def stale(self, out):
         """(count, entries) of the stale row. Fails when the output holds no such row."""
-        summary = re.search(r"^upkeep: .*?%s: (\d+)" % re.escape(self.ROW), out, re.M)
-        if summary is None:
-            self.fail("the upkeep output has no %r row:\n%s" % (self.ROW, out))
-        detail = re.search(r"^  %s: (.*)$" % re.escape(self.ROW), out, re.M)
-        return int(summary.group(1)), (detail.group(1) if detail else "")
+        return self.row(out, self.ROW)
 
     def listed_ids(self, entries):
         return re.findall(r"([^,()\s]+) \(set to ", entries)
@@ -775,6 +792,134 @@ class StaleInProgress(Fixture):
 
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
+
+
+class FeelRows(UpkeepFixture):
+    """The feel-fix rows of the upkeep list (spec feel-fix-needs-device-check, part A). A feel-fix is a step whose
+    `feel` is anything but absent, false or null. A landed feel-fix with no valid `deviceCheck` is listed in the
+    device row. With a valid check it reads the try-it suffix in the triage row. The triage row drops the device
+    row's steps, and the in-progress row skips a feel-fix that has no valid check."""
+
+    DEVICE = "landed, waiting for a device trial"
+    TRIAGE = "landed, waiting for triage to close"
+    UNLANED = StaleInProgress.ROW
+    CHECK = {"how": "simulator", "at": "2026-11-01T11:44:00-06:00"}
+    NOT_FEEL = {"absent": {}, "json-false": {"feel": False}, "json-null": {"feel": None}}
+    OTHER_FEEL = {"true": {"feel": True}, "yes": {"feel": "yes"}, "zero": {"feel": 0}, "empty-text": {"feel": ""},
+                  "empty-list": {"feel": []}, "empty-object": {"feel": {}}, "text-false": {"feel": "false"}}
+    INVALID_CHECKS = {
+        "bad-how": {"how": "phone", "at": "2026-11-01T11:44:00-06:00"},
+        "no-zone": {"how": "device", "at": "2026-11-01T11:44:00"},
+        "not-a-time": {"how": "device", "at": "yesterday"},
+        "no-at": {"how": "device"},
+        "no-how": {"at": "2026-11-01T11:44:00-06:00"},
+        "text": "simulator",
+        "list": ["simulator", "2026-11-01T11:44:00-06:00"],
+    }
+
+    def land(self, sid, pr, **fields):
+        """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
+        The step is doing unless the case says otherwise."""
+        fields.setdefault("status", "doing")
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step(sid, **fields)
+        self.on_main()
+        (self.repo / ("landed-%s-%d.txt" % (sid, pr))).write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "landed (#%d)\n\nStep: %s" % (pr, sid))
+
+    def land_all(self, specs, first_pr):
+        """Land each step in specs ({step id: fields}), one PR each from first_pr. Returns {step id: PR number}."""
+        prs = {}
+        for pr, (sid, fields) in enumerate(specs.items(), start=first_pr):
+            self.land(sid, pr, **fields)
+            prs[sid] = pr
+        return prs
+
+    def build_live(self):
+        """(page, out) of a build from main, with a live file that lists no sessions."""
+        self.publish(sessions=[])
+        return self.build_from_main("--live", str(self.live))
+
+    def entries(self, detail):
+        """The entries of a row's detail, sorted. The builder orders them by step id, which no case relies on."""
+        return sorted(detail.split(", ")) if detail else []
+
+    def test_landed_feel_fix_without_a_check_is_listed_in_the_device_row(self):
+        self.land("c1", 12, feel=True)
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.DEVICE), (1, "c1 (#12)"))
+        self.assertEqual(self.row(out, self.TRIAGE), (0, ""))
+
+    def test_device_row_sits_just_before_the_triage_row(self):
+        self.land("c1", 12, feel=True)
+        _, out = self.build_live()
+        labels = list(self.summary_counts(out))
+        self.assertIn(self.DEVICE, labels)
+        self.assertEqual(labels[labels.index(self.DEVICE) + 1], self.TRIAGE)
+
+    def test_device_row_joins_every_mark_with_a_comma(self):
+        self.land("c1", 12, feel=True)
+        self.land("c1", 13, feel=True, note="second landing")
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.DEVICE), (1, "c1 (#12, #13)"))
+
+    def test_landed_feel_fix_with_a_valid_check_reads_the_try_it_suffix(self):
+        self.land_all({"sim": {"feel": True, "deviceCheck": self.CHECK},
+                       "dev": {"feel": True, "deviceCheck": dict(self.CHECK, how="device")}}, 12)
+        _, out = self.build_live()
+        count, detail = self.row(out, self.TRIAGE)
+        self.assertEqual((count, self.entries(detail)),
+                         (2, ["dev (#13; open a try-it item)", "sim (#12; open a try-it item)"]))
+        self.assertEqual(self.row(out, self.DEVICE), (0, ""))
+
+    def test_present_but_invalid_device_check_reads_unreadable(self):
+        prs = self.land_all({sid: {"feel": True, "deviceCheck": check} for sid, check in self.INVALID_CHECKS.items()}, 20)
+        _, out = self.build_live()
+        want = sorted("%s (#%d; device trial unreadable)" % (sid, pr) for sid, pr in prs.items())
+        count, detail = self.row(out, self.DEVICE)
+        self.assertEqual((count, self.entries(detail)), (len(want), want))
+        self.assertEqual(self.row(out, self.TRIAGE), (0, ""))
+        self.assertEqual(self.row(out, self.UNLANED)[0], 0)
+
+    def test_absent_false_or_null_is_not_a_feel_fix(self):
+        prs = self.land_all(self.NOT_FEEL, 30)
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.DEVICE), (0, ""))
+        want = sorted("%s (#%d)" % (sid, pr) for sid, pr in prs.items())
+        count, detail = self.row(out, self.TRIAGE)
+        self.assertEqual((count, self.entries(detail)), (len(want), want))
+        # control: a step that is not a feel-fix is still listed as set to done
+        want_done = sorted("%s (set to done: landed in #%d)" % (sid, pr) for sid, pr in prs.items())
+        count, detail = self.row(out, self.UNLANED)
+        self.assertEqual((count, self.entries(detail)), (len(want_done), want_done))
+
+    def test_other_feel_values_are_feel_fixes(self):
+        prs = self.land_all(self.OTHER_FEEL, 40)
+        _, out = self.build_live()
+        want = sorted("%s (#%d)" % (sid, pr) for sid, pr in prs.items())
+        count, detail = self.row(out, self.DEVICE)
+        self.assertEqual((count, self.entries(detail)), (len(want), want))
+        self.assertEqual(self.row(out, self.TRIAGE), (0, ""))
+        self.assertEqual(self.row(out, self.UNLANED)[0], 0)
+
+    def test_landed_feel_fix_without_a_check_is_not_listed_as_set_to_done(self):
+        self.land("c1", 12, feel=True)  # doing, no check: the device row lists it instead
+        self.land("c2", 13, order=2)  # control: a plain landed step is still listed
+        self.land("c3", 14, order=3, status="active", feel=True)  # active counts the same as doing
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.UNLANED), (1, "c2 (set to done: landed in #13)"))
+
+    def test_landed_feel_fix_with_a_valid_check_is_still_listed_as_set_to_done(self):
+        self.land("c1", 12, feel=True, deviceCheck=self.CHECK)
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to done: landed in #12)"))
+
+    def test_feel_fix_not_yet_landed_still_reads_set_to_todo(self):
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step("c1", status="doing", feel=True)
+        _, out = self.build_live()
+        self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to todo)"))
 
 
 def baked(text, key):

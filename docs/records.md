@@ -131,7 +131,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `browser-prompts-are-the-apps` | Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's approval prompts on outside sites. | [`docs/decisions/browser-prompts-are-the-apps.md`](../docs/decisions/browser-prompts-are-the-apps.md) |
 | `build-dirs-reaped-at-agent-end` | Owner, 2026-10-11: the agent-end reap also deletes build folders. | [`docs/decisions/build-dirs-reaped-at-agent-end.md`](../docs/decisions/build-dirs-reaped-at-agent-end.md) |
 | `builders-cannot-edit-tests` | A builder that cannot pass a test must not delete, skip or rewrite it. | [`docs/decisions/builders-cannot-edit-tests.md`](../docs/decisions/builders-cannot-edit-tests.md) |
-| `ci-job-caps` | Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when something is broken, never because a job ran out of time. | [`docs/decisions/ci-job-caps.md`](../docs/decisions/ci-job-caps.md) |
+| `ci-job-caps` | Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. | [`docs/decisions/ci-job-caps.md`](../docs/decisions/ci-job-caps.md) |
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`docs/decisions/ci-unknown-is-red.md`](../docs/decisions/ci-unknown-is-red.md) |
 | `cite-by-id-refuses-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git commit -F <file>` when it cannot read the file at hook time. | [`docs/decisions/cite-by-id-refuses-unread-file.md`](../docs/decisions/cite-by-id-refuses-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`docs/decisions/claude-md-shrink.md`](../docs/decisions/claude-md-shrink.md) |
@@ -147,9 +147,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `detached-launch-refused` | The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. | [`docs/decisions/detached-launch-refused.md`](../docs/decisions/detached-launch-refused.md) |
 | `docs-only-prs-skip-review` | Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. | [`docs/decisions/docs-only-prs-skip-review.md`](../docs/decisions/docs-only-prs-skip-review.md) |
 | `draft-until-reviewed` | Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. | [`docs/decisions/draft-until-reviewed.md`](../docs/decisions/draft-until-reviewed.md) |
+| `feel-fix-waits-device-check` | A feel-fix is a change to how a screen feels: its motion, touch, timing or scroll. | [`docs/decisions/feel-fix-waits-device-check.md`](../docs/decisions/feel-fix-waits-device-check.md) |
 | `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`docs/decisions/fewest-words-mandate.md`](../docs/decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right. | [`docs/decisions/frozen-path-resolves-shell-vars.md`](../docs/decisions/frozen-path-resolves-shell-vars.md) |
 | `git-env-set-refused` | No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. | [`docs/decisions/git-env-set-refused.md`](../docs/decisions/git-env-set-refused.md) |
+| `glossary-meets-owner-halfway` | Owner, 2026-11-01 18:46 CST: a session reads what the owner types by meaning, and the glossary keeps one name per thing. | [`docs/decisions/glossary-meets-owner-halfway.md`](../docs/decisions/glossary-meets-owner-halfway.md) |
 | `guard-command-position` | One resolver in `hooks/guard_core.py` finds the command word for every rule. | [`docs/decisions/guard-command-position.md`](../docs/decisions/guard-command-position.md) |
 | `guard-guards-mistakes-only` | Owner, 2026-10-17 09:07 CDT, "widen": every guard and check stops Claude's mistakes, never an attacker. | [`docs/decisions/guard-guards-mistakes-only.md`](../docs/decisions/guard-guards-mistakes-only.md) |
 | `guard-hooks-fail-closed` | Owner, 2026-10-12: a guard whose script or python is missing refuses the call. | [`docs/decisions/guard-hooks-fail-closed.md`](../docs/decisions/guard-hooks-fail-closed.md) |
@@ -161,6 +163,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hook-if-filters` | Owner, 2026-10-21. | [`docs/decisions/hook-if-filters.md`](../docs/decisions/hook-if-filters.md) |
 | `hook-inputs-carry-token-counts` | c151 is the plan item "compaction timing reads message tokens, not total context". | [`docs/decisions/hook-inputs-carry-token-counts.md`](../docs/decisions/hook-inputs-carry-token-counts.md) |
 | `hooks-share-the-transcript-reader` | The Stop hooks read the transcript through one module, `lint/_transcript.py`. | [`docs/decisions/hooks-share-the-transcript-reader.md`](../docs/decisions/hooks-share-the-transcript-reader.md) |
+| `idle-resume-compacts` | The owner reported (2026-11-01 17:54 CST): after a session sits idle for a couple of hours, the first thing it does on his reply is compact, whatever the context size. | [`docs/decisions/idle-resume-compacts.md`](../docs/decisions/idle-resume-compacts.md) |
 | `install-hooks-whole` | No running session judges a call with a missing, short or mixed set of hook files. | [`docs/decisions/install-hooks-whole.md`](../docs/decisions/install-hooks-whole.md) |
 | `ios-mac-install-first` | Owner, 2026-10-22 19:40 CDT, for every app: when the phone is on Wi-Fi and the Mac can install, install from the Mac. | [`docs/decisions/ios-mac-install-first.md`](../docs/decisions/ios-mac-install-first.md) |
 | `ios-ship-is-one-shared-tool` | Owner, 2026-10-25: one tool, `bin/ios-ship`, builds and ships the owner's iOS apps from the Mac. | [`docs/decisions/ios-ship-is-one-shared-tool.md`](../docs/decisions/ios-ship-is-one-shared-tool.md) |
@@ -190,6 +193,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's grant in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | A hook writes every owner message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `owner-judge-test` | A session asks the owner a decision only when he can judge it from what he already knows. | [`docs/decisions/owner-judge-test.md`](../docs/decisions/owner-judge-test.md) |
+| `page-stale-publish` | Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). | [`docs/decisions/page-stale-publish.md`](../docs/decisions/page-stale-publish.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`docs/decisions/playwright-install-once.md`](../docs/decisions/playwright-install-once.md) |
@@ -201,6 +205,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`docs/decisions/question-reviewer-agent-hook.md`](../docs/decisions/question-reviewer-agent-hook.md) |
 | `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`docs/decisions/questions-go-to-owner.md`](../docs/decisions/questions-go-to-owner.md) |
 | `recovery-independent-of-state` | A recovery control exists for the moment its own precondition is false. | [`docs/decisions/recovery-independent-of-state.md`](../docs/decisions/recovery-independent-of-state.md) |
+| `refusals-reach-the-owner` | Owner-side goal: when the auto-mode classifier refuses a tool call, the owner hears of it in the session's reply. | [`docs/decisions/refusals-reach-the-owner.md`](../docs/decisions/refusals-reach-the-owner.md) |
 | `reply-judge-samples-never-refuses` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`docs/decisions/reply-judge-samples-never-refuses.md`](../docs/decisions/reply-judge-samples-never-refuses.md) |
 | `repo-kind-and-caution` | Owner, 2026-10-27 00:30 and 00:31 CDT, roadmap step c115: about 1 in 5 home sessions refuse to log in to the owner's own Home Assistant or KEF speakers. | [`docs/decisions/repo-kind-and-caution.md`](../docs/decisions/repo-kind-and-caution.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`docs/decisions/reuse-needs-checkout-proof.md`](../docs/decisions/reuse-needs-checkout-proof.md) |
@@ -263,6 +268,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`docs/decisions/records-index-at-merge.md`](../docs/decisions/records-index-at-merge.md) |
 | `rm-path-wrapper` | `bin/rm` sits ahead of the real `rm` on PATH, for Claude sessions only. | [`docs/decisions/rm-path-wrapper.md`](../docs/decisions/rm-path-wrapper.md) |
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`docs/decisions/shell-scripts-check-out-lf.md`](../docs/decisions/shell-scripts-check-out-lf.md) |
+| `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
 
 ## Debts
 
@@ -340,3 +346,4 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `3d-tools-survey` | Plan: 3D tools, what to think about as 3D work grows | [`docs/plans/3d-tools-survey.md`](../docs/plans/3d-tools-survey.md) |
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
+| `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
