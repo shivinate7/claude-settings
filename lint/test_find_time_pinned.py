@@ -515,10 +515,12 @@ class JsTrapsTest(FinderCase):
     def test_lone_quote_in_jsx_text_does_not_hide_the_defect(self):
         for name in ("note.test.jsx", "note.test.tsx"):
             with self.subTest(name=name):
+                root = os.path.join(self.tmp.name, name)
                 text = src("export const Note = () => <p>Don't stop here</p>;", JS_SLEEP)
-                self.put(f"tests/{name}", text)
-                code, out = self.report()
-                self.assertEqual(self.rows(out), pinned(
+                put(root, f"tests/{name}", text)
+                proc = run(root, "--json")
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertEqual(self.rows(json.loads(proc.stdout)), pinned(
                     f"tests/{name}", text, ("setTimeout(r, 500)", "sleep")))
 
     def test_regex_literal_with_a_quote(self):
@@ -801,7 +803,7 @@ class OutputTest(FinderCase):
             "import time",
             "",
             "def test_x(cmd):",
-            "        time.sleep(1)",
+            "    time.sleep(1)",
             "    subprocess.run(cmd, timeout=5)",
         )
         self.put("tests/test_x.py", text)
