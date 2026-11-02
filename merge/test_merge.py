@@ -9146,6 +9146,28 @@ class RedMainBrake(Env):
         self.refused_red(rc, out, before, 931)
         self.assertIn("actions/runs/932/jobs", self.host.reads, "the clear was tried, and its read failed")
 
+    # A newer run clears a red run's job name only when it ran that name at least as often as the red run did non-skipped, and every such leg passed.
+    def test_a_newer_run_with_fewer_legs_of_a_red_job_name_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("build", "failure", 20), main_job("build", "success", 20)],
+                                           main_run(932, "success", event="workflow_dispatch"), [main_job("build", "success")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_run_with_a_skipped_leg_of_a_red_job_name_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("build", "failure", 20), main_job("build", "success", 20)],
+                                           main_run(932, "success", event="workflow_dispatch"), [main_job("build", "skipped"), main_job("build", "success")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_run_with_a_failed_leg_of_a_required_name_does_not_clear_it(self):
+        # a continue-on-error leg fails in a newer run that still concludes success
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("build", "failure", 20)],
+                                           main_run(932, "success", event="workflow_dispatch"), [main_job("build", "failure", 20), main_job("build", "success")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_run_that_passed_every_leg_of_each_required_name_clears_it(self):
+        rc, out, _ = self.cross_group(main_run(931, "failure"), [main_job("build", "failure", 20), main_job("build", "success", 20)],
+                                      main_run(932, "success", event="workflow_dispatch"), [main_job("build", "success"), main_job("build", "success")])
+        self.merged(rc, out)
+
     def test_a_dynamic_event_run_is_not_judged(self):
         # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
         rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")], {925: [main_job("checks", "failure", 20)]})
