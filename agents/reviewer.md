@@ -56,7 +56,7 @@ Check for:
   file's `model:` pin, else `CLAUDE_CODE_SUBAGENT_MODEL`. Flag a named model that no spawn ran. Flag
   a model above the role's row in `agent-model-cap` (the model-per-role table) that no owner grant
   or standing grant covers.
-- Tests: check each new or changed test against the practices in decision `test-strategy-reset`, section "How to write a test that earns its keep". Plant the defect on a scratch copy and see the named case go red. Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no plant. A check or guard is tested on the cases its rule allows, not only the ones it refuses.
+- Tests: check each new or changed test against the practices in decision `test-strategy-reset`, section "How to write a test that earns its keep". If the red run is missing or in doubt, make a mutant on a scratch copy and see the named case go red (P10). Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 

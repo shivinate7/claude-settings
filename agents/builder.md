@@ -43,7 +43,7 @@ pass: search, then run them. Report each test change the lane needs, with the ru
 time, for the test-author to re-point red then green. A test that pins a behaviour next to the
 ruled one is class (c). Carry this 4-class list in your report.
 
-A flake is a defect report: find its cause before you widen a bound. Never delete or loosen a test to pass; see decision `test-strategy-reset`, section "How to write a test that earns its keep".
+A flake is a defect report: find its cause before you widen a bound (P6 in decision `test-strategy-reset`). A test leaves only as P9 says.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
 If the task is too large for one agent, stop at a clean point and report PARTIAL with the
