@@ -1,0 +1,9 @@
+{
+ "title": "Report guard accepts \"the refusal was right\" for a stray agent call",
+ "phase": "now",
+ "status": "todo",
+ "order": 483,
+ "why": "Three incidents on Nov 1: after auto mode rightly refused a stray agent call, the report guard forced an \"allow <tool>?\" owner question each time: merge-lock-record-drift (create_session, 22:12 CST), roles-follow-ruling (interrupt_session, 23:17), worktree-base-copies-remove (interrupt_session, 23:48). Each recommended keeping the refusal, which is main's state, so none was filed, and each cost a question round.",
+ "note": "The report guard asks for an allow line only when the refused call was in the agent's brief scope, or accepts \"refusal was right\" as the answer. A guard verdict change: red first on the three forms. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T05:50:00Z"
+}
