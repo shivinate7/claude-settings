@@ -4,9 +4,13 @@
 Export, the writer's step at each wake and before each republish:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
+        [--allow-empty COLLECTION]
 
 DIR holds `<collection>/<doc_id>.json` for each of the five collections, as `ArtifactData list ... out_dir=DIR`
 saves them; an empty collection is an empty folder. A script cannot call that tool, so the session fetches first.
+The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
+shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
+unknown too, unless the session names it with --allow-empty.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's designData block lands in `page/designData.json`. The script never runs git: the session commits.
 
@@ -15,10 +19,12 @@ Verdict, one line, then exit:
   same       nothing differs; exit 0
   refused    a value or key has the shape of a secret or of personal data; one line per find (file, JSON path,
              kind, never the value); nothing is written; exit 1
-  unknown    a collection folder is missing, a file is not one JSON doc, or the page has no or two designData
-             blocks; nothing is written; exit 2
-Every doc is scanned, as parsed JSON, before the first write. Only the shape counts: words such as "token budget"
-or "password manager" pass. A personal fact in plain words passes too.
+  unknown    a collection folder or its marker is missing, a file is not one JSON doc, a collection emptied, or the
+             page has no or two designData blocks; nothing is written; exit 2
+  unknown    the run crashed (one line, nothing written); exit 3
+Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
+10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass.
+A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
 
@@ -26,9 +32,10 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR
 
-Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries,
-one per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session sends each list as an
-`ArtifactData batch`. A missing or empty WAITING_DIR is `unknown`, exit 2.
+Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
+under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
+sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
+neither one of the five collections nor `page/`, or one doc over the byte cap.
 
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
 """
@@ -44,25 +51,39 @@ import splice  # noqa: E402  the one home of the designData block's span
 
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
 PAGE_FOLDER, DESIGN_FILE = "page", "designData.json"
+MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
-REFUSED, UNKNOWN = 1, 2
+BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
+REFUSED, UNKNOWN, CRASH = 1, 2, 3
 
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
-# from starting inside a longer word ("risk-" is not "sk-").
+# from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
-    ("api-key", re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}")),
-    ("aws-key-id", re.compile(r"(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])")),
+    ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
+    ("stripe-key", re.compile(r"(?<![A-Za-z0-9_-])[sr]k_live_[A-Za-z0-9]{16,}")),
+    ("google-key", re.compile(r"(?<![A-Za-z0-9_-])AIzaSy[A-Za-z0-9_-]{33}")),
+    ("gitlab-token", re.compile(r"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}")),
+    ("aws-key-id", re.compile(r"(?<![A-Z0-9])A[KS]IA[A-Z0-9]{16}(?![A-Z0-9])")),
     ("slack-token", re.compile(r"(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9-]+")),
     ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("jwt", re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")),
     ("auth-header", re.compile(r"\bAuthorization:\s*(?:Bearer|Basic)\s+\S+", re.I)),
     ("cookie-header", re.compile(r"\bCookie:\s*[^\s=;]+=\S+", re.I)),
-    ("password", re.compile(r"\b(?:password|passwd|pwd)=\S+", re.I)),
+    ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
+    ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
-PHONE_RUN = re.compile(r"(?<![\w+(])\+?\(?\d[\d()\s.\-]{8,}\d(?!\w)")
+# A phone in a string has a country code and separated groups, or the "(xxx) xxx-xxxx" form, or groups of 3, 3 and 4
+# digits joined by one separator. A bare run of digits is never one: a PO number or a timestamp is not a phone.
+PHONE_COUNTRY = re.compile(r"(?<![\w+])\+\d{1,3}[\s.\-]*\(?\d{1,4}\)?(?:[\s.\-]+\d{2,4}){1,4}(?!\d)")
+PHONE_OTHER = (
+    re.compile(r"(?<!\d)\(\d{3}\)\s*\d{3}[\s.\-]\d{4}(?!\d)"),
+    re.compile(r"(?<!\d)\d{3}([-. ])\d{3}\1\d{4}(?!\d)"),
+)
 DATE_START = re.compile(r"\d{4}-\d{2}-\d{2}")
+PHONE_DIGITS = (10, 11)  # a JSON number of this many digits is a phone; 13 digits is an epoch in milliseconds
 
 
 class Stop(Exception):
@@ -73,19 +94,20 @@ class Stop(Exception):
         self.code = code
 
 
-def is_phone(run, after):
-    """True when digit run `run`, followed by the text `after`, reads as a phone number. A date and a time in the space
-    form ("YYYY-MM-DD hh:mm" is ten digits in one run), a run of single digits (a viewBox, points) and a run with no group of three digits do not."""
-    groups = re.findall(r"\d+", run)
-    if sum(len(g) for g in groups) < 10 or DATE_START.match(run) or re.match(r":\d", after):
-        return False
-    return all(len(g) >= 2 for g in groups[1:]) and any(len(g) >= 3 for g in groups)
+def is_phone(text):
+    """True when `text` holds a phone-shaped run. A country-code form with fewer than ten digits, or one that
+    runs into an ISO date, is not a phone."""
+    for found in PHONE_COUNTRY.finditer(text):
+        whole = found.group(0)
+        if sum(c.isdigit() for c in whole) >= 10 and not DATE_START.search(whole):
+            return True
+    return any(shape.search(text) for shape in PHONE_OTHER)
 
 
 def kinds_in(text):
     """The kinds of secret or personal data that `text` has the shape of, each once."""
     found = [name for name, shape in SECRET_SHAPES if shape.search(text)]
-    if any(is_phone(m.group(0), text[m.end():]) for m in PHONE_RUN.finditer(text)):
+    if is_phone(text):
         found.append("phone")
     return found
 
@@ -95,10 +117,13 @@ def plain_key(key):
 
 
 def scan(node, path, out):
-    """Append (path, kind) to `out` for each string value and each key of the parsed JSON `node`. The path of a find in a key
-    names that key as <redacted>, so a find's line never holds its value."""
+    """Append (path, kind) to `out` for each string value, each key and each phone-length integer of the parsed JSON
+    `node`. The path of a find in a key names that key as <redacted>, so a find's line never holds its value."""
     if isinstance(node, str):
         out.extend((path, kind) for kind in kinds_in(node))
+    elif isinstance(node, int) and not isinstance(node, bool):
+        if len(str(abs(node))) in PHONE_DIGITS:
+            out.append((path, "phone"))
     elif isinstance(node, list):
         for number, child in enumerate(node):
             scan(child, "%s[%d]" % (path, number), out)
@@ -124,11 +149,13 @@ def load_json(path, label):
 
 
 def docs_in(folder, label):
-    """{doc_id: parsed JSON} of the `<doc_id>.json` files in `folder`. Anything else in it is unknown: a doc that
+    """{doc_id: parsed JSON} of the `<doc_id>.json` files in `folder`. Anything but the marker is unknown: a doc that
     is skipped would be deleted from the copy as if it were gone."""
     found = {}
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)
+        if name == MARKER and os.path.isfile(path):
+            continue
         if not (os.path.isfile(path) and name.endswith(".json") and len(name) > len(".json")):
             raise Stop("unknown - %s/%s is not a <doc_id>.json file" % (label, name), UNKNOWN)
         found[name[:-len(".json")]] = load_json(path, "%s/%s" % (label, name))
@@ -173,19 +200,32 @@ def existing(out):
     return found
 
 
-def export(fetched, out, page):
-    want = {}
-    finds = []
+def export(fetched, out, page, allow_empty):
+    docs = {}
     for name in COLLECTIONS:
         folder = os.path.join(fetched, name)
         if not os.path.isdir(folder):
             raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
-        for doc_id, data in docs_in(folder, name).items():
-            label = "%s/%s.json" % (name, doc_id)
-            found = []
-            scan(data, "$", found)
-            finds.extend((label, path, kind) for path, kind in found)
-            want[label] = canonical(data)
+        if not os.path.isfile(os.path.join(folder, MARKER)):
+            raise Stop("unknown - %s has no %s marker, so the fetch may have stopped early" % (name, MARKER), UNKNOWN)
+        docs[name] = docs_in(folder, name)
+
+    have = existing(out)
+    for name in COLLECTIONS:
+        kept = [label for label in have if label.startswith(name + "/")]
+        if not docs[name] and kept and name not in allow_empty:
+            raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
+                       % (name, len(kept), name), UNKNOWN)
+
+    want = {}
+    finds = []
+    for name in COLLECTIONS:
+        for doc_id, data in docs[name].items():
+            hits = [("$id", kind) for kind in kinds_in(doc_id)]
+            label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)
+            scan(data, "$", hits)
+            finds.extend((label, path, kind) for path, kind in hits)
+            want["%s/%s.json" % (name, doc_id)] = canonical(data)
     if page:
         data = design_data(page)
         found = []
@@ -195,7 +235,6 @@ def export(fetched, out, page):
     if finds:
         refuse(finds)  # before any write, so a refused run leaves the copy as it was
 
-    have = existing(out)
     if page:
         path = os.path.join(out, PAGE_FOLDER, DESIGN_FILE)
         if os.path.isfile(path):
@@ -216,18 +255,44 @@ def export(fetched, out, page):
     return "changed %d" % changed if changed else "same"
 
 
+def entry_bytes(entry):
+    """The bytes `entry` takes inside a batch file, which is `canonical` of a list: two-space indent on each line."""
+    text = json.dumps(entry, sort_keys=True, indent=2)
+    return len(text) + 2 + 2 * text.count("\n")  # ensure_ascii is on, so a character is a byte
+
+
+def batch_bytes(count, entries_total):
+    """A batch file's size: "[\\n", the entries joined by ",\\n", "\\n]" and the final newline."""
+    return 3 + 2 * count + entries_total
+
+
 def rebuild(waiting, batches):
     entries = []
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
             folder = os.path.join(waiting, name)
-            if name != PAGE_FOLDER and os.path.isdir(folder):
-                for doc_id, data in docs_in(folder, name).items():
-                    entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
+            if name == PAGE_FOLDER:
+                continue
+            if name not in COLLECTIONS or not os.path.isdir(folder):
+                raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
+            for doc_id, data in docs_in(folder, name).items():
+                entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
     if not entries:
         raise Stop("unknown - %s holds no docs" % waiting, UNKNOWN)
+
+    pieces, piece, total = [], [], 0
+    for entry in entries:
+        size = entry_bytes(entry)
+        if batch_bytes(1, size) >= BATCH_BYTES:
+            raise Stop("unknown - %s/%s is over the %d byte batch cap" % (entry["collection"], entry["doc_id"], BATCH_BYTES), UNKNOWN)
+        if piece and (len(piece) == BATCH_SIZE or batch_bytes(len(piece) + 1, total + size) >= BATCH_BYTES):
+            pieces.append(piece)
+            piece, total = [], 0
+        piece.append(entry)
+        total += size
+    pieces.append(piece)
+
     os.makedirs(batches, exist_ok=True)
-    pieces = [entries[i:i + BATCH_SIZE] for i in range(0, len(entries), BATCH_SIZE)]
     for number, piece in enumerate(pieces, 1):
         with open(os.path.join(batches, "batch-%03d.json" % number), "w", encoding="utf-8", newline="") as handle:
             handle.write(canonical(piece))
@@ -239,6 +304,8 @@ def main(argv):
     ap.add_argument("--fetched", help="the folder `ArtifactData list` saved, one folder per collection")
     ap.add_argument("--out", help="the waiting-data folder to mirror into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
+    ap.add_argument("--allow-empty", action="append", choices=COLLECTIONS, default=[], metavar="COLLECTION",
+                    help="a collection that really emptied, so its docs leave the copy")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     args = ap.parse_args(argv)
@@ -247,10 +314,16 @@ def main(argv):
             or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --rebuild DIR --batches DIR")
     try:
-        verdict = export(args.fetched, args.out, args.page) if export_mode else rebuild(args.rebuild, args.batches)
+        if export_mode:
+            verdict = export(args.fetched, args.out, args.page, args.allow_empty)
+        else:
+            verdict = rebuild(args.rebuild, args.batches)
     except Stop as stop:
         print(str(stop))
         return stop.code
+    except Exception as err:  # a crash is unknown, never a silent pass or a traceback the reader scrolls past
+        print("unknown - the run crashed (%s)" % type(err).__name__)
+        return CRASH
     print(verdict)
     return 0
 

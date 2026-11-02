@@ -231,10 +231,14 @@ def probe_layout(root):
     waiting = waiting_copy(root)
     if waiting and waiting.startswith("missing"):
         lines.append("  " + waiting)
-    if not rolled:
-        lines = ["  preview" + line[1:] for line in lines]
-        return finish("layout", lines, "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, len(lines)), 0)
     unread = waiting if waiting and waiting.startswith("unknown") else None
+    if not rolled:
+        if unread and not lines:
+            return finish("layout", [], unread, 2)  # an unread branch is never a clear preview
+        lines = ["  preview" + line[1:] for line in lines]
+        total = len(lines)
+        return finish("layout", lines + (["  " + unread] if unread else []),
+                      "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, total), 0)
     if lines:
         return finish("layout", lines + (["  " + unread] if unread else []), "out - %d finding(s)" % len(lines), 1)
     if unread:

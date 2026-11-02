@@ -216,18 +216,19 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`.
-3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
+   republish, so the copy holds the page as it was.
+4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
    `<out>` first and republish once ("Add a design").
-4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
+5. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.
-5. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo").
 
 The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
-repo's waiting page from a file behind main is refused, and its reason repeats steps 1 to 3. An allowed
+repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
@@ -241,29 +242,38 @@ transcripts because no repo held them. So the writer keeps a copy of the page's 
 `waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
 request. The record branch (`roadmap` by default, `layout.py` `record_branch()`) takes a direct push.
 
-The writer runs this at each wake and before each republish. A lane never runs it.
+The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
+never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
 
-1. Find the folder: `python3 ~/.claude/lint/layout.py path <repo root> waiting-data`. Call it the copy folder.
+1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
+   Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
+   and use that path inside the worktree.
 2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
-   Follow `next_cursor` until it is empty. A missed cursor page deletes docs from the copy.
-   An empty collection is an empty folder. Make it by hand if the tool wrote none.
-3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder in the record worktree> --page <file>`.
+   Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
+   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
+   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
+   is an empty folder with that marker. Make the folder by hand if the tool wrote none.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
    `<file>` is the page that "Keep the page on main's code" step 1 already read.
+   Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
+   collection is `unknown`.
 4. Read the verdict line.
    - `same`: stop. Commit nothing.
-   - `changed <n>`: in the record branch's own worktree, run `git add` on the copy folder, then
+   - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
      commit and push the record branch. The commit message names the count.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
      the kind, never the value. Fix the item on the page first, then run the steps again.
-   - `unknown`: nothing was written. Say the line in the reply. A missing collection folder is the usual cause.
+   - `unknown`: nothing was written. Say the line in the reply. A missing collection folder or marker, an
+     emptied collection and a crash (exit 3) are the usual causes.
 
 The copy holds one JSON file per doc, `<collection>/<doc id>.json`, and `page/designData.json`. The mockups live
 in the page's `designData` block, not in the database.
-The scan reads shapes: tokens, keys, cookie and auth headers, passwords, email addresses and phone numbers. A
-personal fact in plain words, such as an employer or a city, passes. Do not write one in an item.
+The scan reads shapes: tokens, keys, cookie and auth headers, passwords, URL query secrets, email addresses and
+phone numbers. A personal fact in plain words, such as an employer or a city, passes. Do not write one in an item.
 
-Cost: five list calls, one python process, and one commit when something changed. No timer, no watcher.
+Cost: one list call per page of each collection, one python process, and one commit when something changed. No
+timer, no watcher.
 
 ## Rebuild a page from the repo
 
@@ -271,14 +281,15 @@ Use this when the page is gone, or moved to an org this account cannot read. It 
 live page.
 
 1. Make a new page ("Make a repo's page"), and note its URL. The new page has an empty database.
-2. Find the copy folder as "Keep a copy in the repo" step 1 says. Check out the record branch in its own worktree.
+2. Check out the record branch in its own worktree and name the copy folder in it, as "Keep a copy in the repo"
+   step 1 says.
 3. Make one new empty folder. Run
    `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
    It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop and say so.
 4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
 5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
-   it to the new URL, as "Keep the page on main's code" step 3 says.
+   it to the new URL, as "Keep the page on main's code" step 4 says.
 6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
 7. Write the new URL into the `waiting-page` key of the repo's extras file, in a pull request.
 
