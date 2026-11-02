@@ -63,6 +63,7 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
   - commit 165dfede holds decision record `sim-lease`, ruling 2: `sim-test` runs on the Duo first, with an optional 18 Pro run.
   - It has no PR and no finished review. Read it, then reuse it or replace it.
 - iOS 27.1 runtime: deleted, then downloaded again with `xcodebuild -downloadPlatform iOS -buildVersion 27.1` (7.85 GB, new image C77A48A3). The erased AC2E94F9 then booted to its home screen, with no "Data Migration Failed" and no new crash. So the fault was a damaged runtime image, not the device and not Xcode. The standard should say: when a fresh device of a type fails too, reinstall that runtime; do not erase devices.
+- Later the same day (13:40–13:45 CST) the Duo failed again: "Data Migration Failed", and even a named-display screenshot failed for about 2 minutes while SpringBoard ran. The 5-minute load was about 130 to 173, mostly swift-frontend builds. Clean boots at 13:31–13:36 ran under lighter load. Working theory, unmeasured: the Duo's first-boot step times out under load. Interim rule, given to the coordinators: boot the Duo only when the 5-minute load is under 30. Measure it, then put a load bar in the standard or in the boot check.
 
 ## What I want
 
