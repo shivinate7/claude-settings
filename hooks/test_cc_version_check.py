@@ -44,7 +44,7 @@ VERSION = "2.1.316"
 NEXT_VERSION = "2.1.320"
 AI_AGENT = "claude-code_2-1-316_agent"
 NEXT_AI_AGENT = "claude-code_2-1-320_agent"
-NOW = "2026-11-02T10:00:00-06:00"  # the clock seam for daily_note: Central day 2026-11-02
+NOW = "2026-11-02T10:00:00-06:00"  # the clock seam for daily_note: a fixed instant, so the Central day is known
 TODAY = "2026-11-02"
 ANCHORED = ("version", "idle_compaction_default", "auto_compact_enabled_default",
             "settings_keys", "env_vars", "summary_fraction_default")
