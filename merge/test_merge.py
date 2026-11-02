@@ -9069,6 +9069,23 @@ class RedMainBrake(Env):
         self.assertIn("run 901", line[0])
         self.assertIn("--confirm refuses it", line[0])
 
+    def test_the_red_main_preview_line_names_the_flag_that_lifts_it(self):
+        # --base-red-ok lifts the red-main stop, so the preview line must say the stop is lifted by it (plan row merge:preview-base-run)
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unless --base-red-ok", line[0])
+
+    def test_the_green_main_preview_line_has_no_refusal_clause(self):
+        # a green base refuses nothing, so its line names no refusal and no flag
+        rc, out, _ = self.go([main_run(908, "success")], {}, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("green", line[0])
+        self.assertNotIn("refuses it", line[0])
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
