@@ -14,7 +14,11 @@ Never write a refused path another way, such as with a shell command or a script
 needs a product change, report that change. The orchestrator assigns it to a builder.
 
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
-Run the tests you write. Show each one red for its named cause before the build, or passing after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+Run the tests you write. Each new case fails on the old code for the right reason. Record that run as a trailer on
+the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).
+Use `Red-run: none: <reason>` only for a change that adds no new claim, such as a re-pointed fixture.
+`lint/check_red_run.py` reads the trailer. Before you push, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
+Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
 Follow the practices in decision `test-practices`. At write time: show each new case red on a named old commit, with a green control beside it (P2). The red must be an assert that fails for the named cause, never a crash, an import error or "not built" (P3). For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red (P3). Each failure message names one cause (P4). No fixed sleep, wall-clock wait or real clock in an assert (P5). Assert the scope before the subject when the test probes or branches on the subject (P7). Fixtures reach the empty and full-size states (P8).
