@@ -7473,6 +7473,57 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
            "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
 
 
+# ---- env heredoc (incident 2, 2026-11-01 23:38 CST): a coordinator wrote a brief into a file through a
+# heredoc. A body line held an interpreter word before `<<`, or a `| bash` after `<<`. The rule read the
+# whole command for those words, so it kept the body in view and refused the env forms named in the
+# text. Bash reads a body for neither a header nor a pipe. The body is data, so these cases are allowed.
+_BRIEF_FORMS = "Refused forms, as text:\ncat " + ENV + "\nnode --env-file=" + ENV + " app.js\n"
+for _line in ("python3 - <<X", "cat <<X | bash"):
+    sh("env heredoc: incident 2 brief, quoted delimiter, a body line `%s`, allowed" % _line,
+       "cat > briefs/brief.md <<'EOF'\n" + _BRIEF_FORMS + _line + "\nEOF", "allow", cwd=NOGIT)
+    sh("env heredoc: incident 2 brief, unquoted delimiter, no substitution, a body line `%s`, allowed"
+       % _line, "cat > briefs/brief.md <<EOF\n" + _BRIEF_FORMS + _line + "\nEOF", "allow", cwd=NOGIT)
+# A nested bash block in a quoted data body is text too: the outer body is never run.
+sh("env heredoc: a nested bash <<X block that names the file, in a quoted notes body, allowed",
+   "cat > notes.md <<'EOF'\nRun later:\nbash <<X\ncat " + ENV + "\nX\nEOF", "allow", cwd=NOGIT)
+# A lone apostrophe and a hash in a data body hold no command, so they must not change the reading.
+sh("env heredoc: a lone apostrophe and a hash line in a data body, with a python3 - <<X line, allowed",
+   "cat > briefs/brief.md <<'EOF'\nDon't run this.\n# " + ENV + " is the file\npython3 - <<X\nEOF",
+   "allow", cwd=NOGIT)
+# A hash inside a quoted word of the header is text, not a comment, so the body is still data.
+sh("env heredoc: a hash in the quoted file name of a header, with a python3 - <<X body line, allowed",
+   'cat > "briefs/#brief.md" <<\'EOF\'\n' + _BRIEF_FORMS + "python3 - <<X\nEOF", "allow", cwd=NOGIT)
+# A quoted string that spans lines and holds a heredoc header is text. The header after it is real.
+sh("env heredoc: a multi-line quoted string that holds a heredoc header, then an incident 2 brief, allowed",
+   'echo "a\ncat <<\'EOF\'\nb"\ncat > briefs/brief.md <<\'EOF\'\n' + _BRIEF_FORMS + "python3 - <<X\nEOF",
+   "allow", cwd=NOGIT)
+# Green: each form runs its body as shell, so the env read in the body is refused as before.
+sh("env heredoc: a cat heredoc piped to bash, a cat ENV line in the body, denies",
+   "cat <<'EOF' | bash\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a bash heredoc, a cat ENV line in the body, denies",
+   "bash <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a python3 heredoc, a cat ENV line in the body, denies",
+   "python3 - <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a plain cat ENV still denies", "cat " + ENV, "deny", "env-file", cwd=NOGIT)
+# With no closing line the body is never closed, so the whole text is read as shell and the read denies.
+sh("env heredoc: an unclosed body that runs bash <<X and names the file, denies",
+   "cat > briefs/brief.md <<'EOF'\nbash <<X\ncat " + ENV, "deny", "env-file", cwd=NOGIT)
+# Regression: prose that names an env folder is text, in a python body and in a data body with no
+# interpreter line.
+for _name in (ENV + "s/", ENV + "/x"):
+    sh("env heredoc: incident 1 roadmap note, python3 - <<'EOF', prose names %s, allowed" % _name,
+       "python3 - <<'EOF'\nimport json\nprint(json.dumps({\"note\": \"keep secrets out of %s\"}))\nEOF"
+       % _name, "allow", cwd=NOGIT)
+# A backticked file name in a python body is text too. Outside single quotes the env rule reads the
+# backticks as a substitution, because the python body stays under inspection. Red at base.
+sh("env heredoc: incident 1 roadmap note, python3 - <<'EOF', prose names the backticked file, allowed",
+   "python3 - <<'EOF'\nimport json\nprint(json.dumps({\"note\": \"keep secrets out of `" + ENV + "`\"}))\nEOF",
+   "allow", cwd=NOGIT)
+sh("env heredoc: incident 2 brief that names the %s folder in prose, no interpreter line, allowed" % (ENV + "s/"),
+   "cat > briefs/brief.md <<'EOF'\nKeep secrets out of " + ENV + "s/ and the example file.\nEOF",
+   "allow", cwd=NOGIT)
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
