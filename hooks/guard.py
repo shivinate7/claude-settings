@@ -2948,7 +2948,7 @@ CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
-PAGE_ITEM_DESIGN_FIX = " Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
 def _run_check_designs(page_file, item):

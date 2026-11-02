@@ -106,6 +106,7 @@ def _blank_messages(segment: str) -> str:
     return ENV_MESSAGE_ARG.sub(blank, segment)
 
 ENV_ADVICE = (
+    "(decision env-file-stays-unread, a session never reads an environment file). "
     "Remedy: ask the user for the value and never read the file. "
     "To RUN something that needs those variables, hand the file to the runner with the "
     "--env-file flag ahead of node, npm, npx or a container command. "
