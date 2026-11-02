@@ -29,6 +29,12 @@ from git_reads import (  # noqa: F401
 )
 
 
+def is_cloud() -> bool:
+    """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
+    cloud check; the load brake and its report stand down here, because the brake is local-only."""
+    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+
+
 # ------------------------------------------------------------------ the stream encoding
 #
 # MEASURED 2026-09-09 in a Claude Code session on Windows: `sys.stderr.encoding` was `cp1252`, so
@@ -1568,9 +1574,10 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 # THE RULE JUDGES THE RESULT, NOT THE COMMANDS (docs/decisions/predicate-is-the-act.md). The act is a
 # test path in the diff, not a shell command. So the diff is judged, at three
 # points: a Write/Edit tool call (the early warning, by path), the builder's own `git commit` and
-# `git push`, and its SubagentStop. Each reads the SAME diff: the working tree against the commit
-# the agent's branch was created from, plus untracked files, with every path normalised for
-# backslashes and resolved through symlinks.
+# `git push`, and its SubagentStop. Each reads the SAME change: what the agent wrote itself
+# (`own_changes` in guard.py: its own commits HEAD still holds, against their first parent or git's
+# own merge, and the working tree against HEAD), plus untracked files, with every path normalised
+# for backslashes and resolved through symlinks.
 #
 # THE ROLE is read from the payload: it carries an `agent_id` (an agent) and an `agent_type`.
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no

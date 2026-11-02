@@ -15,7 +15,7 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
-  merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
+  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -748,9 +748,12 @@ class Host:
             heads[name] = row
         return heads
 
-    def batch_running(self, n, base, unprotected_counts_all=False, ignore=None):
+    def batch_running(self, n, base, unprotected_counts_all=False, ignore=None, head=None):
         """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a required check
-        reported and not completed (rule git-no-merge-during-batch-ci). The run counts because a required job can wait on another job
+        reported and not completed (rule git-no-merge-during-batch-ci), unless that head contains n's head (decision no-merge-during-batch-ci):
+        the compare `head...other head` reads `ahead` or `identical`, and so does the compare `base...head` (this head holds the base tip). Both are read only for a busy
+        pull request, the second only when the first passes. A failed read raises Stop.
+        `head` is n's head sha; None reads it through pr(n). The run counts because a required job can wait on another job
         (checks.yml's `checks` needs `scope`), so it has no row yet. A required name with no entry and no running workflow on that head
         does not count: a ready PR whose CI never reports would block every merge. merge.ignoreChecks runs and checks never count. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
         The required names are a pinned list, else the branch protection. `unprotected_counts_all` (the guard's mode): a base with no
@@ -773,9 +776,24 @@ class Host:
                     for k in pending if (names is None or k in names) and got.get(k)]
             running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
             parts = (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
-            if parts:
+            if not parts:
+                continue
+            if head is None:
+                head = self.pr(n)["head"]
+            # contained only when the busy head holds this head AND this head holds the base tip: else its run never tested the base this merge lands on
+            if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
+
+    def holds_head(self, head, other):
+        """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
+        c, out = self.api(f"compare/{head}...{other}")
+        try:
+            if c:
+                raise ValueError(out)
+            return json.loads(out)["status"] in ("ahead", "identical")
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"cannot read whether {other[:9]} holds {head[:9]}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -1129,7 +1147,7 @@ class Host:
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
-                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"], unprotected_counts_all=True, ignore=batch_ignore)
+                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"], unprotected_counts_all=True, ignore=batch_ignore, head=info["head"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -1565,7 +1583,8 @@ _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read afte
 
 def small_base_move(wt, base_ref, sha, before_run=None):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
-    It stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
+    It stands with no run at all when main's diff from the merge base M is empty (the merge of sha and T is sha's tree). Otherwise
+    it stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
     generator proves it on the merge), the merge of sha and T is clean, the repo's ci-scope.sh turns on no job and no suite
     for main's paths, and on that merge the `checks` lint steps pass and so does each other `checks` suite that names one of
     main's paths (hit_suites). Anything unread refuses. The worktree goes back to its HEAD.
@@ -1585,9 +1604,22 @@ def small_base_move(wt, base_ref, sha, before_run=None):
     if any(c for c, _ in reads) or count[0]:
         return False, "the paths of main or of the batch cannot be read"
     theirs, ours = ({p for p in out.split("\0") if p} for _, out in reads)
+    if not theirs:  # main's tree is the merge base's: the merge of sha and tip is sha's tree, which the green run tested
+        # ... only if no commit between changed a path: a pull_request run tested the merge with main as it was then, path and all
+        trees = git(wt, "log", "--format=%T", f"{m}..{tip}")
+        base_tree = git(wt, "rev-parse", f"{m}^{{tree}}")
+        if trees[0] or base_tree[0]:
+            return False, "the trees of main's commits since the merge base cannot be read"
+        moved = [t for t in trees[1].split() if t != base_tree[1]]
+        if moved:
+            return False, f"main changed paths since the merge base and changed them back ({len(moved)} commit{'s' * (len(moved) != 1)} with another tree), so the green run tested a main that had them"
+        n = int(count[1])
+        verdict = True, f"{base_ref.split('/', 1)[-1]} moved by {n} commit{'s' * (n != 1)} that change no path; the merge of the head and the tip is the head's tree"
+        _SMALL_MOVES[key] = verdict
+        return verdict
     shared = sorted((theirs & ours) - {RECORDS_PAGE})
-    if not theirs or shared:
-        return False, "main and the batch both change " + ", ".join(shared) if shared else "main's commits change no path"
+    if shared:
+        return False, "main and the batch both change " + ", ".join(shared)
     c, head = git(wt, "rev-parse", "HEAD")
     if c:
         return False, "the worktree's HEAD cannot be read"
@@ -2271,13 +2303,13 @@ def red_base(root, host, base, red_ok=""):
         return
     raise Liftable(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
-def batch_refusal(host, n, base):
-    """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending,
-    else None. A failed read raises Stop. No reason flag lifts it: a merge under a running batch moves the base that run tests."""
-    blockers = host.batch_running(n, base)
+def batch_refusal(host, n, base, head):
+    """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending
+    and its head does not contain `head`, else None. A failed read raises Stop. No reason flag lifts it: a merge under a running batch moves the base that run tests."""
+    blockers = host.batch_running(n, base, head=head)
     if not blockers:
         return None
-    return (f"#{n} does not merge to {base} while another ready PR's CI runs: " + "; ".join(blockers) + ".\n"
+    return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             "Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again.")
 
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
@@ -2314,8 +2346,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
     try:
-        blockers = host.batch_running(n, base)
-        batch = "; ".join(blockers) + ". --confirm refuses it." if blockers else "clear"
+        blockers = host.batch_running(n, base, head=info["head"])
+        batch ="; ".join(blockers) + ". --confirm refuses it." if blockers else "clear"
     except Stop as e:
         batch = "unknown (" + " ".join(str(e).split()) + "). --confirm refuses it."
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
@@ -2399,7 +2431,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         red_base(root, host, base, red_ok)
-        busy = batch_refusal(host, n, base)
+        busy = batch_refusal(host, n, base, info["head"])
         if busy:
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
@@ -2537,7 +2569,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             lanes, dropped = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
             try:  # again right before the PUT: a batch that went ready during the waits is refused, and its claim reverted as for a refused PUT
-                busy = batch_refusal(host, n, base)
+                busy = batch_refusal(host, n, base, sha)
             except NetStop:  # a network error is not a refusal: the claim stays
                 raise
             except Stop as e:
@@ -2578,7 +2610,7 @@ def default_lock(root):
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
 
-MERGE_ROLES = {"coordinator", "batch-runner"}  # the tiers that may run `merge <pr> --confirm` in a cloud session
+MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
@@ -2625,7 +2657,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
-    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (coordinator or batch-runner)")
+    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
