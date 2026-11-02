@@ -1,0 +1,9 @@
+{
+ "title": "q_max: judge its time-pinned test candidates and fix the true ones",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.2104,
+ "why": "Part 2 of step time-pinned-tests-go. The finder in PR #1026 listed 326 candidates in q_max (docs/plans/time-pinned-tests.md).",
+ "note": "Candidates: sleep 64, elapsed-assert 20, test-cap 127, wait-cap 115, total 326. Many may be false matches; judge each first. Replace each true finding with an outcome check (fake clock, wait for a condition), or record it as a debt, per decision test-strategy-reset. Then re-measure q_max's job caps. Starts once PR #1026 merges.",
+ "updatedAt": "2026-11-02T03:26:00Z"
+}
