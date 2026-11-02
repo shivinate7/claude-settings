@@ -1317,6 +1317,95 @@ retired_case15() {
   rm -rf "$h"
 }
 
+# retired16 helper: a git shim first on PATH. It logs its arguments to $2, then runs the real git.
+retired_git_shim() {
+  real_git=$(command -v git)
+  mkdir -p "$1"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$2" "$real_git" > "$1/git"
+  chmod +x "$1/git"
+}
+
+# retired16: one install starts git ls-files at most once per landed folder. The second run has a
+# manifest, so it also checks every recorded entry: the case that multiplies the calls.
+retired_case16() {
+  name="retired16: one install starts git ls-files at most once per landed folder"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired16-checkout"
+  retired_checkout "$co" retired16
+  printf '#!/bin/sh\necho a\n' > "$co/hooks/a_hook.sh"
+  printf '#!/bin/sh\necho b\n' > "$co/hooks/b_hook.sh"
+  mkdir -p "$co/skills/second-skill"; printf 'two\n' > "$co/skills/second-skill/SKILL.md"
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    printf '#!/bin/sh\necho %s\n' "$i" > "$co/bin/tool_$i.sh"
+  done
+  retired_commit "$co" "ship more files"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  log="$work/retired16-git.log"; : > "$log"
+  retired_git_shim "$work/retired16-bin" "$log"
+  out2=$( PATH="$work/retired16-bin:$PATH"; export PATH; retired_run "$co" "$h" "$cfg" local ); rc2=$?
+  calls=$(grep -c 'ls-files' "$log" 2>/dev/null); calls=${calls:-0}
+  folders=$(landed_dirs | wc -l | tr -d ' ')
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$calls" -lt 1 ]; then
+    bad "$name" "the git shim logged no ls-files call, so the count proves nothing"
+  elif [ "$calls" -gt "$folders" ]; then
+    bad "$name" "$calls git ls-files calls for $folders landed folders"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# retired17: a removal that fails keeps its manifest line, and the next run removes the entry once the
+# folder is writable again. As root, chmod blocks no write, so the case skips and says so.
+retired_case17() {
+  name="retired17: a removal that fails keeps its manifest line; the next run, folder writable again, removes the entry"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired17-checkout"
+  retired_checkout "$co" retired17
+  printf '#!/bin/sh\necho gone\n' > "$co/hooks/gone_retry.sh"
+  retired_commit "$co" "ship gone_retry"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  recorded1=$(grep -c '^hooks/gone_retry.sh' "$cfg/backups/install-manifest.txt" 2>/dev/null); recorded1=${recorded1:-0}
+  rm -f "$co/hooks/gone_retry.sh"
+  retired_commit "$co" "retire gone_retry"
+
+  chmod a-w "$cfg/hooks"
+  if ( : > "$cfg/hooks/probe" ) 2>/dev/null; then
+    rm -f "$cfg/hooks/probe"; chmod u+w "$cfg/hooks"
+    skip "$name" "chmod does not block writes here (running as root), so the failed-removal path cannot run"
+    rm -rf "$h"
+    return
+  fi
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+  recorded2=$(grep -c '^hooks/gone_retry.sh' "$cfg/backups/install-manifest.txt" 2>/dev/null); recorded2=${recorded2:-0}
+  link2=no; [ -L "$cfg/hooks/gone_retry.sh" ] && link2=yes
+  chmod u+w "$cfg/hooks"
+  out3=$(retired_run "$co" "$h" "$cfg" local); rc3=$?
+  recorded3=$(grep -c '^hooks/gone_retry.sh' "$cfg/backups/install-manifest.txt" 2>/dev/null); recorded3=${recorded3:-0}
+
+  if [ $rc1 -ne 0 ] || [ $rc3 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc3=$rc3: $out1 / $out3"
+  elif [ "$recorded1" != 1 ]; then
+    bad "$name" "run 1 did not record hooks/gone_retry.sh in the manifest"
+  elif [ "$link2" != yes ]; then
+    bad "$name" "the link was gone after the run with a read-only folder, so the removal did not fail as set up (run 2 exit $rc2)"
+  elif [ "$recorded2" != 1 ]; then
+    bad "$name" "the removal failed, and the manifest dropped its line, so the next run cannot retry it"
+  elif [ -L "$cfg/hooks/gone_retry.sh" ] || [ -e "$cfg/hooks/gone_retry.sh" ]; then
+    bad "$name" "the run with the folder writable again left the entry in place"
+  elif [ "$recorded3" != 0 ]; then
+    bad "$name" "the manifest still lists the entry after it was removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- Case F1-F5: session_start.sh origin-freshness check ---------------------------------
 # These cases use a real local bare repo as "origin", so `git fetch` succeeds with no
 # network and the behind-count is exact. They also confirm the fetch never runs, and
@@ -4669,6 +4758,8 @@ run retired_case12
 run retired_case13
 run retired_case14
 run retired_case15
+run retired_case16
+run retired_case17
 run skills_case1
 run skills_case2
 run cloud_settings1
