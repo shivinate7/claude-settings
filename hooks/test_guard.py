@@ -20288,6 +20288,9 @@ CS_NOTEBOOK = os.path.join(GITMAIN, "src", "a.ipynb")
 CS_CLAUDE_MD = os.path.join(GITMAIN, "CLAUDE.md")
 CS_OWN_SCRATCH = os.path.join(GITMAIN, CS_PAYLOAD_SID, "scratchpad", "notes", "out.txt")
 CS_OTHER_SCRATCH = os.path.join(GITMAIN, CS_OTHER_SID, "scratchpad", "notes", "out.txt")
+# A repo path over the log field's bound on every platform, so the field must shorten it. Its folders are plain names:
+# no record kind and no scratchpad segment, so the Edit is refused.
+CS_DEEP_CODE = os.path.join(GITMAIN, "deep-" + "x" * 45, "nested-" + "y" * 45, "src", "app.py")
 
 # ---- denied: a repo path outside the kinds, by each write tool
 for _tool in ("Edit", "Write"):
@@ -20958,22 +20961,31 @@ def cs_log_rows(config):
     return [line.split("\t") for line in gs_log_lines(config)]
 
 
+def cs_log_refused_line(name, tool_input, tool="Edit"):
+    """The one guard.log line of a coordinator call that is refused: the six fields of one deny line for
+    coordinator-scope. Returns (fields, problem), with fields None when the call or its line is wrong. Every refusal
+    check in this section takes its line here, so each case adds only its own assertions."""
+    config = cs_config(name, "coordinator")
+    got, reason = ov_call(tool, dict(tool_input), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return None, problem
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return None, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
+    fields = rows[0]
+    if len(fields) != 6 or fields[2:4] != ["deny", CS_RULE]:
+        return None, "the line is %r, want six fields with decision deny and rule coordinator-scope" % (fields,)
+    return fields, ""
+
+
 def cs_log_refusal_check(tool="Edit", tool_input=None, name="cs-log-refusal", matched=os.path.basename(CS_CODE)):
     """One denied coordinator write appends one guard.log line: six fields, decision deny, rule coordinator-scope, the
     refused path in the matched field, and the payload's session last. The remedy is printed, not logged, so the line
     holds none of its words. `matched` is the fragment the matched field must hold, or None to leave that field unpinned."""
-    config = cs_config(name, "coordinator")
-    got, reason = ov_call(tool, dict(CS_LOG_EDIT if tool_input is None else tool_input), GITMAIN, config, CS_PAYLOAD_SID, 0,
-                          env=CS_REMOTE)
-    problem = ov_want(got, reason, "deny", CS_RULE)
+    fields, problem = cs_log_refused_line(name, CS_LOG_EDIT if tool_input is None else tool_input, tool)
     if problem:
         return False, problem
-    rows = cs_log_rows(config)
-    if len(rows) != 1:
-        return False, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
-    fields = rows[0]
-    if len(fields) != 6 or fields[2:4] != ["deny", CS_RULE]:
-        return False, "the line is %r, want six fields with decision deny and rule coordinator-scope" % (fields,)
     if matched is not None and matched not in fields[4]:
         return False, "the matched field is %r, want the refused path" % fields[4]
     if fields[5] != CS_PAYLOAD_SID:
@@ -20983,6 +20995,34 @@ def cs_log_refusal_check(tool="Edit", tool_input=None, name="cs-log-refusal", ma
         if remedy in text:
             return False, "the log line holds remedy text %r: %r" % (remedy, fields)
     return True, "one deny line names coordinator-scope and the refused path, and no remedy text"
+
+
+def cs_log_deep_path_check():
+    """A refused path longer than the log field keeps its file name at the tail and shortens its head, by guard_core's
+    path rule: the mark, then the tail of the path. A path is never cut from its tail, so a deep path must not reach the
+    cut that a command takes. CS_DEEP_CODE is over the bound on every platform, so the case reads the same on Linux,
+    where the temporary root is short, and on macOS, where it is long."""
+    from guard_core import LOG_CUT_MARK, LOG_MAX_MATCHED, LOG_PATH_MARK  # the one home of the field bound and path mark
+    if len(CS_DEEP_CODE) <= LOG_MAX_MATCHED:
+        return False, "the fixture path is only %d characters, so it pins nothing" % len(CS_DEEP_CODE)
+    fields, problem = cs_log_refused_line("cs-log-deep-path", dict(CS_LOG_EDIT, file_path=CS_DEEP_CODE))
+    if problem:
+        return False, problem
+    matched = fields[4]
+    if len(matched) > LOG_MAX_MATCHED:
+        return False, "the matched field runs to %d characters, past the %d bound: %r" % (len(matched), LOG_MAX_MATCHED, matched)
+    if LOG_CUT_MARK in matched:
+        return False, "the matched field is cut from its tail, so the file name is lost: %r" % matched
+    if not matched.startswith(LOG_PATH_MARK):
+        return False, "the matched field does not shorten the path's head with %r: %r" % (LOG_PATH_MARK, matched)
+    name = os.path.basename(CS_DEEP_CODE)
+    visible = matched.rstrip()  # a space the field ends with is no part of the path's tail
+    if not visible.endswith(name):
+        return False, "the matched field does not keep the file name %r at its tail: %r" % (name, matched)
+    if not CS_DEEP_CODE.endswith(visible[len(LOG_PATH_MARK):]):
+        return False, "the matched field's tail is not a tail of the refused path: %r" % matched
+    return True, "a %d-character path logs as %d characters, its head marked and its file name at the tail" % (
+        len(CS_DEEP_CODE), len(matched))
 
 
 def cs_log_override_check():
@@ -21090,6 +21130,8 @@ def cs_log_cost_check():
 
 CS_CHECKS.append(("coordinator-scope refusal_logs_one_line: one denied coordinator write appends one guard.log line that "
                   "names the rule and holds no remedy text", cs_log_refusal_check))
+CS_CHECKS.append(("coordinator-scope refusal_logs_deep_path_tail: a refused path longer than the log field keeps its file "
+                  "name at the tail and shortens its head, by guard_core's path rule", cs_log_deep_path_check))
 CS_CHECKS.append(("coordinator-scope override_logs_one_line: a typed override that lifts a coordinator write appends one "
                   "line that marks it an override of coordinator-scope", cs_log_override_check))
 CS_CHECKS.append(("coordinator-scope unreadable_override_logs_diagnostic_then_refusal: an unreadable override file writes one "

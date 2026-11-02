@@ -279,10 +279,10 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, LOG_MAX_MATCHED, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path, log_path_and_text,
             inner_commands, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -3992,28 +3992,37 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
 
 def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path
-    that is no record home and not its scratchpad, or commits one, else ''."""
+    that is no record home and not its scratchpad, or commits one, else ''.
+
+    The detail is a log field, so a path in it is shortened from its head (guard_core.log_path) after its
+    label. A raw path would be cut from the tail by `record`, and a long macOS temporary root would take
+    the file name with it."""
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
         return ""
     if not _cloud_coordinator(payload):
         return ""
     session_id = session_id_of(payload)
+
+    def detail(label: str, path: str) -> str:
+        return label + log_path(path, LOG_MAX_MATCHED - len(label))
+
     if tool in WRITE_TOOLS:
         for target in write_targets(tool_input):
             if coordinator_path_outside(target, cwd, session_id):
-                return target
+                return detail("", target)
         return ""
     raw = str(tool_input.get("command", "") or "")
     stripped = strip_heredoc_bodies(raw)
     hit = _shell_write_hit(stripped, cwd, lambda word, where: coordinator_path_outside(word, where, session_id),
                            follow_cd=True, writes_first=True)
     if hit:
-        return "shell write: " + hit
+        return detail("shell write: ", hit)
     hit = coordinator_commit_hit(stripped, cwd)
     if hit:
-        return hit
+        label = hit.split(" ", 2)
+        return detail(" ".join(label[:2]) + " ", label[2]) if len(label) == 3 else hit
     hit = coordinator_interpreter_hit(raw, cwd, session_id)
-    return "interpreter write: " + hit if hit else ""
+    return detail("interpreter write: ", hit) if hit else ""
 
 
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
