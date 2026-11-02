@@ -134,8 +134,10 @@ Other tools, in `judge` order:
                        `agent-<id>-<suffix>` red-run folder passes that act.
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
-                       in one while `CLAUDE_PROJECT_DIR` names the home clone; the temp folder,
-                       other repos, an unreadable origin and the home clone pass.
+                       in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
+                       changes files (SESSION_HOME_GIT_VERBS) is refused from that stranded cwd
+                       and as `git -C <separate clone>`, while `git log` and `git show` pass; the
+                       temp folder, other repos, an unreadable origin and the home clone pass.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -927,17 +929,18 @@ OTHER_CHECKOUT_CD_REASON = (
 
 OTHER_CLONE_DETAIL = "write into another clone: "
 OTHER_CLONE_CD_DETAIL = "cd into another clone: "
+OTHER_CLONE_GIT_DETAIL = "git write into another clone: "
+OTHER_CLONE_REMEDY = (
+    "Remedy: change files only in your home checkout. To read another clone, use "
+    "`git -C <dir> log` or `git -C <dir> show`, or a path."
+)
 OTHER_CLONE_REASON = (
-    "Rule (other checkout): this command writes into a separate clone of this repo, not the checkout "
-    "this session stands in. "
-    "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other clone."
+    "Rule (other checkout): this command writes into a separate clone of this repo, or runs from one "
+    "while this session's home is another clone. " + OTHER_CLONE_REMEDY
 )
 OTHER_CLONE_CD_REASON = (
     "Rule (other checkout): this command changes directory into, or writes into, a separate clone of "
-    "this repo, not the checkout this session stands in. "
-    "Remedy: stay in your own checkout. To read another clone, use `git -C <dir>` or a path, never "
-    "`cd`."
+    "this repo. " + OTHER_CLONE_REMEDY
 )
 
 
@@ -3740,8 +3743,18 @@ def _same_repo(common: str, other: str) -> bool:
         local = _origin_local(url) if url else ""
         if local and local in (theirs, os.path.dirname(theirs)):
             return True
+    if urls[0] and _origin_local(urls[0]) and _origin_local(urls[0]) == _origin_local(urls[1] or ""):
+        return True  # two clones of one local bare repository
     return (all(urls) and not any(_origin_local(url) for url in urls)
             and _origin_key(urls[0]) != "" and _origin_key(urls[0]) == _origin_key(urls[1]))
+
+
+def _git_verb_called(command: str) -> bool:
+    """True when COMMAND runs a git verb of SESSION_HOME_GIT_VERBS. A text with no `git` in it is
+    never scanned, so a call with no git word spends nothing."""
+    return "git" in command and any(
+        verb in SESSION_HOME_GIT_VERBS
+        for segment in split_segments(command, []) for verb, _args in git_calls(segment))
 
 
 def _separate_clone(path: str, tops, common: str) -> bool:
@@ -3857,6 +3870,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         command = strip_heredoc_bodies(raw)
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
+        writes = writes or _git_verb_called(command)
     else:
         return ""
     if moves:
@@ -3905,7 +3919,13 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
         if not hit:
-            return ""
+            # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
+            # reader of such verbs is session_home_git_hit; only the folder test differs.
+            def in_clone(folder, _at):
+                elsewhere(folder, folder)
+                return clone_hit.get(folder, False)
+            verb = session_home_git_hit(command, where, in_clone) if "git" in command else ""
+            return OTHER_CLONE_GIT_DETAIL + verb if verb else ""
         return ("shell write into another clone: " if clone_hit.get(hit) else
                 "shell write into another checkout: ") + hit
     for target in targets:
