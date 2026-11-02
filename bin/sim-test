@@ -4,16 +4,86 @@
 # iPhone 18 Pro, tests, then shuts that simulator down. It never shuts down a simulator it did not boot.
 # Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool.
+# Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
+# a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
+# too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is read
+# again every SIM_TEST_POLL s (default 2), for at most SIM_TEST_LOCK_WAIT s (default 300); then exit 1 naming the pid,
+# with no boot and no xcodebuild. A dead holder: the folder is renamed to a name unique to this run (one rename
+# wins), removed, and the mkdir retried. A lock with no pid yet counts as held. A reused pid reads as a live holder.
+# Crash stop: xcodebuild runs as this tool's own background child, and this loop lists SIM_TEST_CRASH_DIR (default
+# $HOME/Library/Logs/DiagnosticReports) every poll until it exits. Files there before the watch starts do not count.
+# At 3 or more new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops xcodebuild,
+# shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
+# stderr, and exits 1. INT and TERM stop the child too.
+# Cost per run: one mkdir, one pid file and one folder removal; one folder listing every poll while xcodebuild runs;
+# a waiting run also reads the lock every poll. It starts no process besides xcodebuild and sleep, and writes no log.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
-# The exit code is otherwise xcodebuild's. The tool takes no lock and waits for no load.
+# The exit code is otherwise xcodebuild's.
 # macOS only. It runs under /bin/bash 3.2.
 CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 SHARED=8787FE1C-48CC-4213-9B5C-8605AFE7F9B3 # iPhone 18 Pro, booted only when no iPhone is booted
+POLL=${SIM_TEST_POLL:-2}
+LOCK_WAIT=${SIM_TEST_LOCK_WAIT:-300}
+WINDOW=${SIM_TEST_WINDOW:-30}
+CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
+STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
+LOCK=$STATE_DIR/sim-test.lock
 booted_by_me=
+have_lock=
+child=
 
-cleanup() { [ -n "$booted_by_me" ] && xcrun simctl shutdown "$SHARED"; }
+# Order: stop the child, shut down my simulator, then free the lock, so no run sees the lock free while a simulator of
+# mine is still booted. Later signals are ignored so the cleanup finishes.
+cleanup() {
+  trap '' INT TERM
+  if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then kill "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi
+  [ -n "$booted_by_me" ] && xcrun simctl shutdown "$SHARED"
+  if [ -n "$have_lock" ]; then rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null; fi
+}
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+
+# take_over DEADPID: rename the lock folder to a name unique to this run. Only one rename wins. The winner removes it.
+# If the renamed folder held another pid (a new holder took the lock after the check), it is put back.
+takeover_n=0
+take_over() {
+  local dead="$LOCK.dead.$$.$takeover_n" seen
+  takeover_n=$((takeover_n + 1))
+  mv "$LOCK" "$dead" 2>/dev/null || return 0
+  seen=$(cat "$dead/pid" 2>/dev/null)
+  if [ "$seen" != "$1" ]; then mv "$dead" "$LOCK" 2>/dev/null; return 0; fi
+  rm -f "$dead/pid"
+  rmdir "$dead"
+}
+
+acquire_lock() {
+  local start=$SECONDS told= pid
+  mkdir -p "$STATE_DIR" || exit 1
+  while :; do
+    if mkdir "$LOCK" 2>/dev/null; then
+      have_lock=1
+      echo $$ > "$LOCK/pid"
+      return 0
+    fi
+    pid=$(cat "$LOCK/pid" 2>/dev/null)
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then take_over "$pid"; continue; fi
+    if [ $((SECONDS - start)) -ge "$LOCK_WAIT" ]; then
+      echo "sim-test: the lock is still held by pid ${pid:-unknown} after ${LOCK_WAIT}s; booted nothing, ran no tests." >&2
+      exit 1
+    fi
+    [ -z "$told" ] && echo "sim-test: waiting for the lock held by pid ${pid:-unknown} (up to ${LOCK_WAIT}s)." >&2
+    told=1
+    sleep "$POLL"
+  done
+}
+
+# list_reports: one SpringBoard report name per line.
+list_reports() {
+  local f
+  for f in "$CRASH_DIR"/SpringBoard*; do [ -e "$f" ] && printf '%s\n' "${f##*/}"; done
+}
+
+acquire_lock
 
 booted=$(xcrun simctl list devices booted | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
 udid=$(printf '%s\n' "$booted" | sed -n 's/^.*iPhone.* (\([0-9A-F-]\{36\}\))$/\1/p' | head -1)
@@ -32,5 +102,28 @@ fi
 echo "sim-test: using $udid"
 diag=(-collect-test-diagnostics never)
 for arg in "$@"; do [ "$arg" = -collect-test-diagnostics ] && diag=(); done
-xcodebuild test "$@" "${diag[@]}" -destination "platform=iOS Simulator,id=$udid"
+
+# known holds "|name|name|" for the reports seen so far: first the ones before the watch, then each new one.
+known="|"
+for name in $(list_reports); do known="$known$name|"; done
+new_times=
+xcodebuild test "$@" "${diag[@]}" -destination "platform=iOS Simulator,id=$udid" &
+child=$!
+while kill -0 "$child" 2>/dev/null; do
+  for name in $(list_reports); do
+    case $known in *"|$name|"*) ;; *) known="$known$name|"; new_times="$new_times $SECONDS" ;; esac
+  done
+  recent=0
+  for t in $new_times; do [ "$t" -ge $((SECONDS - WINDOW)) ] && recent=$((recent + 1)); done
+  if [ "$recent" -ge 3 ]; then
+    echo "sim-test: crash loop: $recent new SpringBoard crash reports within ${WINDOW}s on $udid; stopped xcodebuild." >&2
+    kill "$child" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
+    kill -KILL "$child" 2>/dev/null
+    wait "$child" 2>/dev/null
+    exit 1
+  fi
+  sleep "$POLL"
+done
+wait "$child"
 exit $?
