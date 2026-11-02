@@ -453,5 +453,97 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_no_live_pin_line(session_cwd=link)
 
 
+# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line
+# when the stamp an allowed publish wrote, <git common dir>/waiting-page-built, holds a blob sha other than
+# main's page.html. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
+# hook compares blob shas and never reads the text.
+WAITING_URL = "https://claude.ai/artifact/sspage"
+WAITING_PAGE_REL = "skills/waiting-page/page.html"
+WAITING_STAMP = "waiting-page-built"
+MAIN_PAGE = "<!doctype html>\n<title>Queue</title>\n"
+OLDER_PAGE = "<!doctype html>\n<title>Queue, older</title>\n"
+
+
+class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
+    """The session-start line for a waiting page built from a page other than main's (rule page-stale)."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        # The claude-settings clone stands in: a checkout whose origin/main holds the skill's page.
+        self.pointer = os.path.join(self.root, "claude-settings")
+        self.put(os.path.join(self.pointer, WAITING_PAGE_REL), MAIN_PAGE)
+        vcs(self.pointer, "init", "-q", "-b", "main", ".")
+        vcs(self.pointer, "add", "-A")
+        vcs(self.pointer, "commit", "-q", "-m", "main")
+        vcs(self.pointer, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.main_sha = vcs(self.pointer, "rev-parse", "origin/main:" + WAITING_PAGE_REL).stdout.strip()
+        older = os.path.join(self.root, "older.html")
+        self.put(older, OLDER_PAGE)
+        self.older_sha = vcs(self.pointer, "hash-object", older).stdout.strip()
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.pointer.replace("\\", "/"))
+        self.waiting_extras(self.primary)
+
+    def put(self, path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def waiting_extras(self, checkout):
+        """The checkout's extras file names the waiting page, as lint/layout.py reads it."""
+        self.put(os.path.join(checkout, ".claude", "layout-extras.json"),
+                 json.dumps({"kinds": {}, "waiting-page": WAITING_URL}))
+
+    def stamp(self, sha):
+        """Write the stamp into the common git dir of the primary checkout, where an allowed publish puts it."""
+        self.put(os.path.join(self.primary, ".git", WAITING_STAMP), sha + "\n")
+
+    def waiting_lines(self, lines):
+        return [line for line in lines if re.search("waiting page", line, re.IGNORECASE)]
+
+    def run_checked(self, session_cwd=None):
+        """The hook's lines. A control first: the hook ran and printed its checkout line, so an empty
+        waiting-page answer is not an empty run."""
+        lines = self.run_hook(session_cwd=session_cwd)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        return lines
+
+    def test_a_stamp_that_is_not_main_blob_prints_one_behind_line(self):
+        self.stamp(self.older_sha)
+        hits = self.waiting_lines(self.run_checked())
+        self.assertEqual(len(hits), 1, "expected one waiting page line, got %r" % hits)
+        self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
+
+    def test_a_stamp_equal_to_main_blob_prints_no_line(self):
+        self.stamp(self.main_sha)
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_no_stamp_prints_no_line(self):
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
+        self.stamp(self.older_sha)
+        vcs(self.pointer, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_a_repo_whose_extras_name_no_waiting_page_prints_no_line(self):
+        self.stamp(self.older_sha)
+        os.remove(os.path.join(self.primary, ".claude", "layout-extras.json"))
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+
+    def test_a_linked_worktree_reads_the_stamp_of_the_common_dir(self):
+        linked = os.path.join(self.root, "linked")
+        vcs(self.primary, "worktree", "add", "-q", "--detach", linked, "HEAD")
+        self.waiting_extras(linked)
+        self.stamp(self.older_sha)
+        hits = self.waiting_lines(self.run_checked(session_cwd=linked))
+        self.assertEqual(len(hits), 1, "expected one waiting page line from the linked worktree, got %r" % hits)
+        self.assertIn("behind", hits[0], "the waiting page line does not say behind: %r" % hits[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
