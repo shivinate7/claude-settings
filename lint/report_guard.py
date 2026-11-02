@@ -28,6 +28,18 @@ unless the same main-session turn opened the question box (AskUserQuestion), or 
 waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
 waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+A promise is not a send, so on every Stop that is not a rewrite the pick-send check
+(`questions-go-to-owner`, "Chat first, then the page") follows each pick to its route. An owner-facing
+session's pick that its reply offers outside the question box is recorded with its ask time, in one JSON
+file (local_time.pick_state_path). A later owner message, a send (feedback_guard.SEND_TOOLS) or an
+ArtifactData items write clears it. One still open after 5 minutes blocks, and the reason names the pick
+and the page writer to send it to. A repo with no waiting page records nothing and never blocks; a
+systemMessage says the check stood down. A lane (own record, read by hooks/own_session.py, tagged
+cs-build:lane or naming a parent session) has no owner chat: its pick blocks unless the same turn sent it
+to the parent session, whatever the reply promises, links or opens in the box.
+Cost: one stat per Stop that offers no pick and has no state file. Otherwise one JSON file per
+owner-facing session, written only at a Stop that records or clears a pick and deleted when empty;
+a lane writes none. No process, timer or log.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
