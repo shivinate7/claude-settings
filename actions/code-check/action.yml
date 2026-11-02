@@ -7,7 +7,8 @@ description: >
   needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref and origin's default branch) and setup-python.
   Pinned tools run through pipx or npx (tsc, and astro-check for .astro), so the runner needs Node.
   Formatter layers wait for o2 and do not run.
-  It also runs the comment check on lines the change adds (Python only), against base.
+  It also runs the comment check on lines the change adds (Python, JS/TS, Astro and Swift), against base.
+  The JS, TS and Astro part runs the pinned TypeScript through npx, so the runner needs network for it.
 inputs:
   base:
     description: >
