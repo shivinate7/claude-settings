@@ -38,8 +38,9 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -692,6 +693,27 @@ def _report_with_config(dw, hook, config):
             os.environ["CLAUDE_CONFIG_DIR"] = saved
 
 
+def _report_with_reader_blocked(dw, hook, config):
+    """The config report with the reader's import raising ImportError, so the split fallback reads the lines."""
+    had = "guard_log_report" in sys.modules
+    saved = sys.modules.get("guard_log_report")
+    sys.modules["guard_log_report"] = None  # the reader's import raises ImportError
+    try:
+        return _report_with_config(dw, hook, config)
+    finally:
+        if had:
+            sys.modules["guard_log_report"] = saved
+        else:
+            sys.modules.pop("guard_log_report", None)
+
+
+# Both are later than the turn's human message, so both are in the turn.
+OFFSET_UNREAD_LINES = [
+    "2026-10-12T10:02:00-05:00\tBash\tnoted\tsubject-unread\tgit clean -fd\t" + SID,
+    "2026-10-12T10:03:00+05:00\tBash\tnoted\tsubject-unread\tgit rebase origin/main\t-",
+]
+
+
 def _load_decision_watch():
     spec = importlib.util.spec_from_file_location(
         "decision_watch_unread", os.path.join(REPO_ROOT, "hooks", "decision_watch.py"))
@@ -713,18 +735,23 @@ class UnreadNotesFailOpenTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             hook, config = _unread_turn(folder, UNREAD_LINES)
             healthy = _report_with_config(dw, hook, config)
-            had = "guard_log_report" in sys.modules
-            saved = sys.modules.get("guard_log_report")
-            sys.modules["guard_log_report"] = None  # the reader's import raises ImportError
-            try:
-                blocked = _report_with_config(dw, hook, config)
-            finally:
-                if had:
-                    sys.modules["guard_log_report"] = saved
-                else:
-                    sys.modules.pop("guard_log_report", None)
+            blocked = _report_with_reader_blocked(dw, hook, config)
         self.assertNotesNamed(healthy)  # the fixture is live
         self.assertNotesNamed(blocked)
+
+    def test_offset_unread_notes_come_back_healthy_and_with_the_reader_blocked(self):
+        # An offset line parses to an aware datetime. Compared with the naive turn bound, it raises, and
+        # config_notices then drops every notice of the turn, not only the unread subjects. Both the reader
+        # and the split fallback must read it. The old-form lines in the same turn must still come back.
+        dw = _load_decision_watch()
+        with tempfile.TemporaryDirectory() as folder:
+            hook, config = _unread_turn(folder, UNREAD_LINES + OFFSET_UNREAD_LINES)
+            healthy = _report_with_config(dw, hook, config)
+            blocked = _report_with_reader_blocked(dw, hook, config)
+        for label, message in (("healthy", healthy), ("reader blocked", blocked)):
+            self.assertNotesNamed(message)
+            self.assertIn("git clean -fd", message, label + ": " + message)
+            self.assertIn("git rebase origin/main", message, label + ": " + message)
 
     def test_two_unread_notes_come_back_with_a_stale_guard_core(self):
         # The reader imports SESSION_LOG_PLACEHOLDER from guard_core at load. A guard_core that lacks
@@ -752,6 +779,106 @@ class UnreadNotesFailOpenTests(unittest.TestCase):
                 else:
                     sys.modules.pop("guard_log_report", None)
         self.assertNotesNamed(blocked)
+
+
+# ------------------------------------ a guard.log line that carries its UTC offset
+#
+# guard_core.record() writes its time with the UTC offset: 2026-11-01T12:00:00+05:00 is 07:00 UTC. The reader
+# gives `at`, the aware instant, and `when`, naive in the reading machine's local time. An old line has no
+# zone: `at` is None, and window() counts it as unknown, never as inside. Every assertion here is true on any
+# clock: aware datetimes compare by instant, and `when` is checked against `at`, not against a literal hour.
+
+def utc(hour, minute=0):
+    return datetime(2026, 11, 1, hour, minute, tzinfo=timezone.utc)
+
+
+OLD_LINE = "2026-11-01T07:00:00\tBash\tdeny\tload-brake\tgit push\t" + SID  # no zone
+PLUS_FIVE_LINE = "2026-11-01T12:00:00+05:00\tBash\tdeny\tload-brake\tgit push\t" + SID  # 07:00 UTC
+
+
+class OffsetStampReadTests(unittest.TestCase):
+    def test_old_line_keeps_its_naive_when_and_has_no_zone(self):
+        row = glr.parse_line(OLD_LINE)
+        self.assertEqual(row.when, datetime(2026, 11, 1, 7, 0))
+        self.assertIsNone(row.when.tzinfo)
+        self.assertIsNone(row.at)
+
+    def test_offset_line_gives_the_utc_instant_and_a_naive_local_when(self):
+        row = glr.parse_line(PLUS_FIVE_LINE)
+        self.assertEqual(row.at, utc(7))
+        self.assertIsNone(row.when.tzinfo)
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset here, so the zone cannot be forced")
+    def test_offset_line_reads_as_local_wall_time_in_a_forced_non_utc_zone(self):
+        # Asia/Kolkata is +05:30. The +05:00 line at 12:00 is 07:00 UTC, which is 12:30 there. A reader that
+        # returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Kolkata"
+        time.tzset()
+        try:
+            row = glr.parse_line(PLUS_FIVE_LINE)
+            self.assertEqual(row.at, utc(7))
+            self.assertIsNone(row.when.tzinfo)
+            self.assertEqual(row.when, datetime(2026, 11, 1, 12, 30))
+        finally:
+            if old is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
+    def test_minus_six_line_converts_the_same_way(self):
+        row = glr.parse_line("2026-11-01T16:55:00-06:00\tBash\tdeny\tload-brake\tgit push\t" + SID)
+        self.assertEqual(row.at, utc(22, 55))
+        self.assertIsNone(row.when.tzinfo)
+
+    def test_at_is_the_last_field_and_a_seven_argument_row_still_builds(self):
+        self.assertEqual(glr.Row._fields[-1], "at")
+        row = glr.Row("line", datetime(2026, 10, 11, 9), "Bash", "deny", "rule", "matched", "sess")
+        self.assertIsNone(row.at)
+
+    def test_summarize_counts_old_and_offset_lines_alike(self):
+        # days=None reads every line whatever its date, so no zone can move a line out of the count.
+        s = glr.summarize([PLUS_FIVE_LINE, OLD_LINE], None, NOW)
+        self.assertEqual(s["by_rule"]["load-brake"], {"deny": 2, "ask": 0, "noted": 0})
+        self.assertEqual(s["unreadable"], 0)
+
+
+class OffsetWindowTests(unittest.TestCase):
+    def test_offset_line_is_inside_the_window_that_holds_its_instant(self):
+        rows, _unknown = glr.window([PLUS_FIVE_LINE], utc(6, 30), utc(7, 30))
+        self.assertEqual([row.line for row in rows], [PLUS_FIVE_LINE])
+
+    def test_offset_line_is_outside_a_window_that_misses_its_instant(self):
+        rows, _unknown = glr.window([PLUS_FIVE_LINE], utc(11, 30), utc(12, 30))
+        self.assertEqual(rows, [])
+
+    def test_window_edges_are_inclusive(self):
+        at_start = "2026-11-01T11:30:00+05:00\tBash\tdeny\tload-brake\tgit push\t" + SID  # 06:30 UTC
+        at_end = "2026-11-01T12:30:00+05:00\tBash\tdeny\tload-brake\tgit push\t" + SID  # 07:30 UTC
+        rows, _unknown = glr.window([at_start, at_end], utc(6, 30), utc(7, 30))
+        self.assertEqual([row.line for row in rows], [at_start, at_end])
+
+    def test_old_line_is_unknown_and_never_inside(self):
+        # Read as UTC, OLD_LINE is at 07:00 and sits in 06:30-07:30. Read as Central (UTC-6 in November) it
+        # is at 13:00 UTC and sits in 12:30-13:30. It must sit in neither: its zone is unknown.
+        rows, unknown = glr.window([OLD_LINE], utc(6, 30), utc(7, 30))
+        self.assertEqual((rows, unknown), ([], 1))
+        rows, unknown = glr.window([OLD_LINE], utc(12, 30), utc(13, 30))
+        self.assertEqual((rows, unknown), ([], 1))
+
+    def test_rule_filter_keeps_other_rules_out_of_rows_and_unknown(self):
+        other_inside = "2026-11-01T12:00:00+05:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID
+        other_old = "2026-11-01T07:00:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID
+        lines = [PLUS_FIVE_LINE, other_inside, OLD_LINE, other_old]
+        rows, unknown = glr.window(lines, utc(6, 30), utc(7, 30), rule="load-brake")
+        self.assertEqual(([row.line for row in rows], unknown), ([PLUS_FIVE_LINE], 1))
+        rows, unknown = glr.window(lines, utc(6, 30), utc(7, 30))
+        self.assertEqual(([row.line for row in rows], unknown), ([PLUS_FIVE_LINE, other_inside], 2))
+
+    def test_an_unreadable_line_is_neither_inside_nor_unknown(self):
+        rows, unknown = glr.window(["not a guard line", OLD_LINE], utc(6, 30), utc(7, 30))
+        self.assertEqual((rows, unknown), ([], 1))
 
 
 class FixedDecisionTests(unittest.TestCase):
