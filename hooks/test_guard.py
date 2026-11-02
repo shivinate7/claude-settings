@@ -11096,6 +11096,24 @@ sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDI
 sh("builder-test: --agent builder with no agent_id shell write of a test is allowed",
    RULE_AUDIT_EDIT, "allow", agent_type="builder", cwd=GITMAIN)
 
+# Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
+# heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
+sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allowed",
+   "grep -n install tests/test_guard.py", "allow", **BR)
+sh("builder-test: shell pytest -k with a mutating word is allowed",
+   "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
+   "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
+   "allow", **BR)
+# A write to a test path through the working folder is refused, however the path is built.
+sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
+   "python3 - <<'EOF'\nfrom pathlib import Path\nROOT = Path.cwd()\n"
+   "(ROOT / 'tests' / 'test_x.py').write_text('x')\nEOF", "deny", rule=BT,
+   carries=("test-author",), **BR)
+sh("builder-test: shell open-write to a test under os.getcwd() is refused",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
