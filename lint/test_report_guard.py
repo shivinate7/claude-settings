@@ -1160,7 +1160,7 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(out)
 
     def test_pk_green_page_write_without_link_passes(self):
-        # The writer's own items write is the send, with no link in the reply (spec v2, owner ruling 2026-11-01 23:31 CST).
+        # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
         self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
@@ -1176,7 +1176,7 @@ class PickGuardTests(unittest.TestCase):
                 self.assertIsNotNone(self.verdict(self.PICK, [call]))
 
     def test_pk_red_page_link_alone_blocks_whatever_the_calls(self):
-        # A page link passes nothing (spec v2, owner ruling 2026-11-01 23:31 CST): the send is the act.
+        # A page link alone is not a send. A link only shows the page; nothing reaches the writer, so the question still blocks.
         reply = self.PICK + "\n" + self.PAGE
         for calls in ([], [self.page_set(collection="notes")], [self.page_set(action="get")]):
             with self.subTest(calls=calls):
@@ -1211,12 +1211,12 @@ class PickGuardTests(unittest.TestCase):
         self.assertIn("Pick guard", out["reason"])
 
     def test_pk_red_reply_links_page_with_no_write_blocks(self):
-        # A link passes nothing: the question goes to the page writer in its turn (spec v2, owner ruling 2026-11-01 23:31 CST).
+        # A link to the page with no write does not reach the writer, so a pick with only that link still blocks.
         self.assertIsNotNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
 
     def test_pk_red_five_minute_promise_blocks(self):
-        # The 5-minute promise passes nothing: the question goes to the page writer in its turn
-        # (spec v2, owner ruling 2026-11-01 23:31 CST, which replaces the chat-first wait).
+        # A promise to send after 5 minutes passes nothing. The question must reach the page writer in its
+        # own turn, so a wait does not count as a send.
         for phrase in ("5 min", "5 minutes", "5-minute", "five minutes"):
             with self.subTest(phrase=phrase):
                 reply = ("> **Done** OTHER read the code\n"
@@ -1422,9 +1422,9 @@ _CALL_IDS = itertools.count(1)
 
 
 class QuestionReachesPageTests(unittest.TestCase):
-    """questions-reach-page, spec v2.1 (owner ruling 2026-11-01 23:31 CST, pick a): every question for the
-    owner goes to the page writer in the turn it is asked. A question is an offered pick, or an Input Needed
-    sentence ending in "?" outside quotes. The Stop check reads the turn alone: no clock, no state file.
+    """Every question for the owner reaches the page writer in the turn it is asked. A question is an
+    offered pick, or an Input Needed sentence ending in "?" outside quotes. The Stop check reads the turn
+    alone: no clock, no state file.
     Owner-facing turn: the question box (main session), a send to the writer id, or an ArtifactData set,
     update or batch under collection items. Lane turn: a send to @parent or the parent id, or to the writer
     id. A promise, a page link, a box or an items write passes nothing in a lane."""
