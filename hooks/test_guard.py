@@ -13920,7 +13920,7 @@ ol("a label A: a rail keyed a, which matches its tag, is allowed", "allow", ol_i
 ol("a label (B) strip keyed b, which matches its tag, is allowed", "allow", ol_item(options=ol_opt(1, label="(B) strip")))
 ol("a label Option B: strip keyed b, which matches its tag, is allowed", "allow",
    ol_item(options=ol_opt(1, label="Option B: strip")))
-ol("a label with no tag, a rail keyed a, is allowed", "allow", ol_item(options=ol_opt(0, label="a rail")))
+ol("a label with no tag, a rail keyed b, is allowed", "allow", ol_item(options=ol_opt(1, label="a rail")))
 ol("a label that opens with the word A, A rail along the side keyed b, is allowed", "allow",
    ol_item(options=ol_opt(1, label="A rail along the side")))
 ol("a label that opens with the word I, I would pick the strip keyed a, is allowed", "allow",
