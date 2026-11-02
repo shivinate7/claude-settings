@@ -2433,7 +2433,7 @@ case "\$dest" in
     case "\$(basename "\$dest")" in
       guard.py|guard_*.py)
         if [ -n "\${SWAP_INSTALL_LOG:-}" ]; then
-          printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S)" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
+          printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)\$/:\1/')" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
         fi ;;
     esac ;;
 esac
@@ -2693,6 +2693,46 @@ installlog1() {
   elif [ -z "$e" ]; then bad "$name" "no end line with exit=0 and a numeric id and pid: $(cat "$log")"
   elif [ "$s" != "$e" ]; then bad "$name" "start names [$s], end names [$e] (id pid)"
   else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# Install-log stamps carry the zone offset, so a reader in another zone sees the true time. stamp_problems
+# LOG PREFIX OFFSET prints one line per problem: each line of LOG that names PREFIX (e.g. "install.sh:") must
+# start with YYYY-MM-DDTHH:MM:SS, a sign, HH:MM and a space, and its offset must be OFFSET. No output means it
+# holds. merge/test_install_from_main.sh has the same step: each suite keeps its own copy, since they share no helper file.
+STAMP_RE='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9][+-][0-9][0-9]:[0-9][0-9] '
+stamp_problems() {
+  lines=$(grep -F "$2" "$1" 2>/dev/null)
+  [ -n "$lines" ] || { echo "no line of the install log names $2"; return; }
+  n=$(printf '%s\n' "$lines" | grep -v -E "$STAMP_RE" | grep -c .)
+  [ "$n" -eq 0 ] || echo "$n line(s) name $2 without an ISO 8601 stamp and offset, first: $(printf '%s\n' "$lines" | grep -v -E "$STAMP_RE" | head -n 1)"
+  n=$(printf '%s\n' "$lines" | cut -c20-25 | grep -v -x -F -e "$3" | grep -c .)
+  [ "$n" -eq 0 ] || echo "$n line(s) name $2 with an offset other than $3"
+}
+
+# ---- logoffset1: under TZ=America/Chicago every install.sh log line carries the zone offset ----
+# The offset is the one that zone has now: date +%z under the same TZ, with a colon added, never a fixed value.
+# The container runs UTC, where the offset is +00:00, so the precondition refuses that: a run that ignored TZ
+# fails here. The landed lines come from the mv shim (SWAP_INSTALL_LOG), so the fixture's own stamp is checked too.
+logoffset1() {
+  name="logoffset1: under TZ=America/Chicago every install.sh log line starts with ISO 8601 time and the zone offset"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/logoffset1-bin"
+  clone="$work/logoffset1-clone"
+  make_guard_clone "$clone" one
+  make_swap_bin "$swap_bin"
+  ev="$work/logoffset1-ev"; : > "$ev"
+  log="$cfg/claude-settings-install.log"
+  want=$(TZ=America/Chicago date +%z | sed 's/\(..\)$/:\1/')
+  ( cd "$clone" && env TZ=America/Chicago HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SWAP_EVENTS="$ev" SWAP_INSTALL_LOG="$log" \
+      PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud ) > "$work/logoffset1-run" 2>&1; rc=$?
+
+  if [ -z "$want" ] || [ "$want" = "+00:00" ]; then
+    bad "$name" "TZ=America/Chicago gave the offset [$want]; the check would prove nothing"
+  elif [ "$rc" -ne 0 ]; then bad "$name" "install exit $rc: $(tail -n 3 "$work/logoffset1-run")"
+  else
+    why=$(stamp_problems "$log" 'install.sh:' "$want")
+    if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
   fi
   rm -rf "$h"
 }
@@ -4256,6 +4296,7 @@ run lock1sh
 run putfile_nogap1
 run putfile_prose1
 run installlog1
+run logoffset1
 run pinlive1
 run pinlive2
 run guardset1
