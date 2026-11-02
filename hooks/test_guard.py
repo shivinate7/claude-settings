@@ -11620,11 +11620,11 @@ def _product_commit(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _test_author_lane(w):
+def _test_author_lane(w, rel=TEST_A, text=LANE_TEXT):
     """The test-author's commit on branch `lane`, cut from main. Main's checkout ends on main."""
     main = w + "-main"
     _must(main, "checkout", "-q", "-b", "lane")
-    write(os.path.join(main, TEST_A), LANE_TEXT)
+    write(os.path.join(main, rel), text)
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
     _must(main, "checkout", "-q", "main")
@@ -11691,6 +11691,36 @@ def _shell_write(w):
         sys.exit("fixture setup failed: python write in %r: %s" % (w, done.stderr.strip()))
 
 
+NEW_TEST = "tests/test_lane_new.py"
+
+
+def _stale_revert(w):
+    """Cut at main. Reset to a lane tip that adds test lines, then write the test file back to the cut
+    point's exact bytes. The cut point is no base once the lane tip is one."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A])
+
+
+def _stale_delete(w):
+    """Cut at main. Clean-merge a lane tip that adds a new test file, then delete that file."""
+    _test_author_lane(w, NEW_TEST, "def test_lane_new():\n    assert 1\n")
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    os.remove(os.path.join(w, NEW_TEST))
+
+
+def _newer_main_merge(w):
+    """Cut at main. The builder commits product work on its lane, main gains a test change, and the
+    builder clean-merges main in. It changes no test."""
+    _product_commit(w)
+    main = w + "-main"
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "main")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
@@ -11722,6 +11752,29 @@ sh("builder-refuse: a test file written by a Python process is denied at commit"
    COMMIT, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a test file written by a Python process is denied at push",
    PUSH, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
+
+# Stale revert: the cut point's bytes are no base once a reset has moved the worktree to a lane tip
+# that holds the test lines. The reverted file differs from that tip, so it is refused.
+_bd_stale = diff_repo("bd-stale-revert", _stale_revert)
+sh("builder-refuse: a stale revert to the cut point's bytes, after a reset to a lane tip, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_stale, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a stale revert to the cut point's bytes, after a reset to a lane tip, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_stale, agent_id="bld1", agent_type="builder")
+
+# Stale delete: a file the clean merge brought in is no base once the merge result holds it.
+_bd_stale_del = diff_repo("bd-stale-delete", _stale_delete)
+sh("builder-refuse: a stale delete of a test file a clean merge brought in is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_stale_del, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a stale delete of a test file a clean merge brought in is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_stale_del, agent_id="bld1", agent_type="builder")
+
+# Newer main: a builder that clean-merges a newer main into its own lane, and changes no test, is
+# allowed. The newer main is a base, and the file equals it.
+_bd_newer = diff_repo("bd-newer-main", _newer_main_merge)
+sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at commit",
+   COMMIT, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at push",
+   PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
 
 # Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
 # diff_logs_case (the a-product-edit row: author-diff at commit, push and stop).
