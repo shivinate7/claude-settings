@@ -876,6 +876,11 @@ WINDOW_ROWS = [
     ("bad top-level falls to default 500k", {"autoCompactWindow": 0}, None, A_MODEL, False),
     ("settings not an object falls to default", "[1]", None, A_MODEL, False),
     ("no model in transcript uses top-level", ms(B_MODEL, 900000, top=200000), None, None, True),
+    # F2: the CLI's suffix forms are windows too, in the env var and in settings.json.
+    ("F2: env '200k' is a 200k window", {"autoCompactWindow": 500000}, {WINDOW_ENV: "200k"},
+     A_MODEL, True),
+    ("F2: top-level '200K' string is a 200k window", {"autoCompactWindow": "200K"}, None,
+     A_MODEL, True),
 ]
 
 
@@ -906,6 +911,47 @@ def case_window_tier_follows_transcript_model():
         p = nudge(c, 0, overhead=None, lines=lines)
         check("window e2e: the last counted entry's model picks the 200k window, so it blocks",
               is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
+# F2: window_limit reads the CLI's suffix forms (200k, 1m, 1.5m, any case), not only integers.
+WINDOW_FORMS = (("200k", 200000), ("1m", 1000000), ("1.5m", 1500000),
+                ("200K", 200000), ("1M", 1000000), ("1.5M", 1500000))
+
+
+def window_at(c, env_value=None, settings=None, model=None):
+    """window_limit(model) with the case's config dir. settings.json holds `settings` when it is
+    not None, else is absent. As (value, error)."""
+    path = os.path.join(c.cfg, "settings.json")
+    if os.path.isfile(path):
+        os.remove(path)
+    if settings is not None:
+        put(path, json.dumps(settings))
+    with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_AUTO_COMPACT_WINDOW=env_value):
+        return call_under_test("window_limit", model)
+
+
+def case_window_limit_suffix_forms():
+    """F2: each suffix form gives its token count in the env var and in settings.json. A value
+    that is not a number and not a suffix form ('abc') still falls to the next tier."""
+    c = Case("wsuffix")
+    try:
+        for text, want in WINDOW_FORMS:
+            got, err = window_at(c, env_value=text)
+            expect_value("window: env %r is %d" % (text, want), got, err, want)
+        for text, want in WINDOW_FORMS:
+            got, err = window_at(c, settings={"autoCompactWindow": text})
+            expect_value("window: top-level autoCompactWindow %r is %d" % (text, want),
+                         got, err, want)
+        got, err = window_at(c, model=A_MODEL,
+                             settings={"modelSettings": {A_MODEL: {"autoCompactWindow": "1.5m"}}})
+        expect_value("window: modelSettings autoCompactWindow '1.5m' is 1,500,000",
+                     got, err, 1500000)
+        got, err = window_at(c, env_value="abc", settings={"autoCompactWindow": "200k"})
+        expect_value("window: env 'abc' falls to top-level '200k' (200,000)", got, err, 200000)
+        got, err = window_at(c, settings={"autoCompactWindow": "abc"})
+        expect_value("window: top-level 'abc' falls to the 500k default", got, err, 500000)
     finally:
         c.cleanup()
 
@@ -1553,8 +1599,8 @@ def case_summary_fraction_reads_config_dir_file():
 
 # --------------------------------------------------------------------------- compact threshold
 # compact_threshold(500k) with the flag fraction: 0.2 gives 384,000, 0.08 gives 441,600.
-# With CLAUDE_CODE_REMOTE and CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = p (limits up to 200k only), the
-# second term is min(floor(E * p / 100), E - 13k), where E = limit - 20k.
+# F1: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = p applies to every window, remote or not, so the second
+# term is min(floor(E * p / 100), E - 13k), where E = limit - 20k, for 0 < p <= 100.
 
 
 def threshold_at(c, limit, remote=None, pct=None):
@@ -1575,15 +1621,19 @@ def case_compact_threshold_reads_flag_and_remote():
         c.set_flags(fraction_flags(0.2))
         got, err = threshold_at(c, 200000, remote="1", pct="80")
         expect_value("threshold: 200k remote pct 80, fraction 0.2 is 144,000", got, err, 144000)
-        got, err = threshold_at(c, 500000, remote="1", pct="80")
-        expect_value("threshold: 500k ignores the remote override (above 200k)", got, err, 384000)
+        # F1: the percent override has no remote gate and no 200k gate, so PCT 80 applies at 500k.
+        c.set_flags(fraction_flags(0.08))
+        got, err = threshold_at(c, 500000, pct="80")
+        expect_value("threshold: 500k PCT 80, fraction 0.08 is 384,000 (no remote gate)",
+                     got, err, 384000)
 
         c.set_flags(fraction_flags(0.01))
         got, err = threshold_at(c, 200000)
         expect_value("threshold: 200k no remote pct 80, fraction 0.01 is 167,000", got, err, 167000)
+        # F1: PCT 80 without CLAUDE_CODE_REMOTE is applied, so 200k is 144,000, not 167,000.
         got, err = threshold_at(c, 200000, pct="80")
-        expect_value("threshold: 200k pct 80 without CLAUDE_CODE_REMOTE is not applied",
-                     got, err, 167000)
+        expect_value("threshold: 200k pct 80 without CLAUDE_CODE_REMOTE is applied",
+                     got, err, 144000)
         got, err = threshold_at(c, 200000, remote="1", pct="80")
         expect_value("threshold: 200k remote pct 80, fraction 0.01 is 144,000 (override lower)",
                      got, err, 144000)
@@ -1591,6 +1641,26 @@ def case_compact_threshold_reads_flag_and_remote():
             got, err = threshold_at(c, 200000, remote="1", pct=pct)
             expect_value("threshold: 200k remote, pct %s is not 0 < p <= 100, so ignored" % pct,
                          got, err, 167000)
+    finally:
+        c.cleanup()
+
+
+def case_compact_threshold_pct_override_every_window():
+    """F1: the percent override applies in every session and window, with no remote gate. An
+    unset, unparsable or out-of-range value (0, 150, abc) is ignored."""
+    c = Case("cthpct")
+    try:
+        c.set_flags(fraction_flags(0.2))
+        got, err = threshold_at(c, 500000, pct="50")
+        expect_value("threshold: PCT 50, no remote, 500k, fraction 0.2 is 240,000",
+                     got, err, 240000)
+        c.set_flags(fraction_flags(0.08))
+        got, err = threshold_at(c, 500000)
+        expect_value("threshold: PCT unset, 500k, fraction 0.08 is 441,600", got, err, 441600)
+        for pct in ("abc", "0", "150"):
+            got, err = threshold_at(c, 500000, pct=pct)
+            expect_value("threshold: 500k, PCT %s is not 0 < p <= 100, so ignored" % pct,
+                         got, err, 441600)
     finally:
         c.cleanup()
 
@@ -1770,6 +1840,38 @@ def case_digest_plain_errors_are_not_refusals():
         c.cleanup()
 
 
+# F5: a failed tool result is a refusal when its first line is one of the three refusal shapes
+# Claude Code writes (a hook error, a user rejection, a permission denial). A network error, an OS
+# permission error, prose that only says "refused", and a plain exit code are not refusals.
+REFUSAL_ROWS = (
+    ("PreToolUse:Bash hook error: [guard] blocked", True),
+    ("The user doesn't want to proceed with this tool use. The tool use was rejected", True),
+    ("Permission to use Bash has been denied", True),
+    ("Error: connect ECONNREFUSED 127.0.0.1", False),
+    ("bash: /x: Permission denied", False),
+    ("Nobody refused it", False),
+    ("Exit code 1", False),
+)
+
+
+def case_digest_refusal_shapes():
+    """F5: each row's first line is listed exactly when the row says so. Each line carries its own
+    marker, so a listed line is found by its marker."""
+    c = Case("dgshape")
+    try:
+        since = epoch(SINCE_ISO)
+        lines = [tool_result("%s SHAPEMARK%d" % (text, i), AFTER_ISO)
+                 for i, (text, _) in enumerate(REFUSAL_ROWS)]
+        d, err = digest_at(c, lines, since)
+        listed = refused_lines(d)
+        for i, (text, want) in enumerate(REFUSAL_ROWS):
+            got = any("SHAPEMARK%d" % i in ln for ln in listed)
+            check("refused shape: %r is %s" % (text, "listed" if want else "not listed"),
+                  got == want, err or "section: %r" % (listed,))
+    finally:
+        c.cleanup()
+
+
 def case_digest_refused_line_limits():
     c = Case("dgline")
     try:
@@ -1867,6 +1969,7 @@ def main() -> int:
     case_nudge_small_room_margin()
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
+    case_window_limit_suffix_forms()
     case_handoff_path_not_frozen()
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
@@ -1886,10 +1989,12 @@ def main() -> int:
     case_summary_fraction_defaults()
     case_summary_fraction_reads_config_dir_file()
     case_compact_threshold_reads_flag_and_remote()
+    case_compact_threshold_pct_override_every_window()
     case_nudge_reads_summary_flag()
     case_digest_since_keeps_text_after_handoff()
     case_digest_lists_refused_acts_after_handoff()
     case_digest_plain_errors_are_not_refusals()
+    case_digest_refusal_shapes()
     case_digest_refused_line_limits()
     case_precompact_digest_starts_at_handoff()
     case_precompact_digest_without_handoff()
