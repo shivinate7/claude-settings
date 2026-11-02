@@ -1,0 +1,69 @@
+{
+ "dir": "<set by shard.py>",
+ "paths": "<set by shard.py>",
+ "shas": {
+  "claude-settings": "da8d8073",
+  "q_max": "5bbf10e13",
+  "banchi": "ce3c0b09",
+  "degen": "22256a40",
+  "joyous": "53b5046",
+  "mailaudit": "cd3e12f"
+ },
+ "prs": [
+  {
+   "n": 1108,
+   "ref": "questions-reach-page-r",
+   "t": "Questions reach the waiting page in the same turn they are asked"
+  },
+  {
+   "n": 1106,
+   "ref": "one-home-check-design",
+   "t": "Plan: mechanize the one-home rule"
+  },
+  {
+   "n": 1099,
+   "ref": "no-undo-lane-commits",
+   "t": "Refuse a lane commit that undoes earlier work of its own lane"
+  },
+  {
+   "n": 1065,
+   "ref": "review-record",
+   "t": "Review record on each PR; merge --reviewed lists PRs whose record is done"
+  },
+  {
+   "n": 1051,
+   "ref": "local-session-reach",
+   "t": "Plan: reach between local and cloud sessions"
+  },
+  {
+   "n": 1049,
+   "ref": "grant-reaches-lanes",
+   "t": "Plan: an owner grant reaches the session it names"
+  },
+  {
+   "n": 1042,
+   "ref": "coordinator-acts",
+   "t": "Guard coordinator-scope: a coordinator runs no build agents and no merges"
+  },
+  {
+   "n": 1036,
+   "ref": "plugin-assess-three",
+   "t": "plans: assess three catalog plugins (skip all three)"
+  },
+  {
+   "n": 1034,
+   "ref": "prose-homes-shivpedia",
+   "t": "Plan: one home per kind of prose, and shivpedia"
+  },
+  {
+   "n": 1008,
+   "ref": "owner-feedback-audit",
+   "t": "Owner feedback audit: one record, corrected after the read"
+  },
+  {
+   "n": 919,
+   "ref": "tier-boundaries-enforced",
+   "t": "Guard coordinator-scope: a cloud coordinator writes records only"
+  }
+ ]
+}
