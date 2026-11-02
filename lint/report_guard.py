@@ -32,14 +32,15 @@ A promise is not a send, so on every Stop that is not a rewrite the pick-send ch
 (`questions-go-to-owner`, "Chat first, then the page") follows each pick to its route. An owner-facing
 session's pick that its reply offers outside the question box is recorded with its ask time, in one JSON
 file (local_time.pick_state_path). A later owner message, a send (feedback_guard.SEND_TOOLS) or an
-ArtifactData items write clears it. One still open after 5 minutes blocks, and the reason names the pick
+ArtifactData items write clears it; a send, or one in the turn that asks, also keeps the pick's key in the
+file for 24 hours so a report repeating it is not asked again, until an owner message follows. One still open after 5 minutes blocks, and the reason names the pick
 and the page writer to send it to. A repo with no waiting page records nothing and never blocks; a
 systemMessage says the check stood down. A lane (own record, read by hooks/own_session.py, tagged
 cs-build:lane or naming a parent session) has no owner chat: its pick blocks unless the same turn sent it
 to the parent session, whatever the reply promises, links or opens in the box.
 Cost: one stat per Stop that offers no pick and has no state file. Otherwise one JSON file per
-owner-facing session, written only at a Stop that records or clears a pick and deleted when empty;
-a lane writes none. No process, timer or log.
+owner-facing session, written only at a Stop that records or clears a pick and deleted when empty or
+when it does not parse; a lane writes none. No process, timer or log.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
@@ -552,6 +553,7 @@ def pick_has_a_control(records, text, cwd):
 # tests are feedback_guard's, imported at the Stop that needs them and never copied.
 FIVE_MIN = 300  # seconds: the chat-first wait
 PICK_TEXT_CHARS = 120
+SENT_KEEP = 24 * 3600  # seconds a sent pick's key stays, so a repeat of it is not asked again
 LANE_PICK_REASON = (
     "Lane pick guard: a lane's chat is not a route to the owner. Send this pick to your parent "
     "session%s in this turn.")
@@ -620,14 +622,24 @@ def _pick_key(section):
 
 
 def _load_picks(path):
+    """(picks, sent) from the state file. A file that does not parse is removed, so it cannot stay
+    broken for good. `sent` maps the key of a pick a send settled to the epoch of that send."""
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
     except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("asked"), (int, float))}
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return {}, {}
+    sent = data.get("sent")
+    sent = {k: v for k, v in sent.items() if isinstance(v, (int, float))} if isinstance(sent, dict) else {}
+    picks = {k: v for k, v in data.items()
+             if k != "sent" and isinstance(v, dict) and isinstance(v.get("asked"), (int, float))}
+    return picks, sent
 
 
 def pick_send(hook, records, after, text):
@@ -663,8 +675,10 @@ def pick_send(hook, records, after, text):
             return "", (PICK_STAND_DOWN if offers and not boxed else ""), False
         import _transcript
         import shared_names
-        picks = _load_picks(state) if os.path.exists(state) else {}
-        before = json.dumps(picks, sort_keys=True)
+        picks, sent = _load_picks(state) if os.path.exists(state) else ({}, {})
+        before = json.dumps([picks, sent], sort_keys=True)
+        now = time.time()
+        sent = {k: v for k, v in sent.items() if now - v <= SENT_KEEP}
         events = []  # (epoch, was_send), in transcript order
         for rec in records:
             when = _transcript.parse_utc_timestamp(rec.get("timestamp"))
@@ -674,23 +688,29 @@ def pick_send(hook, records, after, text):
                 events.append((when, False))
             elif _sends(rec, feedback_guard, True):
                 events.append((when, True))
-        sent = set()
         for key, pick in list(picks.items()):
-            hit = next((was_send for when, was_send in events if when >= pick["asked"]), None)
+            hit = next(((when, was_send) for when, was_send in events if when >= pick["asked"]), None)
             if hit is not None:
                 del picks[key]
-                if hit:
-                    sent.add(key)  # a send settled it, so a reply repeating it is no new ask
-        now = time.time()
+                if hit[1]:
+                    sent[key] = hit[0]  # a send settled it, so a later reply repeating it is no new ask
+        for key, when in list(sent.items()):
+            if any(not was_send and at > when for at, was_send in events):
+                del sent[key]  # the owner has written since: a repeat is a new ask
         if offers and not boxed:
             key, snippet = _pick_key(input_needed_section(text))
-            if key not in picks and key not in sent:
+            turn_send = next((_transcript.parse_utc_timestamp(rec.get("timestamp")) or now
+                              for rec in after if _sends(rec, feedback_guard, True)), None)
+            if turn_send is not None:
+                sent[key] = turn_send  # sent in the turn that asks it
+                picks.pop(key, None)
+            elif key not in picks and key not in sent:
                 picks[key] = {"asked": now, "text": snippet}
-        if json.dumps(picks, sort_keys=True) != before:
-            if picks:
+        if json.dumps([picks, sent], sort_keys=True) != before:
+            if picks or sent:
                 os.makedirs(os.path.dirname(state), exist_ok=True)
                 with open(state, "w", encoding="utf-8") as f:
-                    json.dump(picks, f)
+                    json.dump(dict(picks, **({"sent": sent} if sent else {})), f)
             elif os.path.exists(state):
                 os.remove(state)
         stale = sorted((p for p in picks.values() if now - p["asked"] > FIVE_MIN), key=lambda p: p["asked"])
