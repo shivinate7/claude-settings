@@ -46,8 +46,9 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   with no items is reported with the inbox file's path, its heading line and line number, and an
   example item, then each kind's home (`ruling -> <homes>; task -> <homes>; question -> answered; note -> noted;
   standing -> handoff; page -> page:<n>`). Items added in any later turn count, so the session needs no new heading. A home outside
-  its kind's paths is reported as not a tracked home of that kind, with the homes listed. It exits on
-  `stop_hook_active`, so it cannot loop, but it still counts that turn's messages. When the session's
+  its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
+  nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
+  judges repeats (next bullet). When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
@@ -63,6 +64,35 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at 15:41 and never sent to
   the page writer, who asked again at 16:07. Landed 2026-10-30. Known gap: a session that never writes the `[page]` item is not caught. The guard
   cannot know which owner messages answer a page item.
+- **Repeats.** A model matches each new item's owner message, by meaning, against older feedback and
+  work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
+  glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New
+  items are well-formed, open items whose ids the turn state's `judged` list lacks; a state file
+  from before the key counts the items already there as judged. One call per Stop covers all of
+  them, through `decision_watch.invoke_model` (`claude-haiku-5-5`, 45 s, no effort; the Stop hook's
+  timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
+  source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
+  100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
+  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
+  never fetched); the layout's debt, todo and notes files in the working tree; this inbox's other
+  blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
+  `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
+  session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model names
+  at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox rewrite
+  through a temp file) and the block reason names it, or systemMessage does when `stop_hook_active`.
+  A line that cannot be found is reported as not marked. The session merges the work or drops the
+  mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
+  systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
+  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse.
+  It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
+  on a hit the inbox. Capture adds one small file per session and no process. Risk kind: named
+  incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
+  nothing matched the repeat. Ruling 2026-11-01 17:57 CST: a model's meaning match, no glossary.
+  Landed 2026-11-01. Known gaps: inboxes from before the sidecar are not searched. Item ids
+  `fb-HHMM-n` can recur after a day, and a recurring id counts as judged, so its item is not judged. A cloud container
+  starts with no old inboxes, so there the roadmap and backlog do the work. Outside a repo only this
+  inbox's blocks are candidates. A session whose cwd is a linked worktree has its own top level, so
+  inboxes bind per worktree, not per repo. A session's cwd is usually the primary checkout.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
   home holds it for good. The guard stops asking for a closed standing id in the handoff.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
