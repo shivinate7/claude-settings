@@ -20,6 +20,8 @@ ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnul
 os.environ.update({k: ENV[k] for k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")})
 
 BODY = "".join("line %d\n" % i for i in range(1, 21))
+OWN_DROP = "\n\n%s: app.txt -- the owner cut these lines" % C.TRAILER  # the excuse for a commit or merge that drops own lines
+OWN_NOTE = "ALLOWED app.txt: the owner cut these lines"
 
 
 REPOS = []
@@ -685,8 +687,8 @@ class OwnHistory(unittest.TestCase):
     """A line a lane commit added is the lane's work. A later lane commit or merge that removes it, with the line still
     absent at head, is a finding. A `Drops-lines` trailer on the removing commit allows it."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
-    ALLOW = "\n\n%s: app.txt -- the owner cut these lines" % C.TRAILER
-    ALLOW_NOTE = ["ALLOWED app.txt: the owner cut these lines"]
+    ALLOW = OWN_DROP
+    ALLOW_NOTE = [OWN_NOTE]
 
     def setUp(self):
         r = self.r = Repo()
@@ -814,7 +816,7 @@ class LaneUndo(unittest.TestCase):
         b = r.commit("B: put other.txt back", other_txt="other v1\n")
         self.assertEqual(self.lane(), [a, b])
         self.assertEqual(r.sh("rev-parse", b + ":other.txt"), pre)  # scope: the same blob as before A
-        assert_finding(self,r.verdict(), "other.txt", b, a)
+        assert_finding(self, r.verdict(), "other.txt", b, a)
 
     def test_a_later_commit_that_restores_the_dropped_lines_is_green(self):
         r = self.r
@@ -864,7 +866,7 @@ class LaneUndo(unittest.TestCase):
     def test_a_commit_that_removes_a_line_main_had_before_the_lane_is_silent(self):
         r = self.r
         a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
-        b = r.commit("B: remove a line main had", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n")
+        b = r.commit("B: remove a line main had", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n" + self.CASE)
         self.assertEqual(self.lane(), [a, b])
         self.assertEqual(r.verdict(), [])
 
@@ -885,7 +887,7 @@ class LaneUndo(unittest.TestCase):
         a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
         m = self.merge_main_note("theirs")
         self.assertEqual(self.lane(), [a, m])
-        assert_finding(self,r.verdict(), "app.txt", m, a)
+        assert_finding(self, r.verdict(), "app.txt", m, a)
 
     def test_a_merge_that_drops_a_line_main_added_still_fails_with_lane_lines_present(self):  # control
         r = self.r
@@ -907,7 +909,31 @@ class LaneUndo(unittest.TestCase):
         a = r.commit("A: add 49 test lines", app_txt=self.CARD + self.BLOCK)
         b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
         self.assertEqual(self.lane(), [a, b])
-        assert_finding(self,r.verdict(), "app.txt", b, a)
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_one_line_reword_of_a_comment_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a comment", app_txt=self.CARD + "# wait for the advisory lock before the first write\n")
+        b = r.commit("B: reword the comment", app_txt=self.CARD + "# wait for the lock before any write\n")  # ratio 0.76
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_commit_that_replaces_a_six_line_case_with_one_line_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: replace the case with one line", app_txt=self.CARD + "one new line\n")
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_lane_merged_with_no_ff_into_an_integration_branch_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it", app_txt=self.CARD)
+        r.sh("checkout", "-q", "-B", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "lane")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, b, m])  # scope: the lane's commits are off the first-parent line of integ
+        assert_finding(self, r.verdict(), "app.txt", b, a)
 
 
 class IntegrationBase(unittest.TestCase):
@@ -1395,9 +1421,10 @@ def scanner_lines(tag):
     return out + ["%s = `template open" % tag, "%s middle" % tag, "%s close`" % tag, "%s plain 20" % tag]
 
 
-def drop_merge(lines, own=False):
+def drop_merge(lines, own=False, drops=""):
     """A merge commit that drops `lines` from app.txt. own=False: main added them, so upstream holds
-    them. own=True: the branch added them itself and main did not. -> (repo, merge sha)."""
+    them. own=True: the branch added them itself and main did not. drops: a trailer for the merge message.
+    -> (repo, merge sha)."""
     body = BODY + "function Card() {}\n" + "".join(l + "\n" for l in lines)
     r = base_repo()
     r.sh("checkout", "-q", "-b", "feat")
@@ -1414,7 +1441,7 @@ def drop_merge(lines, own=False):
     r.sh("merge", "--no-commit", "--no-ff", "main")
     r.put("app.txt", BODY + "function Card() {}\n")
     r.sh("add", "-A")
-    r.sh("commit", "-q", "-m", "Merge main, drop the lines")
+    r.sh("commit", "-q", "-m", "Merge main, drop the lines" + drops)
     return r, r.sh("rev-parse", "HEAD")
 
 
@@ -1470,9 +1497,11 @@ class Scanner(unittest.TestCase):
         for line in scanner_lines("m"):
             self.assertIn(" ".join(line.split()), text)
 
-    def test_none_of_the_twenty_own_lines_is_flagged(self):
-        r, _ = drop_merge(scanner_lines("o"), own=True)
+    def test_none_of_the_twenty_own_lines_is_read_as_lost(self):
+        r, m = drop_merge(scanner_lines("o"), own=True, drops=OWN_DROP)
+        self.assertEqual(C.lost_lines(r.dir, m, ["origin/main"]), [])  # the lost-line reading: none of the lines is lost
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [OWN_NOTE])
 
 
 class NulLine(unittest.TestCase):
@@ -1509,7 +1538,7 @@ class OwnContentLines(unittest.TestCase):
     those by prefix, so the branch's own line never finds its adding commit and counts as lost (false FAIL).
     The old per-line `git log -G` read them as content."""
 
-    def test_branch_own_plus_plus_and_dash_dash_lines_dropped_by_the_merge_are_green(self):
+    def test_branch_own_plus_plus_and_dash_dash_lines_are_not_read_as_lost(self):
         r = base_repo()
         r.sh("checkout", "-q", "-b", "feat")
         r.commit("feat adds a ++ line and a -- note", app_txt=BODY + "function Card() {}\n++i;\n-- note\n")
@@ -1521,8 +1550,11 @@ class OwnContentLines(unittest.TestCase):
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY + "function Card() {}\n")
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my lines")
+        r.sh("commit", "-q", "-m", "Merge main, drop my lines" + OWN_DROP)
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(C.lost_lines(r.dir, m, ["origin/main"]), [])  # the lost-line reading: the ++ and -- lines are not lost
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [OWN_NOTE])
 
 
 class BlobReads(unittest.TestCase):
