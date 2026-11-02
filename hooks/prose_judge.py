@@ -28,7 +28,8 @@ def invoke_model(*args, **kwargs):
 
 
 RULE = "prose-judge"
-RULE_CITE = "(decision rulings-declare-kind, each ruling in a decision record declares its kind)"
+RULE_CITE = ("(decision rulings-declare-kind, each ruling in a decision record declares its kind) "
+             "(rule speak-rewrite-superseded-in-place, superseded text is rewritten in place)")
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}
 

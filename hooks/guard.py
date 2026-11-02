@@ -2182,6 +2182,7 @@ LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the sm
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
 LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
@@ -2292,7 +2293,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk.
 RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_CITE)
+                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
 def running_lane_hit(payload, tool: str) -> tuple:
