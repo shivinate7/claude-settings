@@ -2117,6 +2117,33 @@ class RefusalCiteHelperTests(unittest.TestCase):
         self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
 
 
+KIND_FAIL = 'def fail(why, kind=Stop):\n    raise kind(why)\n'  # the kind parameter of merge/merge.py's fail()
+LIFT = 'class Liftable(Stop):\n    """A refusal the owner may lift."""\n'
+
+
+class RefusalKindParameterTests(unittest.TestCase):
+    """A raise through a parameter that defaults to a Stop class, as `fail(why, kind=Stop)` in merge/merge.py:
+    each call of that helper is a site. A Stop subclass is read from its base, a plain name or an attribute."""
+
+    def test_a_kind_parameter_raise_reads_an_uncited_call(self):
+        self.assertEqual(status_of(body_src('    fail("no cite")\n', KIND_FAIL), "merge:go", module="merge"), ["no cite"])
+
+    def test_a_kind_parameter_raise_passes_a_cited_call(self):
+        self.assertEqual(status_of(body_src('    fail("see decision alpha")\n', KIND_FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_kind_keyword_on_the_call_leaves_the_message_read(self):
+        src = body_src('    fail("no cite", kind=Liftable)\n', LIFT + KIND_FAIL)
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"])
+
+    def test_a_liftable_default_kind_is_read_through_its_derived_class(self):
+        src = body_src('    lift("no cite")\n', LIFT + 'def lift(why, kind=Liftable):\n    raise kind(why)\n')
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"])
+
+    def test_a_stop_subclass_with_an_attribute_base_is_a_stop(self):
+        src = body_src('    raise Lift("no cite")\n', 'class Lift(stops.Stop):\n    """A refusal."""\n')
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"])
+
+
 class RefusalCiteRatchetTests(unittest.TestCase):
     """The exempt list: an uncited id must be exempt with a home, and an entry must still be needed."""
 
