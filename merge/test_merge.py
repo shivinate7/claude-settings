@@ -376,7 +376,7 @@ class Flow(Env):
     def test_nothing_to_claim_waits_once(self):
         sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
-        sh(self.other, "git", "commit", "-qm", "no pending record left\n\nDrops-lines: docs/decisions/second.md -- nothing pending is left to claim"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out)
@@ -5777,7 +5777,7 @@ class UndoMemo(Env):
         """feat deletes its only pending record, so the run claims nothing and the head does not move."""
         sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
-        sh(self.other, "git", "commit", "-qm", "no pending record left\n\nDrops-lines: docs/decisions/second.md -- nothing pending is left to claim"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
 
     def move_main_in_the_wait(self, real_wait, fetch_co=False):
         def wait_while_main_moves(n, sha, d, prior=None):
@@ -7393,7 +7393,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page(self):
         # The refusal turns on the claim, not on the config: with kinds on and no pending record, the page has no claim to ride.
-        self.drop("feat", "docs/decisions/second.md", "drop the pending decision\n\nDrops-lines: docs/decisions/second.md -- nothing pending is left to claim")
+        self.drop("feat", "docs/decisions/second.md", "drop the pending decision")
         self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
         refs_before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
