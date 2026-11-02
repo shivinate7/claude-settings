@@ -7529,8 +7529,10 @@ for _label, _body in (
        "ssh host <<'EOF'\n" + _body + "\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("env heredoc: a bare forced push of main from a feature branch, the control verdict",
    VCS + " push --force origin main", "ask", "force-push", cwd=PUSHFEAT)
-sh("env heredoc: ssh runs a forced push of main in its body, the control verdict",
-   "ssh host <<'EOF'\n" + VCS + " push --force origin main\nEOF", "ask", "force-push", cwd=PUSHFEAT)
+# A remote shell runs its body, so the body counts as more than one command. The ruling in the ask-alone
+# section says a bash or `ssh host "bash -s"` body does, and a plain ssh body reads the same way.
+chained_ask("env heredoc: ssh runs a forced push of main in its body, denies as a chained ask command",
+            "ssh host <<'EOF'\n" + VCS + " push --force origin main\nEOF", cwd=PUSHFEAT)
 _DEPLOY = "cat > deploy <<'EOF'\ncat " + ENV + "\nEOF\n"
 for _run in ("chmod +x deploy && ./deploy", "sh deploy", "bash ./deploy", "source deploy", ". deploy"):
     sh("env heredoc: a file written by a heredoc, run later by %s, denies" % _run,
