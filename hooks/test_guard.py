@@ -11842,6 +11842,35 @@ def _f2b_clean_merge(w):
     _must(w, *IDENT, "merge", "-q", "--no-edit", "main")
 
 
+def _f2_conflict_then_reset(w):
+    """The conflicted own merge of _f2_conflict_merge, then a reset to the lane tip, which leaves that merge
+    behind. The test file it conflicted in is no longer in the tree."""
+    _f2_conflict_merge(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+
+
+def _product_conflict_merge(w):
+    """Cut at main. Reset to a lane tip that changes a product file. Main changes the same product file on the
+    same line. The builder merges main, the product file conflicts, and the builder resolves it and commits the
+    merge by hand. No test file conflicts."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 6\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "lane product")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 9\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main product")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
@@ -12005,6 +12034,28 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that pulls a test-author's f
 diff_repo("bd-f2b-clean-merge", _f2b_clean_merge)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's clean merge of main, where each side changed a different "
                          "test file, is allowed and logs no builder-diff line", clean_builder_case("bd-f2b-clean-merge")))
+# The conflicted merge a builder resets away leaves no resolution in the tree, so its test file is not judged.
+diff_repo("bd-conflict-reset", _f2_conflict_then_reset)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a test file, which it then resets away, "
+                         "is allowed and logs no builder-diff line", clean_builder_case("bd-conflict-reset")))
+# A conflict both sides made in a product file is no test path, so it does not offend for a builder.
+diff_repo("bd-product-conflict", _product_conflict_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a product file, both sides changed it, "
+                         "is allowed and logs no builder-diff line", clean_builder_case("bd-product-conflict")))
+
+
+def author_conflict_case():
+    """A test-author's conflicted merge of a test file is never refused, and logs nothing: a test file is the
+    test-author's own work, so the conflict is no offence for it."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-conflict"), _bd_f2, "test-author", "auth1")
+    hits = [r for r in rows if len(r) > 3 and r[3] in (BDIFF, "author-diff")]
+    if out or hits:
+        return False, "a test-author's conflicted test file was judged: %r and %d line(s)" % (out[:60], len(hits))
+    return True, "allowed at commit, push and stop; no builder-diff or author-diff line"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing",
+                         author_conflict_case))
 
 
 def stop_pair_case():
