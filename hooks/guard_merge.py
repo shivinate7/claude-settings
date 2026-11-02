@@ -69,7 +69,7 @@ def gh_call_of(segment: str):
 MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
+# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
 # batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
 # 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a

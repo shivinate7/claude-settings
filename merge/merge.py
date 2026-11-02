@@ -79,8 +79,8 @@ def resolve_program(name, env=None):
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
-# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name,
-# more for the batch read of a settled head) for one read, so it shares a single deadline across them instead: each call gets whatever of
+# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name, one more
+# run-list read when the check runs link more than one run, more for the batch read of a settled head) for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
 _READ_DEADLINE = None
 
@@ -810,48 +810,58 @@ class Host:
         `sha` is the head the caller already read; with none, the head of the pull request `n` is read. The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
         A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
         A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped.
-        The check runs of a superseded workflow run are dropped (`superseded_rows`); statuses and rows with no run link stay."""
+        The rows of a superseded workflow run are dropped (`superseded`); statuses and rows with no run link stay."""
         sha = sha or self.pr(n)["head"]
         rows = []
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             rows.append(self.run_row(r, r.get("details_url")))
-        rows = self.superseded_rows(rows, sha)
         for s in self.pages(f"commits/{sha}/status", "statuses"):
-            rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "link": s.get("target_url")})
-        return self.buckets(rows, warn)
+            rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "status": True, "link": s.get("target_url")})
+        return self.buckets(rows, warn, sha)
 
-    def superseded_rows(self, rows, sha):
-        """`rows` less the check runs of a cancelled workflow run when a run of the same workflow with a larger id is on `sha`. A concurrency group cancels
-        the older run, yet its always() fan-in job still fails. A row's run is the id in its link. The runs are read only when the rows link more than one run.
-        A failed runs read drops nothing: the cancelled run stays red, never green-washed."""
-        run_of = [(m.group(1) if (m := re.search(r"/actions/runs/(\d+)/", d.get("link") or "")) else None) for d in rows]
+    def superseded(self, items, sha):
+        """`items` ((row, bucket) pairs) less the rows of a cancelled workflow run when a newer run (larger id) of the same workflow is on `sha`. A concurrency group
+        cancels the older run, yet its always() fan-in job still fails. Its cancel, skip and pending rows drop. Its fail or timeout row drops only when the
+        newest run of that workflow has a pass row of the same check name, or a pending one (it holds the wait, then judges). A row's run is the id in its link; a status has none. The runs are read only when the
+        rows link more than one run. A failed runs read drops nothing: the cancelled run stays red, never green-washed."""
+        run_of = [(m.group(1) if (m := re.search(r"/actions/runs/(\d+)/", d.get("link") or "")) and not d.get("status") else None) for d, _ in items]
         if len(set(run_of) - {None}) < 2:
-            return rows
+            return items
         try:
             runs = self.runs(sha)
         except NetStop:
             raise
         except Stop:
-            return rows
+            return items
+        runs = [r for r in runs if r.get("databaseId") and r.get("workflowDatabaseId")]
         newest = {}
         for r in runs:
-            newest[r.get("workflowName")] = max(newest.get(r.get("workflowName"), 0), r.get("databaseId") or 0)
-        gone = {str(r["databaseId"]) for r in runs if r.get("conclusion") == "cancelled" and r.get("databaseId") and newest[r.get("workflowName")] > r["databaseId"]}
-        return [d for d, rid in zip(rows, run_of) if rid not in gone]
+            newest[r["workflowDatabaseId"]] = max(newest.get(r["workflowDatabaseId"], 0), r["databaseId"])
+        flow = {str(r["databaseId"]): r["workflowDatabaseId"] for r in runs}
+        gone = {str(r["databaseId"]) for r in runs if r.get("conclusion") == "cancelled" and newest[r["workflowDatabaseId"]] > r["databaseId"]}
+        cleared = {(rid, d["name"]) for (d, bucket), rid in zip(items, run_of) if bucket in ("pass", "pending") and rid}
+        keep = []
+        for (d, bucket), rid in zip(items, run_of):
+            red = bucket == "fail" or bucket.startswith("timed out")
+            if rid in gone and (not red and bucket != "pass" or red and (str(newest[flow[rid]]), d["name"]) in cleared):
+                continue
+            keep.append((d, bucket))
+        return keep
 
     def run_row(self, r, link):
         """A check run, or an Actions job (the same fields), as the row `buckets` judges."""
         bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
         return {"name": r["name"], "bucket": bucket, "link": link, "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")}
 
-    def buckets(self, rows, warn=True):
-        """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks."""
+    def buckets(self, rows, warn=True, sha=None):
+        """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks.
+        With `sha`, the rows of a superseded run are dropped after that judgment, so a timeout is told from a cancel."""
         try:
             flow = workflow_dir(self.cwd)
             caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
         except (OSError, ValueError):  # the warning is advice: with no readable workflow there is no cap to judge against
             caps = {}
-        got = {}
+        items = []
         for d in rows:
             bucket, link, cap, used = d["bucket"], d.get("link") or "", caps.get(d["name"]), job_minutes(d)
             if cap and used is not None:
@@ -860,7 +870,10 @@ class Host:
                 elif warn and used > 0.7 * cap and (d["name"], link) not in self.warned:
                     self.warned.add((d["name"], link))
                     say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
-            got.setdefault(d["name"], []).append((bucket, link))
+            items.append((d, bucket))
+        got = {}
+        for d, bucket in (self.superseded(items, sha) if sha else items):
+            got.setdefault(d["name"], []).append((bucket, d.get("link") or ""))
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
@@ -932,7 +945,7 @@ class Host:
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowName,databaseId"], self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
@@ -1052,7 +1065,7 @@ class Host:
         batch: the head is settled, but another ready PR on its base has a workflow run or a required check pending (batch_running,
         which takes `batch_ignore` as its ignore list).
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
-        a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        a head whose check runs link more than one run adds one more workflow runs read; a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
         not one per call."""
         try:
