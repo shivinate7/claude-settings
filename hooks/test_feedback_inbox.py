@@ -131,7 +131,6 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
-<<<<<<< HEAD
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
     the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
     off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
@@ -141,7 +140,6 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     `message` names `<owner>/<name>` as a whole token, compared without case, after the owner record
     that anchors the block. Other tools never count. A missing transcript passes with a systemMessage,
     as for pages. A page item and a repo item share one transcript read per Stop.
-=======
   - Chat picks (F46, F43). An owner block whose text holds page picks (`<n> <letter>`, letters a to h, an
     optional `(done)`, picks separated by commas or lines; `143b` and `143: b` count), in a repo whose
     extras name a waiting page (layout.waiting_page), blocks until the transcript shows a send naming each
@@ -163,7 +161,6 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     are as before.
   - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
     page item.
->>>>>>> c117b6cc
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -1323,7 +1320,6 @@ def case_page_queued_owner_record_anchors():
     expect_silent("page: a queued owner record with a later send passes", p)
 
 
-<<<<<<< HEAD
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -1558,7 +1554,8 @@ def case_page_and_repo_stand_downs_both_give_a_note():
           PAGE_FAIL_OPEN in msg, msg)
     check("page and repo stand-downs: the systemMessage gives the repo note",
           REPO_FAIL_OPEN in msg, msg)
-=======
+
+
 # --------------------------------------------------------------------------- chat picks, grants, closed notes
 
 # Named incidents, cited by F-id (decision owner-feedback-inbox). Each red case expects a block or a
@@ -1871,7 +1868,6 @@ def case_page_check_reads_no_transcript_for_other_blocks():
         os.makedirs(transcript_of(cfg, sid))
         expect_silent("cost: %s reads no transcript" % label,
                       guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid)))
->>>>>>> c117b6cc
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -3181,7 +3177,6 @@ CASES = (
     case_page_owner_record_missing_stands_down,
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
-<<<<<<< HEAD
     case_repo_send_naming_the_repo_passes,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
@@ -3203,7 +3198,6 @@ CASES = (
     case_repo_home_in_backticks_or_with_a_comma_is_not_malformed,
     case_repo_only_stand_down_names_repo_sends_not_page,
     case_page_and_repo_stand_downs_both_give_a_note,
-=======
     case_chat_pick_without_a_send_blocks,
     case_chat_multi_pick_partial_send_blocks,
     case_chat_pick_with_items_blocks,
@@ -3223,7 +3217,6 @@ CASES = (
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_page_check_reads_no_transcript_for_other_blocks,
->>>>>>> c117b6cc
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
