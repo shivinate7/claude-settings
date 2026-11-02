@@ -46,7 +46,7 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 
 ### Marking a lone lane's PR ready
 
-Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: "when an operation is occuring solo and/or there is only one "outcome" PR (ie it's not going into an integration branch) then of course they can be marked ready".
+Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an operation is occuring solo and/or there is only one "outcome" PR (ie it's not going into an integration branch) then of course they can be marked ready`.
 
 - The entry now covers the one outcome PR of a solo or one-lane build that goes into no integration branch, named by the session that owns it. Rule `git-integration-branch-merge` already treats a lone lane as its own integration PR.
 - A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
