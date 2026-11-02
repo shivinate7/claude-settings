@@ -1968,6 +1968,7 @@ class RefusalCiteFixtureTests(unittest.TestCase):
 
 FAIL = 'def fail(why):\n    raise Stop(why)\n'
 MK = 'def mk(what, out):\n    return Stop(what + " " + out)\n'
+KEEP = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
 EXEMPT_REASON = "the run is not in a git checkout, so no merge can start here"
 
 
@@ -2057,12 +2058,10 @@ class RefusalCiteHelperTests(unittest.TestCase):
         self.assertEqual(status_of(body_src('    Host().pages("x")\n', defs), "merge:Host.pages", module="merge"), ["no cite"])
 
     def test_a_helper_with_static_text_reads_its_argument_uncited(self):
-        defs = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
-        self.assertEqual(status_of(body_src('    keep("no cite")\n', defs), "merge:go", module="merge"), ["no cite"])
+        self.assertEqual(status_of(body_src('    keep("no cite")\n', KEEP), "merge:go", module="merge"), ["no cite"])
 
     def test_a_helper_with_static_text_reads_its_argument_cited(self):
-        defs = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
-        self.assertEqual(status_of(body_src('    keep("see decision alpha")\n', defs), "merge:go", module="merge"), ["cited"])
+        self.assertEqual(status_of(body_src('    keep("see decision alpha")\n', KEEP), "merge:go", module="merge"), ["cited"])
 
     def test_comment_openers_and_a_lone_quote_in_a_helper_argument_are_text(self):
         body = '    fail("a # and /* and // in text, Don\'t refuse")\n'
@@ -2085,23 +2084,25 @@ class RefusalCiteHelperTests(unittest.TestCase):
         extra = {"guard_core": 'def refuse(tool, decision, rule, reason, matched):\n    pass\n'}
         self.assertEqual(status_of(src, "alias-id", extra=extra), ["no cite"])
 
-    HELPER_DEFS = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
-
     def test_an_attribute_read_of_a_helper_name_does_not_make_it_a_direct_site(self):
         # `opts.keep` reads an attribute of some object, not the helper, so the helper stays a helper.
-        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        src = body_src('    keep("see decision alpha")\n', KEEP)
         extra = {"guard": "def read(opts):\n    return opts.keep\n"}
         self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), [])
         self.assertEqual(status_of(src, "merge:go", extra=extra, module="merge"), ["cited"])
 
     def test_a_name_another_module_imports_from_the_helper_module_is_no_helper(self):
-        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        src = body_src('    keep("see decision alpha")\n', KEEP)
         extra = {"guard": "from merge import keep\n"}
         self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
 
     def test_a_name_read_through_the_helper_module_alias_is_no_helper(self):
-        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        src = body_src('    keep("see decision alpha")\n', KEEP)
         extra = {"guard": "import merge as m\ndef read():\n    return m.keep\n"}
+        self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
+    def test_a_name_read_through_a_dotted_import_of_the_helper_module_is_no_helper(self):
+        src = body_src('    keep("see decision alpha")\n', KEEP)
+        extra = {"guard": "import merge.merge\ndef read():\n    return merge.merge.keep\n"}
         self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
 
 
