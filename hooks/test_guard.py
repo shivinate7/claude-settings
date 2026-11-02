@@ -34,6 +34,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 
 import ast
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -819,6 +820,9 @@ def make_blind_git(folder):
 
 FAKE_GH_PY = r'''import json, os, re, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
+    with open(state["count_file"], "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + "\n")
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
@@ -933,8 +937,12 @@ else:
 
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
-                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None):
+                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
+                 count_file=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
+    JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -995,6 +1003,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
+        "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -8119,6 +8128,8 @@ def role_said(text):
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
+# A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
+ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
@@ -8151,6 +8162,7 @@ ROLE_LINES = {
     # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
     "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
     "archive-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS),
+    "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
     "archive-no-target": role_call("r0", RUNNER_TAGS),
     "archive-own-lane": role_call("r0", LANE_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
@@ -11367,6 +11379,108 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an owner override lifts the
                          archive_override_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher routes archive_session to the guard",
                          archive_matcher_case))
+
+
+# The cost of lane-closes-after-records, pinned: one archive of a lane makes one gh call, a non-lane archive makes
+# none, and an archive writes no file in the folders the session owns. Each check builds its own counted fake, so no
+# other fake logs a call.
+ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
+
+
+def archive_judged(transcript, folder):
+    """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
+    tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
+    folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
+    finds the merge tool there."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
+        "transcript": transcript,
+    })
+
+
+def archive_counted_gh():
+    """A counted pull request tool. Its one open pull request is on no slug, so an archive of a lane reads the open
+    list and is allowed: a lane archive is allowed only after that read succeeds."""
+    folder = os.path.join(ROOT, "archcount")
+    make_fake_gh(folder, "main", need=["o/r"], count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def gh_calls_taken(folder):
+    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
+    path = os.path.join(folder, ARCHIVE_CALLS)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        calls = [line for line in handle.read().splitlines() if line.strip()]
+    os.remove(path)
+    return calls
+
+
+def tree_files(*roots):
+    """Every file under `roots`, as path -> sha256, so a new file, a removed file and a changed byte each show."""
+    files = {}
+    for root in roots:
+        for folder, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(folder, name)
+                with open(path, "rb") as handle:
+                    files[path] = hashlib.sha256(handle.read()).hexdigest()
+    return files
+
+
+def archive_lane_one_read_case():
+    """An archive of a lane reads the open pull requests in one gh call, and its open list names no slug: allowed."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-lane"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane with no slug pull request on its open list: %s (%r)" % (decision, reason)
+    if len(calls) != 1:
+        return False, "one gh call wanted for the open list, %d seen: %r" % (len(calls), calls)
+    return True, "one gh call, and the lane is allowed"
+
+
+def archive_non_lane_no_read_case():
+    """A target that is no lane is not judged: its archive is allowed and makes no gh call, though its record carries
+    a step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-triage-slug"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "a non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+def archive_writes_nothing_case():
+    """An archive of a lane writes no file in its working folder, its transcript folder or the config folder."""
+    folder = archive_counted_gh()
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the snapshot
+    trees = (NOGIT, ROLE_DIR, MERGECFG)
+    before = tree_files(*trees)
+    decision, _ = archive_judged(role_path("archive-lane"), folder)
+    after = tree_files(*trees)
+    gh_calls_taken(folder)
+    if decision != "allow":
+        return False, "the lane archive was %s, not allowed, so it is not the allow path under test" % decision
+    changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
+    if changed:
+        return False, "the archive wrote %d file(s): %r" % (len(changed), changed[:5])
+    return True, "no file changed in the working, transcript or config folder"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive reads the open pull requests in one gh call",
+                         archive_lane_one_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no gh call",
+                         archive_non_lane_no_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
+                         archive_writes_nothing_case))
 
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
