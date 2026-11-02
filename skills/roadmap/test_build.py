@@ -971,6 +971,134 @@ class PageRulings(Fixture):
         self.assertEqual(self.rulings(out), (1, "c153 (page item 9)"))
 
 
+class DatedClaims(Fixture):
+    """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
+    whole days old. A claim is `Finding` or `Checked` (any case), then a date with no "." or newline between
+    and within 40 characters. The date is `Mon D` or `Month D`, optionally with `, YYYY` or ` YYYY`, or ISO
+    `YYYY-MM-DD`. A date with no year takes this year, or the year before if it is in the future. The row
+    reads `<step id> (<date as written>)` per step."""
+
+    ROW = "dated claims to re-check before a lane starts"
+    MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December")
+
+    def today(self):
+        return datetime.datetime.now(datetime.timezone.utc).date()  # the clock the build reads
+
+    def ago(self, days):
+        return self.today() - datetime.timedelta(days=days)
+
+    def md(self, d):
+        """`Mon D` in English. A fixed table, not strftime: `%-d` is glibc-only and `%b` follows the locale."""
+        return "%s %d" % (self.MONTHS[d.month - 1][:3], d.day)
+
+    def full(self, d):
+        return "%s %d" % (self.MONTHS[d.month - 1], d.day)
+
+    def claims(self, out):
+        return self.upkeep_row(out, self.ROW)
+
+    def listed(self, entries):
+        """Sorted `<id> (<date>)` entries. A date can hold a comma, so match whole entries, not split on commas."""
+        return sorted(m.group(0) for m in re.finditer(r"\S+ \([^()]*\)", entries))
+
+    def build(self):
+        """The build with no --live file: the row reads notes only, so it must not need the live file."""
+        return self.build_from_main()[1]
+
+    def control(self):
+        """A doing step whose claim is STALE_DAYS old, so each negative case also has a listed row. Returns its entry."""
+        self.commit_step("ctl", status="doing", note="Finding, %s: control." % self.md(self.ago(10)))
+        return "ctl (%s)" % self.md(self.ago(10))
+
+    def test_the_incident_shape_is_listed(self):
+        """Incident: step r5 is doing, and its only claim is ten days old."""
+        self.commit_step("r5", status="doing", note="Finding, %s: ios-adblock, joyous and degen: each a drifted "
+                         "impeccable skill." % self.md(self.ago(10)))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "r5 (%s)" % self.md(self.ago(10))])))
+
+    def test_a_newer_claim_wins_whichever_comes_first(self):
+        """The newest claim decides, so a fresh Checked clears an old Finding in either order."""
+        old = "Finding, %s: drifted skills." % self.md(self.ago(10))
+        new = "Checked, %s: gone." % self.md(self.ago(1))
+        self.commit_step("newer-first", status="doing", note="%s %s" % (new, old))
+        self.commit_step("newer-last", status="doing", note="%s %s" % (old, new))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_an_active_step_is_listed(self):
+        self.commit_step("a1", status="active", note="Finding, %s: x." % self.md(self.ago(10)))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "a1 (%s)" % self.md(self.ago(10))])))
+
+    def test_todo_done_and_other_statuses_are_never_listed(self):
+        stale = "Finding, %s: x." % self.md(self.ago(10))
+        for sid, status in (("t1", "todo"), ("d1", "done"), ("b1", "blocked")):
+            self.commit_step(sid, status=status, note=stale)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (1, [ctl]))
+
+    def test_a_gap_over_40_characters_a_period_or_a_newline_does_not_count(self):
+        stale = self.md(self.ago(10))
+        self.commit_step("far", status="doing", note="Finding, %s%s: x." % ("word " * 12, stale))  # 62 characters between
+        self.commit_step("dot", status="doing", note="Finding. %s: x." % stale)
+        self.commit_step("newline", status="doing", note="Finding,\n%s: x." % stale)
+        self.commit_step("near", status="doing", note="Finding, after the cull, %s: x." % stale)  # 18 between: counts
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "near (%s)" % stale])))
+
+    def test_an_iso_date_is_read_as_written(self):
+        iso = self.ago(10).isoformat()
+        self.commit_step("iso", status="doing", note="Checked %s: x." % iso)
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "iso (%s)" % iso])))
+
+    def test_a_yearless_date_in_the_future_takes_the_year_before(self):
+        # Feb 29 has no year before a common year, so the case steps past it.
+        future = next(d for d in (self.today() + datetime.timedelta(days=n) for n in range(3, 9))
+                      if (d.month, d.day) != (2, 29))
+        self.commit_step("fut", status="doing", note="Finding, %s: x." % self.md(future))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (2, sorted([ctl, "fut (%s)" % self.md(future)])))
+
+    def test_an_explicit_year_is_kept_as_written(self):
+        day = self.ago(10)
+        self.commit_step("comma", status="doing", note="Finding, %s, %d: x." % (self.md(day), day.year))
+        self.commit_step("space", status="doing", note="Checked %s %d: x." % (self.md(day), day.year))
+        ctl = self.control()
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (3, sorted([
+            ctl, "comma (%s, %d)" % (self.md(day), day.year), "space (%s %d)" % (self.md(day), day.year)])))
+
+    def test_each_written_form_is_read_as_the_spec_says(self):
+        """One step per form, one build. A form that lists gives its date as written; the rest give None."""
+        day = self.ago(10)
+        forms = [  # (step id, note and why, date as written or None when the step must not list)
+            ("full", {"note": "Finding, %s: x." % self.full(day)}, self.full(day)),
+            ("upper", {"note": "checked %s: x." % self.md(day).upper()}, self.md(day).upper()),
+            ("five", {"note": "Finding, %s: x." % self.md(self.ago(5))}, self.md(self.ago(5))),
+            ("four", {"note": "Finding, %s: x." % self.md(self.ago(4))}, None),
+            ("fresh", {"note": "Checked %s: x." % self.md(self.ago(1))}, None),
+            ("no-claim", {"note": "Waiting on the cull. The lane ran 10 days ago."}, None),
+            ("word-only", {"note": "Finding, nothing dated here."}, None),
+            ("why-only", {"note": "Waiting on the cull.", "why": "Finding, %s: x." % self.md(day)}, None),
+        ]
+        for sid, fields, _ in forms:
+            self.commit_step(sid, status="doing", **fields)
+        ctl = self.control()
+        expect = sorted([ctl] + ["%s (%s)" % (sid, date) for sid, _, date in forms if date])
+        count, entries = self.claims(self.build())
+        self.assertEqual((count, self.listed(entries)), (len(expect), expect))
+
+
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
 
