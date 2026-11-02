@@ -30,6 +30,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 MODULE = os.environ.get("RULING_KIND_UNDER_TEST") or os.path.join(HERE, "check_ruling_kind.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+import _test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/_test_ruling_kind_fixture.py)
 
 PLAN = "plans/build-plan.md"
 L1 = PLAN + "#phase-1-the-sweep"
@@ -303,6 +304,25 @@ class RulingKindTests(unittest.TestCase):
                     self.assert_passes(REC)
                 else:
                     self.assert_fails(REC, "Kind")
+
+    # One ruling in two sections, with one Kind line, passes. Two Kind lines in the same text fail.
+    # The fixture's Home path must exist in the tree, or the case fails on the Home, not on the Kind line.
+
+    def put_fixture_home(self):
+        self.put(fx.HOME_PATH, "name: checks\n")
+
+    def test_one_kind_line_record_with_two_sections_passes(self):
+        self.put_fixture_home()
+        self.put(REC, fx.ONE_KIND_RECORD)
+        self.assert_passes(REC)
+        # A second section of the same ruling carries no Kind line of its own.
+        self.put(REC, record(PROCESS_OK) + "\n## Where CI runs a suite\n\nEach CI job runs when its files change.\n")
+        self.assert_passes(REC)
+
+    def test_pr_record_with_two_kind_lines_fails(self):
+        self.put_fixture_home()
+        self.put(REC, fx.PR_RECORD)
+        self.assert_fails(REC, "found 2")
 
     # --rules-file: a Home names a rule that lives in either rules file. Each file is one side:
     # the caller's CLAUDE.md and the claude-settings CLAUDE.md, passed by check.sh.
