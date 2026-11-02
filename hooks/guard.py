@@ -3305,7 +3305,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 
 
 # Rule coordinator-scope (records session-tiers and roles-orchestrator-never-builds; incident: a cloud
-# coordinator edited another repo's instructions file itself, 2026-10-31). A cloud coordinator briefs lane
+# coordinator edited another repo's instructions file itself). A cloud coordinator briefs lane
 # sessions and writes records. Its own write goes only to a record home, its own scratchpad, or a path in no
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a

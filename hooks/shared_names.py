@@ -52,11 +52,11 @@ def config_dir() -> str:
 MERGE_ROLES = {"coordinator", "batch-runner"}
 
 
-def role_path():
+def role_path() -> pathlib.Path:
     return pathlib.Path(config_dir()) / STATE_DIR_NAME / "merge-role.json"
 
 
-def read_merge_role():
+def read_merge_role() -> str | None:
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
     Every failure is None, so a gate built on it fails closed. An absent id never equals an absent record.
     The id is the environment's CLAUDE_CODE_REMOTE_SESSION_ID (cse_<id>), never a hook payload's session_id."""
