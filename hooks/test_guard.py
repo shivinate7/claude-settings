@@ -7037,7 +7037,7 @@ for text in (
     "node --env-file=" + ENVRC + " app.js",
 ):
     sh("env: an envrc name in a listing or a runner, " + text[:30], text, "allow", cwd=NOGIT)
-# The env-file decision (docs/decisions/env-file-stays-unread.md) exempts the whole name `.env.example`
+# Decision env-file-stays-unread (the session never reads a file of secrets) exempts the whole name `.env.example`
 # only. A glob that could name `.env.example.bak` could name a held file, so the glob is held too. The
 # plain example file stays allowed.
 sh("env: a glob that could name a covered backup, cat .env.example*", "cat " + ENV + ".example*",
