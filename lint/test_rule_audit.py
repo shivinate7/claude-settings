@@ -962,6 +962,16 @@ def _dict_get_options(call):
     return None
 
 
+def _join_parts(call):
+    """(separator, elements) of `"<sep>".join([...])` or `"<sep>".join((...))` with a literal separator, else None."""
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "join" and isinstance(func.value, ast.Constant)
+            and isinstance(func.value.value, str) and len(call.args) == 1 and not call.keywords
+            and isinstance(call.args[0], (ast.List, ast.Tuple))):
+        return None
+    return func.value.value, call.args[0].elts
+
+
 class _Module:
     """One hooks module, read with ast: its module-level values, its functions and its imports."""
 
@@ -1065,6 +1075,9 @@ class _Reasons:
         if isinstance(expr, ast.Call):
             if isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
                 return self.alts(expr.func.value, mod, locs, d)
+            joined = _join_parts(expr)
+            if joined is not None:
+                return self._join(joined[0], joined[1], mod, locs, d)
             options = _dict_get_options(expr)
             if options is not None:
                 return _union([self.alts(o, mod, locs, d) for o in options])
@@ -1093,6 +1106,22 @@ class _Reasons:
                 parts = []
             found += [t for part in parts for t in (part or [])]
         return found
+
+    def _join(self, sep, elts, mod, locs, depth):
+        """The text of `sep.join(elts)`: the branches of each element, joined by `sep`. A starred element, or one
+        with no static text at run time, adds an empty piece, as a run-time piece does in a `+` chain. A join
+        with no static piece reads no text."""
+        pieces, static = [], False
+        for e in elts:
+            options = None if isinstance(e, ast.Starred) else self.alts(e, mod, locs, depth)
+            static = static or any(options or [])
+            pieces.append(options or [""])
+        if not static:
+            return None
+        texts = None
+        for options in pieces:
+            texts = list(options) if texts is None else [a + sep + b for a in texts for b in options]
+        return texts
 
     def _value(self, value, slot, index, mod, locs, depth):
         if slot is not None:
