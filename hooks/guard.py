@@ -2780,11 +2780,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
+def data_tool_judge(tool_input, cwd=""):
+    """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
+    reads the writes again (page-item-design)."""
+    import question_form
+    return question_form.page_item_hit(tool_input, cwd)
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
     filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
-    import question_form
-    return question_form.page_item_hit(tool_input, cwd)[0]
+    return data_tool_judge(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -2802,17 +2808,26 @@ PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, 
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
 
 
+def _waiting_page_folder(name):
+    """The waiting-page skill folder that holds `name`: the one beside this hooks folder, else the config
+    folder's copy. None when neither does."""
+    for folder in (os.path.join(_HERE, "..", "skills", "waiting-page"),
+                   os.path.join(guard_core.config_dir(), "skills", "waiting-page")):
+        if os.path.isfile(os.path.join(folder, name)):
+            return folder
+    return None
+
+
 def _stale_pages_module():
     """stale_pages.py from the skill folder beside this hooks folder, else the config folder's copy; None
     when neither exists. Loaded here and not at the top, so a call that is no waiting-page publish
     never pays for it."""
-    for folder in (os.path.join(_HERE, "..", "skills", "waiting-page"),
-                   os.path.join(guard_core.config_dir(), "skills", "waiting-page")):
-        if os.path.isfile(os.path.join(folder, "stale_pages.py")):
-            if folder not in sys.path:
-                sys.path.insert(0, folder)  # stale_pages imports splice from its own folder
-            return importlib.import_module("stale_pages")
-    return None
+    folder = _waiting_page_folder("stale_pages.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)  # stale_pages imports splice from its own folder
+    return importlib.import_module("stale_pages")
 
 
 def page_stale_hit(tool_input, cwd):
@@ -2854,6 +2869,113 @@ def page_stale_hit(tool_input, cwd):
         return PAGE_STALE_REASON, path
     if blob and not stale_pages.write_stamp(root, blob):
         record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
+    # The file an item write's picture check loads (rule page-item-design): the absolute path of this publish.
+    stale_pages.write_published(root, os.path.abspath(os.path.join(cwd, path) if cwd else path))
+    return None
+
+
+# ------------------------------------------------------------------ a design picture is checked at write
+#
+# Rule `page-item-design` (decision page-item-design). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option `design` runs skills/waiting-page/check_designs.mjs against the page
+# file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
+# sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
+# unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
+CHECK_DESIGNS = "check_designs.mjs"
+CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
+# One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
+PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
+_design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
+PAGE_ITEM_DESIGN_FIX = " Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+
+
+def _run_check_designs(page_file, item):
+    """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
+    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
+    import shutil
+    import subprocess  # TimeoutExpired only; the child starts through _nowindow
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    import tempfile
+    node = shutil.which("node")
+    folder = _waiting_page_folder(CHECK_DESIGNS)
+    if node is None or folder is None:
+        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
+    cap = CHECK_DESIGNS_CAP
+    if _design_deadline[0] is not None:
+        cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
+    with tempfile.TemporaryDirectory() as scratch:
+        item_file = os.path.join(scratch, "item.json")
+        with open(item_file, "w", encoding="utf-8") as handle:
+            json.dump(item, handle)
+        try:
+            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
+                                capture_output=True, text=True, timeout=cap)
+        except subprocess.TimeoutExpired:
+            return 3, "no answer in %d s" % cap
+        except OSError as err:
+            return 3, str(err.strerror or err)
+    lines = run.stdout.strip().splitlines()
+    try:
+        problem = json.loads(lines[-1]).get("problem") if lines else None
+    except ValueError:
+        return 3, "no answer line; exit %d" % run.returncode
+    if run.returncode == 1 and isinstance(problem, str) and problem:
+        return 1, problem
+    if run.returncode == 0:
+        return 0, ""
+    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+
+
+def page_design_hit(writes, tool_input, cwd):
+    """(reason, matched) for the first write in `writes` whose picture the page would refuse, else None. A write
+    with no picture leaves before the record is read. A set is judged whole. An update is judged only when it
+    carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
+    partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
+    on any unread state."""
+    import question_form
+    pictured = []
+    for op, doc_id, data in question_form.design_writes(writes):
+        if op == "update" and not (data.get("options") and data.get("designs")):
+            record(DATA_TOOL, "noted", "page-item-design",
+                   "partial: an update of item %s carries only %s, so its picture is not checked"
+                   % (cap_safe(str(doc_id or data.get("id") or "?"), 40), "options" if data.get("options") else "designs"))
+            continue
+        pictured.append((doc_id, data))
+    if not pictured:
+        return None
+    try:
+        root = question_form.waiting_page_root(tool_input, cwd)
+        stale_pages = _stale_pages_module()
+        if stale_pages is None:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: stale_pages.py not found")
+            return None
+        page_file = stale_pages.read_published(root) if root else None
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if not page_file or not os.path.isfile(page_file):
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
+        return None
+    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    _design_deadline[0] = deadline
+    try:
+        for done, (doc_id, data) in enumerate(pictured):
+            if time.monotonic() >= deadline:
+                record(DATA_TOOL, "noted", "page-item-design",
+                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
+                return None
+            try:
+                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+            except Exception as err:
+                code, text = 3, type(err).__name__ + ": " + str(err)
+            if code == 1:
+                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+            if code != 0:
+                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    finally:
+        _design_deadline[0] = None
     return None
 
 
@@ -3413,7 +3535,7 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        rule, matched = data_tool_hit(tool_input, cwd)
+        (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
@@ -3441,6 +3563,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if item_writes:
+            unseen = page_design_hit(item_writes, tool_input, cwd)
+            if unseen:
+                refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
         return
 
     if tool == PAGE_TOOL:

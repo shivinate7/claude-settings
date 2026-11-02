@@ -115,6 +115,7 @@ FAMILIES = {
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -12172,21 +12173,28 @@ wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
 
 
+def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
+    """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
+    Returns the printed stdout, empty when the guard allowed the call."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    run = subprocess.run([sys.executable, WP_GUARD],
+                         input=json.dumps({"tool_name": "Artifact", "cwd": cwd,
+                                           "tool_input": {"url": url, "file_path": file_path}}),
+                         capture_output=True, text=True, env=env, timeout=120)
+    return run.stdout.strip()
+
+
 def wp_stamp_case():
     """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
         os.remove(stamp)
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
-    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    run = subprocess.run([sys.executable, WP_GUARD],
-                         input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
-                                           "tool_input": {"url": PQ_URL, "file_path": WP_CURRENT}}),
-                         capture_output=True, text=True, env=env, timeout=120)
-    if run.stdout.strip():
-        return False, "the publish of main's page was refused: %r" % run.stdout[:100]
+    out = wp_publish_run(WP_CURRENT)
+    if out:
+        return False, "the publish of main's page was refused: %r" % out[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -12199,6 +12207,345 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
+
+
+# --------------------------------------------------------------------------- a design picture is checked at write
+#
+# Rule page-item-design (decision page-item-design). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option with `design` runs skills/waiting-page/check_designs.mjs against the
+# published file stamped at <git common dir>/waiting-page-published. A miss denies, with the page's own
+# sentence. Unknown (no stamp, the file gone, exit 3) allows and logs one `noted` line. A write with no designs
+# never runs the checker: `_run_check_designs` is the seam, and the seam's call count is what the case reads.
+# Each case gets a checkout and a config folder of its own, so no case reads another case's stamp.
+FAMILY = "page-item-design"
+
+PD_STAMP = "waiting-page-published"  # the stamp file, in the git common dir
+PD_DOC = "fill-of-volume-card"
+PD_PAGE = os.path.join(ROOT, "pd", "design-page.html")  # main's page, with the mockups the cases name
+PD_SLOT = '<script type="application/json" id="designData">{}</script>'
+PD_MOCKS = {
+    "m1": '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>',
+    "m2": '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>',  # a strip, drawn at 2400
+}
+with open(WP_SOURCE, encoding="utf-8", newline="") as _handle:
+    _pd_template = _handle.read()
+wp_must(_pd_template.count(PD_SLOT) == 1, "main's page holds its designData slot once")
+wp_put(PD_PAGE, _pd_template.replace(
+    PD_SLOT, '<script type="application/json" id="designData">'
+    + json.dumps(PD_MOCKS).replace("<", "\\u003c") + "</script>", 1))
+
+
+def pd_node_ready():
+    """True when node can launch a Chromium through playwright, with the environment the guard's checker gets."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    probe = subprocess.run([node, "-e", "require('playwright').chromium.launch().then(b => b.close())"],
+                           capture_output=True, text=True, env=dict(os.environ), timeout=120)
+    return probe.returncode == 0
+
+
+# The deny cases render a page through the checker, so they need Chromium. GUARD_CHROMIUM=1 is set only on the
+# CI step that installs Chromium: there, a node that cannot launch it fails the run. Without the marker, a
+# machine that cannot launch Chromium skips those cases and says so (the rule of testing/skip-locally-fail-in-ci.mjs).
+def pd_chromium_missing():
+    """The marker says this run has Chromium. A node that cannot launch it is a failure, not a skip."""
+    return False, ("GUARD_CHROMIUM=1, but node cannot launch Chromium through playwright, so the checker's deny "
+                   "cases cannot run")
+
+
+PD_MARKER = os.environ.get("GUARD_CHROMIUM") == "1"
+PD_NODE = pd_node_ready()
+PD_NEEDS_NODE = PD_NODE or PD_MARKER
+if PD_MARKER and not PD_NODE:
+    LOG_CHECKS_EXTRA.append(("page-item-design: GUARD_CHROMIUM=1 and node cannot launch Chromium", pd_chromium_missing))
+elif not PD_NODE:
+    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped",
+          file=sys.stderr)
+
+
+def pd_repo(name, stamp):
+    """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    where = os.path.join(ROOT, "pd", name)
+    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+    wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
+    wp_git(where, "init", "-q")
+    wp_git(where, "add", "-A")
+    wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
+    if stamp is not None:
+        wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
+    return where
+
+
+def pd_item(designs=None, **over):
+    """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
+    item = {"id": PD_DOC, "kind": "decision", "status": "open", "title": "Which fill should the volume card show?",
+            "context": "The volume card shows the stock level.",
+            "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                        {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
+            "designs": designs if designs is not None else
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+    item.update(over)
+    return with_stake(item, departs=True)
+
+
+def pd_plain():
+    """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
+    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open",
+                       "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
+                       "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
+                                   {"key": "b", "label": "Build first", "how": "The build before any design review."}]},
+                      departs=True)
+
+
+def pd_body(repo, data, action="set"):
+    return {"tool_name": "ArtifactData", "cwd": repo,
+            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+
+
+def pd_run(name, body):
+    """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
+    folder = os.path.join(ROOT, "pd", "cfg-" + name)
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+                         env=env, timeout=120)
+    if got.returncode != 0:
+        return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
+    decision, reason = read_decision(got.stdout)
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return decision, reason, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_case(label, name, stamp, data, want, fragment="", action="set", note=False):
+    """Register one check: a checkout with `stamp`, one ArtifactData write of `data`, and the verdict wanted.
+    A deny's reason must carry `fragment` and no forbidden target. `note` wants one noted line for the rule."""
+    def check():
+        repo = pd_repo(name, stamp)
+        decision, reason, rows = pd_run(name, pd_body(repo, data, action))
+        problems = []
+        if decision != want:
+            problems.append("want %s, got %s: %s" % (want, decision, reason[:160]))
+        if want == "deny" and fragment and fragment not in reason:
+            problems.append("the reason does not carry %r: %s" % (fragment, reason[:160]))
+        leak = names_the_target(reason, "page-item-design") if want == "deny" else ""
+        if leak:
+            problems.append("the reason names the forbidden target %r" % leak)
+        if note:
+            noted = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+        return (not problems), ("; ".join(problems) or "%s, as wanted" % want)
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+# The deny cases read the checker's answer, so they run only where the checker can render.
+if PD_NEEDS_NODE:
+    pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names")
+    pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            "deny", fragment="a state its mockup does not draw")
+    pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
+            pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                              "drawn": 2400}]),
+            "deny", fragment="option A")
+    pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names", action="update")
+
+pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
+pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        "allow")
+pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
+pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
+        pd_item(), "allow", note=True)
+
+
+def pd_stamp_case():
+    """An allowed publish of this repo's waiting page writes the absolute path of the published file to
+    <git common dir>/waiting-page-published. A relative file path resolves against the checkout, and a refused
+    publish leaves the stamp as it was."""
+    materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
+    stamp = os.path.join(WP_CHECK, ".git", PD_STAMP)
+
+    def stamped():
+        return open(stamp, encoding="utf-8").read().strip() if os.path.isfile(stamp) else None
+
+    def names(got):
+        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_CURRENT)
+
+    if os.path.exists(stamp):
+        os.remove(stamp)
+    if wp_publish_run(WP_CURRENT):
+        return False, "the publish of main's page was refused"
+    if not names(stamped()):
+        return False, "after an allowed publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+    os.remove(stamp)
+    if wp_publish_run(os.path.relpath(WP_CURRENT, WP_CHECK)):
+        return False, "the publish by a relative file path was refused"
+    if not names(stamped()):
+        return False, "after a relative publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+    behind = wp_publish_run(WP_BEHIND)
+    if "page-stale" not in behind:
+        return False, "a behind publish was not refused by page-stale: %r" % behind[:100]
+    if not names(stamped()):
+        return False, "a refused publish changed the stamp to %r" % stamped()
+    return True, "an allowed publish stamps its absolute path, and a refused one leaves the stamp"
+
+
+FIXTURELESS_CHECKS.add(pd_stamp_case)  # builds only the copy it runs, as wp_stamp_case does
+LOG_CHECKS_EXTRA.append(("page-item-design: an allowed publish of the waiting page stamps the published file",
+                         pd_stamp_case))
+
+
+def pd_rows(folder):
+    """The guard.log rows of one config folder, split on tabs."""
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_noted(rows):
+    """The page-item-design noted rows. A row has six columns, the session last."""
+    return [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+
+
+def pd_judged(payload, name, seam=None, patches=None):
+    """(seam calls, printed output, guard.log rows) for one call, judged in this process with its own config folder.
+    The seam is the real _run_check_designs unless `seam` replaces it. `patches` sets module constants, created when absent."""
+    from unittest import mock
+    module = _load_guard_module()
+    real = module._run_check_designs
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return (seam or real)(*args, **kwargs)
+    folder = os.path.join(ROOT, "pd", "judged-" + name)
+    os.makedirs(folder, exist_ok=True)
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = folder
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(module, "_run_check_designs", spy))
+            for key, value in (patches or {}).items():
+                stack.enter_context(mock.patch.object(module, key, value, create=True))
+            out = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            try:
+                module.judge(payload)
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    return len(calls), out.getvalue(), pd_rows(folder)
+
+
+def pd_seam_case():
+    """The guard calls _run_check_designs once for a write with designs, and never for a write without them."""
+    module = _load_guard_module()
+    if not hasattr(module, "_run_check_designs"):
+        return False, "the guard has no _run_check_designs seam"
+    repo = pd_repo("seam", PD_PAGE)
+    with_calls, with_out, _ = pd_judged(pd_body(repo, pd_item()), "seam-with")
+    without_calls, without_out, _ = pd_judged(pd_body(repo, pd_plain()), "seam-without")
+    problems = []
+    if with_calls != 1:
+        problems.append("a write with designs called the seam %d times, want 1" % with_calls)
+    if with_out.strip():
+        problems.append("a good write with designs was refused: %s" % with_out[:120])
+    if without_calls != 0:
+        problems.append("a write with no designs called the seam %d times, want 0" % without_calls)
+    if without_out.strip():
+        problems.append("a write with no designs was refused: %s" % without_out[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the seam runs once for a write with designs, and never for one without"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
+
+
+def pd_partial_options():
+    """Two options with gain and lose, one with a picture. A partial update's options must pass the form rule too."""
+    return with_stake({"options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                                   {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
+
+
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+
+
+def pd_partial(label, name, data, judged):
+    """One update case of rule page-item-design. A write that carries options or designs but not both is not
+    judged: the checker is not called, the write is allowed, and one noted line says partial. A write that
+    carries both is judged, so the checker is called once."""
+    def check():
+        repo = pd_repo(name, PD_PAGE)
+        calls, out, rows = pd_judged(pd_body(repo, data, "update"), name)
+        noted = pd_noted(rows)
+        problems = []
+        if judged:
+            if calls != 1:
+                problems.append("a write that carries both was judged %d times, want 1" % calls)
+            if out.strip():
+                problems.append("a good write that carries both was refused: %s" % out[:120])
+        else:
+            if calls != 0:
+                problems.append("a partial update called the checker %d times, want 0" % calls)
+            if out.strip():
+                problems.append("a partial update was refused: %s" % out[:120])
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+            elif "partial" not in "\t".join(noted[0]):
+                problems.append("the noted line does not say partial: %r" % noted[0])
+        return (not problems), ("; ".join(problems) or "as wanted")
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+pd_partial("a partial update with options and no designs is not judged: one noted line, no checker call",
+           "partial-options", {"options": pd_partial_options()}, judged=False)
+pd_partial("a partial update with designs and no options is not judged: one noted line, no checker call",
+           "partial-designs", {"designs": PD_FULL_DESIGN}, judged=False)
+pd_partial("an update that carries both options and designs is judged",
+           "update-both", {"options": pd_partial_options(), "designs": PD_FULL_DESIGN}, judged=True)
+
+
+def pd_budget_case():
+    """Pictured items in one batch share one deadline. When the budget is spent, the rest are allowed with a noted
+    line, and the checker is not called for them. The checker is a stand-in that sleeps, so the case stays fast."""
+    import time
+
+    def slow(page_file, item):
+        time.sleep(0.6)
+        return 0, ""
+    repo = pd_repo("budget", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": "budget-%d" % i, "data": pd_item(id="budget-%d" % i)}
+              for i in range(3)]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    calls, out, rows = pd_judged(payload, "budget", seam=slow, patches={"PAGE_ITEM_DESIGN_BATCH_SECONDS": 1.0})
+    noted = pd_noted(rows)
+    problems = []
+    if calls != 2:
+        problems.append("three pictured items in one batch called the checker %d times, want 2 (one deadline per batch)"
+                        % calls)
+    if out.strip():
+        problems.append("a batch with no miss was refused: %s" % out[:120])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for the item past the budget, found %d" % len(noted))
+    return (not problems), ("; ".join(problems) or "two judged, one noted, one deadline for the batch")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool

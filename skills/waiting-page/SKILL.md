@@ -405,6 +405,7 @@ carry shows a warning line in its card in place of the picture.
 
 Each option gets its own mockup, drawn in that option's state. Two options never show the same picture with the same `focus`.
 The page refuses an item where they do, or where a `focus` finds nothing.
+The guard runs `check_designs.mjs` on the published page at each item write that carries a design, and refuses a write the page would refuse or draw as a strip (rule `page-item-design`, decision `page-item-design`). Republish the design first: the check reads the page you last published.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it at the width of the first device that
