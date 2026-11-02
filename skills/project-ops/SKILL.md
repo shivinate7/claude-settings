@@ -47,7 +47,11 @@ that triage or the batch runner writes for its successor.
 4. **Fill the tiers.** Copy `templates/operating-model.md` and `templates/roster.md` into the
    project's instructions on claude.ai. Fill each `<placeholder>`. The roster's home is the project
    instructions, so keep no second copy in the repo.
-5. **Commit and push** the record branch. It needs no PR and runs no CI.
+5. **Triage pushes the record branch.** The guard lets only the triage session push it (rule
+   `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
+   session (decision `session-tiers`). Commit the record branch, then send triage the repo, the branch and
+   the worktree path. Triage pushes it. When triage cannot reach that worktree, triage does steps 2 and 3
+   itself, then pushes. The push needs no PR and runs no CI.
 6. **Protect the default branch.** Name the checks the repo's CI reports. Preview, then set, once the
    owner confirms the act (it changes the live repo):
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check <name> [--check <name> ...] [--branch main]`,

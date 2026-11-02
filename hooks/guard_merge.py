@@ -607,6 +607,21 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
+def _command_words(args):
+    """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
+    newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
+    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    words = []
+    for arg in args:
+        word = arg.rstrip(")&")
+        if word != arg:
+            if word:
+                words.append(word)
+            break
+        words.append(arg)
+    return words
+
+
 def _push_calls(segment: str, script: str, cwd: str):
     """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
@@ -615,7 +630,7 @@ def _push_calls(segment: str, script: str, cwd: str):
     for subcommand, args in git_calls(push_text(segment)):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
-            yield args, where, overrides
+            yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
     if inner:
