@@ -295,7 +295,7 @@ while True:
         )
         _loading = "guard_env"
         from guard_env import (
-            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_command_refusal, is_env,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -2734,9 +2734,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
-    refusal, logged = env_refusal(stripped)
-    if not refusal:
-        refusal, logged = env_heredoc_refusal(raw)
+    refusal, logged = env_command_refusal(raw)
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 

@@ -15,6 +15,7 @@ import re
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
@@ -747,7 +748,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, keep_body: "Callable | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -756,7 +757,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it. A caller that
+    passes `keep_body(quote, header)` keeps the lines of each body it accepts, in place."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -777,6 +779,10 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
+            if keep_body is not None and keep_body(quote, header_line):
+                kept.extend(lines[start:index])
+                if kept_at is not None:
+                    kept_at.extend(range(start, index))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
             else:
@@ -784,18 +790,18 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     return kept, bodies, unclosed
 
 
-def _drop_heredoc_bodies(cmd: str) -> str:
+def _drop_heredoc_bodies(cmd: str, keep_body: "Callable | None" = None) -> str:
     """Drop the body of every heredoc, keeping every header line. The one loop
     `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
-    the walk itself."""
+    the walk itself. `keep_body` is `_walk_heredocs`' own: it names the bodies that stay."""
     lane_at, main_at = [], []
-    _walk_heredocs(cmd, kept_at=lane_at)
-    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
+    _walk_heredocs(cmd, kept_at=lane_at, keep_body=keep_body)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at, keep_body=keep_body)   # BANDAID: main's own walk, see _MAIN_HEADER
     if lane_at != main_at:
         keep = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
         return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in keep)
-    return "\n".join(_split_heredocs(cmd)[0])
+    return "\n".join(_walk_heredocs(cmd, keep_body=keep_body)[0])
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
@@ -808,6 +814,36 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     if _walk_heredocs(cmd)[2]:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
     return _drop_heredoc_bodies(cmd)
+
+
+# A quoted body that python or node reads holds strings bash never expands, so a backtick or a `$(` in it
+# is text. Perl and ruby run a backtick pair as a shell command, so they are left out: their body keeps
+# every substitution under judgement.
+_TEXT_STRINGS_FIRST = _interpreter_header("python[\\d.]*|node")
+
+
+def env_scan_view(cmd: str):
+    """Return (text, plain bodies) for the environment layer.
+
+    A body stays in `text` only when ITS OWN header line feeds it to a shell or an interpreter, so
+    a quoted data body is never kept because another heredoc in the call is. A body that python or
+    node reads under a quoted delimiter goes in `plain bodies` instead: the layer judges its words
+    and opens no substitution in it. A body with no closer runs to the end of input, so the whole
+    command stays in `text`, as `strip_heredoc_bodies` keeps it."""
+    if "<<" not in cmd or _walk_heredocs(cmd)[2]:
+        return cmd, []
+
+    def runs(header: str) -> bool:
+        return INTERPRETER_HEREDOC(_without_message_values(header))
+
+    def text_strings(quote: str, header: str) -> bool:
+        return bool(quote) and not SHELL_HEREDOC(header) and bool(_TEXT_STRINGS_FIRST(header))
+
+    text = _drop_heredoc_bodies(
+        cmd, keep_body=lambda quote, header: runs(header) and not text_strings(quote, header))
+    plain = [body for quote, body, header in _walk_heredocs(cmd)[1]
+             if runs(header) and text_strings(quote, header)]
+    return text, plain
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header

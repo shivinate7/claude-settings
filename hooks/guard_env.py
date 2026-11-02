@@ -8,7 +8,7 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, REDIRECT, TIMEOUT_FLAGS_BARE,
-    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, is_powershell, norm, split_segments,
+    TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, env_scan_view, is_powershell, norm, split_segments,
 )
 
 
@@ -332,7 +332,7 @@ def env_reference(word: str) -> str:
     return word if names_env_file(word) else ""
 
 
-def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
+def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, plain: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -348,11 +348,14 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     Every substitution is cut out and judged as a command of its own, at any depth. `text_ok` is
     set for one that sits in a commit or pull request message: an `echo` or `printf` there only
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
-    around them, for the body of a heredoc.
+    around them, for the body of a heredoc. `plain` judges the text and none of its substitutions,
+    for a body whose substitution marks are a script's own strings.
     """
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
+    if plain:
+        texts = texts[-1:]
     if subs_only:
         texts = texts[:-1]
         if not texts:
@@ -380,6 +383,21 @@ def env_heredoc_refusal(raw: str):
             if refusal[0]:
                 return refusal
     return "", ""
+
+
+def env_command_refusal(raw: str):
+    """The environment layer's verdict on one raw shell command: (printed reason, logged text).
+
+    `env_scan_view` keeps each heredoc body a shell or an interpreter reads, and sets apart each quoted
+    body of python or node, which is judged by its words alone. The substitutions of an unquoted body
+    are judged last (`env_heredoc_refusal`)."""
+    text, plain_bodies = env_scan_view(raw)
+    refusal = env_refusal(text)
+    for body in plain_bodies:
+        if refusal[0]:
+            break
+        refusal = env_refusal(body, plain=True)
+    return refusal if refusal[0] else env_heredoc_refusal(raw)
 
 
 def _env_parts(piece: str):
