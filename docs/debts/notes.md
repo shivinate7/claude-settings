@@ -943,3 +943,6 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- review-cost-gh-only: `--reviewed`'s cost counts gh calls only. It also runs `git fetch origin main` and local reads, and judges every PR on main's required checks. The pinned-list five-call count has no test. Decision: pr-review-record.
+- design-round-alone-done: `--round 1:design-reviewer:...:PASS` alone reads done with no code reviewer. That is a lane claim. Decision: pr-review-record.
+- session-start-hands-branch: hooks/session_start.sh still says other sessions hand the branch, head and PR to the batch runner. That contradicts session-tiers and the review record item (113 a). Its fix goes in a lane after PR #1042 merges, because PR #1042 edits the same line. Decision: session-tiers.

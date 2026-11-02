@@ -31,7 +31,8 @@ CI: read live by merge --reviewed
 
 - The first line is the marker.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The comment never stores CI state. The merge tool reads CI live.
+- The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
+  PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
