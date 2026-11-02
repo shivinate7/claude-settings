@@ -7,8 +7,8 @@ The waiting page is the one private page per repo or project. Its Questions tab 
 that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
 reads its own answers at a wake writes an item.
 
-A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
-question in its report. The orchestrator writes the item with itself as `owner`. It routes the
+A lane never writes an item. A lane is a background agent, or a lane session that ends. It sends its
+question to its parent by send_message in the same turn. Its report carries it too. The orchestrator writes the item with itself as `owner`. It routes the
 answer back to the lane or its next try.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
@@ -168,7 +168,7 @@ it with `ArtifactData get meta/page`. With no `writer`, the session that makes t
 into `meta/page`. The writer watches the page ("Read the answers").
 
 - Every other session sends its question to the writer, which writes the item. A lane's question
-  reaches the writer through its report to its orchestrator ("Add an item", step 0).
+  reaches the writer through its orchestrator. The lane sends it to its parent by send_message in the same turn, and its report carries it too ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -183,7 +183,7 @@ gives no page URL: no item exists yet.
 
 - No answer in chat after 5 minutes: send the question to the writer, who adds the item. Then
   "Add an item" step 3 tells the owner where it is.
-- No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
+- No timer counts the 5 minutes. The Stop guard (`lint/report_guard.py`) keeps each Input Needed pick with its time, and blocks a Stop 5 minutes or more later until the question is sent: send_message to the `writer` from `meta/page` (read it with `ArtifactData get meta/page`), or a send naming the item id the block gives. An owner message or the box clears it too. A repo with no page fails open.
   Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
   question only when the owner answers or the session wakes.
 - A chat answer: still send the question and the answer, with its time, to the writer. Jot
@@ -196,7 +196,7 @@ gives no page URL: no item exists yet.
   - An open item: the writer adds the answer and its time to the item's `context`. The owning
     session then routes and closes it, as "Route and close" says. Either way, every question and
     answer ends in the page's record.
-- A lane has no chat with the owner. Its question goes in its report.
+- A lane has no chat with the owner. It sends its question to its parent by send_message in the same turn. The Stop guard blocks a lane pick with no such send.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
 
@@ -231,7 +231,7 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 
 ## Add an item
 
-0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
+0. A lane's question comes to you by send_message, and in the lane's report. Write the item from that report, with yourself as
    `owner`. Never tell a lane to write an item: it has no wake after it ends, so it cannot read the
    answer, and two writers clash on the design republish (see "Add a design").
 1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`

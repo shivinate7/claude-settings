@@ -8,7 +8,7 @@ Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a 
 - The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
 - The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page".
 
-The box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
+The box passes in every repo. The 5-minute words are a promise, so the Stop guard checks it later (decision `questions-go-to-owner`, "Chat first, then the page"): a pick still unsent 5 minutes on blocks. A lane passes only by the box or a send to its parent or the writer in the same turn. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
 
 The refusal is one line: "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only with nothing running, open the question box."
 
