@@ -32,7 +32,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
-  record the answer goes to), `context` (plain text, line breaks kept).
+  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
@@ -47,7 +47,14 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
-    ranked items, oldest first. A group sits together at its best member's `rank`.
+    ranked items, oldest first. A group sits together at its best member's `rank`. Inside a tier,
+    new items come first, then seen ones, each part in that order. Seen: the item is open, has no
+    `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
+    `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
+    never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
+    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
+    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
+    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -126,6 +133,15 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
   time. With `filed`, it says "Answered, filed in <home>" (the item's `home`) and the filed time. With only `read`, it
   also says "Read by <owner>" and the time.
+- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
+  (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
+  `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
+  went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
+  guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
+  An ask with `reply` is answered. The page lists asks newest first by `at`. It shows each waiting ask, each new answer
+  (whatever its age) and the newest 3 answers already seen; no session deletes or replaces an ask.
+  An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
@@ -321,6 +337,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
+- The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
 
 ## Route and close
 
@@ -338,7 +355,8 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
    direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
    `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
-   (layout `todo` or `debts`).
+   (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
+   roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
@@ -362,6 +380,18 @@ item and leaves it open until the lane takes the answer. Then it closes the item
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+
+## Route an ask
+
+An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
+holds its subject:
+
+1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
+2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
+   (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
+4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
 
 ## Make a repo's page
 
@@ -405,6 +435,7 @@ carry shows a warning line in its card in place of the picture.
 
 Each option gets its own mockup, drawn in that option's state. Two options never show the same picture with the same `focus`.
 The page refuses an item where they do, or where a `focus` finds nothing.
+The guard runs `check_designs.mjs` on the published page at each item write that carries a design, and refuses a write the page would refuse or draw as a strip (rule `page-item-design`, decision `page-item-design`). Republish the design first: the check reads the page you last published.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it at the width of the first device that

@@ -32,8 +32,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run replaces it. Give each default-branch run its own group. Put the PR draft state in the group,
    as `snippets.md`, section 4 shows. A draft run skips every job (step 11), so it must never cancel
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
-5. **Cap each job's time.** Set each cap at about 2x the slowest measured run. Decision `ci-job-caps`
-   (each job's cap) holds the rule, the table and how to measure again. A new job's provisional cap
+5. **Cap each job's time.** Caps are generous on purpose, as a stopgap, until the repo's
+   time-pinned tests are gone. Decision `ci-job-caps` (each job's cap)
+   holds the rule, the table and how to measure again. A new job's provisional cap
    is 60 min. Mark it `# provisional` until it has 5 green runs. The owner may set another
    provisional cap. Keep `merge.deadlineMinutes` in `.github/stamp.json` at least the largest cap
    plus 5. The merge tool's `warn` mode flags a job past 70% of its cap. A job that ends at its cap with no red CI
@@ -187,9 +188,12 @@ The seven opt-in templates of that decision:
   is the last job. It sets `needs:` on every other job,
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
   `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
-- `ci-alarm`: opens or comments on one issue when the latest completed run of any workflow on a
-  branch (default `main`) is red. The caller is a scheduled workflow with
-  `permissions: {actions: read, issues: write}`. It needs no checkout. Not enabled in this repo.
+- `ci-alarm`: opens or comments on one issue when the latest completed run per workflow and per
+  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
+  other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
+  deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
+  job. The caller is a scheduled workflow with `permissions: {actions: read, issues: write}`. It
+  needs no checkout. Not enabled in this repo.
 - `readme-links`: checks the external https links in a markdown file (default `README.md`). Run it
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs

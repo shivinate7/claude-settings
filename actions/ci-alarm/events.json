@@ -1,0 +1,5 @@
+{
+  "push": "head",
+  "workflow_dispatch": "head",
+  "schedule": "schedule"
+}
