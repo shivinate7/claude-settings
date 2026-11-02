@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.3375009,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 9 of 12, ranked by harm avoided.",
- "note": "Each repo; runs on the owner's computer under the Oct 30 grant (the cloud read got HTTP 403). Waits on a session on the owner's PC (step local-folder-for-owner-acts). q_max's no-protection decision change comes to the page when it starts. Port: yes.",
- "updatedAt": "2026-11-02T00:35:00Z"
+ "note": "Each repo; runs on the owner's computer under the Oct 30 grant (the cloud read got HTTP 403). Waits on a session on the owner's PC (step local-folder-for-owner-acts). q_max's no-protection decision change comes to the page when it starts. Port: yes. Banchi (live read by its lane, Nov 1 19:51 CST): main protection has allow_deletions true; the shared form needs it off. Setting it is an owner act from his computer (standing grant: acts the cloud refuses).",
+ "updatedAt": "2026-11-02T01:54:00Z"
 }

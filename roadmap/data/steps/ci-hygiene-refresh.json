@@ -3,7 +3,7 @@
  "status": "todo",
  "order": 103.33745,
  "why": "shiv, Oct 30 15:08 CDT (via coordinator): refresh the ci-hygiene skill and apply it to every repo.",
- "note": "An audit of all 7 repos runs first; then the skill is refreshed and each repo gets its fixes in its own lane. Done check: each repo's CI passes the refreshed skill's checks. The skill refresh landed on main in batch 40, #923 (Oct 31); the per-repo fix lanes remain.\nSet back to todo, Nov 1 18:03 CST: no live lane (live check, confirmed by the coordinator). Small claude-settings fix (q_max lane report, Nov 1 19:39 CST): skill ci-hygiene item 15 checks the zizmor pin with grep zizmor==, which misses an action-input pin (version: 1.30.1); reword it to cover both forms.",
+ "note": "An audit of all 7 repos runs first; then the skill is refreshed and each repo gets its fixes in its own lane. Done check: each repo's CI passes the refreshed skill's checks. The skill refresh landed on main in batch 40, #923 (Oct 31); the per-repo fix lanes remain.\nSet back to todo, Nov 1 18:03 CST: no live lane (live check, confirmed by the coordinator). Small claude-settings fix (q_max lane report, Nov 1 19:39 CST): skill ci-hygiene item 15 checks the zizmor pin with grep zizmor==, which misses an action-input pin (version: 1.30.1); reword it to cover both forms. Second claude-settings skill fix (Nov 1 19:54 CST): audit item 2 needs a carve-out for jobs skipped by design, such as banchi design-check-passed and the nightly-alarm skip, held in its EXCLUDED list.",
  "phase": "cleanup",
- "updatedAt": "2026-11-02T01:43:00Z"
+ "updatedAt": "2026-11-02T01:54:00Z"
 }
