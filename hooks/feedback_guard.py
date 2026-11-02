@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item or a chat answer to a page item with no send to the page writer, a grant word with no home, a closed note with no home, or an open standing item whose id is missing from the handoff. It also marks a new item that repeats older feedback or work, which one model call judges.
+"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, or an open standing item whose id is missing from the handoff. It also marks a new item that repeats older feedback or work, which one model call judges.
+It also blocks a chat answer to a page item with no send to the page writer, a grant word with no home, and a closed note with no home.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
 and the session's handoff beside it. A burst is the messages saved since the last Stop when they are
@@ -912,10 +913,10 @@ def main():
             pages = Pages(hook.get("transcript_path"))
             found = problems(blocks, handoff, homes, burst, pages, inbox)
             reasons = found + flags
-            notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + (
-                [FAIL_OPEN_CLOSED % homes.skip_closed] if homes.skip_closed else []) + (
-                [note] if note else []) + (
+            notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
                 [FAIL_OPEN_PAGES % "; ".join(pages.skip)] if pages.skip else [])
+            if homes.skip_closed:
+                notes.append(FAIL_OPEN_CLOSED % homes.skip_closed)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
