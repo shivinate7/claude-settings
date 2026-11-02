@@ -1001,7 +1001,7 @@ settle() {
 # the fixture and its Linux uname first on PATH. $2 = remote sets CLAUDE_CODE_REMOTE. Sets cmd, hrc,
 # hout and hook_secs (the hook's own wall-clock time, before any detached work is waited for).
 # Returns 1 when settings.json has no such command. $3 = nowait skips the settle wait, so a second
-# run can start while the first is still detached.
+# run can start while the first is still detached. HOOK_SHELL names the shell that runs it (default sh).
 run_hook() {
   cmd=$(hook_command) || cmd=""
   [ -n "$cmd" ] || return 1
@@ -1012,7 +1012,7 @@ run_hook() {
     if [ "${2:-}" = remote ]; then CLAUDE_CODE_REMOTE=1; export CLAUDE_CODE_REMOTE; fi
     HOME="$1/home"; CLAUDE_CONFIG_DIR="$1/home/.claude-cfg"; PATH="$1/shim:$PATH"
     export HOME CLAUDE_CONFIG_DIR PATH
-    sh -c "$cmd"
+    "${HOOK_SHELL:-sh}" -c "$cmd"
   ) > "$work/hook.out" 2> "$work/hook.err"
   hrc=$?
   t1=$(clock)
@@ -1423,7 +1423,36 @@ case40() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40"
+# ---- Case 41: the SessionStart hook's fetch-failed log line carries the zone offset (its w helper) ----
+# When origin cannot be fetched, the hook writes one install log line through its w helper. That line is an
+# install log line like the others, so it carries the zone offset too. The hook runs under bash in
+# TZ=America/Chicago, and origin is a path that does not exist, so the fetch fails. The offset is the zone's
+# own (date +%z under the same TZ, a colon added), never a fixed value; the precondition refuses +00:00.
+case41() {
+  name="case41: the SessionStart hook's fetch-failed log line starts with ISO 8601 time and the zone offset under TZ=America/Chicago"
+  d="$work/case41"; mkdir -p "$d"
+  hook_fixture "$d" trunk same
+  git -C "$d/clone" remote set-url origin "$d/no-such-origin.git"
+  want=$(TZ=America/Chicago date +%z | sed 's/\(..\)$/:\1/')
+  log="$d/home/.claude-cfg/claude-settings-install.log"
+  TZ=America/Chicago; export TZ
+  HOOK_SHELL=bash; export HOOK_SHELL
+  run_hook "$d"; ran=$?
+  unset TZ HOOK_SHELL
+  why=""
+  if [ "$ran" -ne 0 ]; then
+    why="settings.json has no SessionStart command that reads CLAUDE.md"
+  elif [ "$hrc" -ne 0 ]; then
+    why="hook exited $hrc: $hout"
+  elif [ -z "$want" ] || [ "$want" = "+00:00" ]; then
+    why="TZ=America/Chicago gave the offset [$want]; the check would prove nothing"
+  else
+    why=$(stamp_problems "$log" 'session-start hook:' "$want")
+  fi
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
