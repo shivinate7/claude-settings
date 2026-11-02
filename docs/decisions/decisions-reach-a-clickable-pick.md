@@ -6,7 +6,7 @@ Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a 
 
 - It called `AskUserQuestion`, the question box. The guard does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the guard does not repeat that.
 - The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
-- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page". It passes only at the first Stop after the pick is asked. The pick-send check in the decision `questions-go-to-owner` (Chat first, then the page) then holds the session to its promise: an open pick over 5 minutes old, with no owner message and no send, blocks the Stop.
+- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page". It passes only while the pick is under 5 minutes old, in an owner-facing session. The pick-send check in the decision `questions-go-to-owner` (Chat first, then the page) then holds the session to its promise: an open pick over 5 minutes old, with no owner message and no send, blocks the Stop.
 
 For an owner-facing session, the box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
 
