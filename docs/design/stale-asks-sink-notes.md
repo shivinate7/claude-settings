@@ -14,7 +14,7 @@ order in a tier, what folds, no fold on a draft, and `article.card[data-seen="tr
 
 - 1A (pick): `p.seenhead` sits after the last new card of a tier. It holds an eye icon, the words, then a dotted
   rule: `span.seenrule` (`border-top: 2px dotted var(--faint)`), a span and not `::after`. The first divider on the page shows the words "Asked
-  before, not answered". Each later divider shows the eye and the rule only. Its words are in a `.sr`
+  before". Not "not answered": a card answered by a Send stays below the divider until reload. Each later divider shows the eye and the rule only. Its words are in a `.sr`
   span and in `title`. Gain: a screen reader hears the words at every divider, and the page follows
   ux-label-once. Loss: a sighted reader who starts at a lower tier sees the shape before the words.
   Ids: the first divider has `id="seen-div"`.
@@ -47,7 +47,9 @@ order in a tier, what folds, no fold on a draft, and `article.card[data-seen="tr
   easy to miss on a long card.
 - Words. Decision: "Show the 3 options" and "Hide the options". Task: "Show the 3 steps and the
   command" ("and the 2 commands" with two shells; no "and the ..." with no command) and "Hide the
-  steps and the command". A task with no steps reads "Show the command" and "Hide the command". A hidden `.sr` span adds " for No. <n>", so each name gives the act and its
+  steps and the command". One option or step is singular: "Show the 1 option", "Hide the option".
+  A task with no steps reads "Show the command" and "Hide the command"; with no command too, "Show
+  Mark done and the note" and "Hide Mark done and the note". A hidden `.sr` span adds " for No. <n>", so each name gives the act and its
   item (`a11y.md`).
 - Markup: `aria-expanded`, and `aria-controls="fold-<id>"` on `div.foldbody` (not `.fold`: page.html
   uses `.fold` on the roadmap). A closed fold has the `hidden` attribute, so its controls leave the

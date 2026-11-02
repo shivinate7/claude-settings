@@ -52,9 +52,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
     never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
-    works it out again. A seen card folds every answer part behind one control (options, or steps and command; Mark done;
-    None of these; the note box), under a divider that reads "Asked before, not answered". An item that arrives after
-    load is new, so its group is new. A card that holds a draft, a stood pick or a pending withdraw stays open.
+    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
+    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
+    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts

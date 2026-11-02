@@ -1266,13 +1266,18 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
+// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen card's fold stays open and its control is locked.
+const foldLocked = (it) => !!eff(it) || withdrawing(it);
 function unfoldBtn(it, open, locked, ncmd) {
   const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
-  const nsteps = (it.steps || []).length, cmdWord = ncmd > 1 ? "commands" : "command";
-  const show = dec ? "Show the " + (it.options || []).length + " options" : nsteps ? "Show the " + nsteps + " steps" + tail : "Show the " + cmdWord;
-  const hide = dec ? "Hide the options" : nsteps ? "Hide the steps" + (ncmd > 1 ? " and the commands" : tail) : "Hide the " + cmdWord;
+  const nopts = (it.options || []).length, nsteps = (it.steps || []).length, cmdWord = ncmd > 1 ? "commands" : "command";
+  // A task with no steps and no command folds only its links, the ready line, Mark done and the note box.
+  const rest = ncmd ? "the " + cmdWord : "Mark done and the note";
+  const show = dec ? "Show the " + nopts + (nopts === 1 ? " option" : " options") : nsteps ? "Show the " + nsteps + (nsteps === 1 ? " step" : " steps") + tail : "Show " + rest;
+  const hide = dec ? "Hide the " + (nopts === 1 ? "option" : "options") : nsteps ? "Hide the " + (nsteps === 1 ? "step" : "steps") + (ncmd > 1 ? " and the commands" : tail) : "Hide " + rest;
+  // The lock is read at the press: a note typed after the build flips it in place (see the note's input handler).
   return h("button", { class: "unfold", type: "button", id: "unfold-" + it.id, "aria-expanded": String(open), "aria-controls": "fold-" + it.id, "aria-disabled": locked ? "true" : null,
-    onclick: () => { if (locked) return; state.unfold[it.id] = !open; repaint(it); } },
+    onclick: () => { if (foldLocked(it)) return; state.unfold[it.id] = !open; repaint(it); } },
     h("span", { class: "chev", "aria-hidden": "true" }),
     h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
     h("span", { class: "sr" }, " for No. " + it.n));
@@ -1334,15 +1339,16 @@ function buildCard(it) {
   ta.addEventListener("input", () => {
     edited(); setDraft(it, { note: ta.value });
     nb.classList.toggle("need", need && !ta.value.trim());
-    const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
+    const cardEl = ta.closest(".card"), rd = cardEl.querySelector(".ready"), ub = cardEl.querySelector(":scope > .unfold");
     rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
+    // The note is not in signature(), so a push never rebuilds this box under the owner's typing. The lock flips here, in place.
+    if (ub) { if (foldLocked(it)) ub.setAttribute("aria-disabled", "true"); else ub.removeAttribute("aria-disabled"); }
     renderRail(); renderBar();
   });
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
   put(nb);
   if (fold) {
-    // A draft, a stood pick or a pending withdraw holds an act Send would submit, so the fold stays open and the control is locked.
-    const locked = !!eff(it) || withdrawing(it);
+    const locked = foldLocked(it);
     if (locked) state.unfold[it.id] = true;
     card.append(unfoldBtn(it, !!state.unfold[it.id], locked, ncmd), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, fold));
   }
@@ -1403,7 +1409,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.note, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1454,7 +1460,8 @@ function reconcile(parent, want) {
   while (parent.children.length > want.length) parent.lastElementChild.remove();
 }
 const tierEls = {}, bundleEls = {}, seenHeads = {};
-const SEEN_WORDS = "Asked before, not answered";
+// Not "not answered": a seen card answered by a Send stays below the divider until reload.
+const SEEN_WORDS = "Asked before";
 // The line between a tier's new and seen items. The first one on the page shows the words; the others keep them for a screen reader (ux-label-once).
 function seenHead(k, first) {
   let e = seenHeads[k];
