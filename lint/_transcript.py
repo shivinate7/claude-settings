@@ -87,6 +87,16 @@ def tool_uses(rec):
             yield b
 
 
+def tool_results(rec):
+    msg = rec.get("message") or {}
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return
+    for b in content:
+        if isinstance(b, dict) and b.get("type") == "tool_result":
+            yield b
+
+
 def records_after_last_human(records):
     last_human_idx = None
     for i, rec in enumerate(records):

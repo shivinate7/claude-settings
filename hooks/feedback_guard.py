@@ -43,16 +43,21 @@ a turn end in these cases:
   - page-filed-check. A page item whose send is proved also needs its number filed: the waiting copy at
     origin/<record branch> (layout.record_branch, then the copy folder of layout.artifacts' waiting-page
     export, else layout.path "waiting-data") holds an item under `items/` whose field n equals the number
-    (Homes.filed_numbers). Only in a repo that names a waiting page. A number not in the copy blocks, and the
-    remedy says to export the waiting copy and to fetch the record branch, and says the copy is read as of
-    the last fetch: the hook fetches nothing. A copy that cannot be read (no record branch ref, no items
+    (Homes.filed_numbers). Only in a repo that names a waiting page. A read-back proves the filing too: after
+    the owner's message, an ArtifactData get, list or query of collection `items` of the waiting page
+    (layout.artifact_id), with no out_dir, whose tool_result is no error and returns a document whose data n
+    equals the number (Pages.read_back; local_time._documents reads the result). A read-back skips the copy
+    read. A number in neither blocks. The remedy says to ask the page writer to export the waiting copy and
+    to fetch the record branch, or to read the item back, and says the copy is read as of the last fetch: the
+    hook fetches nothing. A copy that cannot be read (no record branch ref, no items
     folder, an item file that is not a JSON object, the read fails) blocks nothing: a systemMessage "Feedback
     guard: page filing not checked" says so, and the send check decides alone. The check runs only after a
-    proved send: a send the check stood down on skips it. Risk kind: named incident. Rulings fb-1312-1 and
-    fb-1313-1 (owner, one grant at 13:12 and 13:13 CST), where a send reached the page writer and
-    the item was never filed.
+    proved send: a send the check stood down on skips it. Risk kind: likely risk. Rulings fb-1312-1 and
+    fb-1313-1 (owner, one grant at 13:12 and 13:13 CST) and fb-1311-3 (verify each filing on origin or by
+    read-back). Limit: it proves item n exists in the copy or the page, not that this answer was filed on it.
     Cost: one rev-parse and one `grep` of the copy's items, in the git of the Stop
-    process, once per Stop that holds an open page item with a proved send. No file written;
+    process, once per Stop that holds an open page item with a proved send and no read-back. The read-back
+    uses the transcript the send check read. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
     (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
     parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
@@ -148,6 +153,7 @@ GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
+READ_VERBS = ("get", "list", "query")  # the ArtifactData reads whose result holds the documents
 HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
 HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
@@ -303,6 +309,7 @@ class Homes:
     def __init__(self, cwd):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
+        self._top = None  # (the cwd's repo top or None,), read once per Stop
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -390,6 +397,30 @@ class Homes:
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return False, " ".join(str(e).split()) or type(e).__name__
 
+    def _cwd_root(self):
+        """The top of the git repo of the cwd, None when the cwd is no folder or in no repo. Read once per Stop."""
+        if self._top is None:
+            start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+            self._top = (self._root(start) if start else None,)
+        return self._top[0]
+
+    def reads_waiting_page(self, urls):
+        """True when one of `urls` names the waiting page of the cwd's repo (layout.artifact_id compares them).
+        False when none does, the repo names no page, or the layout or git cannot be read: the copy decides."""
+        if not urls:
+            return False
+        try:
+            import layout
+        except ImportError:
+            return False
+        try:
+            root = self._cwd_root()
+            page = layout.waiting_page(root) if root else "unknown"
+        except (layout.LayoutError, ruling_home._GitFailure):
+            return False
+        page_id = "" if page == "unknown" else layout.artifact_id(page)
+        return bool(page_id) and any(layout.artifact_id(u) == page_id for u in urls)
+
     def filed_numbers(self):
         """(numbers, branch, folder): the item numbers, as digit strings, that the waiting copy holds. `numbers`
         is None when the check does not apply or could not run. The copy is the `items/` folder of the waiting
@@ -404,8 +435,7 @@ class Homes:
             self.skip_filing = " ".join(str(e).split()) or "ImportError"
             return self._filed
         try:
-            start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
-            root = self._root(start) if start else None
+            root = self._cwd_root()
             if root is None or layout.waiting_page(root) == "unknown":
                 return self._filed
             branch = layout.record_branch(root)
@@ -501,10 +531,9 @@ class Pages:
         if why not in self.skip[label]:
             self.skip[label].append(why)
 
-    def proof_state(self, text, k, proof, stamp, label="page"):
-        """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
-        k-th block with this text, False when none does, None when the check stands down: no
-        transcript, or no such owner record."""
+    def _start(self, text, k, stamp, label):
+        """The index of the record after the owner record that anchors the k-th block with this text. None
+        when the check stands down: no transcript, or no such owner record."""
         if not self._load():
             self.stand_down(label, self.unread)
             return None
@@ -512,8 +541,31 @@ class Pages:
         if len(anchors) < k:
             self.stand_down(label, "the transcript has no owner record %d for the message at %s" % (k, stamp))
             return None
-        return any(proof(use) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
-                   for use in _transcript.tool_uses(r))
+        return anchors[k - 1] + 1
+
+    def _uses_after(self, start):
+        return (use for r in self.records[start:] if r.get("type") == "assistant" for use in _transcript.tool_uses(r))
+
+    def proof_state(self, text, k, proof, stamp, label="page"):
+        """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
+        k-th block with this text, False when none does, None when the check stands down: no
+        transcript, or no such owner record."""
+        start = self._start(text, k, stamp, label)
+        if start is None:
+            return None
+        return any(proof(use) for use in self._uses_after(start))
+
+    def read_back(self, text, k, n, stamp):
+        """The page urls of each ArtifactData get, list or query of collection `items`, after the anchor,
+        whose result returns item n (_reads_items, _returns_n). A result pairs with its read by tool_use_id.
+        Empty when the check stands down."""
+        start = self._start(text, k, stamp, "page")
+        if start is None:
+            return set()
+        results = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
+                   for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+        return {use["input"].get("url") for use in self._uses_after(start)
+                if _reads_items(use) and _returns_n(results.get(use.get("id")), n)}
 
     def sent(self, text, k, proof, stamp, label="page"):
         """True when the proof is found, and true too when the check stands down (see proof_state)."""
@@ -537,6 +589,21 @@ def _proves(use, n):
     return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
 
 
+def _reads_items(use):
+    """True for an ArtifactData get, list or query of collection `items` that names a page url and no out_dir.
+    A read with out_dir returns file paths, not the documents, so its result cannot show item n."""
+    name, inp = use.get("name") or "", use.get("input")
+    return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and inp.get("action") in READ_VERBS
+            and inp.get("collection") == "items" and isinstance(inp.get("url"), str) and not inp.get("out_dir"))
+
+
+def _returns_n(result, n):
+    """True when a tool_result block is no error and returns a document whose data has n == n. The documents
+    are read as the page-note capture reads them (local_time._documents)."""
+    return (isinstance(result, dict) and result.get("is_error") is not True
+            and any(_is_n(data.get("n"), n) for _, data in local_time._documents(result.get("content"))))
+
+
 def _in_items(d):
     return (d.get("collection") == "items"
             or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
@@ -548,13 +615,17 @@ def _is_write(d):
     return not isinstance(verb, str) or verb in WRITE_VERBS
 
 
+def _is_n(v, n):
+    """True when the field value v is the item number n: an int (not a bool) or a digit string."""
+    return (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
+        isinstance(v, str) and v.isdigit() and int(v) == int(n))
+
+
 def _has_n(node, n):
     if isinstance(node, dict):
         if not _is_write(node):
             return False
-        v = node.get("n")
-        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
-                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
+        if _is_n(node.get("n"), n):
             return True
         return any(_has_n(c, n) for c in node.values())
     return isinstance(node, list) and any(_has_n(c, n) for c in node)
@@ -570,8 +641,9 @@ def _writes_n(node, n):
 
 
 def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
-    """None when the page item's home is page:<n>, the send is proved and the waiting copy holds n, or the
-    check stood down. The send check decides first; the filing check runs only for a proved send."""
+    """None when the page item's home is page:<n>, the send is proved and n is filed, or the check stood down.
+    The send check decides first; the filing check runs only for a proved send. n is filed when a read-back of
+    the waiting page returns it (Pages.read_back), else when the waiting copy holds it (Homes.filed_numbers)."""
     m = PAGE_HOME.fullmatch(home_word(rest))
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
@@ -580,13 +652,17 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     if state is None:
         return None
     if state:
-        numbers, branch, folder = homes.filed_numbers() if homes is not None else (None, None, None)
+        if homes is None or homes.reads_waiting_page(pages.read_back(text, k, n, stamp)):
+            return None
+        numbers, branch, folder = homes.filed_numbers()
         if numbers is None or str(int(n)) in numbers:
             return None
-        return ("%s [page] page:%s: the waiting copy at origin/%s, as of the last fetch, holds no item with n %s;"
-                " export the waiting copy from the page into %s on that branch and push it, then run"
-                " `git fetch origin %s` (this hook fetches nothing) and end the turn again"
-                % (item_id, n, branch, n, folder, branch))
+        return ("%s [page] page:%s: the waiting copy at origin/%s, as of the last fetch, holds no item with n %s,"
+                " and the transcript shows no read-back of it; ask the page writer to export the waiting copy"
+                " into folder `%s` on that branch and push it, then run `git fetch origin %s` (this hook fetches"
+                " nothing); or read item %s back from the page (an ArtifactData get, list or query of collection"
+                " `items` with no out_dir); then end the turn again"
+                % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
