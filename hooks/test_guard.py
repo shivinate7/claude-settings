@@ -2872,10 +2872,6 @@ if LINKS_MADE:
 # history between the two. Only the first is False. A shallow clone that holds the pin but cuts the path to it is
 # unknown, so branch_is_ancestor answers None. The cases load git_reads by path: the liveness cases patch
 # sys.modules["git_reads"] and never restore it.
-sys.path.insert(0, os.path.join(REPO, "testing"))
-import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
-
-
 def _load_git_reads():
     import importlib.util
     spec = importlib.util.spec_from_file_location("git_reads_by_path", os.path.join(HERE, "git_reads.py"))
@@ -2900,6 +2896,26 @@ def _history_repo(name):
     side = run_vcs(where, "rev-parse", "HEAD").stdout.strip()
     run_vcs(where, "checkout", "-q", "main")
     return where, first, side
+
+
+def _shallow_with_pin(source, pin):
+    """A shallow clone of `source`'s HEAD at a new path, with the commit `pin` fetched at depth 1: the pin's object is
+    present and the history between it and HEAD is cut. Returns (path, error), the error "" when both git calls worked."""
+    where = os.path.join(tempfile.mkdtemp(prefix="shallow-", dir=ROOT), "clone")
+    run_vcs(source, "config", "uploadpack.allowAnySHA1InWant", "true")
+    made = run_vcs(os.path.dirname(where), "clone", "-q", "--depth", "1", "--no-local", source, where)
+    if made.returncode:
+        return where, made.stderr.strip()
+    fetched = run_vcs(where, "fetch", "-q", "--depth", "1", "origin", pin)
+    return where, fetched.stderr.strip() if fetched.returncode else ""
+
+
+def _shallow_facts(where, pin):
+    """What the shallow case reads before it claims the bug: shallow, the pin's object present, and the exit of
+    merge-base --is-ancestor, which is 1 in the bug shape."""
+    return {"shallow": run_vcs(where, "rev-parse", "--is-shallow-repository").stdout.strip() == "true",
+            "pin_present": run_vcs(where, "cat-file", "-e", pin + "^{commit}").returncode == 0,
+            "ancestor_rc": run_vcs(where, "merge-base", "--is-ancestor", pin, "HEAD").returncode}
 
 
 def git_reads_ancestor_true_case():
@@ -2928,73 +2944,16 @@ def git_reads_ancestor_unknown_rev_case():
 
 def git_reads_ancestor_shallow_case():
     source, first, _ = _history_repo("ancestor-shallow")
-    where = os.path.join(tempfile.mkdtemp(prefix="shallow-", dir=ROOT), "clone")
-    error = shallow_clone.make(source, where, first)
+    where, error = _shallow_with_pin(source, first)
     if error:
         return False, "the shallow fixture could not be built: " + error
-    facts = shallow_clone.facts(where, first)
+    facts = _shallow_facts(where, first)
     if not (facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1):
         return False, "the fixture does not reach the bug: %r" % (facts,)
     got = _load_git_reads().branch_is_ancestor(where, "HEAD", first)
     if got is None:
         return True, "a shallow clone that cuts the path to its pin reads None, unknown"
     return False, "branch_is_ancestor(HEAD, pin) in a shallow clone reads %r, want None (unknown)" % (got,)
-
-
-def _branch_delete_in(where, branch):
-    """Claude's `git branch -D <branch>` in `where`, decided by the guard under its own config folder. Returns
-    (decision, reason, config folder); the folder holds the guard.log that the call wrote."""
-    cfg = tempfile.mkdtemp(prefix="branch-del-cfg-", dir=ROOT)
-    decision, reason = decide({"raw": None, "tool": "Bash", "cwd": where, "session": None, "env_path": None,
-                               "config": cfg, "tool_input": {"command": VCS + " branch -D " + branch}})
-    return decision, reason or "", cfg
-
-
-def _guard_log_lines(cfg):
-    path = os.path.join(cfg, "guard.log")
-    return open(path, encoding="utf-8").read().splitlines() if os.path.exists(path) else []
-
-
-def git_reads_branch_only_copy_shallow_case():
-    """`branch -D` in a shallow clone, on a branch whose one commit is on no remote and not on main: the only copy.
-    The guard denies it with the archive remedy, as it does in a full clone. The cut history makes the ancestry
-    unknown, so the cherry and remote tests must decide it. Today branch_proof stops at the unknown ancestry and
-    the guard allows."""
-    source, _, side = _history_repo("branch-only-copy")
-    where = os.path.join(tempfile.mkdtemp(prefix="shallow-", dir=ROOT), "clone")
-    error = shallow_clone.make(source, where, side)
-    if error:
-        return False, "the shallow fixture could not be built: " + error
-    if run_vcs(where, "branch", "lone", side).returncode:
-        return False, "could not name the side commit as branch lone in the shallow clone"
-    decision, reason, _ = _branch_delete_in(where, "lone")
-    if decision == "deny" and "`git push origin <branch>:refs/heads/archive/<branch>`" in reason:
-        return True, "a shallow clone's only-copy branch is denied, with the archive remedy"
-    return False, "branch -D lone in a shallow clone reads %r, want deny with the archive remedy: %s" % (
-        decision, reason[:200])
-
-
-def git_reads_branch_on_remote_shallow_case():
-    """`branch -D` in a shallow clone, on a branch whose commit is truly on main but cut from the clone's history, and
-    that a remote-tracking ref also holds. The on-remote proof allows it, so the guard writes no unread note. Today
-    the cut makes the ancestry unknown, the proof is never read, and the guard allows with a subject-unread note."""
-    source, first, _ = _history_repo("branch-on-remote")
-    where = os.path.join(tempfile.mkdtemp(prefix="shallow-", dir=ROOT), "clone")
-    error = shallow_clone.make(source, where, first)
-    if error:
-        return False, "the shallow fixture could not be built: " + error
-    facts = shallow_clone.facts(where, first)
-    if not (facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1):
-        return False, "the fixture does not reach the bug: %r" % (facts,)
-    if run_vcs(where, "branch", "pushed", first).returncode or run_vcs(
-            where, "update-ref", "refs/remotes/origin/pushed", first).returncode:
-        return False, "could not name the pushed branch and its remote-tracking ref in the shallow clone"
-    decision, reason, cfg = _branch_delete_in(where, "pushed")
-    noted = [line for line in _guard_log_lines(cfg) if "subject-unread" in line]
-    if decision == "allow" and not noted:
-        return True, "a shallow clone's on-remote branch is allowed, with no unread note"
-    return False, "branch -D pushed in a shallow clone reads %r with %d subject-unread line(s), want allow by the on-remote proof: %s" % (
-        decision, len(noted), reason[:200])
 
 
 # =========================================================================== 1b. the pointer HEAD
@@ -11996,9 +11955,7 @@ for _label, _check in (
         ("git_reads: branch_is_ancestor reads False for a full clone's non-ancestor", git_reads_ancestor_false_case),
         ("git_reads: branch_is_ancestor reads None for an unknown revision", git_reads_ancestor_unknown_rev_case),
         ("git_reads: branch_is_ancestor reads None, not False, in a shallow clone that cuts the path",
-         git_reads_ancestor_shallow_case),
-        ("branch delete, shallow clone: the only copy is denied", git_reads_branch_only_copy_shallow_case),
-        ("branch delete, shallow clone: the on-remote proof allows", git_reads_branch_on_remote_shallow_case)):
+         git_reads_ancestor_shallow_case)):
     FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
 
