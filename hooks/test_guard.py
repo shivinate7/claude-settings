@@ -20111,6 +20111,11 @@ role_opus_refuse("role-model: Explore on opus with no marker is denied under age
                "Find where X is defined.")
 role_model_allow("role-model: Explore on opus with Audit: on line one is allowed (item 137)", "Explore", "opus",
            "Audit: check the glossary for meaning drift.")
+# The Explore role matches with no regard to case or padding (role_model_check), so the Audit: grant on Opus must too.
+role_model_allow("role-model: explore in lowercase on opus with Audit: on line one is allowed", "explore", "opus",
+           "Audit: check X")
+role_model_allow("role-model: Explore padded with spaces on opus with Audit: on line one is allowed", " Explore ", "opus",
+           "Audit: check X")
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
