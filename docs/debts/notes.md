@@ -874,3 +874,6 @@
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
+- page-ruling-recite: the roadmap upkeep row "page rulings not on their step" lists a closed item again when a rewrite of its step note drops the `item <n>` cite (skills/roadmap/build.py, unfiled).
+- page-ruling-free-home: that row matches only a bare step id or `step <id>` as an item's home, so a free-text home such as "c204 (zoomed picture)" is a silent miss (skills/roadmap/build.py, unfiled).
+- page-ruling-doc-gaps: build.py's module docstring omits two unknown cases that SKILL.md lists (not a JSON object; no threads or pulls list), and no test covers them (skills/roadmap/build.py, test_build.py).
