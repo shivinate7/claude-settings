@@ -365,7 +365,7 @@ MUTATIONS = [
     ("machine-wide-kill: pkill -P of a foreign parent is no longer judged",
      '        for value in parent_filter_pids(tokens[index + 1:]) or ():',
      '        for value in ():', "guard",
-     "kill: pkill -P of a parent this session did not start is refused"),
+     "kill: pkill -P of a parent this session did not start is refused", "posix"),
     ("machine-wide-kill: a kill of a pid this session did not start no longer denies",
      '        if pid_is_owned(abs(number) if number < -1 else number, root) is False:',
      '        if False:', "guard", 'kill: a pid this session did not start',

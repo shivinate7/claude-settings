@@ -439,7 +439,7 @@ KILL_REASON = (
 # MEASURED on macOS: a background job in a subshell,
 # `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`, exits the subshell at
 # once. Pid 1 adopts the server, the harness never tracks it, and no pid is kept. Rule 2 above
-# refuses `pkill -f` and `lsof -t`, and its remedy needs a pid this session started, so the
+# refuses `pkill -f` and `kill $(lsof -t ...)`, and its remedy needs a pid this session started, so the
 # server stays up. This rule refuses the LAUNCH, before a session reaches a machine-wide kill.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
