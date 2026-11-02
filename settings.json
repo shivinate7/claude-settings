@@ -443,7 +443,6 @@
   },
   "outputStyle": "shiv-stylisms",
   "autoCompactWindow": 500000,
-  "idleCompaction": false,
   "advisorModel": "opus",
   "fastModePerSessionOptIn": true,
   "autoUpdatesChannel": "latest",
