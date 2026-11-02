@@ -13269,6 +13269,20 @@ pl("a step that taps Mark done after step #2 is allowed", "allow",
    pl_task(["Tap Mark done after step #2."]))
 pl("a step that takes my pick, then presses Send, is allowed", "allow",
    pl_task(["Take my pick, then press Send."]))
+# Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes the
+# press, after his pick, needs no link. The owner's own press still needs one.
+pl("a session merges PR #374 after the pick, with no link, is allowed", "allow",
+   pl_item(options=[pl_opt("Merge PR #374", "The session merges PR #374 after your pick."), PL_KEEP_OPT]))
+pl("an owner press of Merge PR #374 in GitHub, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Merge PR #374", "Press Merge in GitHub."), PL_KEEP_OPT]))
+# Decision act-in-place: an option whose label asks him to press is an owner press, whatever its how says.
+for label, how in (("Approve on GitHub", "The session records your pick and reruns CI."),
+                   ("Pick this", "The session opens PR #374 after your pick, then press Merge."),
+                   ("Click Merge on GitHub", "The session merges after your pick.")):
+    pl("an owner press labelled %r, with no link, is denied" % label, "deny",
+       pl_item(options=[pl_opt(label, how), PL_KEEP_OPT]))
+pl("a session press after the pick, with no link, is allowed when the pick comes first", "allow",
+   pl_item(options=[pl_opt("Merge PR #374", "After the pick, the session merges PR #374."), PL_KEEP_OPT]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
@@ -13387,6 +13401,31 @@ for step in BACKTICK_RUNS:
 BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "Read the `npm` section"]
 for step in BACKTICK_PROSE:
     ci("a step with a known program alone in backticks is allowed: " + step, "allow", ci_task([step]))
+
+# A span or fence is a shell line only when it chains with an operator and starts with a program or cmdlet.
+# Text with an operator, a lone quote and a comment opener are no command, and must not hide a real one after them.
+ci("a step with a regex span, foo|bar, is allowed", "allow", ci_task(["Search for `foo|bar` in the page"]))
+ci("a step with a semicolon span that starts with no program is allowed", "allow",
+   ci_task(["Read the `title; subtitle` line on the page"]))
+ci("a step with a lone quote in text before a regex span is allowed", "allow",
+   ci_task(["Don't search for `foo|bar` in the page"]))
+ci("a step with a comment opener inside a span is allowed", "allow", ci_task(["Search for `// a | b` in the page"]))
+ci("a step with a markdown table in a multi-line fence is allowed", "allow",
+   ci_task(["Check the table:\n```\n| lane | state |\n| N1 | done |\n```"]))
+ci("a step with a git log pipe in backticks is denied", "deny", ci_task(["Check the log with `git log | head`"]))
+ci("a step with a Get-ChildItem pipe in backticks is denied", "deny",
+   ci_task(["Check the list with `Get-ChildItem | Select`"]))
+ci("a step with a cd and semicolon line in backticks is denied", "deny", ci_task(["Run `cd x; npm test`"]))
+ci("a step with a lone quote before a git log pipe in backticks is denied", "deny",
+   ci_task(["Don't run `git log | head` yet"]))
+ci("a comment opener span does not hide a git log pipe after it, so the step is denied", "deny",
+   ci_task(["Run `// note` then `git log | head`"]))
+# A span whose first word no program in the list names still holds a second command after an operator.
+for span in ("grep -n x a.py | head", "find . -name x | xargs rm", "yarn install && yarn test",
+             "dir | findstr x", "get-process | sort", "env git log | head", "time git log | head",
+             "$(git log) | head", "cmd /c git log | head"):
+    ci("a step holding `%s` is denied" % span, "deny", ci_task(["Check the output of `%s`" % span]))
+ci("a fence holding grep x a | head is denied", "deny", ci_task(["Check the output:\n```\ngrep x a | head\n```"]))
 
 
 # --------------------------------------------------------------------------- a gh command handed to the owner switches login first
@@ -13526,6 +13565,19 @@ wp_write("gh login switch: a str_replace on command that adds a switch, then gh,
 wp_write("gh login switch: a str_replace on command with no gh text is allowed", "allow",
          "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
          old_str="step one", new_str="step two")
+# A gh line changed to another gh line adds no gh line, so the switch the stored command holds still stands.
+wp_write("gh login switch: a str_replace that changes one gh line to another, on a command that keeps its switch, is allowed",
+         "allow", "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh pr view 3", new_str="gh pr view 4")
+wp_write("gh login switch: a str_replace that removes the switch and leaves a gh line is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh auth switch -u shivinate7\ngh pr view 3", new_str="gh pr view 3")
+wp_write("gh login switch: a str_replace that adds a gh line beside a gh line, with no switch, is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh pr view 3", new_str="gh pr view 3\ngh pr merge 3")
+wp_write("gh login switch: a str_replace that adds a -R shivinate7/ repo to a gh line is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="gh pr view 3", new_str="gh pr view 3 -R shivinate7/repo")
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
