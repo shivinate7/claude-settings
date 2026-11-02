@@ -3205,7 +3205,15 @@ class LanePickTests(OpenPickCase):
         self.assert_lane_answers([op_send(PARENT, ASK, tool="SendMessage")], "SendMessage to the parent")
 
     def test_ln_a_send_to_the_writer_in_the_same_turn_answers_it(self):
-        self.assert_lane_answers([op_writer(), op_send(WRITER, "Which way?")], "send_message to the writer")
+        self.assert_lane_answers([op_writer(), op_send(WRITER, ASK)], "send_message to the writer")
+
+    def test_ln_an_unrelated_send_to_the_writer_does_not_answer_the_pick(self):
+        s = OpenSession()
+        s.lane()
+        out = s.turn(T0, LANE_PICK, owner="decide",
+                     seq=[op_writer(), op_send(WRITER, "PR 12 opened, tests green")])
+        self.assertBlocked(out, "an unrelated send to the writer answered the pick")
+        self.assertIn("Lane pick guard", out["reason"])
 
     def test_ln_only_the_main_session_box_answers_a_lane(self):
         self.assert_lane_answers([op_box()], "the question box")
@@ -3302,7 +3310,8 @@ class LanePickTests(OpenPickCase):
         ok.lane(tags=["cs-repo:o/r"], parent=PARENT)
         self.assertIsNone(ok.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK)]))
 
-    def test_ln_a_tag_only_lane_passes_any_send_message_and_the_writer(self):
+    def test_ln_a_tag_only_lane_passes_a_send_that_carries_the_pick(self):
+        # With no parent known, a send answers the pick when it carries it, to any session or to the writer.
         control = OpenSession()
         control.lane(parent=None)
         out = control.turn(T0, LANE_PICK, owner="decide")
@@ -3311,11 +3320,27 @@ class LanePickTests(OpenPickCase):
         anyone = OpenSession()
         anyone.lane(parent=None)
         self.assertIsNone(anyone.turn(T0, LANE_PICK, owner="decide",
-                                      seq=[op_send("session_anyone01", "Which way?")]))
+                                      seq=[op_send("session_anyone01", ASK)]),
+                          "a send to any session that carries the pick did not pass")
         writer = OpenSession()
         writer.lane(parent=None)
         self.assertIsNone(writer.turn(T0, LANE_PICK, owner="decide",
-                                      seq=[op_writer(), op_send(WRITER, "Which way?")]))
+                                      seq=[op_writer(), op_send(WRITER, ASK)]),
+                          "a send to the writer that carries the pick did not pass")
+
+    def test_ln_an_unrelated_send_does_not_answer_a_tag_only_lanes_pick(self):
+        anyone = OpenSession()
+        anyone.lane(parent=None)
+        out = anyone.turn(T0, LANE_PICK, owner="decide",
+                          seq=[op_send("session_anyone01", "PR 12 opened, tests green")])
+        self.assertBlocked(out, "an unrelated send to any session answered the pick")
+        self.assertIn("Lane pick guard", out["reason"])
+        writer = OpenSession()
+        writer.lane(parent=None)
+        out = writer.turn(T0, LANE_PICK, owner="decide",
+                          seq=[op_writer(), op_send(WRITER, "PR 12 opened, tests green")])
+        self.assertBlocked(out, "an unrelated send to the writer answered the pick")
+        self.assertIn("Lane pick guard", out["reason"])
 
     def test_ln_the_lane_check_is_quiet_on_a_rewrite(self):
         control = OpenSession()
