@@ -1,0 +1,9 @@
+{
+ "title": "The feedback guard proves a page item exists, not only that it was sent",
+ "phase": "checks",
+ "status": "todo",
+ "order": 103.2106,
+ "why": "Owner grant Nov 2 13:12 and 13:13 CST (page item 175): one narrow check that a writer's filing landed, kept in the feedback guard.",
+ "note": "hooks/feedback_guard.py already proves ruling and task homes in git. Extend page:<n> to require the item in the repo's waiting store (records/waiting/). Waits on lane waiting-data-in-repo, which merges only on the owner's word.",
+ "updatedAt": "2026-11-02T19:50:00Z"
+}

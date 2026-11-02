@@ -1,0 +1,9 @@
+{
+ "title": "Each capability's drifted copies are replaced with pointers, per the drift map",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.2103,
+ "why": "Owner pick a, Nov 2 13:45 CST (page item 176): fix drift that already exists. Pilot: the three Duo standards in docs/plans/sim-standard.md (branch claude/sim-lease-592a4d).",
+ "note": "Input: the drift map on branch audit/drift-map (Opus-planned sonnet workflow). One lane per repo swaps copies for pointers or declared overrides; value conflicts go to the owner. Gaps: home and ios-adblock repos and Mac memory notes need a Mac session. Waits on the map.",
+ "updatedAt": "2026-11-02T19:50:00Z"
+}
