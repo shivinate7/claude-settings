@@ -225,3 +225,4 @@ Ten lanes wound down at 12:31 CST went back to todo (13:10 CST); each lane's bra
 - Item 166 context gained a note, Nov 2 12:58 CST: banchi #1003 has no merger (runner 8 archived); the next session merges it after item 166 and the nightly.
 - Trial lg's report-guard question not filed on the page: the Nov 1 16:23 CST ruling answers it (extend the guard). Note in roadmap/outbox/triage.md.
 - Steps filed after the wind-down, from the owner's direct reports Nov 2 12:54-12:55 CST: option-key-guard-gap, ask-reaches-writer.
+- Owner ruling Nov 2 13:10 CST (time zone on every time, 24-hour clock): home is step time-zone-every-time until it lands. Follow it now in every reply.
