@@ -27,12 +27,18 @@ override lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
 Shell tools (Bash, PowerShell), in judge_shell order:
-  builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
-                       noted. A builder, test-author or record-writer `git commit` or `git push`.
+  builder-diff         deny. A builder commit or push whose diff holds a test path, judged
+                       against the commits the builder received. The reason gives the undo route and
+                       names no path. No override lifts it. SubagentStop (`judge_stop`) blocks the
+                       builder's first stop the same way; a second stop passes.
+                       (builders-cannot-edit-tests)
+  author-diff, writer-diff, designer-diff, role-diff-*
+                       noted. A test-author or record-writer commit or push.
                        The diff it would send is logged for the reviewer. Never refuses.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
                        also role-diff-main-checkout, role-diff-unresolved and
-                       role-diff-unread.
+                       role-diff-unread. An unread diff of any role, builder included, is logged
+                       and allowed.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
@@ -238,7 +244,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -1538,28 +1544,85 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     return ""
 
 
-def diff_bases(root: str):
-    """The commits this agent's own work is measured against. Empty when git could not answer.
+ENTRY_OWN = re.compile(r"^(?:commit|cherry-pick|revert|am)\b")
+ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
+ENTRY_RECEIVED = re.compile(r"^(?:reset|checkout|clone|branch|merge|pull)\b")
 
-    TWO candidates, and a path counts only if it differs from BOTH:
-      - the oldest `HEAD` reflog entry: the commit the worktree was cut from. It survives a new
-        branch name (`switch -c b2`), which a branch reflog would not.
-      - the merge base of HEAD with the default branch. It moves forward each time main is merged
-        or rebased in.
-    The work the parent branch handed over differs from the first and not the second only if the
-    parent is the default branch; the work main later gained differs from the second and not the
-    first. Only the agent's own change differs from both."""
-    bases = []
-    log = guard_core._git(root, "reflog", "show", "--format=%H", "HEAD")
-    lines = log.stdout.split() if log is not None and log.returncode == 0 else []
-    if lines:
-        bases.append(lines[-1])
+
+def entry_kind(subject: str) -> str:
+    """'own' for a HEAD reflog entry the agent made, 'received' for one that handed it a commit,
+    '' for any other. A rebase step other than start, finish and abort replays or makes the agent's
+    own commit. An entry kind this reader does not know is no base: that errs toward a refusal."""
+    rebase = ENTRY_REBASE.match(subject)
+    if rebase:
+        step = rebase.group(1).strip()
+        if step.startswith("start"):
+            return "received"
+        return "" if step.startswith(("finish", "abort")) else "own"
+    if ENTRY_OWN.match(subject):
+        return "own"
+    return "received" if ENTRY_RECEIVED.match(subject) else ""
+
+
+def diff_bases(root: str):
+    """The commits this agent RECEIVED, which its own work is measured against. Empty when git
+    could not answer: unknown, never clear.
+
+    A base is any commit HEAD was handed, read from the HEAD reflog (it survives a new branch name,
+    which a branch reflog would not):
+      - the oldest entry: the commit the worktree was cut from;
+      - the target of a reset or checkout, the result of a pull, a fast-forward or a clean merge,
+        and the commit a rebase starts on;
+      - each non-first parent of a merge commit: the tip merged in. A merge the agent resolved
+        by hand (`commit (merge)`) is its own commit, and only these parents count from it;
+      - the merge base of HEAD with the default branch, which moves forward as main is merged in.
+    Two filters, in this order:
+      1. A base that holds one of the agent's own commits (reflog `commit`, `commit (amend)`,
+         `commit (merge)`, cherry-pick, a rebase pick) is dropped: it carries the agent's own change.
+      2. A base that is an ancestor of another base is dropped: the newer received tip supersedes it.
+    A path offends only if it differs from EVERY base left. The last base is the newest one."""
+    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
+    if log is None or log.returncode != 0:
+        return []
+    entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
+    if not entries:
+        return []
+    bases, own = [entries[0][0]], []
     default = resolve_default_base(root)
     if default:
         merged = guard_core._git(root, "merge-base", "HEAD", default)
         if merged is not None and merged.returncode == 0 and merged.stdout.strip():
-            if merged.stdout.strip() not in bases:
-                bases.append(merged.stdout.strip())
+            bases.append(merged.stdout.strip())
+    for index, (sha, subject) in enumerate(entries[1:], 1):
+        kind = entry_kind(subject)
+        if kind == "own":
+            own.append(sha)
+        elif kind == "received":
+            bases.append(sha)
+        if subject.startswith("commit (merge)") or (kind == "received" and "Merge made" in subject):
+            parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
+            if parents is None or parents.returncode != 0:
+                return []
+            bases.extend(parents.stdout.split()[1:])
+    bases = list(dict.fromkeys(bases))
+    own = list(dict.fromkeys(own))
+    if own:
+        kept = []
+        for base in bases:
+            # `own --not base` lists what the base does not reach: an own commit absent from the
+            # list is one the base holds.
+            lost = guard_core._git(root, "rev-list", *own, "--not", base)
+            if lost is None or lost.returncode != 0:
+                return []
+            if set(own) & set(lost.stdout.split()) == set(own):
+                kept.append(base)
+        bases = kept
+    if len(bases) > 1:
+        tips = guard_core._git(root, "merge-base", "--independent", *bases)
+        if tips is None or tips.returncode != 0:
+            return []
+        tips = set(tips.stdout.split())
+        bases = [base for base in bases if base in tips]
     return bases
 
 
@@ -1665,7 +1728,8 @@ def role_offences(root: str, top: str, base: str, role: str):
 
 def diff_violation(root: str, role: str):
     """Judge the agent's whole result. Returns ('', base) when clean, (the first offending path,
-    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear.
+    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear. The base is
+    the newest one the agent received: the refusal tells the agent to restore from it.
 
     A path offends only if it offends against EVERY base (see `diff_bases`)."""
     bases = diff_bases(root)
@@ -1675,9 +1739,9 @@ def diff_violation(root: str, role: str):
     top = os.path.realpath(top.stdout.strip())
     sets = [role_offences(root, top, base, role) for base in bases]
     if any(s is None for s in sets):
-        return None, bases[0]
+        return None, bases[-1]
     both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]
-    return (both[0] if both else ""), bases[0]
+    return (both[0] if both else ""), bases[-1]
 
 
 def diff_rule(role: str) -> str:
@@ -1685,20 +1749,41 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
+def builder_diff_reason(base: str) -> str:
+    """The refusal text for a builder's test change. It names no path: it gives the undo route."""
+    return (
+        "Your change holds a test change, and a builder does not change tests or test config. Put the "
+        "test files back to the commit you started from: run `git restore --source=%s --staged "
+        "--worktree` on them, and delete a test file that commit does not hold. Then report the test "
+        "change you need in your report. The orchestrator assigns it to a test-author. A merge "
+        "conflict in a test file takes the same route. This refusal is final: never write the "
+        "files another way." % (base[:12] or "<base>")
+    )
+
+
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Log a role's diff at commit or push for the reviewer. Never refuses: the base can count the
-    parent branch's files as the agent's own (docs/decisions/builders-cannot-edit-tests.md)."""
-    found, _ = diff_violation(root, role)
+    """Judge a role's diff at commit or push. A builder's test change DENIES (rule `builder-diff`,
+    with the undo route). Any other role's offence is logged for the reviewer, and so is a diff
+    that could not be read: a refusal on an unread diff would be a false alarm. The base is the
+    commits the agent received (`diff_bases`), so a parent branch's files are not the agent's own."""
+    found, base = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
+    elif found and role == BUILDER_ROLE:
+        # A role guard stays outside every override (decision owner-override): a refusal is final.
+        guard_core.set_override_veto(lambda: True)
+        refuse(tool, "deny", diff_rule(role), builder_diff_reason(base), found)
     elif found:
         record(tool, "noted", diff_rule(role), found)
 
 
 def judge_stop(payload) -> None:
-    """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
-    diff that could not be read log too. A missing cwd logs nothing."""
+    """A builder, test-author or record-writer that stops has its whole diff judged. A builder's
+    test change BLOCKS the first stop (rule `builder-diff`, with the undo route). A second stop
+    (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its
+    tree never loops. The other roles' offences log as `author-diff` or `writer-diff` and never
+    block. A cwd that is the main checkout and a diff that could not be read log too, and allow. A
+    missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
@@ -1708,12 +1793,15 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, _ = diff_violation(where, role)
+    found, base = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
-        # kept: role_log_case still expects this line on a second stop
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:
         record("SubagentStop", "noted", "role-diff-unread", where)
+    elif found and role == BUILDER_ROLE:
+        record("SubagentStop", "deny", diff_rule(role), found)
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(base)}))
+        sys.exit(0)
     elif found:
         record("SubagentStop", "noted", diff_rule(role), found)
 
