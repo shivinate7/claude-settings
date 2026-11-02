@@ -3706,9 +3706,9 @@ def _clone_origin(common: str) -> str:
         if line.startswith("["):
             in_origin = re.fullmatch(r'\[remote\s+"origin"\]', line, re.IGNORECASE) is not None
         elif in_origin:
-            named = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
-            if named:
-                return named.group(1).strip().strip('"')
+            found = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
+            if found:
+                return found.group(1).strip().strip('"')
     return ""
 
 
@@ -3877,7 +3877,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     temp = os.path.realpath(tempfile.gettempdir())
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
-    def elsewhere(target, at, moving=False):
+    def elsewhere(target, at):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -3887,23 +3887,20 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         # top-level call may write into the session's own scratchpad worktree.
         if not has_agent and under_session_scratchpad(resolved, session_id):
             return False
-        # The primary's `.git` is the clone's common directory, shared by every checkout.
-        in_git = bool(owner) and path_is_inside(resolved, os.path.join(owner, ".git")) is True
-        if bool(owner) and owner != own and not in_git:
-            clone_hit[target] = False
+        # A separate clone of the same repo, or a write from a cwd stranded in one. The temp folder
+        # holds scratchpads and throwaway clones, so it passes.
+        clone_hit[target] = (
+            path_is_inside(resolved, temp) is not True
+            and ((stranded and bool(owner) and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                 or (not owner and _separate_clone(resolved, tops, common))))
+        if clone_hit[target]:
             return True
-        # The temp folder holds scratchpads and throwaway clones.
-        if path_is_inside(resolved, temp) is True:
-            return False
-        # A stranded cwd's own clone is the wrong place to write; a cd within it is no harm.
-        separate = ((stranded and not moving and bool(owner) and not in_git)
-                    or (not owner and _separate_clone(resolved, tops, common)))
-        clone_hit[target] = separate
-        return separate
+        # The primary's `.git` is the clone's common directory, shared by every checkout.
+        return (bool(owner) and owner != own
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
 
     for move in moves:
-        if (elsewhere(move, where, moving=True)
-                and not _cd_red_run(payload, roots, _owning_checkout(move, roots))):
+        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
