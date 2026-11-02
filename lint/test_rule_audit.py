@@ -2138,7 +2138,39 @@ class RefusalCiteHelperTests(unittest.TestCase):
         self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
 
 
-KIND_FAIL = 'def fail(why, kind=Stop):\n    raise kind(why)\n'  # the kind parameter of merge/merge.py's fail()
+class RefusalJoinTests(unittest.TestCase):
+    """A refusal built by `"<sep>".join([...])` with literal separator and list: its static lines are its text,
+    as a `+` chain's are. The reader reads it as text, so a cite or a missing cite inside it is judged."""
+
+    def test_a_join_of_static_lines_with_no_cite_is_read_as_no_cite(self):
+        src = body_src('    raise Stop("\\n".join(["cannot make the thing:", "detail"]))\n')
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"],
+                         "a join of static lines is read as not resolved, not as its text")
+
+    def test_a_join_with_a_cited_line_passes(self):
+        src = body_src('    raise Stop("\\n".join(["cannot make the thing:", "see decision alpha"]))\n')
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["cited"],
+                         "a join with a cited line is read as not resolved, not as cited")
+
+    def test_a_join_held_in_a_name_is_read_through_the_name(self):
+        body = '    body = "\\n".join(["cannot make the thing:", "detail"])\n    raise Stop(body)\n'
+        self.assertEqual(status_of(body_src(body), "merge:go", module="merge"), ["no cite"],
+                         "a join held in a local name is read as not resolved, not as its text")
+
+    def test_a_run_time_line_in_a_join_adds_no_text_and_the_static_lines_still_count(self):
+        src = body_src('    raise Stop("\\n".join([f"cannot do {b}:", *b.lines]))\n')
+        self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"],
+                         "a join with a run-time line is read as not resolved, not as its static text")
+
+    def test_a_join_with_no_static_line_stays_not_resolved(self):
+        # The control: these read as not resolved before the reader read joins, and must after it too.
+        self.assertEqual(status_of(body_src('    raise Stop("\\n".join(b.lines))\n'), "merge:go", module="merge"),
+                         ["not resolved"])
+        self.assertEqual(status_of(body_src('    raise Stop("\\n".join([]))\n'), "merge:go", module="merge"),
+                         ["not resolved"])
+
+
+KIND_FAIL ='def fail(why, kind=Stop):\n    raise kind(why)\n'  # the kind parameter of merge/merge.py's fail()
 LIFT = 'class Liftable(Stop):\n    """A refusal the owner may lift."""\n'
 
 
