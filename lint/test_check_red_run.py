@@ -156,6 +156,7 @@ class CheckCase(Fixture):
         rc, out = self.lint(script=script, cwd=cwd)
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, subject, rel)
+        return out
 
     def scratch_repo_test_commit(self, red=None):
         """One test commit in a repo that lacks the gate file at HEAD, the shape of any repo but claude-settings.
@@ -170,7 +171,12 @@ class CheckCase(Fixture):
         self.base()
         rel = self.new_test_path()
         sha = self.commit("add widget tests", {rel: TEST_TEXT})
-        self.assertFlagged(sha, "add widget tests", rel)
+        out = self.assertFlagged(sha, "add widget tests", rel)
+        # The check's message states both trailer forms, and how to add a trailer to a pushed commit.
+        self.assertIn("Red-run: <command> -> <N> failed on <sha>", out, out)
+        self.assertIn("Red-run: none: <reason>", out, out)
+        self.assertIn("reword", out, out)
+        self.assertIn("--force-with-lease", out, out)
 
     def test_valid_red_run_trailer_passes(self):
         for red in (GOOD, "Red-run: python3 lint/test_widgets.py -> 1 failed on abcdef1",
