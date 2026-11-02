@@ -16,7 +16,8 @@ a naive time on the reading machine's clock; `Row.at` is the aware instant. A li
 was written has no zone: `when` is its naked time and `at` is None, never assumed Central.
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
---rule narrows --between to one rule id (the pace read uses load-brake)."""
+--rule narrows --between to one rule id (the pace read uses load-brake).
+In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)`, never 0. No brake count was taken there."""
 import argparse
 import os
 import re
@@ -34,6 +35,7 @@ OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key 
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
+BRAKE_RULE = "load-brake"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -213,6 +215,9 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     if args.between and any(t.tzinfo is None for t in args.between):
         ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
+    if args.between and args.rule == BRAKE_RULE and os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+        print("n/a (cloud)")  # a cloud session has no brake log, so 0 would claim a reading nobody took
+        return 0
     ids = None
     if args.all_rules:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script folder off the path
