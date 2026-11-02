@@ -31,7 +31,7 @@ Known limit: a drive name such as "the A: drive and the B: drive" reads as two l
 
 Cost: no new process, file or timer. One layout read per turn whose Input Needed offers a pick and that opened no box.
 
-**Rewrite-stamp check (`reports-rewrite-stamp`).** The same guard has a second check, landed 2026-11-01. On a landed turn, a reply sentence that says decision D was rewritten (rewritten, rewrote, rewrites, rewrite of) for a ruling blocks when D's record was last committed before that ruling, on the default branch and on HEAD both.
+**Rewrite-stamp check (`reports-rewrite-stamp`).** The same guard has a second check, landed 2026-11-01. On a landed turn, a reply sentence may say decision D was rewritten (rewritten, rewrote, rewrites, rewrite of) for a ruling. It blocks when D's record was last committed before that ruling. Both the default branch and HEAD must predate it.
 - Kind: named incident F119. Sessions said decision `ci-job-caps` was rewritten for the owner's 2026-11-01 18:44 CST ruling, and main showed it last touched on Oct 28.
 - Ruling time: a stamp in the sentence (`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's Central date). Else, for "under" or "by" decision R, R's last commit on the default branch. "In place" alone does not trigger.
 - Fails open: an unknown id, no time, or a failed git read passes.
