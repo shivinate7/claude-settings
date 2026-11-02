@@ -1362,9 +1362,9 @@ HOMES = ({"alpha"}, {"anchor-one"})
 SCOPE = {"guard"}
 
 
-def status_of(src, rid, extra=None, homes=HOMES):
-    sources = dict(extra or {}, guard=src)
-    statuses, _ = refusal_status(sources, homes, SCOPE)
+def status_of(src, rid, extra=None, homes=HOMES, module="guard"):
+    sources = dict(extra or {}, **{module: src})
+    statuses, _ = refusal_status(sources, homes, {module})
     return [s for _, s in statuses.get(rid, [])]
 
 
@@ -1375,6 +1375,11 @@ def unattributed_of(src):
 def site_problems(module, src):
     """The ratchet's problems for one module's source, with no exempt list and no emitted check."""
     return refusal_problems({module: src}, HOMES, {}, {module})
+
+
+def module_problems(src, exempt, module="merge"):
+    """The ratchet's problems for one module's source, with `exempt` as the exempt list."""
+    return refusal_problems({module: src}, HOMES, exempt, {module})
 
 
 def uncited_site(problems, module):
@@ -1412,15 +1417,16 @@ def judge_src(prefix, exit_line, fallback=None):
     return "\n".join(lines) + "\n"
 
 
-def merge_src(raise_line):
-    """The stop classes of merge/merge.py, then one function that runs `raise_line`."""
+def merge_src(raise_line, defs="", body=None):
+    """The stop classes of merge/merge.py, then `defs`, then one function `go(b)` that runs `raise_line`,
+    or the lines of `body` when it is given."""
+    lines = body if body is not None else "    %s\n" % raise_line
     return ('class Stop(Exception):\n    """A refusal."""\n'
             'class NetStop(Stop):\n    """A network error."""\n'
             'class Dropped(Stop):\n    """A dropped line."""\n'
             'class Held(Stop):\n    pass\n'
             'LOCK_CITE = "(decision alpha, one run holds the merge lock)"\n'
-            'def go(b):\n'
-            '    %s\n' % raise_line)
+            + defs + 'def go(b):\n' + lines)
 
 
 class RefusalCiteFixtureTests(unittest.TestCase):
@@ -1627,6 +1633,103 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(ask, "sig-ask"), ["cited"])
 
 
+FAIL = 'def fail(why):\n    raise Stop(why)\n'
+MK = 'def mk(what, out):\n    return Stop(what + " " + out)\n'
+EXEMPT_REASON = "the run is not in a git checkout, so no merge can start here"
+
+
+def body_src(body, defs=""):
+    """merge/merge.py's stop classes, then `defs`, then `go(b)` with the lines of `body`."""
+    return merge_src("pass", defs=defs, body=body)
+
+
+class RefusalCiteHelperTests(unittest.TestCase):
+    """A helper that builds a Stop: its own raise is no site, and each call of it is one, read with the
+    call's arguments. A callable parameter bound to a helper, and a Stop that a helper returns, read the same."""
+
+    def test_a_helper_call_with_uncited_text_flags(self):
+        self.assertEqual(status_of(body_src('    fail("no cite")\n', FAIL), "merge:go", module="merge"), ["no cite"])
+
+    def test_a_helper_call_with_cited_text_passes(self):
+        self.assertEqual(status_of(body_src('    fail("see decision alpha")\n', FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_helper_own_raise_is_no_site(self):
+        self.assertEqual(status_of(body_src('    fail("see decision alpha")\n', FAIL), "merge:fail", module="merge"), [])
+
+    def test_a_helper_argument_passed_by_keyword_is_read(self):
+        self.assertEqual(status_of(body_src('    fail(why="no cite")\n', FAIL), "merge:go", module="merge"), ["no cite"])
+
+    def test_return_stop_with_uncited_text_flags(self):
+        self.assertEqual(status_of(body_src('    return Stop("no cite")\n'), "merge:go", module="merge"), ["no cite"])
+
+    def test_return_stop_with_cited_text_passes(self):
+        self.assertEqual(status_of(body_src('    return Stop("see decision alpha")\n'), "merge:go", module="merge"), ["cited"])
+
+    def test_a_stop_built_by_a_helper_and_raised_by_a_caller_is_read(self):
+        self.assertEqual(status_of(body_src('    raise mk("no cite", b)\n', MK), "merge:go", module="merge"), ["no cite"])
+
+    def test_a_stop_built_by_a_helper_with_a_cite_passes(self):
+        self.assertEqual(status_of(body_src('    raise mk("see decision alpha", b)\n', MK), "merge:go", module="merge"), ["cited"])
+
+    def test_a_callable_parameter_bound_to_a_helper_is_read(self):
+        src = body_src('    prove(fail)\n', FAIL + 'def prove(stop):\n    stop("no cite")\n')
+        self.assertEqual(status_of(src, "merge:prove", module="merge"), ["no cite"])
+
+    def test_a_callable_parameter_passes_a_cited_argument(self):
+        src = body_src('    prove(fail)\n', FAIL + 'def prove(stop):\n    stop("see decision alpha")\n')
+        self.assertEqual(status_of(src, "merge:prove", module="merge"), ["cited"])
+
+    def test_a_helper_argument_from_a_run_time_call_is_not_resolved(self):
+        self.assertEqual(status_of(body_src('    x = b.run()\n    fail(x)\n', FAIL), "merge:go", module="merge"), ["not resolved"])
+
+    def test_a_caught_stop_re_raised_through_a_helper_is_read_as_cited(self):
+        body = '    try:\n        pass\n    except Stop as e:\n        fail(str(e))\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_caught_generic_exception_re_raised_through_a_helper_is_not_resolved(self):
+        body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
+
+    def test_a_nested_def_that_only_returns_is_no_site(self):
+        body = '    def keep(why):\n        return False\n    return keep("see decision alpha")\n'
+        src = body_src(body)
+        self.assertEqual(status_of(src, "merge:go", module="merge"), [])
+        self.assertEqual(status_of(src, "merge:keep", module="merge"), [])
+
+    def test_a_helper_passed_on_without_a_call_is_a_direct_site(self):
+        src = body_src('    store(fail)\n', FAIL + 'def store(cb):\n    return cb\n')
+        self.assertEqual(status_of(src, "merge:fail", module="merge"), ["not resolved"])
+
+    def test_a_method_raise_with_a_parameter_is_a_direct_site(self):
+        defs = 'class Host:\n    def pages(self, rel):\n        raise Stop(f"reading {rel} failed")\n'
+        self.assertEqual(status_of(body_src('    Host().pages("x")\n', defs), "merge:Host.pages", module="merge"), ["no cite"])
+
+    def test_a_helper_with_static_text_reads_its_argument_uncited(self):
+        defs = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
+        self.assertEqual(status_of(body_src('    keep("no cite")\n', defs), "merge:go", module="merge"), ["no cite"])
+
+    def test_a_helper_with_static_text_reads_its_argument_cited(self):
+        defs = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
+        self.assertEqual(status_of(body_src('    keep("see decision alpha")\n', defs), "merge:go", module="merge"), ["cited"])
+
+    def test_comment_openers_and_a_lone_quote_in_a_helper_argument_are_text(self):
+        body = '    fail("a # and /* and // in text, Don\'t refuse")\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["no cite"])
+
+    def test_a_helper_argument_over_several_lines_that_cites_passes(self):
+        body = '    fail("""two\nlines, see decision alpha""")\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_same_named_helper_in_another_function_is_no_site(self):
+        defs = 'def other():\n    def fail(why):\n        raise Stop(why)\n'
+        self.assertEqual(status_of(body_src('    fail("no cite")\n', defs), "merge:go", module="merge"), [])
+
+    def test_an_aliased_refuse_import_is_a_site(self):
+        src = 'from guard_core import refuse as r\ndef go(t, m):\n    r(t, "deny", "alias-id", "no cite", m)\n'
+        extra = {"guard_core": 'def refuse(tool, decision, rule, reason, matched):\n    pass\n'}
+        self.assertEqual(status_of(src, "alias-id", extra=extra), ["no cite"])
+
+
 class RefusalCiteRatchetTests(unittest.TestCase):
     """The exempt list: an uncited id must be exempt with a home, and an entry must still be needed."""
 
@@ -1663,6 +1766,40 @@ class RefusalCiteRatchetTests(unittest.TestCase):
     def test_an_unresolved_reason_fails_with_its_own_label(self):
         src = 'def go(reason):\n    refuse(t, "deny", "param-id", reason, m)\n'
         self.assertEqual(self.problems({}, src), ["param-id: guard.py:2 not resolved"])
+
+    def test_a_new_uncited_stop_in_an_exempt_function_goes_red(self):
+        src = body_src('    raise Stop("not in a git checkout")\n    raise Stop("a brand new uncited refusal")\n')
+        line = next(i for i, text in enumerate(src.splitlines(), 1) if "brand new" in text)
+        exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
+        self.assertEqual(module_problems(src, exempt), ["merge:go: merge.py:%d no cite" % line])
+
+    def test_an_exempt_prefix_that_names_the_site_passes(self):
+        src = body_src('    raise Stop("not in a git checkout")\n')
+        exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
+        self.assertEqual(module_problems(src, exempt), [])
+
+    def test_an_exempt_prefix_that_matches_two_sites_is_a_problem(self):
+        src = body_src('    raise Stop("not in a git checkout")\n    raise Stop("not in a git checkout")\n')
+        exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
+        self.assertTrue(any("matches 2 sites" in p for p in module_problems(src, exempt)))
+
+    def test_an_exempt_function_key_without_a_text_prefix_is_a_problem(self):
+        src = body_src('    raise Stop("not in a git checkout")\n')
+        exempt = {"merge:go": "refusal-matches-rule"}
+        self.assertTrue(any("text prefix" in p for p in module_problems(src, exempt)))
+
+    def test_an_exempt_prefix_no_uncited_site_starts_with_is_stale(self):
+        src = body_src('    raise Stop("other text")\n')
+        exempt = {"merge:go: gone text": "refusal-matches-rule"}
+        self.assertTrue(any("no uncited site starts with" in p for p in module_problems(src, exempt)))
+
+    def test_an_exempt_entry_with_a_home_and_a_reason_passes(self):
+        self.assertEqual(self.problems({"bare-id": ("step-one", EXEMPT_REASON)}), [])
+
+    def test_an_exempt_prefix_without_a_reason_is_a_problem(self):
+        src = body_src('    raise Stop("not in a git checkout")\n')
+        exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
+        self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
 
 
 if __name__ == "__main__":
