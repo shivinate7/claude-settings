@@ -3995,6 +3995,7 @@ class GhHalf(Env):
         self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
+        self.assertIn("the head's own checks are not green, so nothing was claimed or pushed", out)
         self.assertIn("No override lifts this refusal", out)
 
     def test_head_pending_then_red_pushes_no_claim(self):
@@ -5404,6 +5405,18 @@ class UnknownOverride(Env):
             raise undo.Unknown("git is older than 2.38")
         return unittest.mock.patch.object(undo, "check", boom)
 
+    def unreadable_after_the_claim(self):
+        """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        real, calls = undo.check, []
+        def first_then_boom(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                return real(*a, **k)
+            raise undo.Unknown("git is older than 2.38")
+        return unittest.mock.patch.object(undo, "check", first_then_boom)
+
     def test_unknown_refuses_and_names_the_flag(self):
         before = self.refs()
         with self.unreadable():
@@ -5429,6 +5442,28 @@ class UnknownOverride(Env):
         rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "just let it through")
         self.assertEqual(rc, 1)
         self.assertIn("silently undoes", out)
+
+    def test_the_pre_claim_unknown_stop_names_the_flag_not_the_no_override_line(self):
+        # the owner's flag lifts this stop, so the line that no override lifts is false here (before any claim is pushed)
+        before = self.refs()
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("silent-undo check could not read the history", out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+        self.assertEqual(self.refs(), before)
+
+    def test_the_post_claim_unknown_stop_names_the_flag_not_the_no_override_line(self):
+        # the read after the claim push runs through prove() and fail(); the same flag lifts it, so the no-override line is false
+        with self.unreadable_after_the_claim():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("pushed to feat", out, "the claim was pushed first, so this stop is the one after the claim")
+        self.assertIn("silent-undo check could not read the history", out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("No override lifts this refusal", out)
+        self.assertFalse(self.lock_ref())
 
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
