@@ -2,7 +2,9 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST and 2026-11-01 21:34 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. A batch runner runs every merge under the coordinator's grant, so it has the same scope. The coordinator never merges (owner, 2026-11-01 21:34 CST).
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST and 2026-11-01 19:23 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
+
+Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges.
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
@@ -46,7 +48,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
     (`git-integration-branch-merge`: how lanes join a batch).
   - A pull request that GitHub reads as BLOCKED or BEHIND, when read just before the merge call, gets no merge call (sweep row `blocked-or-behind`).
 - The merge tool retries a network error 3 times with a short pause (owner ruling 2026-10-13). A rate-limit wait follows a ladder of 60, 300 and 900 s (the orchestrator's call, 2026-10-16). The 3 retries stay (owner ruling 2026-10-16).
-- A rate wait is the exception to the 600 s lock cap. Before each rate wait the lock extends to now + wait + 300 s. If it cannot extend, the call stops as a network stop. `LOCK_MAX_HOLD`, 6 h from the take, bounds one run's hold (owner ruling 2026-10-17).
+- A rate wait is the exception to the lock's take expiry. The take sets the expiry to `WAITS` × `merge.deadlineMinutes` + 10 minutes: each checks wait once, plus ten minutes spare. Before each rate wait the lock extends to now + wait + `LOCK_MARGIN` (300 s). If it cannot extend, the call stops as a network stop. `LOCK_MAX_HOLD`, 6 h from the take, bounds how far an extension reaches (owner ruling 2026-10-17). It does not cap the take's own expiry (`merge/merge.py` `confirm`; debt note rate-wait-outside-ttl-budget).
 - The lock-break path never waits or retries. A rate-limited delete of an expired lock is a network stop, because a late retry could delete another run's fresh lock (owner ruling 2026-10-17).
 - On one head, a run that ran outranks a cancelled run of its name, in either list order (owner ruling 2026-10-13, option a).
 - With no `.github/stamp.json`, the merge tool runs on defaults and names the file once (owner ruling 2026-10-10).
