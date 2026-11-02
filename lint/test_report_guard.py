@@ -1929,7 +1929,37 @@ import itertools
 _CALL_IDS = itertools.count(1)
 
 
-class QuestionReachesPageTests(unittest.TestCase):
+class SameTurnWriter:
+    """The same-turn send a question needs: an ArtifactData get of the page's meta, whose result names the
+    writer, then a send to that writer id. A TestCase mixes it in and sets PAGE to the waiting page its repo
+    names."""
+
+    WRITER = "session_writer1"
+
+    def call(self, name, input_, result=None, side=False):
+        """The records one tool call leaves: the call, and its result when one is given."""
+        use_id = "toolu_%d" % next(_CALL_IDS)
+        recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
+        if result is not None:
+            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
+        return recs
+
+    def send(self, session_id=None, to=None):
+        """A send: send_message names its target by session_id, SendMessage by to."""
+        if to is None:
+            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
+        return self.call("SendMessage", {"to": to, "message": "pick"})
+
+    def writer_read(self, writer, collection="meta", doc_id="page"):
+        """An ArtifactData get whose result carries the writer id."""
+        return self.call("ArtifactData", {"action": "get", "collection": collection, "doc_id": doc_id,
+                                          "url": self.PAGE},
+                         result=json.dumps({"writer": writer, "url": self.PAGE}))
+
+
+class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     """Every question for the owner reaches the page writer in the turn it is asked. A question is an
     offered pick, or an Input Needed sentence ending in "?" outside quotes. The Stop check reads the turn
     alone: no clock, no state file.
@@ -1938,7 +1968,6 @@ class QuestionReachesPageTests(unittest.TestCase):
     id. A promise, a page link, a box or an items write passes nothing in a lane."""
 
     PAGE = "https://claude.ai/artifact/waitpage2"
-    WRITER = "session_writer1"
     OLDER_WRITER = "session_writer0"
     PARENT = "session_parent1"
     LANE_ENV = "cse_lane1"  # override.remote_session_id() reads this as LANE_ID
@@ -1974,28 +2003,6 @@ class QuestionReachesPageTests(unittest.TestCase):
         lines = ["> **Done** BUILT abc123", "> **Input Needed** " + body[0]]
         lines += ["> " + line for line in body[1:]]
         return "\n".join(lines + ["> **Next** wait"])
-
-    def call(self, name, input_, result=None, side=False):
-        """The records one tool call leaves: the call, and its result when one is given."""
-        use_id = "toolu_%d" % next(_CALL_IDS)
-        recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
-        if result is not None:
-            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
-        return recs
-
-    def send(self, session_id=None, to=None):
-        """A send: send_message names its target by session_id, SendMessage by to."""
-        if to is None:
-            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
-        return self.call("SendMessage", {"to": to, "message": "pick"})
-
-    def writer_read(self, writer, collection="meta", doc_id="page"):
-        """An ArtifactData get whose result carries the writer id."""
-        return self.call("ArtifactData", {"action": "get", "collection": collection, "doc_id": doc_id,
-                                          "url": self.PAGE},
-                         result=json.dumps({"writer": writer, "url": self.PAGE}))
 
     def items_write(self, action="set", collection="items"):
         return self.call("ArtifactData", {"action": action, "collection": collection, "url": self.PAGE,
@@ -3947,7 +3954,9 @@ C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settin
                  "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
 
 
-class PastRulingRelay(unittest.TestCase):
+class PastRulingRelay(SameTurnWriter, unittest.TestCase):
+    PAGE = tcj.PAGE_URL  # the waiting page tcj.make_repo names, which the writer read cites
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -3977,9 +3986,11 @@ class PastRulingRelay(unittest.TestCase):
         with open(self.record, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None):
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False):
         if records is None:
-            records = [human("decide"), assistant_text(reply)]
+            # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
+            sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
+            records = [human("decide"), *sent, assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
         overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
@@ -4003,7 +4014,8 @@ class PastRulingRelay(unittest.TestCase):
         self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
 
     def test_absent_sources_allow_with_the_unknown_notice(self):
-        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW)
+        # The send to the writer keeps the question check quiet, so this case tests only the relay's unknown notice.
+        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW, to_writer=True)
         self.assertEqual(out, {}, out)
         self.assertIn("past-ruling search unknown:", err)
         self.assertEqual(len(self.model_calls()), 1)
@@ -4025,11 +4037,12 @@ class PastRulingRelay(unittest.TestCase):
         self.assertEqual(self.model_calls(), [])
 
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
-        out, _ = self.stop(self.decided, RELAY, model_fail=True)
+        # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
+        out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
         self.assertIn("Unvetted:", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
-        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True)
+        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
         self.assertEqual(out, {}, out)
         self.assertEqual(len(self.model_calls()), 1)
 
