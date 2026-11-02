@@ -213,6 +213,22 @@ def _artifact_link(found, where):
     return found
 
 
+def artifact_id(url):
+    """The artifact id of a claude.ai artifact link: its last path segment, with a trailing slash, a query
+    and a fragment ignored. "" when `url` is no string or names no id, as a bare `.../artifact/` does. The one
+    home of "same artifact", so the /artifact/ and /code/artifact/ forms of one page compare equal."""
+    if not isinstance(url, str):
+        return ""
+    found = url.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return "" if found == "artifact" else found
+
+
+def is_waiting_page_url(root, url):
+    """True when `url` names the waiting page of `root` (same artifact id), false for a repo with no page."""
+    page = waiting_page(root)
+    return page != "unknown" and bool(artifact_id(page)) and artifact_id(page) == artifact_id(url)
+
+
 def waiting_page(root):
     """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
     "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
@@ -336,8 +352,8 @@ def devices(root):
 
 def caution(root):
     """{level, facts, acts} for the repo at `root`: its "caution" key, else the level its "visibility"
-    key maps to, else the layout's default (public). The visibility source is a key in the extras file,
-    so it reads offline."""
+    key maps to. A missing, non-string, "default" or unmapped visibility resolves to the layout's default,
+    "unknown", never to "public". The visibility source is a key in the extras file, so it reads offline."""
     level = _named(root, "caution", "cautions")
     if level is None:
         by, seen = layout().get("visibility-caution", {}), _repo_keys(root).get("visibility")
@@ -362,10 +378,14 @@ def _size(size):
     return "%s (%s)" % (size.get("text", ""), size["source"])
 
 
+UNKNOWN_CAUTION_LINE = "caution: unknown, the level could not be read"  # hooks/session_start.sh prints the same line when the read fails
+
+
 def describe_caution(root):
     """The text `layout.py caution` prints, and session start prints: the level, its facts, its acts."""
     found = caution(root)
-    return "\n".join(["caution: " + found["level"]] + ["fact: " + f for f in found["facts"]]
+    first = UNKNOWN_CAUTION_LINE if found["level"] == "unknown" else "caution: " + found["level"]
+    return "\n".join([first] + ["fact: " + f for f in found["facts"]]
                       + ["act: " + a for a in found["acts"]])
 
 

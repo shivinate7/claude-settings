@@ -1380,7 +1380,7 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
         folder = config_dir()
         os.makedirs(folder, exist_ok=True)
         fields = [
-            datetime.now().isoformat(timespec="seconds"),
+            datetime.now().astimezone().isoformat(timespec="seconds"),  # with the UTC offset: a reader on another clock reads the true instant
             tool or "",
             decision,
             rule,
