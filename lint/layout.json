@@ -132,7 +132,7 @@
       "acts": [
         "Read each file before you commit it or publish it.",
         "Keep tokens, passwords, keys and personal data out of commits, pull requests and artifacts.",
-        "Name \"visibility\" in .claude/layout-extras.json to set the level."
+        "Ask the owner for the repo's visibility and never guess it, then name \"visibility\" in .claude/layout-extras.json to set the level."
       ]
     },
     "public": {
