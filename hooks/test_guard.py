@@ -11016,9 +11016,8 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
-# ---- a shell write to a test path. Incident 2026-11-01: a builder changed lint/test_rule_audit.py
-# through a python heredoc in Bash. The early warning above judges Edit and Write only, so each deny
-# row below is red until the guard reads the target of a shell write. BR is a builder in a checkout.
+# ---- a builder's shell write to a test file: a redirect, tee, sed -i, or a python or node script that
+# opens it for write. A read, a write to product code and a recovery are allowed. BR is a builder in a checkout.
 BR = dict(B, cwd=GITMAIN)
 RULE_AUDIT_EDIT = ("python3 - <<'EOF'\np='lint/test_rule_audit.py'\ns=open(p).read()\n"
                    "s = s.replace('a', 'b')\nopen(p,'w').write(s)\nEOF")
