@@ -988,33 +988,59 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The CI alarm reads the same file
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clear in base_state. The CI alarm reads the same file and the same clear rule
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A green push or dispatch never hides a red schedule run; a dispatch
-        clears an older red push. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
+        with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
+        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
+        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        cancelled or skipped jobs only) is never cleared across groups; an unknown R stays unknown. N's jobs are read only when R has a red job
+        and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
-            red, unknown = [], []
-            for r in {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.values():
+            red, unknown, read = [], [], {}
+
+            def jobs_of(r):  # a run's jobs, read once per call
+                if r["id"] not in read:
+                    read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                return read[r["id"]]
+            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
+            age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
+
+            def cleared(r):
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job."""
+                names = {j["name"] for j in jobs_of(r)}
+                for n in newest.values():
+                    if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
+                            or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"):
+                        continue
+                    theirs = {}
+                    for j in jobs_of(n):
+                        theirs.setdefault(j["name"], []).append(j.get("conclusion") if j.get("status") == "completed" else None)
+                    if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in names):
+                        return True
+                return False
+            for r in newest.values():
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
-                got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
+                got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
                 steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    red.append(f"{where}: " + "; ".join(jobs))
+                    if not cleared(r):
+                        red.append(f"{where}: " + "; ".join(jobs))
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
