@@ -103,7 +103,7 @@ Other tools, in `judge` order:
                        other than the one holding its cwd. A nested worktree owns its own files.
                        A target in no checkout, or in the clone's `.git`, passes; unreadable git
                        passes. The shell form reads the targets frozen-path reads, after a
-                       leading `cd`. A Bash or PowerShell `cd` or `Set-Location` into another
+                       leading `cd`. A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
                        `agent-<id>-<suffix>` red-run folder passes that act. An override lifts it.
@@ -3045,23 +3045,24 @@ def _checkout_root_by_stat(folder: str) -> str:
 
 
 def _cd_targets(tool: str, command: str, where: str):
-    """The folder each real `cd` or `Set-Location` segment of COMMAND moves into, as a realpath. Read
-    the way `_run_dir` reads the shell: heredoc bodies dropped first, one segment at a time, so a
-    `cd` in a quote, a comment or a heredoc body is text. A target that holds a variable, a bare
-    `cd`, `cd -` and a folder that does not exist are not read."""
+    """The folder each real `cd`, `pushd` or `Set-Location` segment of COMMAND moves into, as a
+    realpath. Read the way `_run_dir` reads the shell: heredoc bodies dropped first, one segment at a
+    time, so a `cd` in a quote, a comment or a heredoc body is text. A target that holds a variable,
+    a bare `cd`, `cd -`, a bare `pushd` or `pushd +N`, and a folder that does not exist are not read."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     command = _strip_heredoc_bodies_unconditionally(command)
-    if not re.search(r"\bcd\b|set-location", command, re.IGNORECASE):
+    if not re.search(r"\bcd\b|set-location|\bpushd\b", command, re.IGNORECASE):
         return []
     found, ends = [], []
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment)
-        named = _segment_cd_target(tokens) if tokens else None
+        named = _segment_cd_target(tokens, ("cd", "set-location", "pushd")) if tokens else None
         if named is None or _unexpanded(named):
             continue
-        at = dir_before_segment(segments, number, where, ends)
-        folder = shell_abs(named, at) if at else None
+        # An absolute target needs no known folder. After a failed cd the shell stayed put.
+        at = dir_before_segment(segments, number, where, ends, keep_on_failed_cd=True)
+        folder = shell_abs(named, at)
         if folder and os.path.isdir(folder):
             found.append(os.path.realpath(folder))
     return found
@@ -3126,7 +3127,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, payload=None) -> s
         # the cwd. Stat alone tells, so only a move toward another `.git` entry spends the git read.
         own_root = _checkout_root_by_stat(os.path.realpath(where))
         moves = [m for m in moves
-                 if own_root and _checkout_root_by_stat(m) != own_root and not _cd_home_exempt(payload, where, m)]
+                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]
     if not moves and not writes:
         return ""
     roots = clone_checkouts(where) if where else None

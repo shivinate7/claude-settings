@@ -959,6 +959,12 @@ def _segment_cd_move(tokens):
         return CD_UNKNOWN
     if not (word in CD_WORDS or (word == "sl" and POWERSHELL_CALL[0])):
         return None
+    if word == "pushd":
+        operands = [t for t in tokens[index + 1:] if not (t[:1] in "<>" or REDIRECTION.match(t))]
+        # `pushd` alone swaps the top two folders, and `pushd +N` / `-N` rotates the stack: neither
+        # names a folder.
+        if not operands or re.fullmatch(r"[+-]\d+", operands[0]):
+            return CD_UNKNOWN
     for token in tokens[index + 1:]:
         if token == "-":
             return "-"
@@ -968,15 +974,15 @@ def _segment_cd_move(tokens):
     return ""
 
 
-def _segment_cd_target(tokens):
+def _segment_cd_target(tokens, words=("cd", "set-location")):
     """Return the path a tokenized segment's `cd` or PowerShell `Set-Location` would take, or None
     when it names none, or when the segment's command word is neither. The aliases `sl`, `chdir`
     and `Push-Location` are not read (owner ruling 2026-10-15 names only `Set-Location`). The push
     and delete rules and `_run_dir` read this; `_segment_cd_move` (the silent-write rule) reads the
-    rest."""
+    rest. WORDS widens the command words read: rule other-checkout adds `pushd`."""
     move = _segment_cd_move(tokens)
     index = resolve_command(tokens)
-    if index is None or basename(tokens[index]) not in ("cd", "set-location"):
+    if index is None or basename(tokens[index]) not in words:
         return None
     return move if isinstance(move, str) and move not in ("", "-") else None
 
@@ -996,7 +1002,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), keep_on_failed_cd=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1029,7 +1035,10 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
                 where = None
             else:
                 where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                if not (where and os.path.isdir(where)):
+                    # A failed cd leaves the real shell where it was. Most rules trust nothing
+                    # after it; KEEP_ON_FAILED_CD reads the shell as still in the old folder.
+                    where = old if keep_on_failed_cd and old and os.path.isdir(old) else None
             prev = old
         for _ in range(marks.count(")")):
             if stack:
