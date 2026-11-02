@@ -51,6 +51,38 @@ How to read it. A review probe broke each file wholly. Every silent suite except
 
 Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/test_ci_scope.py` against these files. The first two take minutes for each mutant. The third only passes a file path to the scope detector.
 
+## Replay results
+
+Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate.
+
+| Replay | PRs scored | Ran | Killed | Survived | Crashed | Kill rate | Gold | Gap |
+|---|---|---|---|---|---|---|---|---|
+| q_max, all mutants | 36 | 175 | 113 | 51 | 11 | 65% | 100% | 35 points |
+| q_max, product lines only | 36 | 155 | 113 | 31 | 11 | 73% | 100% | 27 points |
+| banchi TypeScript | 2 | 10 | 0 | 7 | 3 | 0% | 100% | 100 points |
+| banchi Python (T7 group runner) | 14 | 59 | 26 | 23 | 10 | 44% | 100% | 56 points |
+| banchi Python, product lines only | 14 | 52 | 26 | 16 | 10 | 50% | 100% | 50 points |
+
+- Not scored. q_max: PRs 971 and 759 read UNKNOWN. No mutant ran, because the 900 s budget ran out first (inferred: the log holds no skip note and no all-unusable reason). PRs 979 and 752 read NO_TESTS. 10 PRs read NO_PRODUCT. banchi TypeScript: 13 NO_TESTS, 35 NO_PRODUCT. banchi Python: 11 NO_TESTS, 25 NO_PRODUCT.
+- Not run. q_max: 3 in PRs 885 and 993, and 10 in the UNKNOWN PRs. banchi Python: 6 in PRs 981 and 926. A mutant not run is not a survivor.
+- Skipped. Seven q_max PRs skipped one file, `harness/browser/verify.test.mjs`: "Invalid string length" (4) or heap exhaustion (3). Six of the seven rows still show a rate.
+- T6 reads UNKNOWN. Its clean run needs `demo-assets/`, which a checkout leaves out. No PR of the 50 touched it.
+- Survivors. Per-mutant lists are too long for this record, so these are per-file counts.
+  - q_max (51): `harness/browser/verify.test.mjs` 20, a test file. `src/components/RfpSafetyPanel.tsx`, `src/components/Chat.tsx` and `harness/model-calls-map.mjs` 4 each. `harness/decision-refs.mjs` 3. Three more files with 2 each. 10 files with 1 each.
+  - banchi TypeScript (7): `app/src/Slabs.tsx` 5. `app/src/SendCard.tsx` 2.
+  - banchi Python (23): `server/pipeline_routes.py` 3. `server/send_routes.py`, `pipeline/join.py` and `cli/cmd_identify.py` 2 each. Seven files with 1 each. The other seven sit in self-test scripts (`scripts/pricearchive-selftest.py` 3, `scripts/slabs-store-selftest.py` 2, `scripts/slabs-routes-selftest.py` 2), so 16 are product survivors. The log does not split not-run mutants by file, so the product row leaves them out.
+- banchi has no per-file `select`. A survivor may sit in code that no changed suite reaches.
+- banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
+
+Open items, each a debt:
+
+- `qmax-replay-mutates-test-files`: q_max mutates test files.
+- `banchi-replay-no-select`: banchi rows do not say that every changed suite ran.
+- `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
+- `banchi-replay-mutates-selftests`: banchi mutates self-test scripts as product code.
+
+On 2026-11-02 no CI check reads the replay. The owner rules on one.
+
 ## Cost
 
 One full report run, measured: 41.5 minutes on 4 cores with `--jobs 3`. About 155 suite process starts and 5 `git init` starts. The slowest suite, `hooks/test_stall_watch.py`, takes 150 s a run. The JS engine is not in this run. In the replay it adds one `node` start per file mutated. Files written: temporary copies of the repository (about 13 MB each; the clean copy and up to 3 mutant copies at a time) in the system temp folder, all removed at the end. Nothing is written to the repository. `--limit N` and `--only TEXT` bound a run. A run stopped before its end keeps the rows already printed, because each file's row prints as that file ends.
