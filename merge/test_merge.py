@@ -9009,8 +9009,11 @@ class RedMainBrake(Env):
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
         self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
-    def test_a_green_schedule_run_clears_an_older_red_push_run(self):
-        self.green_run_of("schedule")
+    def test_a_green_schedule_run_does_not_clear_an_older_red_push_run(self):
+        # runs are grouped by workflow and event: a schedule run never hides a red push run (roadmap step ci-alarm-reads-by-event)
+        rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 914", out)
 
     def test_a_green_push_run_does_not_clear_an_older_red_schedule_run(self):
         # a schedule run is judged in its own group: a newer green push never hides it
