@@ -450,14 +450,11 @@ LANE_REFUSAL = (
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
 LANE_TAG = "cs-build:lane"
 PARENT_TARGETS = ("@parent", "parent")
-# A "?" ends a question only before whitespace or the end, so a URL query never counts. Quoted text,
-# backticked text and a blockquoted line are past words, never a question asked now.
-QUOTED_RE = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
-QUESTION_MARK_RE = re.compile(r"\?(?=\s|$)")
-# The refusal route (refusals-reach-the-owner) already carries "allow `<tool>`?" to the owner: this guard
-# does not ask it twice.
-_TOOL = r"(?:`[^`\n]+`|mcp__[\w-]+)"
-REFUSAL_ASK_RE = re.compile(r"\ballow\s+" + _TOOL + r"(?:\s*(?:,|and)\s*" + _TOOL + r")*\s*\?", re.I)
+# A "?" ends a question only before whitespace, the end or markup, so a URL query never counts. Quoted
+# text, backticked text and a blockquoted line are past words, never a question asked now. A quote opens
+# only at a non-word edge, so a lone quote cannot span to the next one.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+QUESTION_MARK_RE = re.compile(r"\?(?=[^\w?]*(?:\s|$))")
 
 
 def input_needed_section(text):
@@ -501,7 +498,7 @@ def asks_a_question(text):
     blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
     section = input_needed_section(text)
     kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
-    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", REFUSAL_ASK_RE.sub("", kept))))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
 
 
 def repo_root(cwd):
@@ -548,24 +545,28 @@ def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page).
     Owner-facing: the question box, a send to the page writer, or an items write to this repo's page.
-    Lane: a send to the parent or the page writer. Cost: one layout read, the own-record import and a
-    transcript read, only on a turn that asks with no qualifying act."""
+    Lane: a send to the parent or the page writer. A send to @parent passes in any session. Cost: nothing
+    past the text check when the turn has no question or sends to @parent; else the own-record import and a
+    transcript read, and the layout read only when no question box or writer send is in the turn."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     main = [r for r in turn if not r.get("isSidechain")]
     uses = [u for r in main for u in tool_uses(r)]
     sends = [send_targets(u) for u in uses]
+    if any(t & set(PARENT_TARGETS) for t in sends):
+        return "", ""
     writer = page_writer_id(records)
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     lane, parent = _own_lane_read(hook, hook.get("transcript_path"))
     if lane:
-        wanted = set(PARENT_TARGETS) | ({parent} if parent else set()) | ({writer} if writer else set())
+        wanted = ({parent} if parent else set()) | ({writer} if writer else set())
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
-    root = repo_root(hook.get("cwd"))
-    page = layout.waiting_page(root) if root else "unknown"
     if any(u.get("name") == ASK_TOOL for u in uses):
         return "", ""
     if writer and any(writer in t for t in sends):
         return "", ""
+    root = repo_root(hook.get("cwd"))
+    page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
         inp = u.get("input")
