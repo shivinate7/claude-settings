@@ -44,9 +44,10 @@ TAIL = (
 )
 RULES = {
     "Edit": COMMON + (
-        "Rule: rulings-declare-kind (refuse only an edit whose new text deletes a `Kind:`, `Plan:` or `Home:` "
-        "line, or adds a ruling section with no `Kind:` line in the same text; you see only the changed text, "
-        "so never refuse for a Kind line you cannot see). "
+        "Rule: rulings-declare-kind (refuse only an edit whose new text deletes a `Plan:` or `Home:` line, or "
+        "adds a second ruling section to a record; the fix is to move that ruling to its own record. "
+        "A record has one `Kind:` line, and the lint counts it, so never refuse an edit for a `Kind:` "
+        "line; you see only the changed text). "
     ) + TAIL,
     "Write": COMMON + (
         "Rule: rulings-declare-kind (refuse a decision record that has no `Kind: build` with "

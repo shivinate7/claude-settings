@@ -411,9 +411,17 @@ RM_PARENT_RAW = UnquotedStart(re.compile(
 ))
 
 
+def _pwd_as_dot(target: str) -> str:
+    """`target` with a leading `$(pwd)` read as `.`, the working folder the substitution names, so
+    `$(pwd)/*` is judged as `./*` and `$(pwd)/build` as `./build`. Quotes are already gone from a
+    parsed token. `$PWD` is left alone: the variable rule (rm-var-unguarded) refuses it."""
+    return "." + target[len("$(pwd)"):] if target.startswith("$(pwd)") else target
+
+
 def _parent_target(target: str, cwd: str, moved: bool) -> bool:
     """True when `target` is `.`, a relative parent, or the working folder or a folder above it,
     or a glob of one."""
+    target = _pwd_as_dot(target)
     if REL_PARENT.fullmatch(target):
         return True
     if not cwd or not target or RM_WIDE_TARGET.fullmatch(target):
@@ -486,7 +494,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
         RM_PARENT_RAW, by_word=True)
     if not matched:
         return "", ""
-    if moved and REL_PARENT.fullmatch(matched.split()[-1].strip("'\"")):
+    if moved and REL_PARENT.fullmatch(_pwd_as_dot(matched.split()[-1].strip("'\""))):
         return matched, PARENT_MOVED_REASON % PARENT_MOVED_REMEDY[is_powershell(segment)]
     return matched, PARENT_DELETE_REASON
 

@@ -31,10 +31,15 @@ REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jo
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
 demand and refuses nothing: no timer, no CI job.
+
+REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
+[--suite-timeout S] [--jobs N] [--pr-budget S]` scores the suites each recent merged pull request changed against mutants of the
+product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
 """
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -218,8 +223,8 @@ MUTATIONS = [
      '                    continue  # the call\'s own dry run is a read, never a discard', "guard",
      'worktree prune: -n itself is a read, not a discard, so it passes unconditionally'),
     ("env-file: read only the bare environment basename",
-     'ENV_BASENAME = re.compile(r"^\\.env(\\.[A-Za-z0-9_.\\-]+)?$")',
-     'ENV_BASENAME = re.compile(r"^\\.env$")', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
+     '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
+     '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
      '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):\n'
      '        return cmd',
@@ -519,11 +524,12 @@ MUTATIONS = [
      'word = re.sub(r"\\\\(?!\\.)", "", word)', 'word = word', "guard",
      'env: normalized, glob, heredoc or depth, cat .e\\nv'),
     ("env-file: a glob names an env file only by a fixed suffix",
-     'sample.startswith(".env.")', 'sample.startswith(".env.local")', "guard",
+     '        if names_env_file(sample):', '        if sample.startswith(".env.local"):', "guard",
      'env: normalized, glob, heredoc or depth, cat .env.bak*'),
-    ("env-file: the example glob is held",
-     '    if word.startswith(ENV_ALLOWED):\n        return False', '    if False:\n        return False', "guard",
-     'env: a normalized allowance, cat .env.example*'),
+    ("env-file: the example exemption is a prefix, not the whole name",
+     '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
+     '    return name.startswith(ENV_PREFIX) and not name.startswith(ENV_ALLOWED)', "guard",
+     'env: a glob that could name a covered backup, cat .env.example*'),
     ("env-file: a piped echo keeps the text allowance",
      'text_ok and not piped', 'text_ok', "guard", 'env: a relay of the text, echo .env | xargs'),
     ("env-file: a pipe with a double bar counts as a pipe",
@@ -803,11 +809,11 @@ MUTATIONS = [
      '        if named > ROLE_MODEL_RANK.index(row):',
      '        if False:', "guard", 'role-model: test-author on sonnet is denied'),
     ("role-model: Explore loses its audit exemption, so an audit Explore on sonnet is denied",
-     'if role == EXPLORE_ROLE and named < top and re.search(',
-     'if False and re.search(', "guard", 'role-model: Explore on sonnet with Audit: on line 1 is allowed'),
+     'if role == EXPLORE_ROLE and named < top and ("audit"',
+     'if False and ("audit"', "guard", 'role-model: Explore on sonnet with Audit: on line 1 is allowed'),
     ("role-model: the audit marker is read off any line, so an Explore with it on line 2 walks past on sonnet",
-     'brief_first_line(tool_input.get("prompt"))):',
-     'tool_input.get("prompt") or ""):', "guard",
+     '            hit = rx.search(first)',
+     '            hit = rx.search(brief)', "guard",
      'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
     ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
      'for kind, n in brief_markers(tool_input.get("prompt"))):',
@@ -816,10 +822,10 @@ MUTATIONS = [
      'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
      'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
      'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
-    ("role-model: Opus is no longer left to the ask, so a builder on opus is denied here",
+    ("role-model: Opus is no longer left to the ceiling, so a builder on opus is denied here",
      'named == top or row is None:',
      'row is None:', "guard",
-     'role-model: builder on opus with no round line asks'),
+     'role-model: builder on opus with no round line is denied under agent-model-cap, not this rule'),
     ("role-model: the default model is ignored, so a builder with no model is denied under a sonnet default",
      '    if os.environ.get(ROLE_MODEL_ENV, "").strip():',
      '    if False:', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
@@ -835,16 +841,16 @@ MUTATIONS = [
      '    if role_unread:\n        record(',
      '    if False:\n        record(', "guard",
      'role-model: a missing decision file logs one unread line'),
-    ("step-up: the marker regex loses its multiline flag, so a round line after the first line walks past",
-     'STEP_UP_MARKER = re.compile(r"(?im)^',
-     'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
-    ("step-up: the first-line marker search is dropped, so a Round 3 of 3 behind a role word on line one asks",
-     '    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])',
-     '    return found', "guard",
+    ("step-up: the line-start rows read the first line only, so a round line after the first line walks past",
+     '            found = list(rx.finditer(brief))',
+     '            found = list(rx.finditer(first))', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
+    ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
+     '            hit = rx.search(first)\n            found = [hit] if hit else []',
+     '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)'),
+     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
     ("step-up: a builder round 3 on a non-opus model is no longer refused",
      'if role == "builder" and builder_third_round(prompt) and "opus" not in model:',
      'if False and role == "builder" and builder_third_round(prompt) and "opus" not in model:',
@@ -859,13 +865,32 @@ MUTATIONS = [
      'kind.lower() in BUILDER_MARKERS and n == "3"',
      'kind.lower() in BUILDER_MARKERS and n in "23"', "guard",
      'floor step-up: builder Round 2 of 3 on sonnet is allowed'),
-    ("ceiling: the Opus spawn ask never fires, so an Opus spawn passes unasked",
-     'if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():',
-     'if True:', "guard", 'ceiling: Agent with model opus and no role asks'),
-    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unasked",
+    ("ceiling: the Opus spawn denial never fires, so an Opus spawn passes unrefused",
+     'if "opus" not in str(tool_input.get("model") or "").lower():\n        return False',
+     'if True:\n        return False', "guard", 'ceiling: Agent with model opus and no role is denied'),
+    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unrefused",
      'if role == "builder" and builder_third_round(brief):',
      'if builder_third_round(brief):', "guard",
-     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' asks"),
+     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
+    ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
+    ("ceiling: the Workflow scan skips a call whose brief it cannot read, so a variable-brief builder on opus passes",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if prompt is None or unseen & {"model", "agentType"} or not keys.get("model"):', "guard",
+     'role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied'),
+    ("ceiling: the Workflow scan skips a call with a spread in its options, so a spread-first builder on opus passes",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if unseen & {"model", "agentType", "..."} or not keys.get("model"):', "guard",
+     'role-model: Workflow builder on opus with a spread before its literal keys is denied'),
+    ("ceiling: the Workflow scan judges a shorthand agentType as general-purpose, so a designer loop on opus is refused",
+     'if "..." in unseen and "agentType" not in keys:',
+     'if False:', "guard",
+     'role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed'),
+    ("role row: a Workflow agent() call loses its agentType, so an Explore on sonnet runs as general-purpose",
+     'yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",',
+     'yield {"subagent_type": None, "model": keys["model"], "prompt": prompt or "",', "guard",
+     'role-model: Workflow Explore on sonnet with no marker is denied under agent-role-model'),
     ("frozen-path: the config-watch baseline store is not frozen",
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),
@@ -1774,6 +1799,34 @@ MUTATIONS = [
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60',
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 60',
      "calljudge", 'question: one model call, claude-opus-5-5'),
+    # RULE simulator-boot-bypass (decision sim-test-is-the-one-boot-path, ruling 4). Each mutant breaks one arm.
+    ("simulator-boot-bypass: a raw simctl boot is never read",
+     '        if _simctl_boot_args(word, rest) is not None:\n            return',
+     '        if False:\n            return', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    ("simulator-boot-bypass: a boot with no device argument (xargs feeds it) is not a boot",
+     '            return after[1:]\n    return None',
+     '            return after[1:] or None\n    return None', "guard", 'simulator-boot-bypass: xargs of an echo into a boot'),
+    ("simulator-boot-bypass: an open flag cluster is not read, only a lone -a or -b",
+     'if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg)',
+     'if re.fullmatch(r"-[ab]", arg)', "guard", 'simulator-boot-bypass: open -ga Simulator'),
+    ("simulator-boot-bypass: a bare simctl word is not a boot command",
+     'if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):',
+     'if word in ("xcrun",) and "simctl" in ([word] + rest):', "guard", 'simulator-boot-bypass: bare simctl boot'),
+    ("simulator-boot-bypass: open -a Simulator is not read",
+     'if ("a" in arg and re.sub(r"\\.app$", "", value) == "simulator") or (',
+     'if (False) or (', "guard", 'simulator-boot-bypass: open -a Simulator'),
+    ("simulator-boot-bypass: open -b the simulator bundle id is not read",
+     '"b" in arg and value == "com.apple.iphonesimulator"):',
+     'False):', "guard", 'simulator-boot-bypass: open -b the simulator bundle id'),
+    ("simulator-boot-bypass: an open of the Simulator.app path is not read",
+     'elif low.endswith("/simulator.app") or low == "simulator.app":',
+     'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
+    ("simulator-boot-bypass: a command a wrapper hands on is not read",
+     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
+     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+    ("simulator-boot-bypass: the refusal is never raised",
+     '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
+     '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -1843,6 +1896,125 @@ def report_main(argv) -> int:
                                                      ", ".join(REPORT_GOLD[1])))
     print()
     print(mutate_shared.format_report(rows, gold=note))
+    return 0
+
+
+# REPLAY MODE. Repository -> how to read it (the profile keys are in hooks/mutate_shared.py). Each profile
+# was measured on its repository: the suite times, and which suites are green on a clean checkout.
+# q_max: one `node --test` file runs 0 to 15 s; harness/tests/checks-known-bad.test.mjs runs past 300 s,
+# so it reads unusable under the suite timeout.
+# banchi: the TypeScript tier runs through the Playwright unit config (the `unit` script of app/package.json),
+# one file as a path argument. Its Python harness (harness/run.py) has no per-module runner of its own, so
+# the runner below imports one harness/tests/tN_*.py and calls its `run()` under `isolated_home()`, as
+# run.py does. A module is a suite only when it is green on a clean checkout: T6 needs demo-assets/ (its
+# photos are left out of the checkout), so it reads unusable. T7 is minutes long whole, so a changed T7 group
+# module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
+# helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
+# an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
+BANCHI_MODULE_RUNNER = """\
+import importlib, os, sys
+sys.path.insert(0, os.getcwd())
+from harness.tests.home import isolated_home
+name = sys.argv[1][:-3].replace('/', '.')
+group = name.startswith('harness.tests.t7.')
+with isolated_home():
+    if group:
+        t7 = importlib.import_module('harness.tests.t7_store_and_seams')
+        wanted = tuple(importlib.import_module(name).CHECKS)
+        result = t7.run(order=lambda todo: [check for check in todo if check in wanted])
+    else:
+        result = importlib.import_module(name).run()
+passed = getattr(result, 'passed', None)
+if passed is not True and passed is not False:
+    raise TypeError('run() returned no Result with a bool passed: %r' % (result,))
+if not passed:
+    print('FAIL: ' + name)
+    print(result.detail)
+    sys.exit(1)
+"""
+REPLAY_PROFILES = {
+    "q_max": {
+        "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/",
+        "tests": r"^harness/tests/[^/]+\.test\.mjs$",
+        "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "sparse_skip": [],
+        "select": ["node", "harness/tests-for.mjs", "{path}"],
+    },
+    "banchi": {"parts": {
+        "ts": {
+            "code": r"^app/src/.*\.(ts|tsx)$", "tests": r"^app/tests/unit/[^/]+\.unit\.ts$",
+            "argv": ["node", "node_modules/@playwright/test/cli.js", "test", "-c", "playwright.unit.config.ts",
+                     "{suite}"],
+            "classify": "playwright", "cwd": "app",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
+            "sparse_skip": ["demo-assets", "vendor"],
+        },
+        "py": {
+            "code": r"^(?!harness/tests/).*\.py$", "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
+            "suite_filter": {"paths": r"^harness/tests/t7/", "keep": "defines_checks"},
+            "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
+            "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                        ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                         "requirements.txt"]],
+            "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+        },
+    }},
+}
+
+
+def replay_main(argv) -> int:
+    """Replay the last merged pull requests of a repository, print each row as it ends, then the table.
+    Exit 0 whatever the scores: a replay is not a check. A bad argument is the only nonzero exit."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --replay")
+    parser.add_argument("--replay", required=True, metavar="REPO", help="a clone of the repository to replay")
+    parser.add_argument("--profile", required=True, choices=sorted(REPLAY_PROFILES))
+    parser.add_argument("--prs", type=int, default=20, help="how many of the newest merged pull requests")
+    parser.add_argument("--limit", type=int, default=20, help="mutants per pull request")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--pr-budget", type=float, default=None, metavar="SECONDS",
+                        help="mutants not started this long after a pull request began count as not_run")
+    args = parser.parse_args(argv)
+    repo = os.path.abspath(args.replay)
+    try:
+        prs = mutate_shared.merged_prs(repo, "HEAD", args.prs)
+    except ValueError as error:
+        print("ERROR %s" % error)
+        return 2
+    profile = REPLAY_PROFILES[args.profile]
+    print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    rows = []
+
+    def stop(signum, _frame):
+        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
+        # then each checkout is removed and the deps folder with it.
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
+    try:
+        for sha, _number, _title in prs:
+            for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
+                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
+                                                    pr_budget=args.pr_budget,
+                                                    progress=lambda line: print(line, flush=True)):
+                rows.append(row)
+                print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
+    finally:
+        shutil.rmtree(deps, ignore_errors=True)
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
+    print()
+    print(mutate_shared.format_replay(rows))
     return 0
 
 
@@ -1967,6 +2139,8 @@ def run_mutant(sources, work: str, entry):
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
+    if "--replay" in sys.argv[1:]:
+        return replay_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
