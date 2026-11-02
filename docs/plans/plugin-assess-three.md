@@ -8,9 +8,9 @@ installed and no setting changed. "Unknown" marks a fact no read confirmed.
 
 | Plugin | Verdict | Gold standard: one home per capability, no load on every task | Gap |
 | --- | --- | --- | --- |
-| iceberg | Skip | Prose has one home: `lint/ste_lint.py` and the fresh-prose skill | A second prose rulebook that tells Claude to rewrite every plan and doc |
-| Ambition Lenses | Skip | Working rules have one home: the root `CLAUDE.md` | A second rulebook of about 2,000 words that a SessionStart hook loads into each task |
-| Hypotize | Skip | A plugin serves work that this repo's sessions do | Growth-experiment tracking on an outside service. No session here does that work |
+| iceberg | Skip (lane pick, 2026-11-01) | Prose has one home: `lint/ste_lint.py` and the fresh-prose skill | A second prose rulebook that tells Claude to rewrite every plan and doc |
+| Ambition Lenses | Trial, owner 2026-11-01 22:43 CST | Working rules have one home: the root `CLAUDE.md` | A second rulebook of about 2,000 words that a SessionStart hook loads into each task |
+| Hypotize | Skip (lane pick, 2026-11-01) | A plugin serves work that this repo's sessions do | Growth-experiment tracking on an outside service. No session here does that work |
 
 ## Where each plugin was found
 
@@ -209,10 +209,12 @@ experiments is unknown.
 - If the owner runs growth experiments for a product, he adds it to his own account from the
   catalog, outside this repo.
 
-## Owner question
+## Ruling
 
-The coordinator brings the three verdicts to the owner as one question. Adding any plugin needs
-his grant.
+- **Ambition Lenses: trial.** The owner answered on 2026-11-01 at 22:43 CST: run the trial (see
+  Trial). The verdict waits on its result.
+- **iceberg and Hypotize: skip.** No install is the state on `main`. Under that ruling, the lane
+  takes "skip both" as its pick. Adding either one later needs the owner's grant.
 
 ## Trial
 
