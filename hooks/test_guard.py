@@ -111,7 +111,7 @@ FAMILIES = {
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
-    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
+    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its label opens with no letter tag naming another letter, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",
@@ -13899,6 +13899,34 @@ add("option letter keys: a batch with one item keyed e2, a and c is denied", "de
     writes=[ol_write(ol_item()), ol_write(ol_item(options=ol_keyed("e2", "a", "c")))])
 add("option letter keys: a batch of keyed items is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch", writes=[ol_write(ol_item()), ol_write(ol_item(multi=True, pick=["a", "c"]))])
+
+# An option's label that opens with a letter tag names the key's letter. The tags are B:, B -, B., (B), [B], and
+# Option B: or Option B - at the label's start, in any case of the letter. A label whose tag names another letter
+# than its key is refused. A label with no tag, or one that opens with a word such as A or I, is not a tag.
+ol("the incident item, labels B, D, A and C on keys a, b, c and d, is denied", "deny",
+   ol_item(options=[dict(OL_BASE[0], key="a", label="B: a bottom strip"),
+                    dict(OL_BASE[0], key="b", label="D: drag sideways"),
+                    dict(OL_BASE[0], key="c", label="A: a rail"),
+                    dict(OL_BASE[0], key="d", label="C: a grab line")]))
+ol("a label (B) a bottom strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="(B) a bottom strip")))
+ol("a label Option B: bottom strip keyed a is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B: bottom strip")))
+ol("a label B - a bottom strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="B - a bottom strip")))
+ol("a label B. a bottom strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="B. a bottom strip")))
+ol("a label [B] a bottom strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="[B] a bottom strip")))
+ol("a label Option b - strip, with a lowercase tag, keyed a is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option b - strip")))
+ol("a label A: a rail keyed a, which matches its tag, is allowed", "allow", ol_item(options=ol_opt(0, label="A: a rail")))
+ol("a label (B) strip keyed b, which matches its tag, is allowed", "allow", ol_item(options=ol_opt(1, label="(B) strip")))
+ol("a label Option B: strip keyed b, which matches its tag, is allowed", "allow",
+   ol_item(options=ol_opt(1, label="Option B: strip")))
+ol("a label with no tag, a rail keyed a, is allowed", "allow", ol_item(options=ol_opt(0, label="a rail")))
+ol("a label that opens with the word A, A rail along the side keyed b, is allowed", "allow",
+   ol_item(options=ol_opt(1, label="A rail along the side")))
+ol("a label that opens with the word I, I would pick the strip keyed a, is allowed", "allow",
+   ol_item(options=ol_opt(0, label="I would pick the strip")))
+ol("a label Another option keyed c is allowed", "allow", ol_item(options=ol_opt(2, label="Another option")))
+ol("a label B2B export keyed a is allowed", "allow", ol_item(options=ol_opt(0, label="B2B export")))
 
 # The page's letters and none. The guard's copy must match them: the page's letterOf maps index i to
 # String.fromCharCode(65 + i % 26), and NONE is "none". Each check reads one line, anchored at a line start,
