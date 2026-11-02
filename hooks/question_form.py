@@ -1135,7 +1135,8 @@ def _record_index(root, folder, unknown, label, seen):
         return False, []
     lines = []
     try:
-        names = sorted(n for n in os.listdir(path) if n.endswith(".md") and n.lower() != "readme.md")
+        names = sorted(n for n in os.listdir(path) if n.endswith(".md") and n.lower() != "readme.md"
+                       and not (folder == "debts" and n.lower() == "notes.md"))  # the notes file holds no ruling
     except OSError as exc:
         unknown.append("%s (%s: %s)" % (label, UNREADABLE, type(exc).__name__))
         return True, lines
@@ -1174,9 +1175,10 @@ def _read_steps(root):
     if _git_root_of(root) is None:
         return {}, "absent"
     import subprocess
+    import _nowindow  # the one home of a no-window child start
     try:
-        proc = subprocess.Popen(["git", "-C", root, "cat-file", "--batch"], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = _nowindow.Popen(["git", "-C", root, "cat-file", "--batch"], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError:
         return {}, UNREADABLE + ": git did not start"
     try:
@@ -1303,16 +1305,20 @@ def candidates_block(candidates, unknown) -> str:
 
 
 def ruling_cite(reason, ids, strict=False) -> str:
-    """Classify a refusal reason against the ids the model was shown. "cited" when it names a shown id and no
-    record that was not shown. "bogus" when it names a `decisions/..` or `debts/..` record that was not shown, or,
-    with `strict` (a call that judges item 8 alone), names no shown id. "" for any other refusal (a form item)."""
+    """Classify a refusal reason against the ids the model was shown. "bogus" when the reason opens with a
+    `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
+    "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
+    bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
     # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
     reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
 
     def names(i):
         return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
     shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
-    if [r for r in RECORD_REF.findall(reason) if r not in ids]:
+    opening = RECORD_REF.match(reason.lstrip(" \t\n*_`'\"([>"))
+    if opening and opening.group(0) not in ids:
+        return "bogus"
+    if strict and [r for r in RECORD_REF.findall(reason) if r not in ids]:
         return "bogus"
     if shown:
         return "cited"
@@ -1365,8 +1371,9 @@ OPTION_KEY = re.compile(r"^[ \t]*(?P<bullet>[-*+][ \t]+)?(?:\*\*|\()?(?P<key>\d*
 
 
 def _option_keys(reply) -> list:
-    """(key, question line) for each option line of the reply's Input Needed item. The question line is the last
-    non-option line with a `?` before the option, else the item's first line, lowercased."""
+    """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
+    is the last non-option line with a `?` before the option, else the item's first line. The option text is the
+    line after its key. Both are lowercased with spaces folded."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -1375,7 +1382,8 @@ def _option_keys(reply) -> list:
     for line in input_needed_section(reply).splitlines():
         match = OPTION_KEY.match(line)
         if match and not (match.group("bullet") and match.group("close") == ":"):
-            found.append((match.group("key").lower(), asked or first))
+            option = " ".join(line[match.end() - 1:].lower().split())
+            found.append((match.group("key").lower(), asked or first, option))
             continue
         plain = " ".join(line.lower().split())
         if plain:
@@ -1385,23 +1393,28 @@ def _option_keys(reply) -> list:
 
 
 def _same_question(one, other) -> bool:
-    """True when two question lines are one question, reworded or not: they share at least half of their words
-    (lowercase words of 4+ letters, minus the stop words). Lines with no such word compare as text."""
-    a, b = _words(one), _words(other)
-    return one == other or (bool(a | b) and len(a & b) * 2 >= len(a | b))
+    """True when two (question line, option text) pairs are one question sent again: the option texts are equal,
+    and the question lines, reworded or not, share at least half of their words (lowercase words of 4+ letters,
+    minus the stop words). Lines with no such word compare as text."""
+    (one_q, one_option), (other_q, other_option) = one, other
+    if one_option != other_option:
+        return False
+    a, b = _words(one_q), _words(other_q)
+    return one_q == other_q or (bool(a | b) and len(a & b) * 2 >= len(a | b))
 
 
 def key_overlap(reply, earlier_replies) -> str:
     """The option keys, comma joined, that two questions share. A key used twice in the Input Needed of `reply` is
     a clash. So is a key that an assistant reply since the last human message also uses under a different question
-    line. The same key under the same question, reworded or not, is a question sent again, never a clash. '' when none clash."""
+    line or option text. The same key, option text and question, reworded or not, is a question sent again, never a
+    clash. '' when none clash."""
     seen, clash = {}, set()
-    for key, question in _option_keys(reply):
+    for key, question, option in _option_keys(reply):
         if key in seen:
             clash.add(key)
-        seen.setdefault(key, question)
+        seen.setdefault(key, (question, option))
     for earlier in earlier_replies:
-        for key, question in _option_keys(earlier):
-            if key in seen and not _same_question(seen[key], question):
+        for key, question, option in _option_keys(earlier):
+            if key in seen and not _same_question(seen[key], (question, option)):
                 clash.add(key)
     return ", ".join(sorted(clash))

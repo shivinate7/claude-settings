@@ -604,16 +604,39 @@ ASK_TEXT_MAX = 6000
 # A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
 # code span is no question.
 SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
+# A code span: a run of backticks, its text, and a closing run of the same length (CommonMark).
+CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)
+LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
 def prose_questions(text):
-    """The reply's own prose lines that hold a sentence ending in `?`, outside code fences. A blockquote line counts."""
-    found, fenced = [], False
+    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
+    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
+    inside a list an indented line is list text, never code."""
+    found, fenced, code_ok, in_list = [], False, True, False
     for line in text.splitlines():
-        body = line.strip().lstrip(">").strip()
+        inner = QUOTE_PREFIX.sub("", line, count=1)
+        body = inner.strip()
         if body.startswith("```"):
-            fenced = not fenced
-        elif not fenced and SENTENCE_QUESTION.search(body):
+            fenced, code_ok = not fenced, True
+            continue
+        if fenced:
+            continue
+        if not body:
+            code_ok = True
+            continue
+        indented = bool(INDENTED_CODE.match(inner))
+        if code_ok and indented and not in_list:
+            continue  # code_ok stays True: the next indented line is code too
+        code_ok = False
+        if LIST_ITEM.match(inner):
+            in_list = True
+        elif not indented:
+            in_list = False
+        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
             found.append(body)
     return found
 
@@ -632,10 +655,19 @@ def has_input_needed(text):
 
 def asked_text(text):
     """The text that asks the owner something, capped from the front so the end of a report stays: the whole text
-    when Input Needed holds an item, else its prose question lines, else ''."""
+    when Input Needed holds an item, else its prose question lines with its `Unvetted:` lines, else ''. The
+    Unvetted lines stay so the Unvetted remedy can be met in a prose question."""
     if has_input_needed(text):
         return text[-ASK_TEXT_MAX:]
-    return "\n".join(prose_questions(text))[-ASK_TEXT_MAX:]
+    questions = prose_questions(text)
+    if not questions:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form  # the one home of the Unvetted line
+    # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
+    questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
+    unvetted = [line.strip() for line in text.splitlines() if question_form.UNVETTED_LINE.match(line)]
+    return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
 
 
 def cannot_run(asked, why):
@@ -676,6 +708,20 @@ def past_ruling_problem(asked, cwd):
     return RELAY_RULE_REASON % reason
 
 
+def since_last_message(after):
+    """The records after the last user record that is not a tool result: an owner message or a peer's message. A
+    past-ruling check reads only the replies to that message, so an older question is not judged again."""
+    start = 0
+    for i, rec in enumerate(after):
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "user" or rec.get("isSidechain"):
+            continue
+        if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            continue
+        start = i + 1
+    return after[start:]
+
+
 def earlier_replies(after, text):
     """The assistant text replies since the last human message, without the reply being judged."""
     texts = []
@@ -711,7 +757,7 @@ def relay_reasons(after, text, cwd):
     except Exception as exc:
         print("question-keys check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     try:
-        asked = asked_text("\n\n".join(earlier_replies(after, text) + [text]))
+        asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
         if asked:
             try:
                 reasons.append(past_ruling_problem(asked, cwd))

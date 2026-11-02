@@ -81,7 +81,7 @@ PAST_RULING_ITEM = (
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
-    "When you refuse, the reason starts with the listed id, such as decisions/<name>, and gives the ruling's date."
+    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
