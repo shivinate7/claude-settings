@@ -5,6 +5,7 @@
 Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main.
 
 - The merge tool refuses a head that does not hold the base tip. The refusal names the fix: merge the base into the branch, push, and run again. It also says why the green run cannot stand.
+- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
 - A small move is the one exception: the green run stands when all of these hold, and any read that fails refuses.
   - The paths main changed since the merge base share no path with the batch's paths. The records page is the one exception, because the generator proves it on the merge.
   - The head and the base tip merge cleanly.
@@ -25,7 +26,7 @@ Cost of a small move check: only when the head lacks the base tip, at most three
 
 Residual risk: some suites that read a doc are not hit. One reads it through a module two imports away, or one that resolves to no file. One reads it through a root not bound from `__file__`, such as an attribute or an argument. One passes a root to a call this tool reads as a path builder. Node and bash suites are matched by words only, which fails safe.
 
-Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28.
+Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28; the empty move 2026-11-02.
 
 Kind: process
 Home: merge/merge.py
