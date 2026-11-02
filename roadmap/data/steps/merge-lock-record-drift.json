@@ -1,9 +1,9 @@
 {
  "title": "Merge lock and env-file records match the code",
  "phase": "next",
- "status": "todo",
+ "status": "doing",
  "order": 473,
  "why": "Lane refusal-uncited-rewrites' record-writer found four places where a record or usage line says one thing and the code does another.",
- "note": "(a) The merge lock's take expiry is not capped by its max hold. (b) The env-file write refusal for .envrc differs from the shell form. (c) decision standing-merge-grant cites a 600 s lock cap the code does not have. (d) The --unlock usage line says it reads no lock state, but it does. The lane reads which side its decision protects; the owner is asked only where no record says. Ready. Port: yes.",
- "updatedAt": "2026-11-02T04:10:00Z"
+ "note": "(a) The merge lock's take expiry is not capped by its max hold. (b) The env-file write refusal for .envrc differs from the shell form. (c) decision standing-merge-grant cites a 600 s lock cap the code does not have. (d) The --unlock usage line says it reads no lock state, but it does. The lane reads which side its decision protects; the owner is asked only where no record says. Ready. Port: yes. Lane session_013NEJL29rbfmVscavv5nB8h, Nov 1 22:36 CST: branch merge-lock-record-drift, stacked on PR #1038; draft PR after review round 2. (a) The record now says the take's expiry reaches about 18 h at deadlineMinutes 360, past LOCK_MAX_HOLD's 6 h; the Oct 17 ruling bounded rate-wait extensions only; capping the take is unmeasured and unruled (debt note rate-wait-outside-ttl-budget). (b) .envrc is code against code: the Write/Edit refusal (is_env) refuses it, the shell form (ENV_BASENAME) and the Read deny list pass it; the env-file record from lane refusal-uncited-rewrites must pick one scope. Unchecked: debt note dead-run-extended-lock-blocks says \"held up to 1200 s\", but a reset-time rate wait can exceed 900 s.",
+ "updatedAt": "2026-11-02T04:37:00Z"
 }
