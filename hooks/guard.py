@@ -67,7 +67,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
-                       the working folder or a folder above it, in either shell.
+                       the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
