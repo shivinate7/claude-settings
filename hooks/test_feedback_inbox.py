@@ -1057,18 +1057,24 @@ def queued_rec(text):
             "attachment": {"type": "queued_command", "prompt": text}}
 
 
-def result_rec():
-    return {"type": "user", "message": {"content": [
-        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+def result_rec(tool_id="t1", content="ok", is_error=False):
+    """The user record that holds the tool_result of `tool_id`, with `content` as the tool printed it."""
+    block = {"type": "tool_result", "tool_use_id": tool_id, "content": content}
+    if is_error:
+        block["is_error"] = True
+    return {"type": "user", "message": {"content": [block]}}
 
 
 def said_rec(text):
     return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
 
 
-def used_rec(name, tool_input):
-    return {"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "name": name, "input": tool_input}]}}
+def used_rec(name, tool_input, tool_id=None):
+    """An assistant record with one tool_use of `name`. `tool_id` is set only when a result must pair with it."""
+    block = {"type": "tool_use", "name": name, "input": tool_input}
+    if tool_id is not None:
+        block["id"] = tool_id
+    return {"type": "assistant", "message": {"content": [block]}}
 
 
 def send_rec(message):
@@ -1591,6 +1597,89 @@ def case_page_stood_down_send_does_not_check_the_filing():
     p = guard(cfg, "page-stood-down-absent", cwd=repo)
     expect_stand_down("page filing: stood-down send (no transcript), n 98 unfiled: no filing block", p,
                       "transcript")
+
+
+# --------------------------------------------------------------------------- read-back cases
+
+OTHER_PAGE_URL = "https://claude.ai/artifact/00000000-0000-4000-8000-000000000000"  # not the waiting page
+ITEM_98 = ("disk-cleanup", {"id": "disk-cleanup", "n": 98})  # the item the waiting copy lacks
+
+
+def case_page_read_back_proves_the_filing():
+    """An ArtifactData get, list or query of the waiting page's items collection, after the owner's message,
+    whose result returns item 98, proves the filing. The sender cannot export the copy, but it can read the page
+    back. The copy here lacks item 98, so only the read-back can pass the item. Red on dbf3586e: there the copy
+    alone decides, and it refuses."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    reads = (
+        ("a get of items/disk-cleanup", tool_input("get", collection="items", doc_id="disk-cleanup"),
+         [ITEM_98], "string"),
+        ("a list of items, with n 97 and n 99 beside n 98", tool_input("list", collection="items", doc_id=None),
+         [("near-97", {"id": "near-97", "n": 97}), ITEM_98, ("sweep-notes", {"id": "sweep-notes", "n": 99})],
+         "blocks"),
+        ("a query of items where n is 98",
+         tool_input("query", collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
+         [ITEM_98], "nested"),
+    )
+    for label, inp, docs, form in reads:
+        p = page_run(new_cfg(), "page-readback", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing: n 98 proved by %s, with its send" % label, p)
+
+
+def case_page_read_back_that_misses_n_does_not_prove_the_filing():
+    """A read proves the filing only as an ArtifactData get, list or query of the waiting page's items
+    collection, with no out_dir, no error, a result that returns item 98, and a send after the owner's message.
+    Each case here misses one of those. The copy lacks item 98, so it refuses each one. Green on dbf3586e, which
+    has no read-back: there the copy alone refuses. This case guards the proof against over-accepting, and the
+    proof case carries the red."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    get98 = tool_input("get", collection="items", doc_id="disk-cleanup")
+    misses = (
+        ("a read that returns n 97", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                      result_rec("rb1", response_of([("near-97", {"id": "near-97", "n": 97})]))]),
+        ("a read that returns n 980", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                       result_rec("rb1", response_of([("near-980", {"id": "near-980", "n": 980})]))]),
+        ("a read of answers that returns n 98", [used_rec("ArtifactData", tool_input("get"), tool_id="rb1"),
+                                                  result_rec("rb1", response_of([ITEM_98]))]),
+        ("a read of another page's items", [used_rec("ArtifactData", dict(get98, url=OTHER_PAGE_URL), tool_id="rb1"),
+                                            result_rec("rb1", response_of([ITEM_98]))]),
+        ("a read whose result is an error", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                             result_rec("rb1", response_of([ITEM_98]), is_error=True)]),
+        ("a result of another tool call", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                           result_rec("rb2", response_of([ITEM_98]))]),
+        ("a read with out_dir, whose result returns n 98",
+         [used_rec("ArtifactData", tool_input("list", collection="items", doc_id=None,
+                                              out_dir=os.path.join(ROOT, "out")), tool_id="rb1"),
+          result_rec("rb1", response_of([ITEM_98]))]),
+    )
+    for label, records in misses:
+        p = page_run(new_cfg(), "page-readback-no", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)] + records, cwd=repo)
+        expect_unfiled("page filing: %s does not prove n 98" % label, p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-readback-early", [(NEUTRAL, (PAGE_ITEM,))],
+                 [used_rec("ArtifactData", get98, tool_id="rb1"), result_rec("rb1", response_of([ITEM_98])),
+                  owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    expect_unfiled("page filing: a read-back before the owner's message does not prove n 98", p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-readback-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec("ArtifactData", get98, tool_id="rb1"),
+                  result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
+    expect_send_missing("page filing: a read-back of n 98 with no send still blocks on the send", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_unfiled_remedy_offers_the_read_back():
+    """The remedy for an unfiled number names both ways out: the page writer exports the copy into folder
+    `waiting`, or the sender reads item 98 back from the page. Red on dbf3586e, whose remedy names the export
+    alone."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-remedy", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
+                 cwd=repo)
+    expect_unfiled("page filing remedy: n 98 unfiled, with its send", p, "fb-0958-7", "98")
+    reason = block_reason(p) or ""
+    check("page filing remedy: offers a read of item 98 back from the page as a way out",
+          "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
 # --------------------------------------------------------------------------- repo cases
@@ -3483,6 +3572,9 @@ CASES = (
     case_page_corrupt_item_file_is_unknown_never_a_block,
     case_page_stale_origin_ref_names_the_fetch,
     case_page_stood_down_send_does_not_check_the_filing,
+    case_page_read_back_proves_the_filing,
+    case_page_read_back_that_misses_n_does_not_prove_the_filing,
+    case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
