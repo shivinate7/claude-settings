@@ -693,7 +693,7 @@ PUSH_REASON = (
 )
 AGENT_PUSH_REASON = (
     "Rule (Git): an agent's own working branch never reaches the remote "
-    "(git-remedy-never-names-target). "
+    "(decision agent-branch-never-pushed). "
     "Remedy: push to the branch the brief names, as `git push origin HEAD:<branch>`. "
     "With no branch named, commit only and report."
 )
