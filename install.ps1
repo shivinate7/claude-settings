@@ -72,8 +72,9 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
 $InstallId = (Get-Date -Format yyyyMMddHHmmssfff) + $PID
 $InstallLogPath = Join-Path $ClaudeDir 'claude-settings-install.log'
 # Get-LogTime: the time stamp of every install-log line, ISO 8601 with the UTC offset (+HH:MM), the same
-# shape the sh writers use. The colons are quoted so a culture's time separator cannot change them.
-function Get-LogTime { Get-Date -Format "yyyy-MM-dd'T'HH':'mm':'sszzz" }
+# shape the sh writers use. The invariant culture keeps the Gregorian calendar and ASCII digits whatever the
+# user's culture is (th-TH and ar-SA would change the year); the colons are quoted for the same reason.
+function Get-LogTime { (Get-Date).ToString("yyyy-MM-dd'T'HH':'mm':'sszzz", [Globalization.CultureInfo]::InvariantCulture) }
 function Add-InstallLogLine([string]$Line) {
     [System.IO.File]::AppendAllText($InstallLogPath, "$Line`n", (New-Object System.Text.UTF8Encoding $false))
 }
