@@ -52,9 +52,10 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
   - The fence is at least three backticks and longer than the longest backtick run in the text.
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
-    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page.
+    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page, repo.
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
     For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
+    For repo, the home is `repo:<owner>/<name>`: the repo the owner's feedback is about.
 
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
@@ -116,9 +117,19 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
     the ruling to the page writer. A home that is not page:<digits> blocks as a malformed page home.
     A block with no owner record for its text stands down: stdout carries a systemMessage that starts
-    "Feedback guard: page sends not checked" and names the reason, as the homes check does. An absent,
+    "Feedback guard: page sends not checked" for a page item, or "Feedback guard: repo sends not
+    checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
+  - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
+    the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
+    off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
+    matches `[A-Za-z0-9._-]+`. Any other home blocks as a malformed repo home. A repo item is checked
+    like a page item: in every block that holds one, burst or not, unless
+    its line ends with `[closed]`. A block passes only with a send_message or SendMessage whose
+    `message` names `<owner>/<name>` as a whole token, compared without case, after the owner record
+    that anchors the block. Other tools never count. A missing transcript passes with a systemMessage,
+    as for pages. A page item and a repo item share one transcript read per Stop.
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -192,6 +203,9 @@ JOTTED_HANDOFF = "# Handoff\n- fb-0958-5 standing\n"
 PAGE_ITEM = "- fb-0958-7 [page] -> page:98"
 PAGE_FAIL_OPEN = "Feedback guard: page sends not checked"
 SEND = "mcp__claude-code-remote__send_message"
+REPO_ITEM = "- fb-0958-21 [repo] -> repo:acme/widgets"
+REPO_SLUG = "acme/widgets"
+REPO_FAIL_OPEN = "Feedback guard: repo sends not checked"
 
 
 
@@ -992,25 +1006,38 @@ def page_run(cfg, sid, blocks, records):
     return guard(cfg, sid, transcript=transcript_of(cfg, sid))
 
 
-def expect_send_missing(name, p, item_id, page):
-    """A block with no proof of the send: the reason names the item id and page:<n> and says to send
-    the ruling to the page writer. The kind-list reason, which the old guard gave, does not count."""
+def expect_unproved(name, p, item_id):
+    """A block that names the item id, and is not the kind-list reason an unknown kind gives. The
+    kind-list reason is the one every kind-check case must not get. Returns the reason."""
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
     check("%s: names %s" % (name, item_id), item_id in reason, reason)
+    check("%s: not the kind-list reason" % name, "needs `[kind]" not in reason, reason)
+    return reason
+
+
+def expect_send_missing(name, p, item_id, page):
+    """A block with no proof of the send: the reason names the item id and page:<n> and says to send
+    the ruling to the page writer. The kind-list reason, which the old guard gave, does not count."""
+    reason = expect_unproved(name, p, item_id)
     check("%s: names page:%s" % (name, page), "page:%s" % page in reason, reason)
     check("%s: says to send the ruling to the page writer" % name, "page writer" in reason.lower(),
           reason)
-    check("%s: not the kind-list reason" % name, "needs `[kind]" not in reason, reason)
 
 
-def expect_stand_down(name, p, word):
-    """No block, and a systemMessage that starts with the page stand-down and names `word`."""
+def expect_repo_unsent(name, p, item_id, slug):
+    """A block with no proof of the send: the reason names the item id and the repo's slug."""
+    reason = expect_unproved(name, p, item_id)
+    check("%s: names %s" % (name, slug), slug in reason, reason)
+
+
+def expect_stand_down(name, p, word, prefix=PAGE_FAIL_OPEN):
+    """No block, and a systemMessage that starts with `prefix` and names `word`."""
     obj = guard_json(p) or {}
     msg = obj.get("systemMessage") or ""
     check(name + ": exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
-    check("%s: a systemMessage starts with the page stand-down and names the %s" % (name, word),
-          msg.startswith(PAGE_FAIL_OPEN) and word in msg.lower(), p.desc())
+    check("%s: a systemMessage starts with %r and names the %s" % (name, prefix, word),
+          msg.startswith(prefix) and word in msg.lower(), p.desc())
 
 
 def case_page_send_message_proof_passes():
@@ -1111,17 +1138,23 @@ def case_page_bad_home_blocks():
               "malformed page home" in reason.lower() and "fb-0958-9" in reason, reason)
 
 
-def case_page_transcript_missing_passes_with_system_message():
+def transcript_missing_checks(kind, text, item, prefix):
+    """Each way the transcript can be missing passes with a systemMessage that starts with `prefix`,
+    for one item of `kind`, in a block with `text`."""
     for label, sid, state in (("no transcript_path in the payload", "tx-absent", "absent"),
                               ("the transcript file does not exist", "tx-missing", "missing"),
                               ("the transcript path is a directory", "tx-dir", "dir")):
         cfg = new_cfg()
-        write_file(inbox_of(cfg, sid), render_block("98: a", items=(PAGE_ITEM,)))
+        write_file(inbox_of(cfg, sid), render_block(text, items=(item,)))
         path = transcript_of(cfg, sid)
         if state == "dir":
             os.makedirs(path)
         p = guard(cfg, sid, transcript=None if state == "absent" else path)
-        expect_stand_down("page: %s" % label, p, "transcript")
+        expect_stand_down("%s: %s" % (kind, label), p, "transcript", prefix)
+
+
+def case_page_transcript_missing_passes_with_system_message():
+    transcript_missing_checks("page", "98: a", PAGE_ITEM, PAGE_FAIL_OPEN)
 
 
 
@@ -1218,6 +1251,242 @@ def case_page_queued_owner_record_anchors():
     p = page_run(new_cfg(), "page-queued-send", [("98: a", (PAGE_ITEM,))],
                  [queued_rec("98: a"), send_rec("98: a")])
     expect_silent("page: a queued owner record with a later send passes", p)
+
+
+# --------------------------------------------------------------------------- repo cases
+
+def case_repo_send_naming_the_repo_passes():
+    """A send_message or SendMessage whose message names the repo as a whole token, after the owner
+    record. The token may sit in backticks, between spaces, before a colon, or at the start."""
+    for label, name, message in (
+            ("send_message, in backticks", SEND, "Filed the rename in `acme/widgets`"),
+            ("send_message, the name then a colon", SEND, "acme/widgets: the rename is filed"),
+            ("send_message, the name at the start", SEND, "acme/widgets done"),
+            ("SendMessage, the name between spaces", "SendMessage",
+             "rename filed in acme/widgets now")):
+        p = page_run(new_cfg(), "repo-send", [("rename", (REPO_ITEM,))],
+                     [owner_rec("rename"), used_rec(name, {"to": "coordinator", "message": message})])
+        expect_silent("repo: %s passes" % label, p)
+
+
+def case_repo_slug_match_ignores_case():
+    p = page_run(new_cfg(), "repo-case", [("rename", ("- fb-0958-21 [repo] -> repo:Acme/Widgets",))],
+                 [owner_rec("rename"), send_rec("the rename is filed in ACME/widgets now")])
+    expect_silent("repo: the slug matches without case, the home's case and the send's differ", p)
+
+
+def case_repo_send_before_the_owner_record_blocks():
+    p = page_run(new_cfg(), "repo-early", [("rename", (REPO_ITEM,))],
+                 [send_rec("acme/widgets rename"), owner_rec("rename"), said_rec("Noted.")])
+    expect_repo_unsent("repo: a send naming the repo before the owner record", p, "fb-0958-21",
+                       REPO_SLUG)
+
+
+def case_repo_send_naming_another_repo_blocks():
+    for label, message in (("another repo", "filed in acme/gadgets"),
+                           ("the owner alone", "filed by acme"),
+                           ("the name alone", "filed in widgets")):
+        p = page_run(new_cfg(), "repo-other", [("rename", (REPO_ITEM,))],
+                     [owner_rec("rename"), send_rec(message)])
+        expect_repo_unsent("repo: a send that names %s does not prove the item" % label, p,
+                           "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_slug_with_a_suffix_or_prefix_blocks():
+    """A name that runs on past the slug, or starts before it, is another repo's name: the token
+    is whole or it does not count."""
+    for label, message in (("acme/widgets2", "filed in acme/widgets2"),
+                           ("acme/widgets-old", "filed in acme/widgets-old"),
+                           ("acme/widgets_old", "filed in acme/widgets_old"),
+                           ("xacme/widgets", "filed in xacme/widgets")):
+        p = page_run(new_cfg(), "repo-affix", [("rename", (REPO_ITEM,))],
+                     [owner_rec("rename"), send_rec(message)])
+        expect_repo_unsent("repo: a send naming %s does not prove the item" % label, p,
+                           "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_other_tools_are_no_send():
+    """Only the message of a send_message or SendMessage counts. An ArtifactData write that names
+    the repo, or a send_message whose `to` holds it, proves nothing."""
+    for label, name, tool_input in (
+            ("an ArtifactData write whose data names the repo", "ArtifactData",
+             {"action": "update", "doc_id": "items/rename", "data": {"repo": "acme/widgets"}}),
+            ("a send_message whose to holds the repo, not its message", SEND,
+             {"to": "acme/widgets", "message": "rename filed"})):
+        p = page_run(new_cfg(), "repo-tool", [("rename", (REPO_ITEM,))],
+                     [owner_rec("rename"), used_rec(name, tool_input)])
+        expect_repo_unsent("repo: %s does not prove the item" % label, p, "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_each_identical_block_needs_its_own_send():
+    """The k-th block whose text is T anchors to the k-th owner record whose text is T, as for pages:
+    the send after owner record 1 proves block 1 only."""
+    second = "- fb-0958-22 [repo] -> repo:acme/widgets"
+    p = page_run(new_cfg(), "repo-kth", [("rename", (REPO_ITEM,)), ("rename", (second,))],
+                 [owner_rec("rename"), send_rec("acme/widgets rename"), owner_rec("rename")])
+    expect_repo_unsent("repo: the second identical block has no send after its own owner record",
+                       p, "fb-0958-22", REPO_SLUG)
+    check("repo: the first identical block passes, so its item is not named",
+          "fb-0958-21" not in (block_reason(p) or ""), p.desc())
+
+
+def case_repo_item_is_checked_in_every_block():
+    """A repo item blocks in a lone short message and in a burst, with no send after the owner record."""
+    p = page_run(new_cfg(), "repo-lone", [("rename", (REPO_ITEM,))],
+                 [owner_rec("rename"), said_rec("Noted.")])
+    expect_repo_unsent("repo: a lone short message with an open repo item and no send", p,
+                       "fb-0958-21", REPO_SLUG)
+    text = "rename\nthe reason, line two\nand a third line"
+    p = page_run(new_cfg(), "repo-burst", [(text, (REPO_ITEM, "- fb-0958-8 [note] -> noted"))],
+                 [owner_rec(text), said_rec("Noted.")])
+    expect_repo_unsent("repo: a burst with an open repo item and no send", p, "fb-0958-21",
+                       REPO_SLUG)
+
+
+def case_repo_bad_home_blocks():
+    for home in ("repo:", "repo:owner", "repo:owner/", "repo:/name", "repo:a/b/c", "repo:o!/n",
+                 "handoff"):
+        item = "- fb-0958-23 [repo] -> %s" % home
+        p = page_run(new_cfg(), "repo-bad-home", [("rename", (item,))],
+                     [owner_rec("rename"), send_rec("acme/widgets rename")])
+        reason = expect_unproved("repo: home %r" % home, p, "fb-0958-23")
+        check("repo: home %r is a malformed repo home" % home, "malformed" in reason.lower(), reason)
+
+
+def case_repo_closed_item_is_never_checked():
+    for label, item in (("closed, no send", "- fb-0958-21 [repo] -> repo:acme/widgets [closed]"),
+                        ("closed, malformed home", "- fb-0958-21 [repo] -> repo:acme [closed]")):
+        p = page_run(new_cfg(), "repo-closed", [("rename", (item,))],
+                     [owner_rec("rename"), said_rec("Noted.")])
+        expect_silent("repo: a closed repo item is never checked (%s)" % label, p)
+
+
+def case_repo_transcript_missing_passes_with_system_message():
+    transcript_missing_checks("repo", "rename", REPO_ITEM, REPO_FAIL_OPEN)
+
+
+def case_repo_owner_record_missing_stands_down():
+    for label, records in (
+            ("the transcript has no owner record for the text",
+             [owner_rec("an earlier question"), said_rec("A reply to it.")]),
+            ("the transcript is empty (rotated)", []),
+            ("the only record with the text is a peer's",
+             [peer_rec("rename"), send_rec("acme/widgets rename")])):
+        p = page_run(new_cfg(), "repo-no-owner", [("rename", (REPO_ITEM,))], records)
+        expect_stand_down("repo: %s" % label, p, "owner", REPO_FAIL_OPEN)
+
+
+def case_repo_queued_owner_record_anchors():
+    p = page_run(new_cfg(), "repo-queued", [("rename", (REPO_ITEM,))], [queued_rec("rename")])
+    expect_repo_unsent("repo: a queued owner record with no send blocks", p, "fb-0958-21",
+                       REPO_SLUG)
+    p = page_run(new_cfg(), "repo-queued-send", [("rename", (REPO_ITEM,))],
+                 [queued_rec("rename"), send_rec("acme/widgets rename")])
+    expect_silent("repo: a queued owner record with a later send passes", p)
+
+
+def case_repo_and_page_items_each_need_their_own_send():
+    """One block can hold a page item and a repo item. Each needs its own send after the owner
+    record, and one transcript read serves both."""
+    both = ("rename", (PAGE_ITEM, REPO_ITEM))
+    p = page_run(new_cfg(), "repo-both", [both],
+                 [owner_rec("rename"), send_rec("98: rename"), send_rec("acme/widgets rename")])
+    expect_silent("repo: a page send and a repo send in one block pass together", p)
+    p = page_run(new_cfg(), "repo-page-only", [both], [owner_rec("rename"), send_rec("98: rename")])
+    reason = block_reason(p) or ""
+    expect_repo_unsent("repo: with only the page send, the repo item blocks", p, "fb-0958-21",
+                       REPO_SLUG)
+    check("repo: the page item, which was sent, is not named", "fb-0958-7" not in reason, reason)
+
+
+def case_repo_kind_is_in_the_kind_lists():
+    """The no-items reason lists `repo -> repo:<owner>/<name>` among the kind homes, and an unknown
+    kind's reason lists repo among the kinds."""
+    cfg, sid = new_cfg(), "repo-homes"
+    write_file(inbox_of(cfg, sid), render_block("rename\nthe reason, line two\nand a third line"))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("repo kinds: a burst with no items blocks", p)
+    check("repo kinds: the no-items reason lists repo -> repo:<owner>/<name>",
+          "repo -> repo:<owner>/<name>" in (block_reason(p) or ""), p.desc())
+    cfg, sid = new_cfg(), "repo-kind-list"
+    write_file(inbox_of(cfg, sid), render_block("rename", items=("- fb-0958-24 [bogus] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    reason = block_reason(guard(cfg, sid)) or ""
+    m = re.search(r"kind one of ([^.]*)", reason)
+    check("repo kinds: the kind list of a bad item names repo",
+          m is not None and "repo" in m.group(1).split(", "), reason)
+
+
+def case_no_open_page_or_repo_item_reads_no_transcript():
+    """Cost: a Stop reads the transcript only for an open page or repo item. With none, a missing
+    transcript path gives no output. Green on main by design: no page or repo item is in the inbox."""
+    cfg, sid = new_cfg(), "repo-no-read"
+    write_file(inbox_of(cfg, sid), render_block(
+        "a ruling\nand a second line\nand a third",
+        items=("- fb-0958-25 [ruling] -> decisions/a-ruling.md", "- fb-0958-26 [note] -> noted")))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("repo cost: no open page or repo item, a missing transcript gives no output",
+                  guard(cfg, sid, transcript=transcript_of(cfg, sid)))
+
+
+def case_closed_repo_item_reads_no_transcript():
+    """Cost: a closed repo item is never checked, so it reads no transcript. A missing transcript
+    then gives no systemMessage, and the item blocks nothing."""
+    cfg, sid = new_cfg(), "repo-closed-no-read"
+    write_file(inbox_of(cfg, sid), render_block("rename", items=(
+        "- fb-0958-21 [repo] -> repo:acme/widgets [closed]",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    obj = guard_json(guard(cfg, sid, transcript=transcript_of(cfg, sid))) or {}
+    check("repo cost: a closed repo item reads no transcript, so it gives no systemMessage",
+          "systemMessage" not in obj, obj)
+    check("repo cost: a closed repo item blocks nothing", not is_block(obj), obj)
+
+
+def case_repo_home_with_a_trailing_period_passes():
+    """A home that ends in a period names the same repo: a send naming acme/widgets proves it."""
+    item = "- fb-0958-21 [repo] -> repo:acme/widgets."
+    p = page_run(new_cfg(), "repo-home-period", [("rename", (item,))],
+                 [owner_rec("rename"), send_rec("rename filed in acme/widgets")])
+    expect_silent("repo: a home with a trailing period, a send naming acme/widgets passes", p)
+
+
+def case_repo_home_in_backticks_or_with_a_comma_is_not_malformed():
+    for label, home in (("in backticks", "`repo:acme/widgets`"),
+                        ("with a trailing comma", "repo:acme/widgets,")):
+        item = "- fb-0958-21 [repo] -> %s" % home
+        p = page_run(new_cfg(), "repo-home-form", [("rename", (item,))],
+                     [owner_rec("rename"), send_rec("rename filed in acme/widgets")])
+        expect_silent("repo: a home %s is not malformed, a send naming acme/widgets passes" % label,
+                      p)
+
+
+def case_repo_only_stand_down_names_repo_sends_not_page():
+    """A repo-only stand-down says repo sends, and never page sends."""
+    cfg, sid = new_cfg(), "repo-only-standdown"
+    write_file(inbox_of(cfg, sid), render_block("rename", items=(REPO_ITEM,)))
+    p = guard(cfg, sid, transcript=transcript_of(cfg, sid))
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    check("repo only stand-down: exit 0, no block", p.code == 0 and not is_block(guard_json(p)),
+          p.desc())
+    check("repo only stand-down: the systemMessage starts with the repo prefix",
+          msg.startswith(REPO_FAIL_OPEN), msg)
+    check("repo only stand-down: the systemMessage does not say page sends", "page sends" not in msg,
+          msg)
+
+
+def case_page_and_repo_stand_downs_both_give_a_note():
+    """A missing transcript with an open page item and an open repo item gives both notes."""
+    cfg, sid = new_cfg(), "page-and-repo-standdown"
+    write_file(inbox_of(cfg, sid), render_block("98: rename", items=(PAGE_ITEM, REPO_ITEM)))
+    p = guard(cfg, sid, transcript=transcript_of(cfg, sid))
+    obj = guard_json(p) or {}
+    msg = obj.get("systemMessage") or ""
+    check("page and repo stand-downs: exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
+    check("page and repo stand-downs: the systemMessage gives the page note",
+          PAGE_FAIL_OPEN in msg, msg)
+    check("page and repo stand-downs: the systemMessage gives the repo note",
+          REPO_FAIL_OPEN in msg, msg)
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -1893,6 +2162,27 @@ CASES = (
     case_page_owner_record_missing_stands_down,
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
+    case_repo_send_naming_the_repo_passes,
+    case_repo_slug_match_ignores_case,
+    case_repo_send_before_the_owner_record_blocks,
+    case_repo_send_naming_another_repo_blocks,
+    case_repo_slug_with_a_suffix_or_prefix_blocks,
+    case_repo_other_tools_are_no_send,
+    case_repo_each_identical_block_needs_its_own_send,
+    case_repo_item_is_checked_in_every_block,
+    case_repo_bad_home_blocks,
+    case_repo_closed_item_is_never_checked,
+    case_repo_transcript_missing_passes_with_system_message,
+    case_repo_owner_record_missing_stands_down,
+    case_repo_queued_owner_record_anchors,
+    case_repo_and_page_items_each_need_their_own_send,
+    case_repo_kind_is_in_the_kind_lists,
+    case_no_open_page_or_repo_item_reads_no_transcript,
+    case_closed_repo_item_reads_no_transcript,
+    case_repo_home_with_a_trailing_period_passes,
+    case_repo_home_in_backticks_or_with_a_comma_is_not_malformed,
+    case_repo_only_stand_down_names_repo_sends_not_page,
+    case_page_and_repo_stand_downs_both_give_a_note,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
