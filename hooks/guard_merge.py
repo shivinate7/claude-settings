@@ -591,7 +591,7 @@ RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry."
+    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
 )
 
 
