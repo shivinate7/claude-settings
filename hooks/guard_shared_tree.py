@@ -54,6 +54,19 @@ def checkout_names_a_path(args, root: str = "") -> str:
     return ""
 
 
+def switch_discards(args) -> bool:
+    """True when a `git switch` carries a flag that throws the local changes away: `-f`,
+    `--force` (the same flag as `checkout -f`) or `--discard-changes`. A short flag may sit
+    inside a cluster (`-fc`). A long flag is read whole, so `--force-create`, which resets a
+    branch and keeps the tree, does not match."""
+    for arg in args:
+        if arg in ("--force", "--discard-changes"):
+            return True
+        if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
+            return True
+    return False
+
+
 def clean_deletes_files(args) -> bool:
     """True when `git clean` carries the force flag that makes it delete."""
     for arg in args:
@@ -217,6 +230,10 @@ def shared_tree_match(segment: str, root: str = ""):
             named = checkout_names_a_path(args, root)
             if named:
                 return "git checkout " + named, subcommand, args
+        if subcommand == "switch":
+            if switch_discards(args):
+                return ("git switch " + " ".join(args)).strip(), subcommand, args
+            continue
         if subcommand == "branch":
             names = branch_delete_names(args)
             if names:
@@ -417,6 +434,11 @@ def checkout_subject(args, where: str):
     return _tree_subject(where, specs, complete)
 
 
+def switch_subject(args, where: str):
+    """A forced `git switch` rewrites the whole tree, so the read is the whole tree."""
+    return _tree_subject(where)
+
+
 def clean_reads_ignored(args) -> bool:
     """True when `git clean` also deletes ignored files, which porcelain hides by default."""
     for arg in args:
@@ -444,6 +466,7 @@ SUBJECT_READS = {
     "stash": stash_subject,
     "restore": restore_subject,
     "checkout": checkout_subject,
+    "switch": switch_subject,
     "clean": clean_subject,
     "branch-delete": branch_delete_subject,
     "worktree-remove": worktree_remove_subject,
