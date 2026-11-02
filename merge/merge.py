@@ -2397,7 +2397,7 @@ def default_lock(root):
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session (owner ruling 2026-11-01 21:34 CST)
+MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
