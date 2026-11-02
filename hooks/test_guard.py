@@ -8964,8 +8964,7 @@ ROLE_LINES = {
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
     "triage-then-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1"),
-    # A set_session_tags call on another session leaves the own record current (ruling: lane orchestrator,
-    # 2026-11-01 about 19:00 CST).
+    # A set_session_tags call on another session leaves the own record current.
     "triage-then-other-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
     "triage-then-tags-no-ids": role_call("g1", TRIAGE_TAGS) + [role_use("t1", SET_SESSION_TAGS, {"add": ["x"]}),
                                                                role_result("t1", "ok")],
@@ -9146,8 +9145,7 @@ record_refuse("a lane's HEAD push from the roadmap checkout is refused", VCS + "
 # A fork's record branch is its own. Its extras file names roadmap-fork, so that push is refused there.
 record_refuse("a lane's push of roadmap-fork is refused in the fork that names it its record branch",
               VCS + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=RECFORK)
-# The default name stays a record branch in a fork too. Owner ruling "Triage is the only writer of the roadmap"
-# (session-tiers, owner 2026-10-28): a fork's lane may not write `roadmap` either.
+# The default name stays a record branch in a fork too, so a fork's lane may not write `roadmap` either.
 record_refuse("a lane's push to roadmap in the fork is refused, since roadmap is a record branch in a fork too",
               VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
 record_refuse("a lane's push to roadmap with git -C into the fork is refused, roadmap being a record branch in a fork too",
