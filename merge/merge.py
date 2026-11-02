@@ -6,6 +6,7 @@
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
+                          On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
@@ -41,6 +42,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
+class Liftable(Stop):
+    """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
+
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
@@ -49,6 +53,13 @@ class Dropped(Stop):
 
 class Held(Stop):
     pass
+
+# The cite each refusal prints, in the house form (decision <slug>, <gloss>). Message text only.
+LOCK_CITE = "(decision merge-lock, one run holds the merge lock for a bounded time and never waits on a lock that could expire)"
+PIN_CITE = "(decision main-branch-protection, the merge tool reads the check names from the protection)"
+BASE_CITE = "(decision merge-needs-current-base, a merge needs a green run that holds for the current base)"
+GRANT_CITE = "(decision standing-merge-grant, a pull request GitHub reads BLOCKED or BEHIND never merges)"
+STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the default base)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -80,8 +91,8 @@ def resolve_program(name, env=None):
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
-# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name,
-# more for the batch read of a settled head) for one read, so it shares a single deadline across them instead: each call gets whatever of
+# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name, one more
+# run-list read when the check runs link more than one run, more for the batch read of a settled head) for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
 _READ_DEADLINE = None
 
@@ -192,7 +203,7 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
             try:
                 before_wait(wait)
             except NetStop as e:
-                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first. {e}\n{out}") from None
+                raise NetStop(f"{what} hit a GitHub rate limit, and the wait of {wait} s needs the merge lock extended first {LOCK_CITE}. {e}\n{out}") from None
         say(f"merge: {what} hit a GitHub rate limit; waiting {wait} s, then retry {n} of {retries}.")
         pause(wait)
 
@@ -239,7 +250,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
             return
-        raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+        raise Liftable(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
     problems, notes = res
     for n in notes:
         say("merge: " + n)
@@ -276,7 +287,7 @@ def old_lock_ref(b):
 
 def refuse_old_lock(b, old, now):
     if old and old[1] > now:
-        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
+        raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53. " + LOCK_CITE)
 
 def boot_stamp():
     """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
@@ -379,7 +390,7 @@ def holder_state(held):
 def refuse_or_take_over(b, held, now):
     """A live lock stops the run (Held), unless its holder's pid is dead on this host: then one line says so and the take goes on, as for an expired lock."""
     if holder_state(held) != "dead":
-        raise Held(holder_text(b, held, now))
+        raise Held(holder_text(b, held, now) + " " + LOCK_CITE)
     f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
     say(f"merge: took over the merge lock on {b}: its holder, PR #{f.get('pr', '?')} (branch {f.get('branch', '?')}), pid {f['pid']} on {f['host']}, is dead.")
 
@@ -421,17 +432,17 @@ class Lock:
             return
         now = self.now()
         if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
-            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now. Run again.")
+            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now {LOCK_CITE}. Run again.")
         need = int(now + wait + LOCK_MARGIN)
         if need <= self.until:
             return
         if need > self.began + LOCK_MAX_HOLD:
-            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take. Run again.")
+            raise NetStop(f"the merge lock on {self.base} cannot be held past {LOCK_MAX_HOLD} s from the take {LOCK_CITE}. Run again.")
         msg = re.sub(r"^expires: \d+$", f"expires: {need}", self.message, flags=re.M)
         try:
             sha = self.swap(self.base, msg)
         except Stop as e:
-            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire. Run again. {e}") from e
+            raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire {LOCK_CITE}. Run again. {e}") from e
         self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
     def release(self, b, token):
@@ -459,7 +470,7 @@ class GitLock(Lock):
         ref = ref or lock_ref(b)
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
-            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock: " + out)
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
@@ -478,13 +489,13 @@ class GitLock(Lock):
         msg = lock_message(ttl, now, self.holder)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         # --force-with-lease with an empty expect creates only. With a sha it swaps only that
         # expired lock. So two runs that break one expired lock cannot both win.
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            raise Held("another run took the merge lock first")
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -493,11 +504,11 @@ class GitLock(Lock):
         ref = lock_ref(b)
         c, sha = git(self.root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", self.tree, "-m", msg)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha}  # this run's before the push: a push that lands with a lost reply still leaves a lock release can delete
         c, out = git(self.root, "push", "-q", f"--force-with-lease={ref}:{self.sha}", "origin", f"{sha}:{ref}")
         if c:
-            raise Stop("the lock ref moved, or the push failed: " + out)
+            raise Stop("the lock ref moved, or the push failed " + LOCK_CITE + ": " + out)
         return sha
 
     def released(self, b, lease):
@@ -528,7 +539,7 @@ class GitLock(Lock):
         if c:
             c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
             if c2:
-                raise Stop("unlock failed: " + out + "\n" + out2)
+                raise Stop("unlock failed " + LOCK_CITE + ": " + out + "\n" + out2)
         return True
 
 class GhLock(Lock):
@@ -551,13 +562,13 @@ class GhLock(Lock):
         c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
-                raise NetStop("cannot read the merge lock: " + sha)
+                raise NetStop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
-            raise Stop("cannot read the merge lock: " + sha)
+            raise Stop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
         c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
         if is_net(c, out):  # an unread expiry is no lock that never expires
-            raise NetStop("cannot read the merge lock commit: " + out)
+            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + out)
         return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
 
     def acquire(self, b, ttl):
@@ -567,23 +578,23 @@ class GhLock(Lock):
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
-                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
+                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock " + LOCK_CITE + ": " + out)
         c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
         c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
         if c2:
-            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch: " + tree)
+            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
         if c:
-            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit: " + sha)
+            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
         if c:
             if is_net(c, out):
-                raise NetStop("cannot take the merge lock: " + out)
+                raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
-                raise Stop("cannot take the merge lock: " + out)
-            raise Held("another run took the merge lock first")
+                raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
+            raise Held("another run took the merge lock first " + LOCK_CITE)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -593,14 +604,14 @@ class GhLock(Lock):
         ref = f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}"
         c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=True)
         if c or cur.strip() != self.sha:
-            raise Stop("the lock is not this run's any more" if not c else "cannot read the lock: " + cur)
+            raise Stop("the lock is not this run's any more " + LOCK_CITE if not c else "cannot read the lock " + LOCK_CITE + ": " + cur)
         c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
         if c:
-            raise Stop("cannot make the lock commit: " + sha)
+            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
         self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
         c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
         if c:
-            raise Stop("cannot move the lock: " + out)
+            raise Stop("cannot move the lock " + LOCK_CITE + ": " + out)
         return sha.strip()
 
     @staticmethod
@@ -617,9 +628,9 @@ class GhLock(Lock):
         """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
-            raise NetStop("unlock failed, still failing after the retries. Run again: " + out)
+            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
         if c and not self.gone(out):
-            raise Stop("unlock failed: " + out)
+            raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return not c
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
@@ -798,7 +809,7 @@ class Host:
         if held is None:
             say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
         elif held and set(held) != set(self.required):
-            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)}. "
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)} {PIN_CITE}. "
                        'Set merge.requiredChecks to "protection" so the protection list is the one source.')
 
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
@@ -810,28 +821,59 @@ class Host:
         exists only as a status counts. The combined status is never read: its state says "pending" for a commit with no statuses.
         `sha` is the head the caller already read; with none, the head of the pull request `n` is read. The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
         A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
-        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped."""
+        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped.
+        The rows of a superseded workflow run are dropped (`superseded`); statuses and rows with no run link stay."""
         sha = sha or self.pr(n)["head"]
         rows = []
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             rows.append(self.run_row(r, r.get("details_url")))
         for s in self.pages(f"commits/{sha}/status", "statuses"):
-            rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "link": s.get("target_url")})
-        return self.buckets(rows, warn)
+            rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "status": True, "link": s.get("target_url")})
+        return self.buckets(rows, warn, sha)
+
+    def superseded(self, items, sha):
+        """`items` ((row, bucket) pairs) less the rows of a cancelled workflow run when a newer run (larger id) of the same workflow is on `sha`. A concurrency group
+        cancels the older run, yet its always() fan-in job still fails. Its cancel, skip and pending rows drop. Its fail or timeout row drops only when the
+        newest run of that workflow has a pass row of the same check name, or a pending one (it holds the wait, then judges). A row's run is the id in its link; a status has none. The runs are read only when the
+        rows link more than one run. A failed runs read drops nothing: the cancelled run stays red, never green-washed."""
+        run_of = [(m.group(1) if (m := re.search(r"/actions/runs/(\d+)/", d.get("link") or "")) and not d.get("status") else None) for d, _ in items]
+        if len(set(run_of) - {None}) < 2:
+            return items
+        try:
+            runs = self.runs(sha)
+        except NetStop:
+            raise
+        except Stop:
+            return items
+        runs = [r for r in runs if r.get("databaseId") and r.get("workflowDatabaseId")]
+        newest = {}
+        for r in runs:
+            newest[r["workflowDatabaseId"]] = max(newest.get(r["workflowDatabaseId"], 0), r["databaseId"])
+        flow = {str(r["databaseId"]): r["workflowDatabaseId"] for r in runs}
+        gone = {str(r["databaseId"]) for r in runs if r.get("conclusion") == "cancelled" and newest[r["workflowDatabaseId"]] > r["databaseId"]}
+        cleared = {(rid, d["name"]) for (d, bucket), rid in zip(items, run_of) if bucket in ("pass", "pending") and rid}
+        keep = []
+        for (d, bucket), rid in zip(items, run_of):
+            red = bucket == "fail" or bucket.startswith("timed out")
+            if rid in gone and (not red and bucket != "pass" or red and (str(newest[flow[rid]]), d["name"]) in cleared):
+                continue
+            keep.append((d, bucket))
+        return keep
 
     def run_row(self, r, link):
         """A check run, or an Actions job (the same fields), as the row `buckets` judges."""
         bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
         return {"name": r["name"], "bucket": bucket, "link": link, "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")}
 
-    def buckets(self, rows, warn=True):
-        """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks."""
+    def buckets(self, rows, warn=True, sha=None):
+        """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks.
+        With `sha`, the rows of a superseded run are dropped after that judgment, so a timeout is told from a cancel."""
         try:
             flow = workflow_dir(self.cwd)
             caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
         except (OSError, ValueError):  # the warning is advice: with no readable workflow there is no cap to judge against
             caps = {}
-        got = {}
+        items = []
         for d in rows:
             bucket, link, cap, used = d["bucket"], d.get("link") or "", caps.get(d["name"]), job_minutes(d)
             if cap and used is not None:
@@ -840,7 +882,10 @@ class Host:
                 elif warn and used > 0.7 * cap and (d["name"], link) not in self.warned:
                     self.warned.add((d["name"], link))
                     say(f"job {d['name']}: {round(used)} of {cap} min; raise the cap from measured runs, or split its slowest suite")
-            got.setdefault(d["name"], []).append((bucket, link))
+            items.append((d, bucket))
+        got = {}
+        for d, bucket in (self.superseded(items, sha) if sha else items):
+            got.setdefault(d["name"], []).append((bucket, d.get("link") or ""))
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
@@ -873,11 +918,11 @@ class Host:
                 self.pause(self.minute)
                 continue
             if info["base"] != base:
-                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait."
+                return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again."
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
-                return False, "the pull request went DIRTY during the wait. Merge the base into the branch and run again."
+                return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
             red, pending = self.settle(red, pending, *self.run_state(sha))
@@ -912,7 +957,7 @@ class Host:
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
@@ -1033,7 +1078,7 @@ class Host:
         batch: the head is settled, but another ready PR on its base has a workflow run or a required check pending (batch_running,
         which takes `batch_ignore` as its ignore list).
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
-        a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        a head whose check runs link more than one run adds one more workflow runs read; a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
         not one per call."""
         try:
@@ -1084,7 +1129,7 @@ class Host:
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
         state_now = self.pr(n)["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
-            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base. gh's merge refuses it the same way, so no merge call was sent."
+            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
             c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
@@ -1760,7 +1805,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
         if unknown_ok.strip():
             say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). Owner override, reason: {unknown_ok.strip()}")
             return
-        raise Stop(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
+        raise Liftable(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
                    "If the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
     if dropped:
         raise Dropped("the batch drops a lane by a revert of its merge (lane tip " + ", ".join(sorted(t[:9] for t in dropped))
@@ -2104,7 +2149,7 @@ def red_base(root, host, base, red_ok=""):
     if red_ok.strip():
         say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
         return
-    raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
+    raise Liftable(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
 def batch_refusal(host, n, base):
     """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending,
@@ -2139,7 +2184,9 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
-            if info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
+            if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
+                records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
+            elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
                 records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
     finally:
         drop_worktree(root, tmp, wt)
@@ -2155,7 +2202,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  batch:  " + batch,
-        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it." if verdict != "green" else ""),
+        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ("--confirm on the draft refuses this head, so mark it ready by hand" if info["draft"] else "a run resumes at the wait")
                         if resumed else trailer or "nothing to claim"),
@@ -2163,6 +2210,17 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
+
+def stale_page_remedy(n, claim=""):
+    """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. A cloud session cannot
+    return a PR to draft (GraphQL only), so the owner's computer does that act. `claim`: the Record-claim the head holds, if any.
+    The draft step refuses a claim head, so the claim commit is reverted first or the remedy would loop."""
+    steps = (f"Return #{n} to draft (a cloud session cannot do that, so a session on the owner's computer does), "
+             f"run merge {n} --confirm on the draft (the records step), then mark it ready after its draft run shows.")
+    if not claim:
+        return steps
+    return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
+            f"Revert that claim commit on the branch, then run the records step: " + steps)
 
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
@@ -2238,7 +2296,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
-                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch. Revert that commit and run again.")
+                raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
             say(f"merge: {base} is not the default branch. Ids stay pending; nothing to claim.")
         else:
             if resumed:
@@ -2247,7 +2305,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             else:
                 trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
                 claimed = bool(trailer)
-            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds: a stale page heals at the next merge, on a resumed head too
+            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI
+            if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree
+                raise Stop(f"the records page on the ready #{n} is stale, and there is no claim to make or resume, so a page-only push would restart its CI. "
+                           f"Nothing was claimed or pushed. {stale_page_remedy(n, head_claim(wt))}")
             if trailer or rebuilt:
                 # check first, then claim: a claim push cancels the head's own run and would hide a red already there
                 try:
@@ -2265,7 +2326,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
 
-        def fail(why):
+        def fail(why, kind=Stop):  # `kind` keeps a Liftable stop's class through the claim revert
             if claim_sha:
                 if not os.path.exists(os.path.join(wt, ".git")):  # the tree is gone (swept or cleaned): the revert needs one
                     shutil.rmtree(tmp, ignore_errors=True)
@@ -2276,7 +2337,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     if c:
                         raise Stop(f"{why}\nmerge: the worktree is gone and cannot be rebuilt ({out}). The claim {claim_sha[:9]} stays on {branch}. Run again to resume, or revert it by hand.")
                 revert_claim(root, wt, branch, claim_sha)
-            raise Stop(why)
+            raise kind(why)
 
         try:  # after the push only a Stop may leave: any other error reverts the claim first
             try:
@@ -2298,7 +2359,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
                 except Stop as e:
-                    stop(str(e))
+                    stop(str(e), Liftable if isinstance(e, Liftable) else Stop)
                 if not os.path.exists(os.path.join(wt, ".git")):
                     stop("the worktree is gone, so the claim cannot be proved fresh.")
                 try:  # the config is the base tip's, read just after the fetch
@@ -2342,8 +2403,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 except Stop as e:
                     ok, why = False, str(e)
 
-                def keep(why):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
-                    raise Stop(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
+                def keep(why, kind=Stop):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
+                    raise kind(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
                 if not ok:
                     keep(f"the checks on the merge commit {merged[:9]} are not green.\n{why}")
                 sha = merged
@@ -2487,7 +2548,7 @@ def main(argv, host=None, lock=None):
                 return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
-        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard.", file=sys.stderr)
+        print(f"merge: {e}" + ("" if isinstance(e, Liftable) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
         return 1
 
 if __name__ == "__main__":
