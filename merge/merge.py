@@ -1012,7 +1012,7 @@ class Host:
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a red run, a cancelled run). The CI alarm reads the same file and the red-run clear; a cancelled run never alarms
+    BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a failed run, a cancelled run). The CI alarm reads the same file and the failed-run clear; a cancelled run never alarms
 
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
@@ -1021,7 +1021,7 @@ class Host:
         with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
         run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
         skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
-        cancelled or skipped jobs only) is never cleared by the red-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
+        cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
         when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older

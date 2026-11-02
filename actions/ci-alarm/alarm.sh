@@ -5,7 +5,7 @@
 # workflow and another group only when N is newer than R, is the newest of its group, succeeded, and
 # every job name of R is a job of N, exact match, with conclusion success. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. The jobs of R and N are read only
-# for a failed group that has such an N (one read each); a failed read is unknown. The same red-run rule as
+# for a failed group that has such an N (one read each); a failed read is unknown. The same failed-run rule as
 # Host.base_state. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.

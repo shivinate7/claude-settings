@@ -1097,3 +1097,5 @@
 - mutate-js-multiline-site-first-line: a multi-line site is keyed by its first line (`lineOf(node)`, hooks/mutate_js.mjs). Decision: mutation-report-scores-suites.
 - renamed-file-all-lines-changed: `changed_lines` runs with `--no-renames`, so a renamed file reads as all lines added (hooks/mutate_shared.py). Decision: mutation-report-scores-suites.
 - lane-force-push-refused: the auto-mode classifier refused a lane's `git push --force-with-lease` to its own draft branch, to add Red-run trailers, twice on 2026-11-02: lane worktree-base-copies-remove at 00:30 CST (replacement PR #1064) and lane tci-6 at 06:05 CST (replacement PR #1087). Refusing stays as on main (lint/report_guard.py forced an allow ask). Decision: owner-override.
+- stale-cancel-all-skipped: a cancelled main run whose jobs were all skipped clears when a newer covering run holds those job names, whatever their conclusions (`cleared`, merge/merge.py). Decision: no-merge-onto-red-main.
+- stale-cancel-missing-head-sha: the cancelled-run clear treats a newer run with no `head_sha` as on another head; GitHub always sends it (`cleared`, merge/merge.py). Decision: no-merge-onto-red-main.
