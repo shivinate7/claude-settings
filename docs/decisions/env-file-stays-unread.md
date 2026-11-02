@@ -2,9 +2,9 @@
 
 ## The ruling
 
-No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, a Write or Edit tool call that names the file, and a Read call on it. A runner may load the file into its own process with its loader flag. A runner prints nothing, so no value reaches the session.
+No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, a write tool call that names the file, and a Read call on it. A runner may load the file into its own process with its loader flag. A runner prints nothing, so no value reaches the session.
 
-One scope covers every form: a Write or Edit call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. Every form reads one shared basename matcher in guard_env.
+One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. Every form reads one shared basename matcher in guard_env.
 
 Ruling: coordinator, 2026-11-01 22:42 CDT. Process-only. The owner may reverse it. Reason: `.envrc` often holds exported secrets. That is the likely risk named below.
 
@@ -14,7 +14,7 @@ Shell form. `judge_shell` calls `env_refusal` and `env_heredoc_refusal`. A name 
 - Allowed: an existence check (`ls`, `test`, `[`, `[[`). `echo` and `printf`, where the name is text. The message or body value of `git commit` and `gh pr create`. A runner in `ENV_LOADER_COMMANDS` (node, npm, npx, pnpm, bun, deno, uv, docker, podman, and their variants) given `--env-file` or `--env-file-if-exists`.
 - Substitutions (`$(...)`, backticks, `<(...)`) are judged as commands of their own, at any depth up to `ENV_MAX_DEPTH` (64). A deeper nest is refused. The substitutions in an unquoted heredoc body are judged (`env_heredoc_refusal`). A quoted heredoc body is text.
 
-Write and Edit form. In `judge`, a Write or Edit tool call whose target name is in the scope is refused (`is_env`). It reads the same matcher as the shell form.
+Write form. In `judge`, a write tool call (Write, Edit, MultiEdit or NotebookEdit) whose target name is in the scope is refused (`is_env`). It reads the same matcher as the shell form.
 
 Read form. The same scope applies. The settings deny list holds `Read(.env)` and `Read(.env.*)`. The guard refuses a Read call on any other name in the scope.
 
