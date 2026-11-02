@@ -4199,14 +4199,16 @@ caseK11() {
 
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
-# allow_case NAME HAS: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
-# merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. Then one piped cloud install
-# from inside it. Sets h, co, rc and out.
+# allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
+# merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. SETTINGS=repo puts this repo's
+# settings.json in the checkout instead of `{}`, so the install carries the repo's own permissions too. Then one piped
+# cloud install from inside it. Sets h, co, rc and out.
 allow_case() {
   h=$(new_home); co="$work/$1-co"
   make_checkout "$co" "# $1 content"
-  if [ "$2" = 1 ]; then
-    mkdir -p "$co/merge"; cp "$REPO_ROOT/merge/cloud_allow.json" "$co/merge/cloud_allow.json"
+  if [ "$2" = 1 ] || [ "${3:-}" = repo ]; then
+    if [ "$2" = 1 ]; then mkdir -p "$co/merge"; cp "$REPO_ROOT/merge/cloud_allow.json" "$co/merge/cloud_allow.json"; fi
+    if [ "${3:-}" = repo ]; then cp "$REPO_ROOT/settings.json" "$co/settings.json"; fi
     git -C "$co" add -A; git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m rules
   fi
   allow_install
@@ -4217,7 +4219,7 @@ allow_install() {
         CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
-# Every allow rule in the written settings.json, sorted. The source settings.json is `{}`, so all of them were added.
+# Every allow rule in the written settings.json, sorted. In caseL1 and caseL2 the source settings.json is `{}`, so all of them were added.
 written_allow() { jq -r '.permissions.allow[]?' "$h/.claude-cfg/settings.json" 2>/dev/null | sort; }
 want_allow() { jq -r '.permissions.allow[]' "$REPO_ROOT/merge/cloud_allow.json" | sort; }
 settings_lines() { printf '%s\n' "$out" | grep settings.json; }
@@ -4273,6 +4275,29 @@ caseL3() {
     bad "$name" "no WARNING names the failed write: $(settings_lines)"
   elif [ -e "$h/.claude-cfg/settings.json.tmp" ]; then
     bad "$name" "the partial settings.json.tmp was left behind"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# caseL4: the owner's remote tools go in settings.json by exact name. The cloud install copies that file, so the
+# case reads the written copy. The server-level form would allow every remote tool, so it must not appear.
+caseL4() {
+  name="caseL4: a cloud install of this repo writes the remote add_repo and archive_session tools as exact allow names, never the server-level form"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  allow_case l4 1 repo
+  missing=""
+  for tool in mcp__claude-code-remote__add_repo mcp__claude-code-remote__archive_session; do
+    written_allow | grep -qxF "$tool" || missing="$missing $tool"
+  done
+  server=$(written_allow | grep -E '^mcp__claude-code-remote(__\*)?$')
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ -n "$missing" ]; then
+    bad "$name" "allow rules lack these exact names:$missing; written: $(written_allow | tr '\n' ' ')"
+  elif [ -n "$server" ]; then
+    bad "$name" "the server-level form is allowed: $server"
   else
     ok "$name"
   fi
@@ -4838,6 +4863,7 @@ run caseK11
 run caseL1
 run caseL2
 run caseL3
+run caseL4
 run caseM1
 run caseM2
 run caseM3

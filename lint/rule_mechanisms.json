@@ -462,7 +462,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/prose_judge.py, a PreToolUse command hook on Edit and Write that calls the model only for a path inside a decisions folder; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Partly checked: lint/stale_cites.py (in the ste-lint CI step) refuses a Markdown line that names a file or Python def the same PR removed. A claim wrong in meaning is judged only by hooks/prose_judge.py, inside a decisions folder."
       }
     },
     "output-write-in-ste": {
@@ -479,8 +479,10 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
-        "kind": "judgment",
-        "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
+        "kind": "check",
+        "ref": "lint/report_guard.py",
+        "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
       }
     },
     "output-never-echo-agent-report": {
