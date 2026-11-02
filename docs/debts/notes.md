@@ -21,6 +21,10 @@
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
 - blind-git-fixtures-unaudited: other blind-command fixtures, such as make_blind_git, are not audited for the PATH shim gap (janitor/test_sweep.py)
+- builder-fstring-path-unread: an f-string path, such as `open(f'tests/x_{n}.py','w')` in a python body, is not read (hooks/guard_frozen.py _py_hit)
+- builder-join-unresolved-refused: `os.path.join(tmpdir,'tests','test_x.py')` is refused, because an unresolved path part is dropped and the rest reads as a test path. A false alarm (hooks/guard_frozen.py _join_path)
+- builder-patch-format-unread: `patch tests/x.py < d.diff`, `git checkout --theirs tests/x`, `ruff format tests/` and `black .` are not refused for a builder (hooks/guard.py builder_shell_test_hit)
+- builder-path-forms-unread: `Path('tests').joinpath(...)`, string `+` paths, `dd of=`, `sort -o` and `touch` of a test path are not read (hooks/guard_frozen.py _py_paths, _shell_write_hit)
 - cap-basename-false-alarm: a heredoc writing a fixture named settings.json with the cap key asks, because is_settings_file tests the basename only (hooks/guard.py)
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
 - cap-write-by-python-unseen: a cap write made by a Python script, or text piped or written to a script and run later, is not asked (hooks/guard_frozen.py)
@@ -195,6 +199,7 @@
 - override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
 - override-veto-no-mutants: no mutant covers never_lifted, take or the veto path. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
+- perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)
 - plain-diff-desktop-untested: the pane draw and turn-text match against real session messages are untested in the desktop app (mods/plain-diff)
@@ -259,6 +264,7 @@
 - sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override too; the busy judge removes none (hooks/sendmessage_state.py)
+- shell-config-disable-unrefused: a shell write that adds a test-disabling line to test config, such as `echo "addopts = --deselect x" >> pytest.ini`, is not refused, though the Edit path refuses it (hooks/guard.py builder_shell_test_hit)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)
 - shell-write-miss-git-config-file: git config --file P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
@@ -318,6 +324,7 @@
 - sweep-tests-sleep-bounds: _peak_concurrency uses a 0.2 s sleep; on a slow host a parallel-confirm mutant can survive (janitor/test_sweep.py)
 - symrun-link-gap-unmeasured: the symrun case needs a mixed-id window; the link route's gap is unmeasured and may flake on a loaded runner (install-no-gap.test.ps1, install.ps1)
 - test-guard-posix-blocks-no-skip: two platform-only case blocks (nt, darwin) print no SKIP row when dropped (hooks/test_guard.py near lines 2847 and 3167)
+- test-utils-name-refused: `echo x > src/test_utils.py` is refused by name, as the Edit path refuses it. The file may be product code, so this may be a false alarm (hooks/guard.py is_test_rel)
 - trigger-call-unchecked: whether a change touches a guard or check is the reviewer's reading; no check reads that call (agents/reviewer.md)
 - trigger-omits-agent-caps: the net-value trigger omits the settings.json env caps and model:/effort: lines in agents/*.md (settings.json, agents/*.md)
 - undo-scan-cr-nul-false-alarm: a lone CR or NUL in a changed line splits it in git log -p, so later lines count as lost; false alarm only (lint/check_silent_undo.py)
@@ -331,6 +338,7 @@
 - wsl-env-path-form-untested: no test pins the env: path form or the quoted-name form of WSLENV (hooks/ WSL guard tests)
 - wsl-wslenv-false-alarms: echo "WSLENV=x", ${env:WSLENV} reads and grep "WSLENV" in a command that also runs wsl give false alarms (hooks/guard_wsl.py)
 - wsl-wslenv-no-equals-unrefused: a WSLENV set with no =, such as New-Item Env:, Set-Item after cd env:, read, ${WSLENV:=x}, printf -v, is not refused (hooks/guard_wsl.py)
+- xargs-list-input-refused: `xargs rm < tests/list.txt` is refused, because the input file is a test path. The input is read, not written, so this may be a false alarm (hooks/guard_frozen.py _shell_write_hit)
 - frozen copy-out after cd: `cd <frozen dir> && cp <frozen abs> rel` is allowed, because the guard does not track cd (hooks/guard_frozen.py _copy_reads).
 - frozen folder name copied into the config root: `cp -r <src named hooks|lint> ~/.claude/` is allowed on main too (hooks/guard_frozen.py).
 - notes-file history check: no test pins that the history check runs on the notes file (lint/hook_catalog.py, lint/test_hook_catalog.py).
@@ -942,6 +950,7 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- other-checkout-mkdir-touch: `touch` and `mkdir` are not in `MUTATING_COMMAND`, so a direct `mkdir <other checkout>/x` with no `cd` passes the write scan, and so does `mkdir -p <other>/d && cd <other>/d` (the `cd` target is made in the same command, so it does not exist when the guard reads it); the list is shared with frozen-path (hooks/guard.py `SHELL_WRITE_HINT`). Decision: an-agent-outside-its-home-tree-must-stop
 - builders-reset-soft-refused: `reset --soft` to a cut point or to HEAD~N, then a commit, is refused; the squash and `cherry-pick -n` gap covers two of these forms (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-own-test-commit-forgotten: an own test commit is forgotten after any rebase (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-reflog-no-author: the reflog cannot name an author, so a shared worktree or the main checkout refuses another role's test commit, and commit and push skip stop's main-checkout check (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
@@ -977,6 +986,11 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- lane-lint-digit-sha-refused: an all-digit short sha is read as a PR number by `merge --lane-lint` and refused, never a false pass (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
+- lane-lint-hex-branch-read-as-sha: a local-only branch named like hex (cafe123) is read as a sha by `merge --lane-lint` (merge/merge.py). Decision: lanes-run-no-full-ci-job.
+- lane-lint-sigterm-leaks-worktree: a SIGTERM between `git worktree add` and the try in lane_lint can leak a locked worktree (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
+- lane-lint-stale-origin-ref: after a branch is deleted on origin, a stale origin/<name> makes `merge --lane-lint` lint the old head (merge/merge.py). Decision: lanes-run-no-full-ci-job.
+- lane-lint-test-comment-not-name: the comment "the gate is live" in merge/test_lane_lint.py uses a glossary Not name for check (test file, test-author scope). Decision: lanes-run-no-full-ci-job.
 - answered-check-case: the ref, hash and path patterns match case, so a capitalised source reads as no source (lint/report_guard.py).
 - answered-check-question-line: a line that ends in "?" is exempt whole, so a claim and a question on one line pass (lint/report_guard.py).
 - answered-check-inline-fence: a line that starts with an inline triple-backtick span opens a fence; "#2" counts as a source; "no-op" counts as a negator (lint/report_guard.py).
@@ -1082,6 +1096,7 @@
 - checkout-f-cluster: `git checkout -fb x` passes while `git switch -fc x` is read as a force; checkout reads -f exactly and switch reads clusters (hooks/guard_shared_tree.py).
 - switch-clean-cluster-false-alarm: `git switch -Cf x` asks or denies, and `git clean -fdn` or `-nfd` in a lost primary is refused, though a dry run deletes nothing (hooks/guard_shared_tree.py).
 - merge-liftable-worktree-gone: the worktree-gone branch of fail() in merge/merge.py raises a plain Stop, so a liftable stop that reaches it prints its flag and also "No override lifts this refusal". It needs the tree removed after the claim push plus an unreadable-history stop. Step: refusal-stricter-fixes (refusals narrowed to their rule).
+- merge-silent-undo-no-repair: on 2026-11-02 at 00:53 CST the auto-mode classifier refused `Bash` for a `git push --force-with-lease` that would replace a lane's own merge commit (Git Destructive). A later commit cannot clear check_silent_undo, which reads the merge commit itself. The lane moved to a new branch and PR (#1068 replaces #1021). That is the cost of a silent-undo failure on a merge commit.
 - press-label-verb-only: the press-link label excusal reads the verb only, so label "Approve on GitHub" beside "The session approves PR #5." passes. Decision: act-in-place
 - shell-line-no-arg-chain: command-in-item passes a chain of commands with no arguments (`whoami; hostname`, `pwd && whoami`, `date | sort`). Decision: act-in-place
 - shell-line-capital-prose: command-in-item lowercases the command word, so capitalised prose with `;` (`Option A; Option B`) is refused, and the decision does not say so. Decision: act-in-place
