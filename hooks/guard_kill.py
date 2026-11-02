@@ -58,9 +58,11 @@ def kill_hit(tokens) -> str:
     `pkill` and `killall` deny outright: naming a process by pattern or by name always reaches
     every match, flags or none. `taskkill` and `Stop-Process` deny only with the flag that names
     a process by image or by name; `taskkill /PID` and `Stop-Process -Id` name one process and
-    pass. `pkill -P <pid>` names the children of one parent: it passes here and the parent pid is
-    judged as a `kill` pid (`foreign_pid_kill`). `lsof -t` lists pids and kills nothing; it is
-    refused only where its list feeds a kill (`kill_fed_by_name`, `kill_fed_by_pipe`).
+    pass. `pkill -P <pid>` names the children of one parent: a number passes here and is judged as
+    a `kill` pid (`foreign_pid_kill`); `$$` and `$!` pass as the shell's own pid and the last job's.
+    Any other value (a substitution, `$PPID`, a variable) is a parent the guard cannot read, so it
+    is no pid this session holds, and the call is refused as `pkill` is. `lsof -t` lists pids and
+    kills nothing; it is refused only in a call that kills (`lsof_pids_reach_kill`).
     """
     index = resolve_command(tokens)
     if index is None:
@@ -68,8 +70,10 @@ def kill_hit(tokens) -> str:
     word = tokens[index]
     tool = basename(word)
     rest = tokens[index + 1:]
-    if tool == "pkill" and parent_filter_pids(rest) is not None:
-        return ""   # children of ONE parent: foreign_pid_kill judges that pid, as it does for `kill`
+    parents = parent_filter_pids(rest) if tool == "pkill" else None
+    if parents is not None and all(value in OWN_PID_VARIABLES or KILL_PID_RE.match(value)
+                                   for value in parents):
+        return ""   # children of ONE parent: foreign_pid_kill judges a number, as it does for `kill`
     if tool in KILL_COMMAND_WORDS:
         return word
     if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):
@@ -95,6 +99,7 @@ ROOT_PID_RE = re.compile(r"[0-9]+")
 PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
 # `-P` as a lower-case cluster's last letter (`-fP 12`), glued digits (`-P12`), or `--parent=12`. A
 # signal name such as `-SIGPIPE` or `-PIPE` is no parent filter: only digits glue to the flag.
+OWN_PID_VARIABLES = {"$$", "$!"}   # the shell's own pid, and the last background job's
 PARENT_FLAG_RE = re.compile(r"^(?:-[a-z]*P|--parent)(?:=(.*)|([0-9,]+))?$")
 
 
