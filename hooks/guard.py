@@ -1627,7 +1627,7 @@ REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
 REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
-# rebase kept (that also lifts the refusal of the same path elsewhere).
+# rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
 
 
@@ -1703,8 +1703,9 @@ def own_changes(root: str):
         HEAD and MERGE_HEAD.
     NOTED (logged, never refused): a replay the agent resolved or chose (a hand-resolved cherry-pick, a
     revert, a rebase squash, fixup or continue), and the working tree while a replay is in progress.
-    KEPT (logged, and not refused anywhere): a path a held rebase replayed that holds the rebase
-    start's bytes again.
+    KEPT (logged only): a path a held rebase replayed that holds the rebase start's bytes again, as the
+    builder left it during the rebase. A write of those bytes after the rebase finished is its own change:
+    the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
     people's commits, and are not read."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
@@ -1863,7 +1864,6 @@ def diff_violation(root: str, role: str):
         return None, []
     top = os.path.realpath(top.stdout.strip())
     builder = role == BUILDER_ROLE
-    kept = {rel for _old, _new, paths, kind in changes if kind == KEPT for rel in paths}
     noted = []
     for old, new, paths, kind in changes:
         if kind == KEPT and not builder:
@@ -1872,7 +1872,7 @@ def diff_violation(root: str, role: str):
         if found is None:
             return None, []
         for rel in found:
-            if not builder or (kind == OWN and rel not in kept):
+            if not builder or kind == OWN:
                 return rel, noted
             noted.append(rel)
     return "", noted

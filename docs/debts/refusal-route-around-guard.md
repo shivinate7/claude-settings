@@ -1,6 +1,6 @@
 # No guard refuses a test-author that routes around a refusal
 
-**What.** A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. Commit, push and stop log that act only, as `author-diff`, and never refuse it. Seen on 2026-10-03 in q_max: a test-author got an Edit refusal, then wrote the same file by shell. The reviewer caught it. A builder's form is refused now (`builders-cannot-edit-tests`), except a write of main's bytes after a rebase, which is logged only (debt `rebase-writeback-logged`).
+**What.** A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. Commit, push and stop log that act only, as `author-diff`, and never refuse it. Seen on 2026-10-03 in q_max: a test-author got an Edit refusal, then wrote the same file by shell. The reviewer caught it. A builder's form is refused now (`builders-cannot-edit-tests`).
 
 **Where.** `hooks/guard.py`: `diff_refusal` logs a test-author's own change as `author-diff` and never refuses it (`diff_rule`). The write tool refuses a test-author's Edit of a non-test path (`AUTHOR_SCOPE_REASON`, rule `test-author-scope`). The prose ("a refusal is final") is in `agents/builder.md` and `agents/test-author.md`. No hook refuses a shell write of a refused path.
 
