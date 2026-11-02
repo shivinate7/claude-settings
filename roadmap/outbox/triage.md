@@ -1,7 +1,11 @@
-# Triage (11) state, Oct 28
+# Triage: notes still owed to docs/debts/notes.md on main
 
-- Note to land in docs/debts/notes.md on main (orchestrator, Oct 28 07:49 CDT; a note, not a debt, unless it repeats): the lint gate (`ci-job gates --lint --base origin/main`) passed on c122's head 1ea8c877 but failed STE001 at docs/debts/notes.md:606 on the batch 9 tree (main 26a539ff plus lanes). Cause unmeasured; one guess is a stale origin/main in the lane, so the changed-line set differed. Fixed in the lane at 5e302879.
-- Incident against rule shared-trees-one-checkout-per-agent (one checkout per concurrent agent), not a new rule (orchestrator, Oct 28 07:58 CDT): in c179's lane two builders shared one branch, and a stale index dropped install.sh's hunk inside d99be389; 23b4ff58 restored it byte-for-byte. Land it where that rule's incidents are logged on main.
-- Note for docs/debts/notes.md, c127 (orchestrator, Oct 28 09:53 CDT, from banchi #993's review), slug code-check-exclude-unchecked: the rule that a repo's code-check exclude holds only vendored or generated files lives only as a comment in check.yml. It needs a check, or a NOT MECHANIZED line. A debt after a real incident.
-- Note for docs/debts/notes.md, c127 (orchestrator, Oct 28 09:55 CDT), slug qmax-tsc-pin-drift: q_max pins tsc 5.8.3 while actions/code-check uses 5.9.3, and the two differ on one TS2322 case. A debt if the action's result and q_max's own run disagree on a PR.
-- Notes for docs/debts/notes.md, c182 (round 2 review of #777, none blocking): (1) code-check compares the exclude list against main's entries plus the fork point's, so a branch can re-add an entry main removed after the fork; the base check still runs. (2) In a pre-commit run, an unstaged new file makes a rename read as a plain delete; CI is not affected. (3) Without --main, every run prints "unknown: main"; noise only. Land with #777 or the next lane that edits notes.md.
+Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage writes only the roadmap branch, so the next lane that edits notes.md lands them.
+
+- ci-gate-stale-base (orchestrator, Oct 28 07:49 CDT): the lint gate passed on c122's head 1ea8c877 but failed STE001 at docs/debts/notes.md:606 on the batch 9 tree. Cause unmeasured; one guess is a stale origin/main in the lane.
+- shared-branch-stale-index (orchestrator, Oct 28 07:58 CDT): incident against rule shared-trees-one-checkout-per-agent: in c179's lane two builders shared one branch, and a stale index dropped install.sh's hunk inside d99be389; 23b4ff58 restored it.
+- code-check-exclude-unchecked (c127, Oct 28 09:53 CDT, from banchi #993's review): the rule that a repo's code-check exclude holds only vendored or generated files lives only as a comment in check.yml. A debt after a real incident.
+- qmax-tsc-pin-drift (c127, Oct 28 09:55 CDT): q_max pins tsc 5.8.3 while actions/code-check uses 5.9.3; they differ on one TS2322 case. A debt if they disagree on a PR.
+- code-check-exclude-fork-point (c182, PR #777 round 2): the exclude list is compared against main's entries plus the fork point's, so a branch can re-add an entry main removed after the fork.
+- code-check-precommit-rename (c182): in a pre-commit run, an unstaged new file makes a rename read as a plain delete; CI is not affected.
+- code-check-unknown-main-noise (c182): without --main, every run prints "unknown: main"; noise only.
