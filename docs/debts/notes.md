@@ -909,3 +909,4 @@
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
 - question-placeholder-trailing-period: a Goal, Problem or Based on line that is a placeholder followed by a period passes, because the check is a fullmatch of one `<...>` (hooks/question_form.py is_placeholder). Decision: question-form.
 - port-str-replace-no-symbol: a `context` str_replace on a port item skips the file:symbol rule, because the stored port flag is unseen there (hooks/question_form.py form_str_replace_hit). Decision: port-keeps-behaviour.
+- departs-bare-angle-name: "Departs from: main — adds <Modal>" is refused as a placeholder, though `<Modal>` can be a real component name; "adds a <Modal>" passes (hooks/question_form.py).
