@@ -850,7 +850,14 @@ KEY_NAMED = re.compile(
     r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
-                      "item's text by that letter (option A, pick b), never by any other key.")
+                      "item's text by that letter (option A, pick b), never by any other key. A label carries "
+                      "no letter of its own: the page key is the only letter.")
+# A label's opening letter tag: B:, B -, B., (B), [B], each with an optional leading "Option ". The dot and
+# the dash need a space or the end after them, so "B2B", "B-tree" and "B.C." are not tags. A word such as A
+# or I that opens a sentence has none of these marks after it, so it is not a tag.
+LABEL_TAG = re.compile(
+    r"^\s*(?:option\s+)?(?:\(([a-z])\)|\[([a-z])\]|([a-z])(?:\s*:|(?:\s*[.\-\u2013\u2014])(?=\s|$)))",
+    re.I)
 
 
 def _letter_of(index: int) -> str:
@@ -899,6 +906,12 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
+            label = o.get("label")
+            tag = LABEL_TAG.match(label) if isinstance(label, str) else None
+            if tag:
+                named = next(g for g in tag.groups() if g).lower()
+                if named != key:
+                    return "option label that opens with a letter tag for another letter: " + tag.group(0).strip()
     return key_named_hit(_item_text_fields(data))
 
 

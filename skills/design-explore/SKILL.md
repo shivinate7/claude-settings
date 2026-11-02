@@ -64,6 +64,8 @@ designer.
    the lane. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
+   Each option on the owner's page has one letter: a mockup carries no letter of its own. Name a mockup by what it
+   shows, never "Option B". The page key is the only letter (`waiting-page`).
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the
    step's design branch, so the owner sees the whole set in one place.
 7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
