@@ -288,7 +288,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`docs/debts/banchi-build-steps.md`](../docs/debts/banchi-build-steps.md) |
 | `bg-end-false-alarms` | The rule splits script names on `:` and `-`, so `build:dev` and `test-watch-ci` read as servers. | [`docs/debts/bg-end-false-alarms.md`](../docs/debts/bg-end-false-alarms.md) |
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`docs/debts/build-disk-guard.md`](../docs/debts/build-disk-guard.md) |
-| `checks-job-near-timeout` | The checks job took 30.4 min slowest over 30 runs (median 22.1), 84% of its 36 min cap, on 2026-10-27. | [`docs/debts/checks-job-near-timeout.md`](../docs/debts/checks-job-near-timeout.md) |
+| `checks-job-near-timeout` | The checks job took 35.4 min slowest over 16 green runs (median 28.9, range 25.2-35.4), 68% of its 52 min cap, from 2026-11-01 to 2026-11-02; its old 36 min cap was at 98%. | [`docs/debts/checks-job-near-timeout.md`](../docs/debts/checks-job-near-timeout.md) |
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
