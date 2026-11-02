@@ -13,10 +13,8 @@ is red until its names exist. Each case asks for its names first, so the failure
 "<name> is not defined in hooks/precompact_handoff.py yet", never a test bug.
 
 Fixtures are synthetic byte blobs in the run folder, never the real binary. Each blob holds the
-2.1.316 shapes the spec gives. The "same facts" fixtures take their values from the tracked
-baseline, hooks/cc_compaction_baseline.json. The spec gives no anchor for blocking_margin or
-output_reserve, so a fixture cannot hold either one until the builder names its anchor: a
-baseline value for either stops binary_text() with a message. A baseline value of "unknown"
+2.1.316 shapes the spec gives, for all eight facts. The "same facts" fixtures take their values
+from the tracked baseline, hooks/cc_compaction_baseline.json. A baseline value of "unknown"
 leaves that fact out of the fixture.
 """
 import contextlib
@@ -50,13 +48,11 @@ NOW = "2026-11-02T10:00:00-06:00"  # the clock seam for daily_note: Central day 
 TODAY = "2026-11-02"
 ANCHORED = ("version", "idle_compaction_default", "auto_compact_enabled_default",
             "settings_keys", "env_vars", "summary_fraction_default")
-OPEN = ("blocking_margin", "output_reserve")
-
 # Minified identifiers. RENAMED is the false-alarm build: every identifier changes, no fact does.
 NAMES = {"obj": "Yz", "N": "N", "I": "I", "Ks": "Ks", "Rd": "Rd", "E": "E", "V": "v",
-         "oQt": "oQt", "rjr": "rjr", "gke": "gke"}
+         "oQt": "oQt", "rjr": "rjr", "gke": "gke", "out": "Pv", "blk": "Ab", "bf": "zb"}
 RENAMED = {"obj": "Mn", "N": "Kp", "I": "Ww", "Ks": "Tq", "Rd": "Zb", "E": "Hb", "V": "Lq",
-           "oQt": "Abc", "rjr": "h3m", "gke": "q9z"}
+           "oQt": "Abc", "rjr": "h3m", "gke": "q9z", "out": "Gh", "blk": "Qz", "bf": "Ln"}
 
 # Text a scanner must step over. Each one comes before the facts, so a scanner that reads a
 # comment opener, an open template literal or a lone quote as code hides the facts after it.
@@ -81,11 +77,7 @@ def binary_text(version, facts, names=NAMES, drop=(), prelude=""):
     def known(name):
         return name not in drop and facts.get(name, "unknown") != "unknown"
 
-    for name in OPEN:
-        if known(name):
-            raise AssertionError("no fixture shape for %s: the spec gives no anchor for it. "
-                                 "Name the anchor in binary_text()." % name)
-    parts = [prelude, 'var %s={VERSION:"%s",product:"claude-code"};' % (n["obj"], version)]
+    parts =[prelude, 'var %s={VERSION:"%s",product:"claude-code"};' % (n["obj"], version)]
     if known("idle_compaction_default"):
         parts.append('%s("idleCompaction",%s);'
                      % (n["N"], _bang(facts["idle_compaction_default"])))
@@ -104,6 +96,12 @@ def binary_text(version, facts, names=NAMES, drop=(), prelude=""):
         parts.append('var %s=13000;var %s=3000,%s=%r;%s("tengu_amber_rokovoko",%s);'
                      % (n["oQt"], n["rjr"], n["gke"], facts["summary_fraction_default"],
                         n["V"], n["gke"]))
+    if known("output_reserve"):
+        parts.append("Math.min(%s.maxOutputTokens,%s);var %s=%s;"
+                     % (n["obj"], n["out"], n["out"], facts["output_reserve"]))
+    if known("blocking_margin"):
+        parts.append('var %s=%s;var %s={buf:(%s.limit)-%s:void 0,id:"autocompact_buffer"};'
+                     % (n["blk"], facts["blocking_margin"], n["bf"], n["obj"], n["blk"]))
     return "".join(parts)
 
 
@@ -360,6 +358,46 @@ class BaselineTests(ScratchCase):
         if hasattr(precompact_handoff, "SUMMARY_FRACTION"):
             self.assertEqual(precompact_handoff.SUMMARY_FRACTION,
                              base["facts"]["summary_fraction_default"])
+
+
+class ReserveBaselineTests(ScratchCase):
+    def test_the_baseline_holds_blocking_margin_13000_and_output_reserve_20000(self):
+        base = self.baseline()
+        self.assertEqual(base["facts"].get("blocking_margin"), 13000,
+                         "the baseline does not hold blocking_margin 13000")
+        self.assertEqual(base["facts"].get("output_reserve"), 20000,
+                         "the baseline does not hold output_reserve 20000")
+
+
+class BlockingBumpTests(ScratchCase):
+    def test_a_blocking_margin_bump_from_13000_to_15000_prints_one_line_naming_both(self):
+        check = self.need("cc_version_check")
+        base = self.baseline()
+        self.assertEqual(base["facts"].get("blocking_margin"), 13000,
+                         "the baseline does not hold blocking_margin 13000")
+        facts = dict(base["facts"], blocking_margin=15000)
+        line = check(env=self.env(self.write_binary(binary_bytes(NEXT_VERSION, facts))),
+                     config=self.config)
+        self.assert_one_line(line)
+        self.assertIn("blocking_margin", line)
+        self.assertRegex(line, r"(?<!\d)13000(?!\d)")
+        self.assertRegex(line, r"(?<!\d)15000(?!\d)")
+
+
+class RenamedReserveTests(ScratchCase):
+    def test_renamed_identifiers_with_the_same_two_values_stay_silent(self):
+        facts = self.need("cc_facts")
+        check = self.need("cc_version_check")
+        base = self.baseline()
+        self.assertEqual(base["facts"].get("blocking_margin"), 13000,
+                         "the baseline does not hold blocking_margin 13000")
+        self.assertEqual(base["facts"].get("output_reserve"), 20000,
+                         "the baseline does not hold output_reserve 20000")
+        data = binary_bytes(NEXT_VERSION, base["facts"], names=RENAMED)
+        read = facts(data)
+        self.assertEqual(read["blocking_margin"], 13000)
+        self.assertEqual(read["output_reserve"], 20000)
+        self.assertEqual(check(env=self.env(self.write_binary(data)), config=self.config), "")
 
 
 def tearDownModule():
