@@ -1,9 +1,9 @@
 {
- "title": "One shared craft book: what a session learns in one repo, the next repo starts with",
+ "title": "shivpedia: what a session learns in one repo, the next repo starts with",
  "phase": "cleanup",
  "status": "todo",
  "order": 102.7,
  "why": "Owner, Nov 1 21:02 CST: \"even broader than this, it's like if i learned how to build seomthing better one way, i should be able to utilize that again some other day\" Just how a carpenter gets more skilled with his experience, similarly we should too, rather than always being a new laborer in each repo!\". Grep found no home for lessons today (only decision guard-guards-mistakes-only mentions one).",
- "note": "One shared craft book in claude-settings, by topic (testing, CI, merging and batches, guards and checks, UI and design, records and prose, orchestration). Each entry: one \"do this\" line, the evidence that earned it (repo, PR or incident), and where it applies. Feed: every lane's closing report names its lessons (zero is fine); a harvester (triage or the lane close step) folds each into the book, or into the skill that owns the topic (one home per capability). Reuse: a session loads the topics its task touches before it plans, by path or by task. Measure: a lesson that repeats as a new incident counts as a miss. Step test-practices-first-principles becomes its testing chapter. Source: coordinator Nov 1 21:20 CST. Port: yes, every repo. Ready; placed high in order.",
- "updatedAt": "2026-11-02T03:21:00Z"
+ "note": "Name (owner, Nov 1 21:05 CST): \"we pull in claude-settings as the overarching parent for all the other repos for a reason -- call it shivpedia\". One shared book, shivpedia, in claude-settings, by topic (testing, CI, merging and batches, guards and checks, UI and design, records and prose, orchestration). Each entry: one \"do this\" line, the evidence that earned it (repo, PR or incident), and where it applies. Feed: every lane's closing report names its lessons (zero is fine); a harvester (triage or the lane close step) folds each into the book, or into the skill that owns the topic (one home per capability). Reuse: a session loads the topics its task touches before it plans, by path or by task. Measure: a lesson that repeats as a new incident counts as a miss. Step test-practices-first-principles becomes shivpedia's testing chapter. Source: coordinator Nov 1 21:20 CST. Port: yes, every repo. Ready; placed high in order.",
+ "updatedAt": "2026-11-02T03:22:00Z"
 }
