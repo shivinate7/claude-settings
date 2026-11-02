@@ -23,11 +23,18 @@ named "role model" pair matches no spawn of that role (`reports-done-names-model
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
-On any turn whose reply holds an Input Needed item that offers a pick with options, it also blocks
-unless the same main-session turn opened the question box (AskUserQuestion), or the repo has a
-waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
-waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
-check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
+options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
+holds a qualifying act (`questions-reach-page`, owner ruling 2026-11-01 23:31 CST: every question goes
+to the page writer in the same turn it is asked, no clock). The turn is every record after the last
+incoming message, a peer's included. Owner-facing session: the question box (main session), a send to
+the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
+collection items to this repo's page. Lane (own get_session record tagged cs-build:lane, or with a
+parent): a send to @parent, the parent id or the writer. A promise or a page link passes nothing. A
+repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
+does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
+transcript this hook already holds; one layout read, the own-record import (hooks/own_session.py) and one
+more transcript read, only on a turn that asks with no qualifying act (`decisions-reach-a-clickable-pick`).
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
@@ -45,7 +52,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
+from _transcript import (  # noqa: E402
+    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, send_targets,
+    tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -430,24 +439,25 @@ OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 
-# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15, 25
-# or "twenty-five". A spelled "five" after a tens word is caught in the `tens` group and refused,
-# since a fixed-width lookbehind cannot hold the tens words.
-FIVE_MINUTES_RE = re.compile(
-    r"(?<![\w.-])(?:(?P<tens>(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[ -]+)?"
-    r"five[ -]minutes?|5[ -]?min(?:ute)?s?)\b", re.I)
-PAGE_WORDS_RE = re.compile(r"\bwaiting[ -]page\b", re.I)
-
-PICK_REFUSAL = (
-    "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat "
-    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only "
-    "with nothing running, open the question box."
+OWNER_REFUSAL = (
+    "Pick guard: every question goes to the page writer in the same turn it is asked (owner, 2026-11-01 "
+    "23:31 CST). Send it now: %s. With nothing running, the question box also counts."
 )
-
-
-def names_five_minutes(section):
-    """True when `section` names the 5-minute wait, never 15, 25 or twenty-five minutes."""
-    return any(not m.group("tens") for m in FIVE_MINUTES_RE.finditer(section))
+LANE_REFUSAL = (
+    "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent "
+    "(send_message session_id @parent) now."
+)
+NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
+LANE_TAG = "cs-build:lane"
+PARENT_TARGETS = ("@parent", "parent")
+# A "?" ends a question only before whitespace or the end, so a URL query never counts. Quoted text,
+# backticked text and a blockquoted line are past words, never a question asked now.
+QUOTED_RE = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+QUESTION_MARK_RE = re.compile(r"\?(?=\s|$)")
+# The refusal route (refusals-reach-the-owner) already carries "allow `<tool>`?" to the owner: this guard
+# does not ask it twice.
+_TOOL = r"(?:`[^`\n]+`|mcp__[\w-]+)"
+REFUSAL_ASK_RE = re.compile(r"\ballow\s+" + _TOOL + r"(?:\s*(?:,|and)\s*" + _TOOL + r")*\s*\?", re.I)
 
 
 def input_needed_section(text):
@@ -486,6 +496,14 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+def asks_a_question(text):
+    """True when the Input Needed item holds a sentence that ends in "?" outside quotes, backticks and
+    blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
+    section = input_needed_section(text)
+    kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", REFUSAL_ASK_RE.sub("", kept))))
+
+
 def repo_root(cwd):
     """The nearest folder at or above `cwd` that holds a git entry, else None."""
     here = os.path.realpath(cwd or os.getcwd())
@@ -514,24 +532,51 @@ def departs_problem(text):
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
 
 
-def pick_has_a_control(records, text, cwd):
-    """True when the main session's turn opened the question box, or this repo has a waiting page
-    and the reply links it or its Input Needed item names the 5-minute wait and the page. An
-    agent's own box (isSidechain) never counts."""
-    for rec in records:
-        if rec.get("isSidechain"):
-            continue
-        if any(b.get("name") == ASK_TOOL for b in tool_uses(rec)):
-            return True
-    root = repo_root(cwd)
+def _own_lane_read(hook, path):
+    """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
+    tag cs-build:lane or a parent_session_id. No own id or no record reads as owner-facing."""
+    from override import remote_session_id
+    own_id = remote_session_id()
+    if not own_id:
+        return False, None
+    import own_session
+    tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
+    return tags is not None and (LANE_TAG in tags or bool(parent)), parent
+
+
+def question_problem(records, turn, text, hook):
+    """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
+    sentence), judged on `turn`, the records after the last incoming message (questions-reach-page).
+    Owner-facing: the question box, a send to the page writer, or an items write to this repo's page.
+    Lane: a send to the parent or the page writer. Cost: one layout read, the own-record import and a
+    transcript read, only on a turn that asks with no qualifying act."""
+    if not (offers_a_pick(text) or asks_a_question(text)):
+        return "", ""
+    main = [r for r in turn if not r.get("isSidechain")]
+    uses = [u for r in main for u in tool_uses(r)]
+    sends = [send_targets(u) for u in uses]
+    writer = page_writer_id(records)
+    lane, parent = _own_lane_read(hook, hook.get("transcript_path"))
+    if lane:
+        wanted = set(PARENT_TARGETS) | ({parent} if parent else set()) | ({writer} if writer else set())
+        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+    root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
-    if page == "unknown":
-        return False
-    page = page.rstrip("/")
-    section = input_needed_section(text)
-    if names_five_minutes(section) and PAGE_WORDS_RE.search(section):
-        return True
-    return bool(re.search(re.escape(page) + r"(?![\w-])", text))
+    if any(u.get("name") == ASK_TOOL for u in uses):
+        return "", ""
+    if writer and any(writer in t for t in sends):
+        return "", ""
+    here = None if page == "unknown" else page.rstrip("/")
+    for u in uses:
+        inp = u.get("input")
+        if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
+                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+            return "", ""
+    if here is None:
+        return "", NO_PAGE_NOTE
+    route = ("send_message to the writer " + writer if writer else
+             "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
+    return OWNER_REFUSAL % route, ""
 
 
 def names_tool(section, tool):
@@ -698,20 +743,24 @@ def main():
     for i, rec in enumerate(records):
         if is_last_human(rec):
             last_human_idx = i
-    if last_human_idx is None:
-        return stop_for_refusal()
 
-    after = records[last_human_idx + 1:]
     text = last_reply(hook)
-    if not turn_landed(after):
-        # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
-        # either fails open on its own: the Departs from check never drops the pick refusal.
-        pick = []
-        try:
-            if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-                pick.append(PICK_REFUSAL)
-        except Exception:
-            pass
+    # The pick check reads the turn after the last incoming message, a peer's included (a lane's input),
+    # and runs whether or not the transcript holds a human record. Landing and the report's shape still
+    # anchor on the last human message.
+    incoming = last_incoming_index(records)
+    turn = records if incoming is None else records[incoming + 1:]
+    after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    note = ""
+    pick_reason = ""
+    try:
+        pick_reason, note = question_problem(records, turn, text, hook)
+    except Exception:
+        pass
+    if last_human_idx is None or not turn_landed(after):
+        # An unlanded turn is judged on the question check and the Departs from check alone. An error in
+        # either fails open on its own: the Departs from check never drops the question refusal.
+        pick = [pick_reason]
         try:
             pick.append(departs_problem(text))
         except Exception:
@@ -722,6 +771,8 @@ def main():
             if pick:
                 reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
+            elif note:
+                print(json.dumps({"systemMessage": note}))
         except Exception:
             pass
         return
@@ -739,11 +790,8 @@ def main():
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
-    try:
-        if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-            reasons.append(PICK_REFUSAL)
-    except Exception:
-        pass
+    if pick_reason:
+        reasons.append(pick_reason)
     try:
         departs = departs_problem(text)
         if departs:
@@ -764,6 +812,8 @@ def main():
         else:
             write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))
+    elif note:
+        print(json.dumps({"systemMessage": note}))
 
 
 if __name__ == "__main__":
