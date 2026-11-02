@@ -63,14 +63,16 @@ except Exception as exc:  # the module does not exist yet: every case fails, non
 FAILED = []
 
 # The Edit rule text the hook sends, verbatim, after "Judge this edit to a file: $ARGUMENTS\n".
-# Its Kind clause is the target wording: a record has one Kind line (decision rulings-declare-kind),
-# and lint/check_ruling_kind.py counts it, so the judge leaves the count to the lint.
+# Ruling, lane orchestrator, process-only, 2026-11-01 22:10 CST, from rulings-declare-kind lines 10-11:
+# a second ruling section moves to its own record; the judge never asks for a Kind line, and the lint
+# counts Kind lines.
 EDIT_RULE = (
     "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
     "and no superseded ruling kept beside the new one). A record may state a current fact with its history in "
     "one clause; that is not a breach. Rule: rulings-declare-kind (refuse only an edit whose new text deletes a "
-    "`Plan:` or `Home:` line. A record has one `Kind:` line, and the lint counts it, so never refuse an edit for "
-    "a `Kind:` line; you see only the changed text). Block only on a clear breach; when "
+    "`Plan:` or `Home:` line, or adds a second ruling section to a record; the fix is to move that ruling to its "
+    "own record. A record has one `Kind:` line, and the lint counts it, so never refuse an edit for a `Kind:` "
+    "line; you see only the changed text). Block only on a clear breach; when "
     "unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and "
     "the fix, one line>\"}."
 )
@@ -436,15 +438,18 @@ def case_f_an_override_lifts_the_refusal():
     check("f: a path that is not judged spends no override", out == "" and "override" not in log, (out, log))
 
 
-# (g) rulings-declare-kind: a record has one Kind line, so the judge does not demand a Kind line for a
-# new ruling section, and does not refuse a fold that keeps the one Kind line. The model is stubbed, so
-# the rule text the judge is sent is the part of the Kind duty a case can read.
+# (g) rulings-declare-kind: the judge refuses an edit that adds a second ruling section to a record, and
+# its remedy is that ruling's own record, never a Kind line. It does not refuse a fold that keeps the one
+# Kind line. The model is stubbed, so the rule text the judge is sent is the part a case can read.
+# Ruling: lane orchestrator, process-only, 2026-11-01 22:10 CST, from rulings-declare-kind lines 10-11.
 ADD_OLD = "## How to write a test that earns its keep"
 ADD_NEW = ("## Where CI runs a suite\n\n- Each CI job runs only when a file that its suites read changes.\n\n"
            + ADD_OLD)
 FOLD_OLD = "Kind: process\nHome: " + fx.HOME_PATH  # the second Kind line of the record and its Home line
 FOLD_NEW = "Home: " + fx.HOME_PATH  # the same Home line, the second Kind line folded away
-SECTION_DEMAND = "adds a ruling section with no `Kind:` line"
+ADD_REFUSAL = "adds a second ruling section to a record"
+OWN_RECORD = "to its own record"
+KIND_ASKS = ("adds a ruling section with no `Kind:` line", "add a `Kind:` line")
 DELETE_DEMAND = "deletes a `Kind:`"
 
 
@@ -458,9 +463,13 @@ def case_g_one_kind_line_record_is_not_refused_for_a_kind_count():
     prompt = stub.prompts[0] if stub.prompts else ""
     check("g: add-section Edit: one model call with the change", len(stub.prompts) == 1 and ADD_NEW in prompt,
           len(stub.prompts))
-    check("g: add-section Edit: no rule text demands a Kind line for a new ruling section",
-          SECTION_DEMAND not in prompt,
-          "the judge demands a Kind line under a new ruling section; the decision says a record has one Kind line")
+    check("g: add-section Edit: the rule text refuses a second ruling section added to a record",
+          ADD_REFUSAL in prompt,
+          "the judge does not refuse a second ruling section; rulings-declare-kind says it needs its own record")
+    check("g: add-section Edit: the rule text's remedy is the ruling's own record",
+          OWN_RECORD in prompt, "the judge names no own-record remedy for a second ruling section")
+    check("g: add-section Edit: the rule text asks for no Kind line",
+          not any(k in prompt for k in KIND_ASKS), "the judge asks for a Kind line for the added section")
     fold = edit(path)
     fold["tool_input"].update(old_string=FOLD_OLD, new_string=FOLD_NEW)
     _, _, stub = run(fold)
