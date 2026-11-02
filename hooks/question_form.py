@@ -851,14 +851,19 @@ KEY_NAMED = re.compile(
 # A label that carries its own letter tag. The page shows each option by its key's letter, so a label that
 # opens "B: ..." under key a gives the owner two letter sets, and the answer "a" reads two ways (incident,
 # 2026-11-01 16:12 CST, in docs/decisions/option-keys-are-letters.md). One compiled pattern, one pass, no model
-# call. Start tags: "(X) ", "X: ", "X. ", "X) ", "X - " or "X — " with spaces, "Option X:", "Option X -".
-# End tag: "Option X". A letter that only starts a word is no tag: "A rail", "I think", "A/B", "X-ray", "B2B",
-# "A.I.", "e.g.", "Option 2". The tag letter is in a named group; the caller compares it in lowercase.
+# call. Only the label start is judged, after any markdown emphasis. Start tags: "(X) ", "[X] ", "X:" with any
+# text after it, "X. ", "X) ", "X - " with spaces and any dash (hyphen, U+2010 to U+2015, minus U+2212),
+# "Option X:", "Option X -", and "Option X" with an uppercase letter and a space. A letter that only starts a
+# word is no tag: "A rail", "I think", "A/B", "X-ray", "B2B", "A.I.", "e.g.", "Plan B: fallback", "Option 2",
+# and a mid-label or end-of-label "option B" is a reference, not a tag. The tag letter is in a named group; the
+# caller compares it in lowercase.
+_DASH = "[-\u2010-\u2015\u2212]"
 LABEL_LETTER_TAG = re.compile(
-    r"^\s*(?:\((?P<paren>[a-z])\)\s"
-    r"|(?P<plain>[a-z])(?:[:.)]\s|\s[-–—]\s)"
-    r"|option\s+(?P<word>[a-z])\s*(?::|\s[-–—](?:\s|$)))"
-    r"|\boption\s+(?P<tail>[a-z])\s*$",
+    r"^\s*[*_`~]*(?:\((?P<paren>[a-z])\)\s"
+    r"|\[(?P<brack>[a-z])\]\s"
+    r"|(?P<plain>[a-z])[*_`~]*(?::|[.)][*_`~]*\s|\s" + _DASH + r"\s)"
+    r"|option\s+(?P<word>[a-z])\s*(?::|\s" + _DASH + r"(?:\s|$))"
+    r"|option\s+(?P<cap>(?-i:[A-Z]))(?:\s|$))",
     re.I)
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
@@ -873,7 +878,7 @@ def label_tag_letter(label) -> str:
     m = LABEL_LETTER_TAG.search(label)
     if not m:
         return ""
-    return next(g for g in m.group("paren", "plain", "word", "tail") if g).lower()
+    return next(g for g in m.group("paren", "brack", "plain", "word", "cap") if g).lower()
 
 
 def _letter_of(index: int) -> str:
@@ -924,13 +929,13 @@ def option_letter_hit(op: str, data) -> str:
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
         designs = data.get("designs") if isinstance(data.get("designs"), list) else []
-        labels = {d.get("slug"): d.get("label") for d in designs if isinstance(d, dict)}
+        labels = {d["slug"]: d.get("label") for d in designs if isinstance(d, dict) and isinstance(d.get("slug"), str)}
         for o in options:
-            tag = label_tag_letter(o.get("label"))
-            if not tag and isinstance(o.get("design"), str):
-                tag = label_tag_letter(labels.get(o["design"]))
-            if tag and tag != o["key"]:
-                return "option label that carries the letter " + tag + " under key " + o["key"]
+            slug = o.get("design")
+            for label in (o.get("label"), labels.get(slug) if isinstance(slug, str) else None):
+                tag = label_tag_letter(label)
+                if tag and tag != o["key"]:
+                    return "option label that carries the letter " + tag + " under key " + o["key"]
     return key_named_hit(_item_text_fields(data))
 
 
