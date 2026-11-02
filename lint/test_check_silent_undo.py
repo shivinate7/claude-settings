@@ -857,7 +857,7 @@ on:
         run: python3 -m unittest discover -s lint
       - name: Report the result
         run: python3 lint/report.py --format json
-  lint:
+{allpass}  lint:
     runs-on: ubuntu-latest
 {t_lint}    steps:
       - name: Check out
@@ -874,9 +874,9 @@ PINS = PIN + "".join("      - uses: actions/%s@%s # %s\n" % x for x in (
     ("upload-artifact", "b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882", "v4.4.3")))
 
 
-def workflow(name="gates", perm="", t_build="", t_lint="", pins=""):
+def workflow(name="gates", perm="", t_build="", t_lint="", pins="", allpass=""):
     """The workflow file as the base has it. Each block keyword is what main's earlier PR adds."""
-    return WORKFLOW_YML.format(name=name, perm=perm, t_build=t_build, t_lint=t_lint, pins=pins)
+    return WORKFLOW_YML.format(name=name, perm=perm, t_build=t_build, t_lint=t_lint, pins=pins, allpass=allpass)
 
 
 def after_51(**edits):
@@ -989,8 +989,9 @@ class RenamedFile(unittest.TestCase):
         self.r.commit("bump a pin")
         self.assertEqual(self.r.verdict(), [])
 
-    def conflicted_limit(self, renamed):
-        """Main moves the limit 10 to 15; the branch moves it to 20, renamed or not; the merge resolves to 30, a third value."""
+    def conflicted_limit(self, renamed, main_renames=False):
+        """Main moves the limit 10 to 15, renaming the file first when main_renames; the branch moves it to 20, renamed
+        or not; the merge resolves to 30, a third value, at the name the merge keeps."""
         r, limit = self.r, lambda n: workflow(t_build="    timeout-minutes: %d\n" % n)
         r.put(self.OLD, limit(10))
         r.commit("set a limit")
@@ -1001,12 +1002,14 @@ class RenamedFile(unittest.TestCase):
         r.put(self.NEW if renamed else self.OLD, limit(20))
         r.commit("move the limit to 20")
         r.sh("checkout", "-q", "main")
-        r.put(self.OLD, limit(15))
+        if main_renames:
+            r.sh("mv", self.OLD, self.NEW)
+        r.put(self.NEW if main_renames else self.OLD, limit(15))
         r.commit("move the limit to 15")
         r.push()
         r.sh("checkout", "-q", "ren")
         r.sh("merge", "--no-edit", "origin/main", ok=False)  # both sides moved the line: a conflict
-        r.put(self.NEW if renamed else self.OLD, limit(30))
+        r.put(self.NEW if renamed or main_renames else self.OLD, limit(30))
         r.sh("add", "-A")
         r.sh("commit", "-q", "--no-edit")
 
@@ -1019,6 +1022,113 @@ class RenamedFile(unittest.TestCase):
     def test_the_same_merge_with_a_third_value_in_place_is_green(self):  # control
         self.conflicted_limit(renamed=False)
         self.assertEqual(self.r.verdict(), [])
+
+    def test_main_renames_then_a_merge_that_resolves_a_changed_line_to_a_third_value_is_green(self):
+        """The mod read for a path main renamed. The base holds the limit only under the old name, so main's edit reads
+        across the two names, and the rewrite excuse holds as it does in place (the control above). Read at the new
+        name, the base has no such file, the excuse fails, and the merge is refused."""
+        self.conflicted_limit(renamed=False, main_renames=True)
+        self.assertEqual(self.r.sh("ls-tree", "--name-only", "origin/main", "--", self.OLD), "", "main must rename the file")
+        self.assertIn("timeout-minutes: 30", self.r.sh("show", "HEAD:" + self.NEW))
+        self.assertEqual(self.r.verdict(), [])
+
+
+ALLPASS = "      - uses: shivinate7/claude-settings/actions/all-jobs-passed@1cc47f015bdaf073d8cb0f043a988c28d09aa3e1 # main, Oct %d\n"
+
+
+class PinComment:
+    """Steps the pin-comment cases share: the old and new path, the merge of main, and the drop check."""
+    OLD, NEW = RenamedFile.OLD, RenamedFile.NEW
+
+    def merge_main(self, resolve=None):
+        """Merge main. With resolve, the merge is held, resolve(text) sets the new path, and that is the merge commit."""
+        r = self.r
+        if resolve is None:
+            r.sh("merge", "-q", "--no-edit", "origin/main")
+            return
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        with open(os.path.join(r.dir, self.NEW)) as f:
+            merged = f.read()
+        r.put(self.NEW, resolve(merged))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main into the rename")
+
+    def assertDropsPinLine(self, got):
+        self.assertTrue(any("drops 1 line" in p and "all-jobs-passed" in p for p in got), got)
+
+
+class RenamedPinComment(PinComment, unittest.TestCase):
+    """Main edits one pinned line after the branch cut: only its trailing comment date. The branch renames the file
+    and bumps a pin. The merge of main must carry the date to the new path. Git pairs the rename at 90 percent
+    similarity in both directions, which can make a merge write the older date (29) where main wrote 30. Cases: a
+    merge that carries main's date is green; a merge that drops the line is refused; a merge that writes the older
+    date is refused by the line rule. A comment-only change stays a drop, as on main."""
+
+    def setUp(self):
+        r = self.r = Repo()
+        r.put(self.OLD, workflow(allpass=ALLPASS % 29))
+        r.commit("base")
+        r.push()
+        r.sh("checkout", "-q", "-b", "ren")
+        r.sh("mv", self.OLD, self.NEW)
+        r.put(self.NEW, workflow(name="checks", pins=PINS.replace(PIN, PIN_BUMPED), allpass=ALLPASS % 29))
+        r.commit("rename gates to checks and bump a pin")
+        r.sh("checkout", "-q", "main")
+        r.put(self.OLD, workflow(allpass=ALLPASS % 30))
+        r.commit("main edits the all-jobs-passed date")
+        r.push()
+        r.sh("checkout", "-q", "ren")
+
+    def test_a_rename_then_a_merge_that_carries_main_s_edited_date_is_green(self):
+        self.merge_main()
+        self.assertIn((ALLPASS % 30).rstrip("\n"), self.r.sh("show", "HEAD:" + self.NEW))
+        self.assertEqual(RenamedFile.paired(self), ["R"])
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_rename_then_a_merge_that_drops_main_s_edited_line_is_refused(self):
+        self.merge_main(resolve=lambda text: text.replace(ALLPASS % 30, ""))
+        self.assertNotIn("all-jobs-passed", self.r.sh("show", "HEAD:" + self.NEW))
+        self.assertDropsPinLine(self.r.verdict())
+
+    def test_a_rename_then_a_merge_that_writes_the_older_date_is_refused(self):
+        """The incident's shape: the same SHA, the older comment date. Refused today by the line rule."""
+        self.merge_main(resolve=lambda text: text.replace(ALLPASS % 30, ALLPASS % 29))
+        self.assertDropsPinLine(self.r.verdict())
+
+
+class RenamedOnMain(PinComment, unittest.TestCase):
+    """Main renames the file, and the branch edits the pinned line's date on the old name after the cut. The merge
+    of main carries that edit to the new path, so it is the branch's own work: green. The check reads main's side of
+    the rename, and the base holds the line only under the old name, so the base lookup misses it and the line counts
+    as main's and is refused. Twin: main edits the line on the new name and the merge drops that edit: refused."""
+
+    def build(self, main_edits):
+        r = self.r = Repo()
+        r.put(self.OLD, workflow(allpass=ALLPASS % 29))
+        r.commit("base")
+        r.push()
+        r.sh("checkout", "-q", "-b", "edit")
+        branch = workflow(allpass=ALLPASS % 29, pins=PINS.replace(PIN, PIN_BUMPED)) if main_edits else workflow(allpass=ALLPASS % 30)
+        r.put(self.OLD, branch)
+        r.commit("the branch's own edit on the old name")
+        r.sh("checkout", "-q", "main")
+        r.sh("mv", self.OLD, self.NEW)
+        if main_edits:
+            r.put(self.NEW, workflow(allpass=ALLPASS % 30))
+        r.commit("rename gates to checks")
+        r.push()
+        r.sh("checkout", "-q", "edit")
+
+    def test_the_branch_edits_the_old_name_and_a_merge_of_main_that_renamed_it_is_green(self):
+        self.build(main_edits=False)
+        self.merge_main()
+        self.assertIn((ALLPASS % 30).rstrip("\n"), self.r.sh("show", "HEAD:" + self.NEW))
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_main_edits_the_line_on_the_new_name_and_a_merge_that_drops_that_edit_is_refused(self):
+        self.build(main_edits=True)
+        self.merge_main(resolve=lambda text: text.replace(ALLPASS % 30, ""))
+        self.assertDropsPinLine(self.r.verdict())
 
 
 class Unknown(unittest.TestCase):

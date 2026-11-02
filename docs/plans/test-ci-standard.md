@@ -60,7 +60,6 @@ claude-settings itself meets S1, S12 and S13 by guard and CI. Its own gaps:
   `roles-each-layer-proves-once` asks for red on the old code.
 - At commit and push, the guard only logs a builder's test edit (`hooks/guard.py:1688-1695`). Three
   sessions routed around the write refusal on 2026-10-31 (decision `guard-that-cries-wolf-is-spent`, a guard that cries wolf is spent).
-- `bin/verdict` prints PASS for a run with skips (debt `verdict-skip-reads-pass`).
 - 60 `time.sleep(` calls in tests; no check enforces the no-fixed-sleep rule.
 - Stale records: `same-check-kinds.md:20` says there is no `all-jobs-passed` job;
   `lint/rule_mechanisms.json:215` calls `git-never-merge-failing-ci` unmechanized; cap

@@ -9,7 +9,9 @@
   "permissions": {
     "allow": [
       "Bash(gh pr merge:*)",
-      "mcp__Claude_Browser"
+      "mcp__Claude_Browser",
+      "mcp__claude-code-remote__add_repo",
+      "mcp__claude-code-remote__archive_session"
     ],
     "deny": [
       "Read(.env)",
@@ -34,7 +36,7 @@
     "allow": [
       "$defaults",
       "Archived Branch Delete: Deleting a git branch is lossless, and allowed, once its tip is kept elsewhere. That holds in two cases. (1) Earlier in this session the agent pushed that same branch to an archive ref on the same remote, as `git push origin <branch>:refs/heads/archive/<branch>` (or a fallback name such as `archive/<branch>-2`, never with force), and made no commit, reset, rebase or amend on the branch since. Then `git branch -D <branch>`, `git branch -d <branch>`, `git push origin --delete <branch>` and `git push origin :<branch>` for that branch are allowed. (2) The branch is already in the default branch: `git branch -d <branch>` (git itself refuses an unmerged branch), or a delete of a branch whose pull request this session visibly merged. This is the owner's standing rule shared-trees-archive-then-delete in CLAUDE.md: once the archive push succeeds, delete with no question. Never covers deleting an `archive/` ref, the default branch, a tag or a release, a force push, or a branch whose archive push this session did not visibly run.",
-      "Owner PR Housekeeping: Closing a pull request, or marking the batch's integration pull request ready for review, is routine and can be undone, because a closed pull request can be reopened and a ready one can go back to draft. Both are allowed only in a repo owned by shivinate7. Closing is allowed only when the coordinator or batch runner session named that pull request in the visible conversation as replaced, empty or batched. Marking ready is allowed only for the batch's integration pull request, named as such by the coordinator or batch runner session in the visible conversation, because lane pull requests stay draft (rule git-integration-branch-merge). The forms are `gh pr close`, `gh pr ready`, `gh api -X PATCH repos/shivinate7/<repo>/pulls/<n> -f state=closed`, and `mcp__github__update_pull_request` with state closed or draft false. Measured example, refused on 2026-10-30: `gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed`. Never covers a merge, an approval, a review, a title or body edit, a change of a pull request's base branch, a branch or ref delete (including `gh pr close --delete-branch`, which deletes the branch), marking ready a lane pull request or any pull request with auto-merge on (that merges it), a force push, a pull request nobody named, or a repo of another owner (outside shivinate7).",
+      "Owner PR Housekeeping: Closing a pull request, or marking an integration pull request ready for review, is routine and can be undone, because a closed pull request can be reopened and a ready one can go back to draft. Both are allowed only in a repo owned by shivinate7. Closing is allowed only when the coordinator or batch runner session named that pull request in the visible conversation as replaced, empty or batched. Marking ready is allowed only for an integration pull request that the visible conversation names as such, in one of two cases. First case: the batch's integration pull request, or a lone lane's pull request (a lone lane is its own integration pull request, rule git-integration-branch-merge), named so by the coordinator or batch runner session. Second case: the one pull request of a solo or one-lane session that no coordinator started, named so by that session. A lane pull request that joins a batch stays draft. The forms are `gh pr close`, `gh pr ready`, `gh api -X PATCH repos/shivinate7/<repo>/pulls/<n> -f state=closed`, and `mcp__github__update_pull_request` with state closed or draft false. Measured example, refused on 2026-10-30: `gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed`. Refusals reported by the coordinator of marking a lone lane's pull request ready, reason \"Unrequested Commit in a Connected App\": q_max #997 at 16:28 CST and banchi #1004 at 17:36 CST (coordinator-reported, unmeasured). Never covers a merge, an approval, a review, a title or body edit, a change of a pull request's base branch, a branch or ref delete (including `gh pr close --delete-branch`, which deletes the branch), marking ready a lane pull request that joins a batch or any pull request with auto-merge on (that merges it), a force push, a pull request nobody named, or a repo of another owner (outside shivinate7).",
       "Owner Session Message: Sending a message with `mcp__claude-code-remote__send_message` to a session in the owner's own account is allowed. The target is one this session or its coordinator created, a `list_sessions` row with `mine: true`, or the owner's Remote Control session. The message may ask only for acts the owner already granted in the visible conversation or in a repo CLAUDE.md. Never covers asking the target to change permissions, settings or overrides, or to merge, and never `priority: now`, which interrupts the target's running turn, and never a post people read (such as `visibility: posted_to_shared_channel`), and never a session outside the owner's account."
     ]
   },
@@ -103,7 +105,7 @@
           {
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/feedback_guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
-            "timeout": 10
+            "timeout": 60
           }
         ]
       },
@@ -154,7 +156,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"$CLAUDE_CODE_REMOTE\" ] && exit 0; ( trap '' HUP; k=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; d=$(sed -n \"s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p\" \"$k/CLAUDE.md\" | head -n1); case \"$d\" in \"~\"/*) d=\"$HOME${d#\\~}\";; esac; [ -n \"$d\" ] || exit 0; c=$(git -C \"$d\" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'); [ -n \"$c\" ] && cd \"$c\" 2>/dev/null && command -v bash >/dev/null 2>&1 || exit 0; w() { printf '%s session-start hook: %s\\n' \"$(date +%Y-%m-%dT%H:%M:%S)\" \"$(printf '%s' \"$1\" | tr '\\n' ' ')\" >> \"$k/claude-settings-install.log\" 2>/dev/null; }; l=\"$k/.claude-settings-pull.lock\"; [ -z \"$(find \"$l\" -maxdepth 0 -mmin +10 2>/dev/null)\" ] || rmdir \"$l\" 2>/dev/null; mkdir \"$l\" 2>/dev/null || exit 0; trap 'rmdir \"$l\" 2>/dev/null' EXIT; export GIT_TERMINAL_PROMPT=0; if e=$(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 fetch -q origin main 2>&1); then t=$(git worktree list --porcelain | awk '/^worktree /{p=substr($0,10)} $0==\"branch refs/heads/main\"{print p; exit}'); if [ -z \"$t\" ]; then git merge-base --is-ancestor refs/remotes/origin/main refs/heads/main >/dev/null 2>&1 || e=$(git fetch -q . refs/remotes/origin/main:refs/heads/main 2>&1) || w \"local main did not fast-forward to origin/main: $e\"; elif [ -n \"$(git -C \"$t\" status --porcelain --untracked-files=no 2>/dev/null)\" ]; then w \"$t holds main with tracked changes, so main was not moved\"; else e=$(git -C \"$t\" merge -q --ff-only origin/main 2>&1) || w \"main in $t did not fast-forward to origin/main: $e\"; fi; else w \"fetch of origin/main failed: $e\"; fi; [ \"$(git -C \"$d\" rev-parse HEAD 2>/dev/null)\" = \"$(git rev-parse refs/heads/main 2>/dev/null)\" ] || { e=$(bash merge/install_from_main.sh 2>&1 >/dev/null) || w \"the pin install failed: $e\"; }; exit 0 ) </dev/null >/dev/null 2>&1 & exit 0",
+            "command": "[ -n \"$CLAUDE_CODE_REMOTE\" ] && exit 0; ( trap '' HUP; k=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; d=$(sed -n \"s|^@\\(.*\\)/CLAUDE\\.md$|\\1|p\" \"$k/CLAUDE.md\" | head -n1); case \"$d\" in \"~\"/*) d=\"$HOME${d#\\~}\";; esac; [ -n \"$d\" ] || exit 0; c=$(git -C \"$d\" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'); [ -n \"$c\" ] && cd \"$c\" 2>/dev/null && command -v bash >/dev/null 2>&1 || exit 0; w() { zt=$(date +%Y-%m-%dT%H:%M:%S%z); printf '%s:%s session-start hook: %s\\n' \"${zt%??}\" \"${zt#${zt%??}}\" \"$(printf '%s' \"$1\" | tr '\\n' ' ')\" >> \"$k/claude-settings-install.log\" 2>/dev/null; }; l=\"$k/.claude-settings-pull.lock\"; [ -z \"$(find \"$l\" -maxdepth 0 -mmin +10 2>/dev/null)\" ] || rmdir \"$l\" 2>/dev/null; mkdir \"$l\" 2>/dev/null || exit 0; trap 'rmdir \"$l\" 2>/dev/null' EXIT; export GIT_TERMINAL_PROMPT=0; if e=$(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 fetch -q origin main 2>&1); then t=$(git worktree list --porcelain | awk '/^worktree /{p=substr($0,10)} $0==\"branch refs/heads/main\"{print p; exit}'); if [ -z \"$t\" ]; then git merge-base --is-ancestor refs/remotes/origin/main refs/heads/main >/dev/null 2>&1 || e=$(git fetch -q . refs/remotes/origin/main:refs/heads/main 2>&1) || w \"local main did not fast-forward to origin/main: $e\"; elif [ -n \"$(git -C \"$t\" status --porcelain --untracked-files=no 2>/dev/null)\" ]; then w \"$t holds main with tracked changes, so main was not moved\"; else e=$(git -C \"$t\" merge -q --ff-only origin/main 2>&1) || w \"main in $t did not fast-forward to origin/main: $e\"; fi; else w \"fetch of origin/main failed: $e\"; fi; [ \"$(git -C \"$d\" rev-parse HEAD 2>/dev/null)\" = \"$(git rev-parse refs/heads/main 2>/dev/null)\" ] || { e=$(bash merge/install_from_main.sh 2>&1 >/dev/null) || w \"the pin install failed: $e\"; }; exit 0 ) </dev/null >/dev/null 2>&1 & exit 0",
             "timeout": 20
           }
         ]
@@ -223,7 +225,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Workflow|Skill|mcp__ccd_session__start_session|mcp__claude-code-remote__create_session|mcp__Claude_Code_iOS_Simulator__control|Artifact|ArtifactData|ExitWorktree|mcp__claude-code-remote__confirm_repository_trust|mcp__claude-code-remote__request_computer_folder",
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Workflow|Skill|mcp__ccd_session__start_session|mcp__claude-code-remote__create_session|mcp__Claude_Code_iOS_Simulator__control|Artifact|ArtifactData|ExitWorktree|mcp__claude-code-remote__confirm_repository_trust|mcp__claude-code-remote__request_computer_folder|mcp__claude-code-remote__archive_session",
         "hooks": [
           {
             "type": "command",
@@ -389,6 +391,17 @@
         ]
       }
     ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/refusal_note.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "hooks": [
@@ -443,6 +456,7 @@
   },
   "outputStyle": "shiv-stylisms",
   "autoCompactWindow": 500000,
+  "idleCompaction": false,
   "advisorModel": "opus",
   "fastModePerSessionOptIn": true,
   "autoUpdatesChannel": "latest",

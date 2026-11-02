@@ -13,9 +13,12 @@ The cases pin this contract:
 - Line numbers follow `ast` and `tokenize`, which break lines on \\r\\n, \\r and \\n only. A U+2028, U+2029,
   \\x0b, \\x0c, \\x1c-\\x1e or \\x85 inside a string never shifts a reported line or hides an added one.
 - Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
+- `--exclude PREFIX` skips the files under that path prefix. Repeat it for each prefix.
+- JS, TS, Astro and Swift comments follow the same rule. The same words in their strings or template text never fail.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
+import json
 import os
 import re
 import shutil
@@ -27,10 +30,17 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 MODULE = os.path.join(HERE, "check_comment_narration.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+STANDARD = os.path.join(HERE, "..", "actions", "code-check", "standard.json")
+with open(STANDARD, encoding="utf-8") as f:
+    TS_PIN = json.load(f)["tools"]["typescript"]
+NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
+                                "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 
 # Text that one of the six patterns must flag, in a comment or in a docstring line.
 FLAGGED = [
@@ -64,12 +74,19 @@ def at(src, needle):
     raise AssertionError("fixture lacks %r" % needle)
 
 
+def lines_of(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return f.read().splitlines()
+
+
 class Case(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
-        self.tree = tempfile.mkdtemp(prefix="cnl_")
+        self.tree = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.tree, True)
-        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, whatever they become
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks", "actions/code-check")  # the imports and the standard
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_comment_narration.py"))
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
@@ -98,12 +115,34 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args):
+    def lint(self, *args, path_tools=False, env=None):
         args = args or ("--base", "origin/main")
+        run_env = dict(GIT_ENV, **(env or {}))
+        run_env.pop("CODE_CHECK_TOOLS", None)
+        if path_tools:
+            run_env["CODE_CHECK_TOOLS"] = "path"
         r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_comment_narration.py"), *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env=GIT_ENV)
+                           env=run_env)
         return r.returncode, r.stdout + r.stderr
+
+    def fake_tool(self, name, body):
+        """A stub command first on PATH that runs body, with @LOG@ as its log file. Returns (env, log path)."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        log = os.path.join(folder, name + ".log")
+        with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\n" + body.replace("@LOG@", log))
+        os.chmod(os.path.join(folder, name), 0o755)
+        return {"PATH": os.pathsep.join([folder, GIT_ENV["PATH"]])}, log
+
+    def path_with(self, *tools):
+        """A PATH holding only the named tools, each linked from this machine. Returns {"PATH": folder}."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        for tool in tools:
+            os.symlink(shutil.which(tool, path=GIT_ENV["PATH"]), os.path.join(folder, tool))
+        return {"PATH": folder}
 
     def hit_line(self, out, path, line):
         """The output line that names path:line, or None."""
@@ -285,12 +324,13 @@ class Ratchet(Case):
         self.change({"gone.py": None, "trim.py": "x = 1\ny = 2\nz = 3\n"})
         self.assertClean()
 
-    def test_only_py_files_are_read(self):
+    def test_files_outside_the_comment_languages_are_not_read(self):
         self.base({"keep.py": "x = 1\n"})
         self.change({
+            "a.rb": "# fixed in round 2\n",
+            "notes.txt": "# owner ruling 2026-10-18\n",
             "notes.md": "Fixed in round 2. Owner ruling 2026-10-18.\n",
             "run.sh": "# fixed in round 2\n",
-            "app.js": "// owner ruling 2026-10-18\n",
             "data.txt": "# MEASURED CORRECTED\n",
             "README": "# PR #509\n",
         })
@@ -412,6 +452,304 @@ class Scanner(Case):
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "flagged.py", at(flagged, "round 2"))
         self.assertNoHit(out, "clean.py", 2)
+
+
+class Exclude(Case):
+    def test_exclude_prefix_drops_a_narrating_line_under_it_and_not_elsewhere(self):
+        self.base({"vendor/x.py": "def f():\n    return 1\n", "pkg/mod.py": "def g():\n    return 2\n"})
+        self.change({"vendor/x.py": "def f():\n    # fixed in round 2\n    return 1\n",
+                     "pkg/mod.py": "def g():\n    # fixed in round 2\n    return 2\n"})
+        rc, out = self.lint("--base", "origin/main", "--exclude", "vendor/")
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "vendor/x.py", 2)
+        self.assertHit(out, "pkg/mod.py", 2)
+        self.assertNotIn("Traceback", out)
+
+    def test_exclude_matches_a_path_prefix_not_a_substring(self):
+        self.base({"pkg/vendor/y.py": "def f():\n    return 1\n"})
+        self.change({"pkg/vendor/y.py": "def f():\n    # fixed in round 2\n    return 1\n"})
+        rc, out = self.lint("--base", "origin/main", "--exclude", "vendor/")
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "pkg/vendor/y.py", 2)
+
+
+class Scripts(Case):
+    def test_round_comment_in_an_extensionless_python_script_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bin/tool": "#!/usr/bin/env python3\n# fixed in round 2\nprint(1)\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "bin/tool", 2)
+
+    def test_round_comment_in_a_pyi_stub_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"stub.pyi": "# fixed in round 2\ndef f(x: int) -> int: ...\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "stub.pyi", 1)
+
+    def test_round_comment_in_an_extensionless_file_without_a_shebang_is_not_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"notes/log": "# fixed in round 2\n"})
+        self.assertClean()
+
+
+@NEEDS_TSC
+class JsTsScan(Case):
+    def test_comment_openers_in_strings_do_not_hide_the_real_comment_after_them(self):
+        src = 'const a = "//";\nconst b = "fixed on 2026-10-28" + \'/*\';\nconst c = "#"; // fixed in round 2\n'
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "app.ts", 1)
+        self.assertNoHit(out, "app.ts", 2)
+        self.assertHit(out, "app.ts", 3)
+
+    def test_template_literal_text_is_not_a_comment_and_a_comment_after_it_is_flagged(self):
+        src = "const s = `\n// fixed on 2026-10-28\n`;\n// fixed in round 2\nexport default s;\n"
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "util.ts", 2)
+        self.assertHit(out, "util.ts", at(src, "round 2"))
+
+    def test_lone_quote_in_text_does_not_hide_the_comment_after_it(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": "// don't\n// fixed in round 2\nconst x = 1;\n",
+                     "view.tsx": "export const p = <p>Don't</p>;\n// fixed in round 2\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "app.js", 2)
+        self.assertHit(out, "view.tsx", 2)
+
+    def test_strings_and_template_text_holding_the_words_are_clean(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": 'const a = "// fixed in round 2";\nconst b = \'/*\';\n',
+                     "util.ts": "const s = `\n// fixed on 2026-10-28\n`;\n",
+                     "view.tsx": "export const p = <p>Don't fixed on 2026-10-28</p>;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_jsx_expression_comment_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"view.tsx": "export const p = <p>{/* fixed on 2026-10-28 */}</p>;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "view.tsx", 1)
+
+    def test_jsdoc_comment_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": "/**\n * owner ruling 2026-10-18\n */\nexport const x = 1;\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "util.ts", 2)
+
+    def test_crlf_line_endings_keep_the_line_numbers(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"crlf.ts": "const a = 1;\r\n// fixed in round 2\r\nexport {a};\r\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "crlf.ts", 2)
+
+    def test_cts_and_mts_files_are_scanned(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"a.cts": "// fixed in round 2\nexport {};\n", "b.mts": "// fixed in round 2\nexport {};\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "a.cts", 1)
+        self.assertHit(out, "b.mts", 1)
+
+
+@NEEDS_TSC
+class AstroScan(Case):
+    def test_narrating_comment_in_frontmatter_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "---\n// fixed on 2026-10-28\nconst n: number = 2;\n---\n<p>{n}</p>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 2)
+
+    def test_narrating_comment_in_script_block_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<p>x</p>\n<script>\n  // fixed in round 2\n  console.log(1);\n</script>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 3)
+
+    def test_narrating_html_comment_in_template_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<!-- fixed in round 2 -->\n<p>x</p>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 1)
+
+    def test_narrating_jsx_comment_in_template_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<p>x</p>\n{/* fixed on 2026-10-28 */}\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 2)
+
+    def test_same_words_in_template_text_are_clean(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "---\nconst n: number = 2;\n---\n<p>fixed in round 2 on 2026-10-28</p>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 0, out)
+
+    def test_comment_inside_a_template_expression_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<ul>{items.map(i => /* fixed on 2026-10-28 */ i)}</ul>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 1)
+
+    def test_narrating_words_in_style_are_not_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<p>x</p>\n<style>\n  /* fixed in round 2 */\n  p { color: red; }\n</style>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 0, out)
+
+    def test_script_comment_without_frontmatter_is_flagged(self):
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": "<script>\n  // fixed in round 2\n</script>\n<p>x</p>\n"})
+        rc, out = self.lint(path_tools=True)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "page.astro", 2)
+
+
+class SwiftScan(Case):
+    def test_comment_openers_in_strings_do_not_hide_the_real_comment_after_them(self):
+        src = 'let a = "//"\nlet b = "/*"\nlet c = 1 // fixed in round 2\n'
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": src})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "Thing.swift", 1)
+        self.assertNoHit(out, "Thing.swift", 2)
+        self.assertHit(out, "Thing.swift", 3)
+
+    def test_multi_line_string_holding_a_comment_is_text_and_a_comment_after_it_is_flagged(self):
+        src = 'let s = """\n// fixed on 2026-10-28\n"""\nlet t = 1 // fixed in round 2\n'
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": src})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "Thing.swift", 2)
+        self.assertHit(out, "Thing.swift", at(src, "round 2"))
+
+    def test_raw_string_with_a_quote_does_not_hide_the_comment_after_it(self):
+        src = 'let r = #"a"b"#; // fixed in round 2\nlet q = #"// fixed on 2026-10-28"#\n'
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Thing.swift": src})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "Thing.swift", 1)
+        self.assertNoHit(out, "Thing.swift", 2)
+
+    def test_nested_block_comment_keeps_a_narrating_line_inside_it(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Nest.swift": "/* outer\n/* inner */\nfixed in round 2\n*/\nlet x = 1\n",
+                     "Nest2.swift": "/* /* */ fixed on 2026-10-28 */\nlet y = 2\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "Nest.swift", 3)
+        self.assertHit(out, "Nest2.swift", 1)
+
+    def test_lone_quote_in_a_line_comment_does_not_hide_the_next_comment(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Quote.swift": "// don't\n// fixed in round 2\nlet x = 1\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "Quote.swift", 2)
+
+    def test_comment_openers_inside_an_interpolated_string_are_text(self):
+        src = r'let s = "\(f("// fixed on 2026-10-28"))"' + "\n" + "let t = 1 // fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Interp.swift": src})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertNoHit(out, "Interp.swift", 1)
+        self.assertHit(out, "Interp.swift", 2)
+
+    def test_doc_comment_line_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": "/// fixed in round 2\nfunc f() {}\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "Doc.swift", 1)
+
+    def test_strings_with_slashes_and_no_comment_are_clean(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Urls.swift": 'let u = "http://x"\nlet v = "/* fixed on 2026-10-28 */"\n'})
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+
+
+class Degraded(Case):
+    def test_node_failure_still_prints_python_and_swift_hits_and_exits_3(self):
+        env, _ = self.fake_tool("tsc", "echo bogus >&2\nexit 3\n")
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bad.py": "x = 1  # fixed in round 2\n", "Thing.swift": "let a = 1 // fixed on 2026-10-28\n",
+                     "app.ts": "const a = 1;\n"})
+        rc, out = self.lint(path_tools=True, env=env)
+        self.assertEqual(rc, 3, out)
+        self.assertHit(out, "bad.py", 1)
+        self.assertHit(out, "Thing.swift", 1)
+
+    def test_unreadable_python_file_does_not_hide_a_later_hit(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"a.py": "def f(:\n", "b.py": "x = 1  # fixed in round 2\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 2, out)
+        self.assertHit(out, "b.py", 1)
+
+
+class NodeCost(Case):
+    def test_one_node_process_covers_every_js_ts_and_astro_file(self):
+        env, log = self.fake_tool("node", 'echo invoked >> "@LOG@"\n')
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": "const a = 1;\n", "util.ts": "const b = 1;\n", "page.astro": "<p>x</p>\n"})
+        self.lint(path_tools=True, env=env)
+        self.assertEqual(len(lines_of(log)), 1)
+
+    def test_a_python_only_diff_starts_no_node_process(self):
+        env, log = self.fake_tool("node", 'echo invoked >> "@LOG@"\n')
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"a.py": "x = 2  # plain\n"})
+        rc, out = self.lint(path_tools=True, env=env)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(lines_of(log), [])
+
+
+class NodeTool(Case):
+    def test_no_npx_on_path_exits_3_and_still_prints_the_python_hit(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bad.py": "x = 1  # fixed in round 2\n", "app.js": "const a = 1;\n// fixed on 2026-10-28\n"})
+        rc, out = self.lint(env=self.path_with("git"))
+        self.assertEqual(rc, 3, out)
+        self.assertIn("npx", out)
+        self.assertHit(out, "bad.py", 1)
+
+
+class NpxPath(Case):
+    def test_comment_scan_starts_through_npx_with_the_pinned_typescript(self):
+        env, log = self.fake_tool("npx", 'printf "%s\\n" "$@" >> "@LOG@"\nexit 1\n')
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"app.js": "const a = 1;\n// fixed in round 2\n"})
+        rc, out = self.lint(env=env)
+        self.assertEqual(rc, 3, out)
+        argv = lines_of(log)
+        self.assertIn("--yes", argv, out)
+        self.assertIn("typescript@" + TS_PIN, argv, out)
+        self.assertIn("node", argv, out)
+        self.assertTrue(any(a.endswith("comment_scan.mjs") for a in argv), out)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":
