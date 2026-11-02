@@ -4,6 +4,8 @@ The config watch's fast exit reads this before the guard loads, so nothing here 
 guard or any sibling hook.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import pathlib
