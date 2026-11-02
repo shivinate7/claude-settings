@@ -373,6 +373,21 @@ class CommentCheck(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertSkipped(out)
 
+    def test_round_comment_is_named_when_another_python_file_does_not_parse(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+        head = {"a.py": "def add(a: int, b: int) -> int:\n    # fixed in round 2\n    return a + b\n",
+                "b.py": "def broken(:\n"}
+        rc, out = check(head, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "a.py:2", "round 2"), out)
+
+    def test_round_comment_in_an_extensionless_python_script_is_red(self):
+        base = {".code-check.json": config([]), "bin/tool": "#!/usr/bin/env python3\nprint(1)\n"}
+        head = {"bin/tool": "#!/usr/bin/env python3\n# fixed in round 2\nprint(1)\n"}
+        rc, out = check(head, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(one_line_with(out, "bin/tool:2", "round 2"), out)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)

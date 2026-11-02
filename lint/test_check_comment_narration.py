@@ -436,6 +436,27 @@ class Exclude(Case):
         self.assertHit(out, "pkg/vendor/y.py", 2)
 
 
+class Scripts(Case):
+    def test_round_comment_in_an_extensionless_python_script_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bin/tool": "#!/usr/bin/env python3\n# fixed in round 2\nprint(1)\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "bin/tool", 2)
+
+    def test_round_comment_in_a_pyi_stub_is_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"stub.pyi": "# fixed in round 2\ndef f(x: int) -> int: ...\n"})
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "stub.pyi", 1)
+
+    def test_round_comment_in_an_extensionless_file_without_a_shebang_is_not_flagged(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"notes/log": "# fixed in round 2\n"})
+        self.assertClean()
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
