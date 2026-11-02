@@ -798,22 +798,30 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     return "\n".join(_split_heredocs(cmd)[0])
 
 
-# A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), and the words of the command. A
-# quote or a comment hides no word from this reader: it can only keep more bodies in view, never fewer.
-_WRITE_TARGETS = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)").findall
+# A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
+# word that runs a file named after it. A quote or a comment hides no word from these readers: they can only
+# keep more bodies in view, never fewer.
+_WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
+_RUNNER = re.compile(r"(?:" + _SHELLS + r"|python[\d.]*|perl|ruby|node|source|\.|eval|exec|xargs|sudo|env|timeout"
+                     r"|nohup|nice|command|time)(?:\.exe|\.cmd)?").fullmatch
 
 
 def _plain_words(words):
-    return [word[2:] if word.startswith("./") else word for word in words]
+    return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
 def _runs_written_file(text: str, headers) -> bool:
-    """True when a file a heredoc writes is named again outside a write to it: `sh f`, `sh < f`, `cat f | sh`,
-    `chmod +x f && ./f` may run the body. The word is compared as written, so `$HOME/f` matches only itself."""
-    words, written = _plain_words(_WORDS(text)), _plain_words(_WRITE_TARGETS(text))
-    return any(words.count(target) > written.count(target)
-               for header in headers for target in _plain_words(_WRITE_TARGETS(header)))
+    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
+    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
+    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
+    for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
+        stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
+        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
+            return True
+    return False
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
