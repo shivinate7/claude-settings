@@ -19926,9 +19926,10 @@ CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused 
                   cs_cost_control_check))
 
 
-# 7. guard.log (owner ruling, waiting-page item 112 a, 2026-11-01 16:45 CST): each coordinator-scope refusal appends
-# exactly one guard.log line, and each override that lifts one appends exactly one line. The reader is shiv (rule
-# outcomes-mechanize-rules). A log line costs one append in the guard process already running: no process starts for it.
+# 7. guard.log: these cases pin that each coordinator-scope refusal appends exactly one guard.log line, and each
+# override that lifts one appends exactly one line, so the log counts every refusal and lift once. The log exists for
+# shiv to read (rule outcomes-mechanize-rules; waiting-page item 112 a). A log line costs one append in the guard
+# process already running: no process starts for it.
 CS_LOG_EDIT = {"file_path": CS_CODE, "new_string": "x"}
 
 
