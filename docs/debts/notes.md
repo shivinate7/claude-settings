@@ -911,4 +911,7 @@
 - answer-own-options: a reply such as "2 b" that answers the session's own options, in a repo with a waiting page, needs a send to the page writer (hooks/feedback_guard.py).
 - grant-no-word-miss: a grant with no grant word, such as "you can merge anything green" or "ok to merge", is not caught (hooks/feedback_guard.py).
 - answer-in-prose-miss: a chat answer to a page item with other text after it, such as "143 b, ok" or "143 b!", is not caught (hooks/feedback_guard.py).
-- grant-home-not-read: a grant block passes with any tracked ruling home, and the guard does not read the record; an unclosed inline fence hides the rest of the message from the grant scan (hooks/feedback_guard.py).
+- grant-home-not-read: a grant block passes with any tracked ruling home, and the guard does not read the record. An unclosed inline fence hides the rest of the message from the grant scan (hooks/feedback_guard.py).
+- grant-root-home-any: in any block with a grant word and an act word, `settings.json` and `.claude/CLAUDE.md` pass as ruling homes, even when the grant match is false (hooks/feedback_guard.py).
+- closed-token-midline: a bare `[closed]` token in mid-line, after the home, stops the standing, page and compaction open-id checks for that item (hooks/feedback_guard.py).
+- grant-scope-misses: "all repositories", "all-repos", "all the repos" and "every repository" are not scope words. A negated "you do not have approval to push" fires the check (hooks/feedback_guard.py).
