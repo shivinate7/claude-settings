@@ -24,6 +24,7 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before th
 
 Before it works, the lane re-runs on main the check behind each dated Finding or Checked claim in its
 step note. If a claim no longer holds, it stops and reports.
+Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane joins a batch, run
 `bin/ci-job checks --lint --base origin/main` once and report its verdict. It runs the fast lint steps
