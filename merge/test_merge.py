@@ -2827,20 +2827,21 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/feat")
-RUN_FIELDS = ("databaseId", "name", "workflowName", "status", "conclusion", "headSha", "headBranch", "event", "url")
+RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
 def next_runs():
-    """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion) or (name, status, conclusion, databaseId); without an id a run gets 9000 plus its place."""
+    """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
+    Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
     seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
-    return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i) for i, r in enumerate(cur)]
+    return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
     """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. No createdAt: a newer run is a larger databaseId."""
     fields = argv[argv.index("--json") + 1].split(",") if "--json" in argv else list(RUN_FIELDS)
     bad = [f for f in fields if f not in RUN_FIELDS]
     if bad:
         print('Unknown JSON field: "%s"' % bad[0]); sys.exit(1)
-    def obj(name, status, conclusion, rid):
-        full = {"databaseId": rid, "name": name, "workflowName": name, "status": status, "conclusion": conclusion, "headSha": sha,
-                "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
+    def obj(name, status, conclusion, rid, wf):
+        full = {"databaseId": rid, "name": name, "workflowName": name, "workflowDatabaseId": wf, "status": status, "conclusion": conclusion,
+                "headSha": sha, "headBranch": "feat", "event": "pull_request", "url": "https://github.com/o/r/actions/runs/%d" % rid}
         return {f: full[f] for f in fields}
     return json.dumps([obj(*r) for r in runs])
 def hold(kind):  # the first such call starts a helper that keeps this process's stdout open, as a detached git or gh helper can
@@ -3023,7 +3024,8 @@ try:
             if S.get("runs_fail"):
                 raise Refused(S["runs_fail"])
             runs = [{"id": rid, "name": n, "status": st, "conclusion": c or None, "head_sha": params["head_sha"], "head_branch": "feat",
-                     "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid} for n, st, c, rid in next_runs()]
+                     "workflow_id": wf, "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid}
+                    for n, st, c, rid, wf in next_runs()]
             finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
         runs = S.get("base_runs", [])
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
@@ -4609,17 +4611,75 @@ class SupersededRuns(Env):
         self.assertNotEqual(rc, 0, out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
+    def test_a_fail_row_of_a_cancelled_older_run_with_no_row_in_the_newer_run_is_refused(self):
+        # The newer run of the workflow reports no row for lint. A newer run that does not report a job does not clear the old run's failure.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("unit", "pass", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "red", detail)
+        rc, out = self.go(required=["unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_fail_row_of_a_cancelled_older_run_beside_a_skip_in_the_newer_run_is_refused(self):
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "skipping", job_link(NEW_RUN, 201)), ("unit", "pass", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint", "unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_fail_row_of_a_cancelled_older_run_beside_a_pending_row_of_the_newer_run_is_pending(self):
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pending", job_link(NEW_RUN, 201))],
+            [("checks", "in_progress", "", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "pending", detail)
+        self.assertEqual(self.gh_host(required=["lint"]).head_state(7), "pending: lint")
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_skip_or_cancel_row_of_a_cancelled_older_run_still_drops_beside_a_newer_skip(self):
+        self.head_rows(
+            [("lint", "skipping", job_link(OLD_RUN, 101)), ("lint", "skipping", job_link(NEW_RUN, 201)),
+             ("e2e", "cancel", job_link(OLD_RUN, 102)), ("e2e", "skipping", job_link(NEW_RUN, 202)),
+             ("unit", "pass", job_link(NEW_RUN, 203))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "cancelled", OLD_RUN)])
+        self.assertEqual(self.judged(["lint", "e2e", "unit"]), ([], []))
+        rc, out = self.go(required=["unit"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_two_workflows_sharing_a_name_do_not_supersede_each_other(self):
+        # Workflow 7 and workflow 8 are both named checks. The newer run is workflow 8's, so it does not supersede workflow 7's cancelled run,
+        # and that run's failed job stays red beside the newer run's pass.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201)), ("unit", "pass", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "success", NEW_RUN, 8), ("checks", "completed", "cancelled", OLD_RUN, 7)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint", "unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
     def test_the_fake_gives_a_heads_runs_the_same_on_both_routes(self):
         # The fake answers `gh run list --commit` and the REST runs route with the same runs, so a builder may read either.
-        self.set(runs_seq=[[("checks", "completed", "success", NEW_RUN), ("ci", "completed", "cancelled", CI_RUN), ("checks", "in_progress", "", OLD_RUN)]])
+        self.set(runs_seq=[[("checks", "completed", "success", NEW_RUN, 7), ("ci", "completed", "cancelled", CI_RUN, 8), ("checks", "in_progress", "", OLD_RUN, 7)]])
         sha, host = self.head(), self.gh_host()
-        c1, out1 = host.gh(["run", "list", "--commit", sha, "--limit", "100", "--json", "databaseId,name,status,conclusion"], self.co)
+        c1, out1 = host.gh(["run", "list", "--commit", sha, "--limit", "100", "--json", "databaseId,name,status,conclusion,workflowDatabaseId"], self.co)
         c2, out2 = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertEqual((c1, c2), (0, 0), out1 + out2)
-        listed = [(r["databaseId"], r["name"], r["status"], r["conclusion"] or None) for r in json.loads(out1)]
-        rest = [(r["id"], r["name"], r["status"], r["conclusion"]) for r in json.loads(out2)["workflow_runs"]]
+        listed = [(r["databaseId"], r["name"], r["status"], r["conclusion"] or None, r["workflowDatabaseId"]) for r in json.loads(out1)]
+        rest = [(r["id"], r["name"], r["status"], r["conclusion"], r["workflow_id"]) for r in json.loads(out2)["workflow_runs"]]
         self.assertEqual(rest, listed)
-        self.assertEqual(listed[0], (NEW_RUN, "checks", "completed", "success"))
+        self.assertEqual(listed[0], (NEW_RUN, "checks", "completed", "success", 7))
         c3, out3 = host.gh(["run", "list", "--commit", sha, "--json", "createdAt"], self.co)
         self.assertNotEqual(c3, 0, out3)  # no createdAt: a newer run is a larger run id
         self.set(runs_fail="failed to get runs: HTTP 500")
