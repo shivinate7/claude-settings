@@ -38,7 +38,8 @@ ROOT = find_root()
 ACTION = os.path.join(ROOT, "actions", "ste-lint")
 # Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
 LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",
-              "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py")
+              "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py", "lint/stale_cites.py",
+              "hooks/_nowindow.py")
 PIN = re.compile(r"[\w.-]+/claude-settings/actions/ste-lint@([0-9a-f]{40})")
 
 

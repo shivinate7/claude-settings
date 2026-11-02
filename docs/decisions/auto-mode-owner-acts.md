@@ -22,6 +22,8 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only the batch's integration pull request, named as such there | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
+| `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
+| `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
@@ -43,6 +45,18 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 - Risk: named incident. On the Mac, the probe branches of c53 (the cloud merge tool) were archived, then the deletes were refused and the owner was asked again.
 - Check: the test reads the remedy's commands from the guard constant and fails until the entry quotes each one.
 - Gap: the classifier sees commands, not their output. A failed archive push followed by a delete is still allowed by this entry. The guard's own remote-contains test still refuses the local `git branch -D` then.
+
+### Remote tool allow rules
+
+Both are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately, with these exceptions:" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
+
+One exception that can apply: an MCP tool marked `requiresUserInteraction` prompts even when an allow rule matches. Unknown whether these two tools are marked so.
+
+- Incident, coordinator-reported, not measured here. The coordinator session (session_013NEJL2pASwRjgJDnsvnpNe) relayed on 2026-11-01: the auto-mode classifier refused `archive_session` from 2026-10-31 on, and about 40 idle sessions stayed open. It refused `add_repo` in repo `degen` at 16:46 CST and in repo `joyous` at 17:14 CST, with the reason "Access Added As A Means".
+- `add_repo` loses nothing. It attaches a repo to the session and mints credentials for it.
+- `archive_session` fails the test "can be undone, or loses nothing". Unarchive gives a fresh container, so unpushed work in the old one is lost. The owner waives that test. Their typed go, 2026-11-01 17:37 CST, covers both tools. It is the verbatim grant: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow". The rule covers any session in the account.
+- Never covers `add_repo`: any other remote tool, or the server-level form.
+- Never covers `archive_session`: any other remote tool, or the server-level form.
 
 ### Incidents for the owner PR and owner message entries
 
