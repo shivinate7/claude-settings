@@ -1523,6 +1523,12 @@ def designer_path_ok(rel: str) -> bool:
     return "/".join(parts).startswith(folder + "/")
 
 
+def drive_form_cwd(cwd: str) -> str:
+    """A Git Bash `/c/Users/...` cwd in drive form (`C:/Users/...`) on Windows, else `cwd` as given.
+    Off Windows `/c/` is a real folder. `_expanded` is the one reader of the drive spelling."""
+    return _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+
+
 def repo_rel(path: str, cwd: str, outside: bool = True):
     """The path relative to its repository root (the nearest parent holding `.git`), posix, or the
     full path when it sits in no repository (`outside` False: None there). None when it cannot be
@@ -1565,8 +1571,11 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if rel.lower().endswith(".md") else target
     # From a call that runs in a repository, a path in no repository is no test of it, as for the author
     # above. From a call in no repository nothing says which paths are outside, so the shape decides.
-    if (repo_rel(os.path.join(cwd or "", "x"), cwd, outside=False) is not None
-            and repo_rel(target, cwd, outside=False) is None):
+    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
+    # read but not from the probe, and the target would then count as outside.
+    where = drive_form_cwd(cwd)
+    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
+            and repo_rel(target, where, outside=False) is None):
         return ""
     if is_test_rel(rel):
         return target
@@ -3098,7 +3107,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
-    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    home_cwd = drive_form_cwd(cwd)
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""
