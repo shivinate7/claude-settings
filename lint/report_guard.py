@@ -586,7 +586,7 @@ def refusal_reason(tools):
     return (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in docs/debts/notes.md that names it." % names)
+        "and a line in the repo's debt notes file (notes.md) that names it." % names)
 
 
 def _marker_path(hook):
