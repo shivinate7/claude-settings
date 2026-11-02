@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 484.100003,
  "why": "Owner ask, typed into batch runner 7 at 11:00 CST Nov 2: export the waiting-page data to records/waiting/ in each repo, with a secret scan and a layout check.",
- "note": "Lane waiting-data-in-repo (session_013NEJL2qwcH6wayAtp2var5), started 11:01 CST by the coordinator. Owner hold: its draft PR merges only on the owner's word. Port: yes, to each repo.",
- "updatedAt": "2026-11-02T17:02:00Z"
+ "note": "Lane waiting-data-in-repo (session_013NEJL2qwcH6wayAtp2var5), started 11:01 CST by the coordinator. Owner hold: its draft PR merges only on the owner's word. Port: yes, to each repo. Scope added (coordinator, 11:50 CST, from the owner's 11:49 CST ask that design files and artifacts outlive sessions and accounts): this lane also takes the artifact registry and the wind-down export. Mockup files go to step mockup-homes. The owner hold on the merge stands.",
+ "updatedAt": "2026-11-02T17:51:00Z"
 }
