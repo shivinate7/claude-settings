@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-140 rows: exact 86, looser 9, stricter 11, uncited 33, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+140 rows: exact 86, looser 9, stricter 12, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -42,7 +42,7 @@ exact has a gap.
 | `git-env-set` | git-env-set-refused | "No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`." | exact | exact | an export of GIT_DIR is denied; unset and echo pass | - |
 | `shared-tree` | shared-trees-no-destructive-git | "No destructive git. Destructive git loses another agent's work in a shared tree." | looser | exact | `git switch -f main` and `git switch --discard-changes main` pass, though `git checkout -f` is refused | tool fix: add switch -f, --force and --discard-changes to shared_tree_match |
 | `subject-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | when git cannot answer, `git reset --hard` passes with one note; cite-by-id also logs this id for an unread record folder | - |
-| `pointer-head` | none | - | uncited | exact | `git switch -C main origin/main` and `git checkout --detach main` are refused, though both land on main | rule rewrite: write a pointer-head decision; tool fix: pass -C, -B and --detach when the target is main |
+| `pointer-head` | recovery-independent-of-state | "The rule refuses a command that moves HEAD off `main` in the pointer checkout." | stricter | exact | `git switch -C main origin/main` is refused, though HEAD stays on main | tool fix: pass -C and -B when the target branch is main |
 | `silent-write` | git-never-discard-output | "Keep command output. Discarded output hides failures from the reader." | looser | exact | `git branch -D x >/dev/null` and `npm test >/dev/null 2>&1` pass; only seven git writes are read | rule rewrite: scope the rule to "never silence a git write's output" |
 | `hand-made-worktree` | lanes-start-in-tool-worktrees | "A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
 | `force-push` | stale-safe-force-push | "Any forced push whose destination is the default branch: ask" | exact | exact | `--force` is denied; a lease with --force-if-includes passes | - |
@@ -232,7 +232,7 @@ Notes: every Stop ends "No override lifts this refusal" (2488), false for red-ba
 Each stricter or looser row becomes one step. Triage owns the steps. This record changes no guard.
 
 - **Stricter, tool fix:** `merge-checks:batch` and `merge:batch-refusal` (step overlapping-batches),
-  `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
+  `pointer-head`, `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
   `impeccable-review-only`, `builder-test-edit`, `records-page`, `destructive-delete` (heredoc text),
   `merge:preview-base-run`, the "no override" text.
 - **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`), `session-home`,
@@ -248,6 +248,6 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
     silent-write-git-only.
   - `load-brake` and `create_session`: no step. A cloud session adds no load to this machine. See note
     load-brake-skips-create-session.
-- **Uncited, rule rewrite:** the merge-lock decision, `pointer-head`, `env-file`, `config-edit`,
+- **Uncited, rule rewrite:** the merge-lock decision, `env-file`, `config-edit`,
   `ln-over-directory`, `role-diff-main-checkout`, `role-diff-unresolved`, `merge:pinned-mismatch`,
   `merge:wait-base-changed`, `merge:blocked-or-behind`, `merge:claim-off-default-base`.
