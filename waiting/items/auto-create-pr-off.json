@@ -1,0 +1,12 @@
+{
+  "added": "2026-10-31T19:54:00Z",
+  "context": "Answered in chat, 14:54 CDT. Process only.\n\nThe coordinator advised turning off the desktop app's auto-create PR setting. Lanes and the batch runner open their PRs themselves, so auto-create only adds stray draft PRs.\n\nDone, 14:55 CDT: you turned auto-create PR off again.",
+  "home": "process only (coordinator handoff)",
+  "id": "auto-create-pr-off",
+  "kind": "decision",
+  "n": 103,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "desktop app setting auto-create PR",
+  "status": "closed",
+  "title": "Turn off auto-create PR in the desktop app"
+}

@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-29T18:50:00Z",
+  "context": "A lane that runs on Opus (reviewers, the third build round) is blocked when your typed grant, such as `opus reviewers 2h`, was typed in another session. The guard in the lane cannot see it. This item is from the coordinator, who raised it at 13:43 CDT Oct 29.",
+  "home": "opus-grant-on-step",
+  "id": "opus-grants-reach-lanes",
+  "kind": "decision",
+  "n": 67,
+  "options": [
+    {
+      "gain": "You type a grant once, anywhere; lanes pick it up; each grant has your words and time on record.",
+      "how": "When you grant Opus, the triage session writes your words and the time on the roadmap step. The guard in a lane reads that step. The coordinator also scans for lanes blocked on a grant.",
+      "key": "a",
+      "label": "Record grants on the roadmap step; the lane's guard reads them",
+      "lose": "A new guard read and a coordinator scan to build; a grant is slower to reach a lane than a typed line."
+    },
+    {
+      "gain": "Nothing new to build; the grant is always yours, typed.",
+      "how": "No change to the guard; you type the grant in every lane that needs it.",
+      "key": "b",
+      "label": "You type `opus reviewers 2h` into each lane",
+      "lose": "You type it in every blocked lane, and each lane waits until you do."
+    },
+    {
+      "gain": "Lanes never wait.",
+      "how": "A brief says you granted Opus; the guard lets it through.",
+      "key": "c",
+      "label": "The guard accepts a grant that a brief claims",
+      "lose": "Goes against uniform ruling t18: a brief could claim a grant you never gave."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 67,
+  "ref": "c201 (session tiers); uniform ruling t18 (the guard accepts only what you typed)",
+  "status": "closed",
+  "title": "How does your Opus grant reach a lane that needs it?",
+  "why": "It keeps the grant yours and on record, without you typing into every lane (the coordinator's recommendation)."
+}

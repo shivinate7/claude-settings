@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T07:15:00Z",
+  "context": "o13 lane A renames every gates* check to checks* (gates -> checks, gates-guard -> checks-guard, and so on; scope, shell-macos and pointer-windows keep their names). Its branch's .github/stamp.json lists the new 13 names. merge.py reads stamp.json from main, so it would wait for the old names on the renamed head, and protection would wait for checks that no longer run.",
+  "group": "branch-protection",
+  "holds": "o13 lane A cannot merge until main requires the renamed checks.",
+  "home": "o13",
+  "id": "o13-protection-rename",
+  "kind": "decision",
+  "n": 33,
+  "options": [
+    {
+      "gain": "Main is never without its required checks for long.",
+      "how": "When the orchestrator says lane A is green, you replace the gates* required checks with the checks* names, and the orchestrator merges at once.",
+      "key": "a",
+      "label": "Switch protection in the merge act",
+      "lose": "You need to be there at the merge."
+    },
+    {
+      "gain": "No need to time it.",
+      "how": "The orchestrator merges lane A by hand on your grant; you switch protection after.",
+      "key": "b",
+      "label": "Merge outside merge.py, then switch",
+      "lose": "For a short time main requires checks that no longer run, so other merges stall."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 1,
+  "ref": "o13 (one name per thing), lane A: the gate/try rename",
+  "status": "closed",
+  "title": "When o13 renames the CI checks, how does main's protection switch?",
+  "why": "It keeps main's protection true at every moment."
+}

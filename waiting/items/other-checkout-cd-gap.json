@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-01T23:13:00Z",
+  "context": "Goal: no session builds, serves or edits inside another checkout by mistake.\nProblem (risk): on Oct 28 you dropped banchi's own tree check because the shared other-checkout rule covers it, but a test shows it does not, so merging #1003 as built opens a gap that only your word can accept or close.\nBased on (measured): the third reviewer's tests on #1003: with it, a cd into another checkout followed by npm run build passes, and so do make up, npm install, touch, mkdir and a bare cd; main refuses all of these today.\nBased on (ruling): your Oct 28 ruling to skip banchi's own tree check, since the shared rule covers it.\nDeparts from: main (banchi's own check refuses a cd into another checkout) \u2014 option B moves that refusal into the shared guard for every repo; option A keeps it in banchi only.",
+  "holds": "banchi PR #1003 is held until you pick.",
+  "home": "c174",
+  "id": "other-checkout-cd-gap",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T23:25:27.149Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 143,
+  "options": [
+    {
+      "gain": "Closes the gap in banchi now.",
+      "how": "banchi keeps refusing a cd into another checkout on Claude Code's shell commands; the rest of its tree check goes, as you ruled.",
+      "key": "a",
+      "label": "Keep only banchi's cd refusal",
+      "lose": "One more banchi-only rule, and other repos stay open."
+    },
+    {
+      "gain": "One rule covers every repo, and your Oct 28 intent holds.",
+      "how": "The shared guard refuses a cd into another checkout in every repo; then #1003 merges.",
+      "key": "b",
+      "label": "The shared guard refuses it for every repo",
+      "lose": "#1003 waits for one shared-guard lane."
+    },
+    {
+      "gain": "#1003 merges now.",
+      "how": "#1003 merges now, and these acts are named as known limits.",
+      "key": "c",
+      "label": "Accept the gap",
+      "lose": "Building in another checkout by mistake can happen in banchi again."
+    }
+  ],
+  "owner": "Lane banchi c174 (session_013NEJKzZFi4Y4oYBoPxfSxp)",
+  "pick": "b",
+  "ref": "banchi PR #1003 (step c174, banchi skips its own tree check)",
+  "reply": "Pick b taken (saved Nov 1 17:25 CST). The banchi lane for step c174 builds it.",
+  "short": "Other-checkout gap",
+  "status": "closed",
+  "title": "Your Oct 28 ruling dropped banchi's tree check because the shared rule covers it, but it does not: where should the fix live?",
+  "why": "A gap one repo finds in the shared rules gets fixed in the shared rules, once, for every repo."
+}

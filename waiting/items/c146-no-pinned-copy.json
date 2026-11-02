@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "docs/decisions/map-skill-lives-here.md lets a host \"pin a copy\" that \"need not stay byte-equal\", which goes against your uniform ruling (t18: a host pins the install link, never a copy). Changing a record needs your grant. Plan: plans/c146-checked-prose-map.md on the roadmap branch, section 7 (Sonnet fact-check clear).",
+  "group": "c146-checked-map",
+  "home": "c146",
+  "id": "c146-no-pinned-copy",
+  "kind": "decision",
+  "n": 29,
+  "options": [
+    {
+      "gain": "The record matches t18.",
+      "how": "The record says a host pins the install link, never a copy.",
+      "key": "a",
+      "label": "Yes, fix the record",
+      "lose": "q_max's drifted copy must go (r5)."
+    },
+    {
+      "gain": "No change.",
+      "how": "The record stays.",
+      "key": "b",
+      "label": "No, keep it",
+      "lose": "The record contradicts t18."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 29,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Checked map: may the plan fix the map skill's record (no pinned copies)?",
+  "why": "It brings the record in line with your t18 ruling."
+}

@@ -1,0 +1,35 @@
+{
+  "added": "2026-10-31T20:15:00Z",
+  "context": "Goal: each agent runs the model its role allows, so cost stays where you set it.\nProblem (rule): the model table lets only an audit Explore run Sonnet, but the guard cannot tell an audit from a search, so any Explore can run Sonnet today; only you can change the rule.\nBased on (read): record agent-model-cap names this point as unruled.\nBased on (notes): the Oct 30 incident, a role whose table row says Haiku ran on Sonnet.",
+  "home": "agent-model-cap",
+  "id": "explore-sonnet-audit-marker",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:43:28Z",
+    "choice": "a"
+  },
+  "n": 107,
+  "options": [
+    {
+      "gain": "Closes the Oct 30 class: a search agent can no longer run Sonnet by mistake.",
+      "how": "The guard lets an Explore run Sonnet only when its brief carries an audit marker line; any other Explore runs below Sonnet.",
+      "key": "a",
+      "label": "An audit brief carries a marker line",
+      "lose": "One more line in each audit brief, and a refusal when it is missing."
+    },
+    {
+      "gain": "No new line and no new refusal.",
+      "how": "Any Explore may run any model below Opus; the guard does not check.",
+      "key": "b",
+      "label": "Keep the exemption",
+      "lose": "The Oct 30 class stays open: a search can run Sonnet and cost more."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "spawn-model-check (#899, the spawn guard checks each agent's model); decision agent-model-cap (model per role)",
+  "short": "Explore on Sonnet",
+  "status": "closed",
+  "title": "Must an Explore brief that asks for Sonnet say it is an audit?",
+  "why": "Your pick, Nov 1 11:43 CST. Filed on roadmap step explore-audit-marker."
+}

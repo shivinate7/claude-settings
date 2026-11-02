@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-31T19:58:00Z",
+  "context": "Answered in chat, 14:55 CDT: (a), with a condition. In your words: \"shivinate7 should be the default unless if it's a repo that shivinate7 doesn't have access too of course\". So the PC's default login is shivinate7, and a repo that shivinate7 cannot reach uses ssemwal-cdc. Filed to step gh-account-clear; the ruling lands in a decision record on main when that lane builds it.\n\nGoal: every gh command you paste runs as the login you expect, with no surprise.\nProblem (risk): your PC holds two gh logins, and the active one decides what a pasted command can change; only you pick the default.\nBased on (measured): gh auth switch printed the active login at 14:52 CDT; the PC is now on shivinate7.\nBased on (read): decision main-branch-protection says protection writes need admin, and ssemwal-cdc has push, not admin.",
+  "home": "gh-account-clear",
+  "id": "pc-default-gh-login",
+  "kind": "decision",
+  "n": 102,
+  "options": [
+    {
+      "gain": "Admin steps run as pasted.",
+      "how": "Leave the PC on shivinate7. Admin steps, such as a protection switch, run with no switch first.",
+      "key": "owner",
+      "label": "shivinate7, the repo owner",
+      "lose": "Every pasted command runs with admin rights, so a wrong command can change settings or protection."
+    },
+    {
+      "gain": "Day-to-day commands cannot change settings or protection.",
+      "how": "Switch the PC back to ssemwal-cdc. An admin step starts with gh auth switch to shivinate7 and switches back at the end.",
+      "key": "work",
+      "label": "ssemwal-cdc, the work login",
+      "lose": "Admin steps carry two more lines, and a step that forgets the switch back leaves admin active."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "owner",
+  "ref": "gh-account-clear (owner gh steps name their account); waiting item 101 (protection switch)",
+  "short": "PC gh login",
+  "status": "closed",
+  "title": "Which GitHub login stays active on your PC?",
+  "why": "Owner commands work with no switch, and step gh-account-clear makes each step name the login it needs anyway (coordinator's chat pick, 14:54 CDT)."
+}

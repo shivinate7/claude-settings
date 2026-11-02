@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T18:18:00Z",
+  "context": "Goal: controls in your apps feel substantial.\nProblem (goal): the UX house rules say nothing about haptics, so no designer or reviewer asks for them.\nBased on (read): docs/design/principles.md has no haptics rule; no file in docs/design or the iOS skill mentions haptics.\nDeparts from: main (no haptics rule) \u2014 adds a house rule and its checklist line.\n\nAsked and answered in chat with triage. Your words, Nov 1 12:18 CST: \"apps should consider integrating haptics on things like sliders to make it feel substantial\". Filed as roadmap step ux-haptics-rule.",
+  "home": "ux-haptics-rule",
+  "id": "ux-haptics-rule",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T18:18:00Z",
+    "choice": "a",
+    "note": "apps should consider integrating haptics on things like sliders to make it feel substantial"
+  },
+  "n": 124,
+  "options": [
+    {
+      "gain": "Designers and reviewers ask for haptics on sliders and similar controls.",
+      "how": "A new rule in docs/design/principles.md and a line in checklist.md.",
+      "key": "a",
+      "label": "Add a haptics house rule",
+      "lose": "One more line on each screen's checklist."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "step ux-haptics-rule; record ux-house-rules",
+  "short": "Haptics on sliders",
+  "status": "closed",
+  "title": "Should the UX house rules ask apps to consider haptics on controls like sliders?",
+  "why": "Your chat words."
+}

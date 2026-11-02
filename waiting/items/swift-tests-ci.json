@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-02T00:42:00Z",
+  "context": "Goal: each iPhone or Mac app you ship gets a full test run with proof, without paying for one on every batch.\nProblem (money): the full Swift suite needs a paid GitHub Mac machine, and how often it runs sets the cost, so it needs your word.\nBased on (ruling): your Oct 27 ruling on CI: trust first, then cut in steps; the last step is full runs at milestones, after a set number of merges or a named milestone, not on every merge. It stays off in claude-settings because its minutes are free, and it carries to repos that pay for minutes.\nBased on (ruling): a claude-settings rule wins over a repo's own rule unless the repo states an exemption; degen states none (searched Nov 1 18:35 CST).\nDeparts from: degen runs Swift only on your Mac, with no record \u2014 the full Swift suite runs on a GitHub Mac machine with a recorded result.\n\nYour question: you are not misunderstanding. Your ruling is the second shape you named: merges keep landing with quick checks, and after a set number of them (or when you call a milestone) one full run tests main. No separate release branch is needed.",
+  "home": "tci-5-platform-tested",
+  "id": "swift-tests-ci",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T00:38:48.267Z",
+    "note": "i thought we agreed that most full scale tests are done not even at merge but at a milestone level? integration branches released at a milestone, or a full test after a set number of merges? or am i misunderstanding again"
+  },
+  "n": 133,
+  "options": [
+    {
+      "gain": "Follows your Oct 27 ruling; Mac minutes only at milestones; proof at each one.",
+      "how": "Batches merge on quick checks; after a set number of app batches, or when you call a milestone, one full Swift run on a GitHub Mac machine tests main, and a red run blocks the next merge until fixed.",
+      "key": "a",
+      "label": "Full Swift run at milestones",
+      "lose": "A broken batch can sit on main until the next milestone run finds it."
+    },
+    {
+      "gain": "A broken batch never merges.",
+      "how": "Each app batch's checks run the full Swift suite on a GitHub Mac machine.",
+      "key": "b",
+      "label": "Full Swift run on every app batch",
+      "lose": "The most Mac minutes, about 10 times the cost of Linux ones, on every batch."
+    },
+    {
+      "gain": "No GitHub Mac minutes.",
+      "how": "degen records why it differs, and each batch posts the result of the run on your Mac for the merge to check.",
+      "key": "c",
+      "label": "degen states an exemption and keeps its Mac run",
+      "lose": "An exemption to keep, and each batch waits on your Mac."
+    }
+  ],
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "pick": "a",
+  "ref": "step tci-5-platform-tested (each shipped platform names where it is tested)",
+  "reply": "Withdrawn: your Oct 27 ruling already answers it. In repos that pay for minutes, the full run happens at milestones, after a set number of merges or when you call one, not on every batch. So degen's and mailaudit's full Swift suite runs at milestones on a GitHub Mac machine with a recorded result, and a red run blocks the next merge. degen states no exemption, so your shared rule applies there.",
+  "short": "Proof of the batch app test",
+  "status": "closed",
+  "title": "Your iPhone and Mac app tests run once per batch: should that run leave proof the merge can check?",
+  "why": "It is the shape you already ruled for repos that pay for minutes, and it keeps Mac costs to milestones."
+}

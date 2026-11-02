@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T13:45:00Z",
+  "context": "Answered Oct 28 12:49 CDT: both a and b; the orchestrator starts the home lane.\nYour question, is this a patch over a root cause? Yes. Any repo that names no tests and has no branch protection hits the same wall. The root fix is c189 on the claude-settings roadmap: the merge tool reads the tests to wait for from branch protection, the one source; adopting a repo sets that protection, so no repo starts with none; and a merge lock held by a dead session is freed instead of refused. Home's fix (a and b) is the stopgap until c189 lands.\n\nThe two gaps: 1) home never told the merge tool which tests to wait for. Fix a: one small settings file that names home's 4 test runs. 2) Home's tests skip draft pull requests and start when a PR is marked ready, but home's rules don't say so, so sessions push empty commits to restart them. Fix b: one sentence in home's CLAUDE.md.",
+  "home": "c42",
+  "id": "c42-home-merge-checks",
+  "kind": "decision",
+  "n": 44,
+  "options": [
+    {
+      "gain": "merge.py waits on home's CI, and sessions stop pushing empty commits to restart a skipped run.",
+      "how": "One home lane, through a PR: reads home's open branches first, adds stamp.json (red first: merge.py stops on a PR with a failing check) and the CLAUDE.md clause.",
+      "key": "ab",
+      "label": "Both a and b",
+      "lose": "A home PR whose CI is skipped by scope may wait, if merge.py does not count skipped as passing; then only scope is listed."
+    },
+    {
+      "gain": "merge.py waits on home's CI.",
+      "how": "The lane adds stamp.json alone.",
+      "key": "a",
+      "label": "Only a (stamp.json)",
+      "lose": "Sessions may still push an empty commit to restart a skipped draft run."
+    },
+    {
+      "gain": "The smallest change to home.",
+      "how": "The lane adds the one clause alone.",
+      "key": "b",
+      "label": "Only b (the CLAUDE.md clause)",
+      "lose": "merge.py still finds no required checks in home."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "ab",
+  "rank": 32,
+  "ref": "c42 (first roll-out visit: home's merge checks); root fix c189 (merge tool reads tests from branch protection)",
+  "status": "closed",
+  "title": "Fix two gaps in how home's pull requests merge?",
+  "why": "Today home cannot merge at all: the merge tool never merges with nothing to wait for, and home names no tests. Fix a gives it the 4 to wait for."
+}

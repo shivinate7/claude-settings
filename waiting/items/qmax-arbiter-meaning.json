@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T19:10:00Z",
+  "context": "q_max uses \"arbiter\" for two jobs. One is batch work: it runs a batch's browser checks (D-748, q_max's record on batch browser runs). The other is a ruling voice: \"an entry changes only on a new ruling by the owner or the arbiter\". Your note, Oct 29 14:46 CDT: the batch half becomes the batch runner; the ruling half goes either to the coordinator or to an arbiter role of its own. So this asks only which one.",
+  "home": "child-repo-gap",
+  "id": "qmax-arbiter-meaning",
+  "kind": "decision",
+  "n": 72,
+  "options": [
+    {
+      "gain": "No new role to run; the session that already decides takes it.",
+      "how": "The batch checks go to the batch runner. The coordinator may change a q_max entry on a new ruling, as the arbiter did.",
+      "key": "a",
+      "label": "The coordinator takes the ruling voice",
+      "lose": "The coordinator both runs the work and rules on q_max's records."
+    },
+    {
+      "gain": "Rulings stay apart from the session running the work.",
+      "how": "The batch checks go to the batch runner. A new standing arbiter role holds the ruling voice, apart from the coordinator.",
+      "key": "b",
+      "label": "A separate arbiter role for rulings",
+      "lose": "One more standing role, added to the session tiers for every repo, to run and keep."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 72,
+  "ref": "child-repo-gap (q_max measured, fix lanes follow the session-tier roles); q_max D-748",
+  "reply": "Picked b, Oct 29 14:55 CDT: a separate arbiter role holds q_max's ruling voice; the batch checks go to the batch runner. The new role goes into the session tiers.",
+  "status": "closed",
+  "title": "q_max: what does the word \"arbiter\" turn into?",
+  "why": "It needs no new role, and the shared tiers stay as they are."
+}

@@ -1,0 +1,61 @@
+{
+  "added": "2026-10-28T20:22:00Z",
+  "context": "On a phone (960 px wide and narrower) the page's overview shows each item as a small numbered chip. As built they are 32 px high. The repo's own accessibility rule asks for 44 px, a comfortable touch size, so 32 px is under it. This is today's behaviour, not a new loss.\n\nMaking them 44 px grows each chip row by 12 px. The pictures below show the phone overview both ways (in this sample the 44 px version is 36 px higher, three rows of chips).",
+  "designs": [
+    {
+      "focus": "#q3-32-rail",
+      "label": "32 px chips",
+      "option": "a",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q3-32"
+    },
+    {
+      "focus": "#q3-44-rail",
+      "label": "44 px chips",
+      "option": "b",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q3-44"
+    }
+  ],
+  "group": "c193-sizes",
+  "home": "c193",
+  "id": "c193-phone-chips",
+  "kind": "decision",
+  "look": true,
+  "n": 56,
+  "options": [
+    {
+      "design": "c193-choices",
+      "gain": "The overview stays compact.",
+      "how": "Chips stay 32 px high.\nBefore and after: the same as today.",
+      "key": "a",
+      "label": "32 px high (as built)",
+      "lose": "Under the 44 px touch size in the repo's rule; harder to tap."
+    },
+    {
+      "design": "c193-choices",
+      "gain": "Meets the touch size; easier to tap.",
+      "how": "Chips become 44 px high.\nBefore: 32 high. After: 44 high, each row 12 px taller.",
+      "key": "b",
+      "label": "44 px high",
+      "lose": "The overview is taller, so less of the list shows at once."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 56,
+  "ref": "c193 (waiting page: pictures and chips fit), PR #783; the touch size rule is docs/design/a11y.md",
+  "reply": "Answered, Oct 28 17:50 CDT: 32 px chips stay (a), as built.",
+  "stands": true,
+  "status": "closed",
+  "title": "How tall should the number chips be on a phone?",
+  "why": "It ships as built to keep this step small; say b and the rail gets the 44 px size the repo's own rule asks for."
+}

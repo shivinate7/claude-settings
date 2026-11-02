@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-01T17:50:00Z",
+  "context": "Goal: you see context fill in the Claude app.\nProblem (goal): token-weather does load in cloud sessions, but it draws in the above-prompt band, which the mod API says only the terminal draws.\nBased on (measured): mods load in a cloud session from its second start on; plugins install about 3 minutes after the first start (plugin cache written 10:33 UTC, session started 10:29 UTC; at 11:47 CST all 7 were installed and ponytail's start hook ran). The earlier \"no mod loads in cloud\" was wrong: that check ran before the install.\nBased on (read): the mod API raises the above-prompt band on the terminal only, and raises a pane on every surface, the phone and desktop apps too. Whether the app draws a mod's pane for a cloud session is unmeasured.\nDeparts from: main (a terminal-only band) \u2014 adds a reading the app can draw.",
+  "home": "mods-relevance-review",
+  "id": "token-weather-in-app",
+  "kind": "decision",
+  "lane": "Lane mods-relevance-review reworks this item",
+  "lastAnswer": {
+    "at": "2026-11-01T22:23:54Z",
+    "note": "look at the mod and the outocme more hollistically before returning to me"
+  },
+  "n": 118,
+  "options": [
+    {
+      "gain": "One mod keeps the reading, and the app may show it.",
+      "how": "token-weather also opens a one-line pane, which every surface draws, and keeps the band in the terminal. Then you check once in the app whether it shows.",
+      "key": "a",
+      "label": "Show the reading in a small pane too",
+      "lose": "Whether the app draws it for a cloud session is unknown until your check; a pane takes screen space."
+    },
+    {
+      "gain": "A likely app surface.",
+      "how": "A hook in your settings prints the context fill as one message after each turn. First you check whether a hook's message shows in the app.",
+      "key": "b",
+      "label": "A Stop hook prints one context line",
+      "lose": "One extra line after every turn, and a second home for the reading."
+    },
+    {
+      "gain": "Nothing to build.",
+      "how": "The band stays in the terminal only.",
+      "key": "c",
+      "label": "Drop token-weather in cloud",
+      "lose": "No context reading in the app."
+    }
+  ],
+  "owner": "Lane mods-relevance-review (session_013NEJKzyYxHchp1Vz6BvPpd)",
+  "pick": "a",
+  "ref": "step mods-relevance-review (your 105 a: fix both mods); mod token-weather",
+  "reply": "No build. Sessions already act on their own context: they write handoffs at checkpoints, standing sessions rotate before the limit, and the cloud session record carries context fill for the coordinator. token-weather stays as the terminal bar. If you want a gauge in the app anyway, say so and it comes back as a question.",
+  "short": "Context band in the app",
+  "status": "closed",
+  "title": "How should you see context fill in the Claude app?",
+  "why": "It keeps one home for the reading, and the mod API says panes reach the apps."
+}

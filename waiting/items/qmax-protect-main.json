@@ -1,0 +1,17 @@
+{
+  "added": "2026-10-30T00:34:00Z",
+  "context": "You asked, 14:45 CDT: confirm we understood you before we act. Our reading of your 12:45 CDT note ('ideally merging across all my repos would have just the same required checks and nothing more or less'): every repo you own requires the same set of checks before a merge to main. Today degen and ios-adblock require one rollup check, all-jobs-passed, that passes only when every other job passed. So q_max would require that same one check, not its four separate ones (gate, tiers, specimen, repo-checks); those four still run, inside the rollup. The coordinator pauses the q_max lane until you confirm.\n\nWhy it matters: q_max's main has no branch protection today (GitHub answers 404), so a red PR can merge.",
+  "home": "decision same-check-kinds (branch same-check-kinds)",
+  "id": "qmax-protect-main",
+  "kind": "task",
+  "n": 87,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 87,
+  "ref": "r1 (compliance visit, q_max); like your item 71 a for degen",
+  "status": "closed",
+  "steps": [
+    "Reply with a note: 'yes' if that is what you meant, or say what you meant instead. Then Mark done."
+  ],
+  "title": "Protect q_max's main: did we read your note right?",
+  "why": "Without it, nothing stops a red PR from merging into q_max's main."
+}

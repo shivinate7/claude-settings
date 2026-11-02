@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T19:40:00Z",
+  "context": "What this is: a list of retired words (the glossary) so each thing has one name. A check now reads the code a change adds, and refuses a retired word used as a name in code (a function or variable name), in a rule name or in a record name.\n\nThe catch: eight of the retired words are also ordinary programming words: gap, entry, issue, try, block, deny, approval and worker (your orchestrator counted six: block, entry, gap, issue, try, worker). A code name like `entry` for one item in a list, or `worker` for a background process, is normal, and `try` is a built-in word of the language. So for these eight the check today reads only file names, rule names and record names, and leaves code names alone.\n\nThe question: should it also refuse them in code names? Before the PR merges, the choice is open. When #780 merges, the compliance probe for retired words (o4 part 2) can start.",
+  "home": "o13",
+  "id": "o13-everyday-words-in-code",
+  "kind": "decision",
+  "n": 49,
+  "options": [
+    {
+      "gain": "No false alarms on normal code; the check stays one people trust.",
+      "how": "The check refuses the eight words in file names, rule names and record names, not in code names.\nBefore and after: a variable called `entry` or a function called `run_worker` passes; a rule named `entry-gate` is refused.",
+      "key": "a",
+      "label": "Keep it as it is: these eight only in file, rule and record names",
+      "lose": "These eight words can still appear in code names, so the code may name things inconsistently with the glossary."
+    },
+    {
+      "gain": "The glossary holds everywhere: one name per thing, in code as well.",
+      "how": "The check refuses the eight words in code names too; a line that really needs one is marked with a glossary-ok comment.\nBefore and after: `entry` or `run_worker` in new code fails until renamed or marked.",
+      "key": "b",
+      "label": "Also refuse them in code names",
+      "lose": "Many false alarms from ordinary code, each needing a rename or a mark; a check that cries wolf gets ignored."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 49,
+  "ref": "o13 (one name per thing: the glossary check), lane B PR #780",
+  "reply": "Your note, Oct 28 14:48 CDT: you asked how these words came to be retired. They were not retired because a better word fits. Plan o13, \"one word per meaning\", which you ruled on Oct 26 (\"yes to all nine groups\"), kept the word that already had a row in GLOSSARY.md and retired the other, so each meaning has one word. Examples: guard (refuses an act) over gate, check (passes or fails a change) over gate, red run over proof. The eight words (gap, entry, issue, try, block, deny, approval, worker) stay plain English in prose; they are retired only as names for our own workflow things, and block and deny stay where Claude Code itself defines them. Your pick (a) keeps them legal in code names. The plan is plans/o13-one-word-per-meaning.md on the roadmap branch, if you want to re-open any one word.",
+  "stands": true,
+  "status": "closed",
+  "title": "Should the word check also refuse everyday words like \"entry\" and \"block\" inside code?",
+  "why": "A check that fires on normal code gets ignored, which loses more than the few inconsistent code names; (a) keeps the check trusted and still catches the words where they can only mean the old name."
+}

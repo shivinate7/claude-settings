@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-02T07:35:00Z",
+  "context": "Goal: trial run gd finishes.\nProblem (rule): the run is stopped on a permission prompt that only you can answer, and the prompt is a false alarm.\nBased on (read): the reviewer's command only passes test strings to the guard; one string looks like a settings file that raises the agent model to Opus.\nDeparts from: today the run waits on the prompt \u2014 Deny lets it go on, with the reviewer testing another way.",
+  "holds": "Trial run gd.",
+  "home": "agent-model-cap-string-false-alarm",
+  "id": "gd-run-deny-prompt",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Trial run gd",
+      "url": "https://claude.ai/code/session_013NEJL41hkyaHUtQNoyagVU"
+    }
+  ],
+  "n": 162,
+  "options": [
+    {
+      "gain": "The run goes on, and the reviewer runs its test another way.",
+      "how": "Open trial run gd and press Deny on the waiting prompt.",
+      "key": "a",
+      "label": "Press Deny",
+      "links": [
+        {
+          "label": "Trial run gd",
+          "url": "https://claude.ai/code/session_013NEJL41hkyaHUtQNoyagVU"
+        }
+      ],
+      "lose": "Nothing."
+    },
+    {
+      "gain": "The run goes on with its test as written.",
+      "how": "Open trial run gd and press Allow.",
+      "key": "b",
+      "label": "Press Allow",
+      "links": [
+        {
+          "label": "Trial run gd",
+          "url": "https://claude.ai/code/session_013NEJL41hkyaHUtQNoyagVU"
+        }
+      ],
+      "lose": "It writes nothing, but it counts as your approval to lift the agent model cap."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 1,
+  "ref": "trial run gd, session_013NEJL41hkyaHUtQNoyagVU",
+  "reply": "Closed 13:05 CST, no answer needed: trial run gd is archived, so its prompt no longer waits. The false alarm stays on step agent-model-cap-string-false-alarm.",
+  "short": "press Deny in run gd",
+  "status": "closed",
+  "title": "Press Deny on the stuck permission prompt in trial run gd",
+  "why": "Trial run gd has waited on a permission prompt since 01:16 CST. A reviewer fed test text into a guard, and the guard that caps agent models read one test string as a real settings change and asked. Nothing writes settings. Only you can answer a prompt in another session."
+}

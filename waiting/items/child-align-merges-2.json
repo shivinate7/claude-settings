@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-29T20:23:00Z",
+  "context": "Three more reviewed PRs wait for your merge word. ios-adblock#123 (review passed in round 2) and joyous#53 (review clear in round 3) are the fix lanes you asked for on item 74. q_max#983 (c200, review passed in round 1) drops q_max's code-check skip entries that are no longer needed, and raises its merge time limit to fit its longest job; it merges as a q_max batch PR. Your item 75 a covered only the three PRs it named, so these need your word.",
+  "home": "child-repo-gap",
+  "id": "child-align-merges-2",
+  "kind": "decision",
+  "n": 80,
+  "options": [
+    {
+      "gain": "All seven child repos are caught up to claude-settings, and q_max's checks skip only what they should.",
+      "key": "a",
+      "label": "Merge all three on green",
+      "lose": "Nothing beyond the reviewed changes landing in three repos.",
+      "recommended": true
+    },
+    {
+      "gain": "The three repos stay untouched.",
+      "key": "b",
+      "label": "Hold them",
+      "lose": "The ios-adblock and joyous compliance visits (r1) cannot start, and q_max keeps the stale skip entries."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 80,
+  "ref": "child-repo-gap and c200; your item 74 (fix lanes for all seven repos) and item 75 a (merge home#391, degen#303, mailaudit#164)",
+  "reply": "Picked a in chat, Oct 29 15:22 CDT (\"All six approved\", with item 75): the coordinator merges ios-adblock#123, joyous#53 and q_max#983 (via batch PR q_max#984) on green.",
+  "status": "closed",
+  "title": "Merge three reviewed child-repo PRs on green?",
+  "why": "Merging to a repo's main needs your word; item 75 a named other PRs."
+}

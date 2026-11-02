@@ -1,0 +1,40 @@
+{
+  "added": "2026-10-28T18:35:00Z",
+  "context": "You said Oct 28 13:25 CDT the options were not explained well enough to decide. This is the whole picture, with no internal terms.\n\nWhat the map is: a set of plain-English pages saying what each part of the code does, which file owns each job, and key facts such as a wait time. A check keeps each fact true: if the code changes and the page does not, the check fails.\n\nWhat goes wrong today without it: when you ask \"how long does a merge wait?\", the AI opens a few files and answers from them. Real case (step c34): one file said 30 minutes and another file's default said 45. The AI could quote either, depending on which it happened to open. With the map, there is one checked page with one answer.\n\nThe only open question: what makes the AI open the map before it answers? A map it never opens changes nothing.\n\nWords used below: a skill is a short instruction file the AI loads when its one-line description fits your question. CLAUDE.md is the rules file the AI reads at the start of every session. A start-up program is a small program that runs when a session opens and prints text into it.",
+  "group": "c146-checked-map",
+  "holds": "The map's \"read it first\" wiring (c146 step) waits on this.",
+  "home": "c146",
+  "id": "c146-read-map-first",
+  "kind": "decision",
+  "n": 23,
+  "options": [
+    {
+      "gain": "Nothing is added to CLAUDE.md, so sessions stay as small as today.",
+      "how": "The skill's one-line description says \"read this before you answer how something works.\" The AI loads the skill if it judges your question fits.\nBefore: you ask how merge waits; the AI answers from whatever files it opens.\nAfter: the same, unless it chooses to load the skill; on a quick question it often won't, so you see no change.",
+      "key": "a",
+      "label": "Only the map skill's description",
+      "lose": "The AI decides whether to open the map, so it can still answer from guesses and you would not know which answers came from the map."
+    },
+    {
+      "gain": "Every session is told, so the map is opened far more reliably, with nothing extra running.",
+      "how": "As a, plus one line in CLAUDE.md: \"Before you explain how something works, read the map.\" Every session reads CLAUDE.md first.\nBefore: the AI answers from whatever files it opens.\nAfter: the AI opens the map first, and its answer cites it: \"per the map, a merge waits 45 minutes.\"",
+      "key": "b",
+      "label": "The skill description plus one sentence in CLAUDE.md",
+      "lose": "CLAUDE.md grows by one line; it has a size limit, so this uses a little of the room."
+    },
+    {
+      "gain": "The most certain: the AI always sees what the map covers without choosing to look.",
+      "how": "A small program runs each time a session opens and prints the list of map topics into it.\nBefore: a session starts with no sign of the map.\nAfter: it starts with \"Map topics: merge, guards, waiting page, ...\" already in view.",
+      "key": "c",
+      "label": "A start-up program prints the map's topic list",
+      "lose": "One extra program start in every session, against your rule that tracking runs inside what is already running; and the list takes room in every session."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 23,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Make the AI read the code map before it explains how something works?",
+  "why": "One line in a file every session already reads gets most of the certainty of the start-up program, with none of its running cost."
+}

@@ -1,0 +1,46 @@
+{
+  "added": "2026-10-31T20:33:00Z",
+  "context": "Goal: your feedback inbox holds only what you said, so no session stops to file an agent's report as your words.\nProblem (rule): decision owner-feedback-inbox already says agent text is never captured, yet agent hand-backs land in the inbox (three times in two days); each fix changes how that rule is enforced.\nBased on (read): decision owner-feedback-inbox: agent text is never captured.\nBased on (measured): hand-backs captured in lanes page-answer-send, c104 and roadmap-matches-lanes (Oct 30) and twice in the coordinator (Oct 31 15:10 CDT).",
+  "holds": "Lane inbox-saves-agent-reports is paused until you pick.",
+  "home": "inbox-saves-agent-reports",
+  "id": "inbox-agent-reports",
+  "kind": "decision",
+  "n": 108,
+  "options": [
+    {
+      "gain": "Matches the ruling as written; a small change.",
+      "how": "Add the agent-message block tag to the inbox's skip list in hooks/local_time.py.",
+      "key": "d",
+      "label": "Skip the agent-message tag",
+      "lose": "An agent report that arrives without that tag still gets in."
+    },
+    {
+      "gain": "Catches reports that arrive untagged.",
+      "how": "As (a), and every brief asks the agent to start its report with a marker line the inbox also skips.",
+      "key": "dplus",
+      "label": "Skip the tag, plus a marker in every brief",
+      "lose": "One more line in every brief, and a forgotten marker still gets in."
+    },
+    {
+      "gain": "Nothing is lost, and the guard stops nagging about agent text.",
+      "how": "The inbox keeps everything but marks each entry as owner or agent, and the guard asks only about owner entries.",
+      "key": "b",
+      "label": "Tag each entry by source",
+      "lose": "A bigger change, and it departs from the ruling's 'never captured'."
+    },
+    {
+      "gain": "No work.",
+      "how": "Keep jotting agent reports by hand.",
+      "key": "c",
+      "label": "No change",
+      "lose": "Sessions keep stopping to file agent reports as yours."
+    }
+  ],
+  "owner": "Triage (session_013NEJL1KKagcGMN1wVnKnmD)",
+  "pick": "d",
+  "ref": "inbox-saves-agent-reports (the feedback inbox skips agent hand-backs); decision owner-feedback-inbox",
+  "short": "Inbox: agent reports",
+  "status": "closed",
+  "title": "How should your feedback inbox keep out agents' reports?",
+  "why": "It matches your existing ruling with the smallest change; add the marker only if untagged reports still get in."
+}

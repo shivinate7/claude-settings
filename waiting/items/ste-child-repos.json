@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-02T19:45:00Z",
+  "context": "Goal: one writing standard in every repo.\nProblem (rule): the child repos still require STE, and work in another repo needs your word.\nBased on (ruling): your 13:22 CST pick b, \"drop STE everywhere\".\nBased on (read): q_max CLAUDE.md \"Language standard\" section; degen CLAUDE.md rule prose-is-ste.\nDeparts from: each child CLAUDE.md that requires STE \u2014 points at rule output-write-in-ste instead.",
+  "holds": "Only the child repos' STE lines; #1105 goes ahead without it.",
+  "home": "ste-child-repos",
+  "id": "ste-child-repos",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Draft PR #1105",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1105"
+    }
+  ],
+  "n": 173,
+  "options": [
+    {
+      "gain": "Every repo states one standard.",
+      "how": "A lane in each child repo replaces its STE lines with a pointer to the parent rule.",
+      "key": "a",
+      "label": "Change them too",
+      "links": [
+        {
+          "label": "Draft PR #1105",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1105"
+        }
+      ],
+      "lose": "Four small lanes in other repos."
+    },
+    {
+      "gain": "No work in other repos.",
+      "how": "Only claude-settings drops the STE name.",
+      "key": "b",
+      "label": "Leave the child repos",
+      "links": [
+        {
+          "label": "Draft PR #1105",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1105"
+        }
+      ],
+      "lose": "The child repos keep a rule the parent dropped."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "decision plain-prose-lint; draft PR #1105; child repos q_max, banchi, degen, joyous",
+  "short": "STE in child repos",
+  "status": "open",
+  "title": "Should the other repos' CLAUDE.md files also drop Simplified Technical English?",
+  "why": "Your 13:22 CST ruling said \"everywhere\". q_max, banchi, degen and joyous still name STE in their own CLAUDE.md files, and changing them is work in other repos."
+}

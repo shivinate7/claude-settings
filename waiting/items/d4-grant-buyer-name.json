@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "Answered Oct 28 02:46 CDT, (a): the envelope view shows the buyer's name; the order number stays in the order detail. Filed on d4.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-grant-buyer-name",
+  "kind": "decision",
+  "n": 20,
+  "options": [
+    {
+      "gain": "The helper matches envelopes by name at a glance.",
+      "how": "Name on the envelope view, number in the detail.",
+      "key": "a",
+      "label": "Yes",
+      "lose": "The number is one tap away when a marketplace asks for it."
+    },
+    {
+      "gain": "Matches marketplace records directly.",
+      "how": "The envelope view shows the order number.",
+      "key": "b",
+      "label": "No, show the order number",
+      "lose": "Numbers are harder to match at a glance."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 20,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: buyer's name on the envelope, order number only in the detail?",
+  "why": "The helper packs by matching names; the number is still in the detail."
+}

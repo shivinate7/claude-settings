@@ -1,0 +1,21 @@
+{
+  "added": "2026-10-28T21:30:00Z",
+  "context": "degen's PR 291 is a draft that changes one line: it points degen's links check at claude-settings main 60216ac9, which carries the home-only-host fix. The coordinator read it on GitHub: one line changed, and the links run on its head passed. A draft runs no CI and the coordinator cannot mark another repo's PR ready, so only you can.\n\nAfter your press and green CI, the coordinator merges it under your 15:55 one-act grant, and degen main's links check goes green.",
+  "home": "c199",
+  "id": "c199-degen-291-ready",
+  "kind": "task",
+  "minutes": 1,
+  "n": 60,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 60,
+  "ref": "c199 (link checker skips home-only hosts), degen PR 291",
+  "reply": "Done, Oct 28 19:40 CDT, on your word. I cannot read degen; the coordinator checks that #291 is ready and merges it.",
+  "status": "closed",
+  "steps": [
+    "Wait for the coordinator to say #291's new head is pushed.",
+    "Open https://github.com/shivinate7/degen/pull/291.",
+    "Press Ready for review."
+  ],
+  "title": "Press Ready for review on degen's PR 291",
+  "why": "Your login is the only way to mark another repo's PR ready."
+}

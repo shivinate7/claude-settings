@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-30T00:34:00Z",
+  "context": "ios-adblock's pin-bump.yml checks again and again, for up to 45 minutes, whether its merge has landed. No GitHub event fires for that moment today, so there is nothing to wait on instead.",
+  "home": "r1",
+  "id": "ios-adblock-pin-poll",
+  "kind": "decision",
+  "n": 90,
+  "options": [
+    {
+      "gain": "No rewrite; the reason is written down.",
+      "how": "A decision record in ios-adblock says no GitHub event fits.",
+      "key": "a",
+      "label": "Keep it and record why",
+      "lose": "A polling loop stays, using CI minutes while it waits."
+    },
+    {
+      "gain": "No polling.",
+      "key": "b",
+      "label": "Rewrite it to run on events",
+      "lose": "No event exists for it today, so this needs a workaround."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 90,
+  "ref": "r1 (compliance visit, ios-adblock)",
+  "reply": "Withdrawn Oct 29 19:32 CDT: the coordinator took this undoable pick itself. The poll stays, and a decision record in ios-adblock says why. Overturn it in chat if you disagree.",
+  "status": "closed",
+  "title": "ios-adblock's pin-bump job waits up to 45 minutes by polling: keep it?",
+  "why": "No event exists to replace it, so the honest fix is to record why."
+}

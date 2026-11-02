@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-01T17:52:00Z",
+  "context": "Goal: you have ponytail's review skills to run by hand when you want them, and nothing of it runs on its own.\nProblem (goal): today the whole plugin is on in your settings file, so its hooks run in every session, which you never asked for.\nBased on (read): settings.json turns on ponytail@ponytail. It is already there in this repo's first commit (b3443148, Oct 27), which brought in the whole settings file at once, so git cannot show who turned it on or when. Unknown, not proven to be an agent's mistake.\nBased on (read): the row it writes after each turn goes to ~/.config/ponytail/band/<repo>.csv, with a board.html beside it. Each row is one task: when it started, its first message, its cost in dollars, turns, agent minutes, tokens, how much code it reused, tests run, and the model. It is a cost and usage ledger. Nothing of yours reads it.\nBased on (notes): why issues show only now: your report format and its put-nothing-below rule came after the install, so its closing-line order began to clash later. Unmeasured.\nDeparts from: settings.json turns the ponytail plugin on in full \u2014 a keeps a fixed copy of its six skills in this repo, as impeccable is kept, and turns the plugin off.\n\nBest practices worth adopting: its core habits (smallest change that fully works, reuse before writing, a test for new logic) are already your rules (building-one-home-per-capability, roles-each-layer-proves-once). One idea your rules lack: a short map of the repo's function names at session start, so a session reuses code. Its value is unmeasured; it could be a later step if you want it.",
+  "home": "mods-relevance-review",
+  "id": "ponytail-keep-change-remove",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:53:56Z",
+    "note": "we've had it for months -- something went wrong recently. we even already had kept custom versions of its skills, if none of this happened, then just turn it off for now and we'll have to deep dive. this is a new and big problem."
+  },
+  "n": 106,
+  "options": [
+    {
+      "gain": "You run its reviews by hand when you want; no hook, no ledger file, no clashing closing line; an outside update cannot change it.",
+      "how": "A lane copies its six skills (review, audit, debt list and others) into this repo at version 5.3.3, and turns the plugin off in settings.json.",
+      "key": "a",
+      "label": "Keep its skills only, as a fixed copy",
+      "lose": "Someone updates the copy by hand if you want a newer version."
+    },
+    {
+      "gain": "No outside code at all.",
+      "how": "Turn the plugin off in settings.json; a lane renames its 21 code comments to your own shortcut form.",
+      "key": "b",
+      "label": "Remove it entirely",
+      "lose": "Its review skills go too."
+    },
+    {
+      "gain": "No work.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Keep the whole plugin on",
+      "lose": "Its hooks, ledger and closing-line clash stay in every session."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "ponytail (outside plugin DietrichGebert/ponytail 5.3.3); mods-relevance-review",
+  "short": "Ponytail plugin",
+  "status": "closed",
+  "title": "Keep, change or remove the ponytail plugin?",
+  "why": "Your direction, Nov 1 11:53 CST: turn it off now, then a deep dive into what changed. Filed as roadmap step ponytail-off-deep-dive."
+}

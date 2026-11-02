@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "The glossary (o13) wants one word per thing. Plan: plans/c146-checked-prose-map.md on the roadmap branch, section 7 (Sonnet fact-check clear).",
+  "group": "c146-checked-map",
+  "home": "c146",
+  "id": "c146-word",
+  "kind": "decision",
+  "n": 28,
+  "options": [
+    {
+      "gain": "\"claim\" already has two senses in CLAUDE.md.",
+      "how": "The plan's word.",
+      "key": "a",
+      "label": "fact line",
+      "lose": "Differs from the brief's word."
+    },
+    {
+      "gain": "Matches the brief.",
+      "how": "The brief's word.",
+      "key": "b",
+      "label": "claim",
+      "lose": "A third sense of the word."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 28,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Checked map: what is one checked line called?",
+  "why": "One word per meaning (o13)."
+}

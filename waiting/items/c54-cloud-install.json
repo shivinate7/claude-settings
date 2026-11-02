@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T07:45:00Z",
+  "context": "Answered Oct 28 02:40 CDT, (c): every cloud container installs claude-settings in full, guard included (c54 part 3, now ready). You had asked whether cloud sessions need the guardrails: nothing was failing without them, but the gaps were UTC times, no hand-off hooks, and slips reviewers caught by hand.",
+  "home": "c54",
+  "id": "c54-cloud-install",
+  "kind": "decision",
+  "n": 31,
+  "options": [
+    {
+      "gain": "No change; cloud sessions stay lean.",
+      "how": "Close c54 part 3; cloud sessions stay as they are, and reviewers keep catching what the guard would.",
+      "key": "a",
+      "label": "Keep the cloud outside",
+      "lose": "The same few slips keep needing a human or reviewer catch."
+    },
+    {
+      "gain": "The two gaps that cost you reading time close; no guard in the cloud.",
+      "how": "Cloud sessions get Central times and the hand-off start-up hooks, nothing else.",
+      "key": "b",
+      "label": "Only times and hand-offs",
+      "lose": "A small install step at each cloud start."
+    },
+    {
+      "gain": "Cloud and local sessions behave the same.",
+      "how": "Every cloud container installs claude-settings, guard included.",
+      "key": "c",
+      "label": "The full install",
+      "lose": "Slower starts, and a guard bug reaches the cloud too."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 31,
+  "ref": "c54 (cloud threads follow the same model rules as local sessions), part 3",
+  "status": "closed",
+  "title": "Cloud sessions: keep them outside claude-settings, or give them some of it?",
+  "why": "Nothing in the cloud is failing for want of it, and you prefer it lean; (b) is there if UTC times keep reaching you."
+}

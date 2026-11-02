@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-29T20:08:00Z",
+  "context": "PR #807 teaches the report check your chat-first ruling: a question may go to chat first, with only the page link, and reach the page after 5 minutes. It passed all three review rounds. The review-cap rule still parks it: it lets through two cases the check asks about today, and only a typed override counts as your say-so, not a ruling. So it waits for your word.",
+  "home": "c202",
+  "id": "c202-followup-held",
+  "kind": "decision",
+  "n": 79,
+  "options": [
+    {
+      "gain": "The report check matches your chat-first ruling; sessions stop getting asked about the page link alone and the 5-minute line.",
+      "key": "a",
+      "label": "Merge it in batch 20",
+      "lose": "The check asks less in those two cases.",
+      "recommended": true
+    },
+    {
+      "gain": "The check stays as strict as today.",
+      "key": "b",
+      "label": "Keep it parked",
+      "lose": "Sessions keep hitting the check when they follow your chat-first ruling."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 79,
+  "ref": "c202 (ask in chat first); PR #807, head b2ca79b5; your chat-first ruling, Oct 28 15:10 CDT",
+  "reply": "Picked a in chat, Oct 29 16:33 CDT: #807 joins batch 21. Wider ruling: after round 3, a change with zero or positive net value merges on green; only negative is held (lane zero-value-merges rewrites rule roles-review-cap-three and decision hold-unsafe-after-round-3).",
+  "status": "closed",
+  "title": "Merge the chat-first report-check change that the review cap parked?",
+  "why": "Rule roles-review-cap-three parks a guard change that loosens a check until you decide; your ruling is not a typed override, so the coordinator cannot merge it."
+}

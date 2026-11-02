@@ -1,0 +1,51 @@
+{
+  "added": "2026-10-30T19:05:00Z",
+  "context": "You asked, 15:02 CDT: what does 'nothing is built yet' mean, when Banchi is a full app? You are right; that line was wrong. Banchi already stores the number as Place.slot (store/master.py, decision D58), and its screens already say 'empty slot'. So b needs no data change: only screen and doc wording, size unmeasured. The code type may stay named Place. Read on banchi main by the coordinator, 15:06 CDT.\n\nYou asked, 14:45 CDT: isn't this part of the glossary work, one name per thing? Yes; this item only asks which word. Your pick lands in Banchi's glossary.\n\nGoal: one plain word for where a card sits, so you and the helper say the same thing. Problem: the d4 brief says 'place', Banchi's code and screens say 'slot'; the word on your screens is yours to pick. Based on: the v3 notes item 8 (read); Banchi store/master.py Place.slot (read).",
+  "designs": [
+    {
+      "label": "Shelf v3: 'Box 5, slot 141' in the dock",
+      "size": {
+        "h": 678,
+        "w": 466
+      },
+      "slug": "d4v3-shelf-full-light"
+    }
+  ],
+  "group": "d4v3-shelf",
+  "home": "roadmap step d4 (v3 rulings), 1adea163",
+  "id": "d4v3-slot-word",
+  "kind": "decision",
+  "look": false,
+  "n": 95,
+  "options": [
+    {
+      "gain": "No wording change in docs.",
+      "how": "Screens say slot; the d4 brief keeps 'place'.",
+      "key": "a",
+      "label": "\"Slot\" on screen only",
+      "lose": "Brief and screens use two words for one thing."
+    },
+    {
+      "gain": "One word on screen, in docs and in chat; matches the stored field.",
+      "how": "Screens and docs say slot. The stored field is already slot; the code type Place may stay.",
+      "key": "b",
+      "label": "\"Slot\" everywhere",
+      "lose": "A wording pass over screens and docs.",
+      "recommended": true
+    },
+    {
+      "gain": "Keeps the brief's word.",
+      "how": "Screens say 'Box 5, place 141'.",
+      "key": "c",
+      "label": "\"Place\" everywhere",
+      "lose": "Fights the stored field 'slot'; vaguer on a box of numbered positions."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7), from lane d4-designer-critique",
+  "pick": "b",
+  "rank": 95,
+  "ref": "d4 v3 Shelf notes item 8 (PR #866); v2 used both 'Slot 227' and 'Reading your places'",
+  "status": "closed",
+  "title": "Banchi: call a card's position a \"slot\"?",
+  "why": "One name per thing; Banchi already stores 'slot', so b costs only wording."
+}

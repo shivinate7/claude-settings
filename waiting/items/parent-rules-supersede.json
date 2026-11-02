@@ -1,0 +1,12 @@
+{
+  "added": "2026-10-31T20:04:00Z",
+  "context": "Ruled in chat, 15:04 CDT. A build rule, not process only.\n\nIf claude-settings rules on something, it supersedes what a repo has, unless the repo explicitly carves out the rule by naming the claude-settings rule. Any guard, hook, CLAUDE.md line or other text in a child repo that conflicts with how repos inherit from claude-settings is wrong unless it cites the claude-settings rule as a \"known exemption\". Such text is stale prose for the compliance check to find.\n\nFiled to roadmap step parent-rules-supersede. Decision compliance-defined is rewritten in place after batch 37 merges. First case: banchi CLAUDE.md line 350 (\"The designation is never inherited\"), fixed by the banchi lane.",
+  "home": "parent-rules-supersede",
+  "id": "parent-rules-supersede",
+  "kind": "decision",
+  "n": 104,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "parent-rules-supersede (claude-settings rulings override child repos); decision compliance-defined (#886)",
+  "status": "closed",
+  "title": "claude-settings rulings override a child repo unless it names a known exemption"
+}

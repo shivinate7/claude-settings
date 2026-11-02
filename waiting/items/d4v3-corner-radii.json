@@ -1,0 +1,61 @@
+{
+  "added": "2026-10-30T19:05:00Z",
+  "context": "You asked, 15:02 CDT: is tokens.md for Banchi or claude-settings? claude-settings: docs/design/tokens.md, the house style for every app, says 'Corner radius is 8 px'. Your pick a bends it for Banchi only; other apps stay at 8.\n\nGoal: the Banchi Shelf looks right and matches your house style. Problem: the redraw rounds the floating dock 20 and its buttons 14 (the phone frame is 28), while tokens.md says every corner is 8; only you can bend or change the house rule. Based on: the v3 mockup's own CSS (read); tokens.md 'Corner radius is 8 px' (read); design review round 3 PASS (lane report).",
+  "designs": [
+    {
+      "label": "A: dock 20, List button 14 (C looks the same)",
+      "option": "a",
+      "size": {
+        "h": 678,
+        "w": 466
+      },
+      "slug": "d4v3-shelf-r20"
+    },
+    {
+      "label": "B: dock and List button at 8",
+      "option": "b",
+      "size": {
+        "h": 678,
+        "w": 466
+      },
+      "slug": "d4v3-shelf-r8"
+    }
+  ],
+  "group": "d4v3-shelf",
+  "home": "roadmap step d4 (v3 rulings), 1adea163",
+  "id": "d4v3-corner-radii",
+  "kind": "decision",
+  "look": true,
+  "n": 94,
+  "options": [
+    {
+      "gain": "The floating dock reads like iOS glass.",
+      "how": "Dock 20, buttons 14, cards 8, trays 4, in Banchi only.",
+      "key": "a",
+      "label": "Keep the mockup's corners",
+      "lose": "Banchi departs from tokens.md; other apps stay at 8. Goes against your uniform ruling (t18)."
+    },
+    {
+      "gain": "One rule in every app, no change to tokens.md.",
+      "how": "The builder draws the dock and buttons at 8.",
+      "key": "b",
+      "label": "Everything at 8, per tokens.md",
+      "lose": "The floating dock and big button look boxier than iOS's own glass.",
+      "recommended": true
+    },
+    {
+      "gain": "The dock keeps its look, written once for every app.",
+      "how": "Looks exactly like A's picture. A lane writes 8 for cards, 14 for controls, 20 for floating bars into tokens.md, for every app.",
+      "key": "c",
+      "label": "Add a small scale to tokens.md",
+      "lose": "Widens a shared token that every repo's screens then follow. Goes against your uniform ruling (t18)."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7), from lane d4-designer-critique",
+  "pick": "a",
+  "rank": 94,
+  "ref": "d4 v3 Shelf redraw, roadmap branch designs/d4-banchi-phone-v3 (PR #866, 4e27249c), notes item 15; docs/design/tokens.md (corner radius 8)",
+  "status": "closed",
+  "title": "Banchi Shelf: which corner roundness?",
+  "why": "It keeps one corner rule in every app, as your uniform ruling (t18) asks; the dock looks a little boxier."
+}

@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-23T07:30:00Z",
+  "context": "Measured Oct 23 on Windows: 17 Claude Desktop sessions resumed with --resume spin about one core each, and the spin survives restarts: a Claude Desktop bug, not claude-settings. Your word Oct 26: you handle idle sessions yourself.",
+  "home": "c40",
+  "id": "c40-idle-sessions",
+  "kind": "decision",
+  "n": 11,
+  "options": [
+    {
+      "gain": "The cause gets reported.",
+      "how": "A session drafts it with the measured versions; you send it.",
+      "key": "a",
+      "label": "Draft a bug report for Anthropic",
+      "lose": "One short session."
+    },
+    {
+      "gain": "You see it without asking.",
+      "how": "As (a), and the health view gains a read-only idle-sessions line.",
+      "key": "b",
+      "label": "Report and a health line",
+      "lose": "One more lane in claude-settings."
+    },
+    {
+      "gain": "Nothing to do.",
+      "how": "No session work; the step closes.",
+      "key": "c",
+      "label": "Leave it with me",
+      "lose": "No report and no line."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 11,
+  "ref": "c40 (idle desktop sessions each burn a full CPU core)",
+  "status": "closed",
+  "title": "What to do about idle desktop sessions each burning a CPU core",
+  "why": "It is not ours to fix, and a report is the only lever."
+}

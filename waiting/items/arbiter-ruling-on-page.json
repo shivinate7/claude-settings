@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-29T22:56:00Z",
+  "context": "#808 writes an arbiter's ruling into its question's record, marked as the arbiter's. Open: whether each one also gets a waiting-page item, so you see it. Meanwhile #808 merges with batch 21 as written (record only).",
+  "home": "c201",
+  "id": "arbiter-ruling-on-page",
+  "kind": "decision",
+  "n": 86,
+  "options": [
+    {
+      "gain": "You see every ruling the arbiter makes for you and can overturn it in one press.",
+      "how": "Each arbiter ruling adds a closed item to the page, with an Overturn choice.",
+      "key": "a",
+      "label": "Yes, a page item for each ruling",
+      "lose": "More items on the page during long runs."
+    },
+    {
+      "gain": "A quieter page.",
+      "key": "b",
+      "label": "No, the record only",
+      "lose": "You learn of a ruling only by reading the record."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 86,
+  "ref": "your item 81 a (arbiter answers rule in its repo, below you, and you can overrule them); PR #808",
+  "reply": "Ruled a, Oct 30 12:44 CDT. Roadmap step arbiter-ruling-page-item builds it.",
+  "status": "closed",
+  "title": "Should each arbiter ruling also show on the waiting page?",
+  "why": "On item 81 you kept the power to overrule; you can only use it on rulings you see."
+}

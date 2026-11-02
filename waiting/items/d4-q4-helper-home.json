@@ -1,0 +1,35 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "The helper pulls and packs; the seller lists and sells. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-q4-helper-home",
+  "kind": "decision",
+  "look": true,
+  "n": 16,
+  "options": [
+    {
+      "design": "d4-q4-a",
+      "gain": "One app and one set of screens to learn and build.",
+      "how": "Seller and helper share every screen.",
+      "key": "a",
+      "label": "One home for both",
+      "lose": "The helper sees seller jobs and money."
+    },
+    {
+      "design": "d4-q4-b",
+      "gain": "Nothing on screen the helper does not use.",
+      "how": "The helper opens to a home with only their jobs.",
+      "key": "b",
+      "label": "A helper home",
+      "lose": "One more mode; the switch must not confuse the helper."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 16,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: does the helper get a home of their own?",
+  "why": "Designer and reviewer both pick B."
+}

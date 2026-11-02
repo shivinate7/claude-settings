@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-28T18:50:00Z",
+  "context": "You asked (13:36 CDT): add real tests to the test files the mutation report called silent, or retire them. A session checked.\n\nWhat it found: all six files run in every CI build and pass, and a planted failure in each turns the build red, so none is silent in the sense of not running. \"Silent\" came from the mutation report: it breaks a file's code on purpose and counts which test files notice. These six noticed nothing, because they test other things (how a hook is wired, a platform exit, a wrapper's shape), not the files the report scored them against. Other test files already cover those files fully. It found six files, not the seven you said; none turned up as a seventh.\n\nThe pick below is the orchestrator's, taken because it changes no code and you can undo it; it stands unless you change it.",
+  "home": "c197",
+  "id": "c197-silent-tests",
+  "kind": "decision",
+  "n": 48,
+  "options": [
+    {
+      "gain": "Nothing is deleted or duplicated; the real checks stay as they are.",
+      "how": "No test changes. The six \"silent test\" notes in the debt list are closed as wrongly attributed, with the reason written down.\nBefore: six notes say these tests are silent. After: they are closed, and the report's pairing of tests to files is noted as the cause.",
+      "key": "a",
+      "label": "Close the six notes as a mistake in the report",
+      "lose": "If you wanted every one of these files to also test the scored file's logic, that does not happen."
+    },
+    {
+      "gain": "Every scored file is tested from more places.",
+      "how": "Each of the six gets new tests that break when the other file's code breaks.\nBefore: they pin wiring and shapes only. After: they also pin that logic.",
+      "key": "b",
+      "label": "Add tests of the scored files' logic into these six",
+      "lose": "It repeats tests that other files already have, which makes more to keep up for no new coverage."
+    },
+    {
+      "gain": "Less to maintain.",
+      "how": "Remove them from the repo and CI.\nBefore: they pin hook wiring, a platform exit and wrapper shapes. After: nothing pins those.",
+      "key": "c",
+      "label": "Delete the six files",
+      "lose": "Those behaviours would lose their only tests, for no gain."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 48,
+  "ref": "c197 (the silent test files; mutation report finding, decision mutation-report-scores-suites)",
+  "stands": true,
+  "status": "closed",
+  "title": "The six \"silent\" test files: they are fine, so close the notes about them?",
+  "why": "They run, they pass and they fail when broken; the report paired them with the wrong files, and the right test files already cover those."
+}

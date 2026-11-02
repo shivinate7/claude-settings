@@ -1,0 +1,25 @@
+{
+  "added": "2026-10-28T18:35:00Z",
+  "context": "Closed on your note, 14:40 CDT: you keep the apps' access to claude-settings as is, because it makes calling into a repo straightforward; revisit if it gets bloated. Nothing changes.\n\nThe item asked whether three outside apps (Renovate, Cloudflare, Render) should keep access to claude-settings.",
+  "home": "c153",
+  "id": "c153-github-apps",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Installed GitHub apps",
+      "url": "https://github.com/settings/installations"
+    }
+  ],
+  "minutes": 5,
+  "n": 9,
+  "owner": "Triage the roadmap (9)",
+  "rank": 9,
+  "ref": "c153 (each installed GitHub app needs the repo)",
+  "status": "closed",
+  "steps": [
+    "Open the Installed GitHub apps link below, then click Configure beside each app (Renovate, Cloudflare, Render).",
+    "Under Repository access, if the app does not use claude-settings, remove claude-settings from its list and save.",
+    "Mark done with a note of what you removed; a session then checks each app's last activity."
+  ],
+  "title": "Remove claude-settings from GitHub apps that do not use it"
+}

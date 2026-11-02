@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T08:10:00Z",
+  "context": "claude-settings is a public repo, and GitHub's published pricing bills standard-runner minutes on public repos at $0. No session here can read your bill (account endpoints refuse). If the bill does show claude-settings minutes, cutting branch CI saves real money and item 34's pick may flip. Check: GitHub, Settings, Billing and plans, Usage, Actions; filter by repository.",
+  "group": "c95-step2",
+  "home": "c95",
+  "id": "c95-minutes-billed",
+  "kind": "decision",
+  "n": 38,
+  "options": [
+    {
+      "gain": "Step 2 stays held here; no money at stake.",
+      "how": "The plan's $0 holds for claude-settings.",
+      "key": "a",
+      "label": "No, they cost nothing",
+      "lose": "Nothing."
+    },
+    {
+      "gain": "Item 34's weighing uses the real price.",
+      "how": "Say the monthly amount in a note.",
+      "key": "b",
+      "label": "Yes, they are billed",
+      "lose": "Step 2 may move ahead here."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "c95 step 2, plans/c95-step2-escapes.md",
+  "status": "closed",
+  "title": "Does your GitHub bill show Actions minutes for claude-settings?",
+  "why": "Public repos run standard runners free; your bill is the only proof."
+}

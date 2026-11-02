@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-27T16:00:00Z",
+  "context": "In ~/Developer, _targets, beli-export and degen-scratch, hooks/decision_watch.py gives no answer every turn. Not a timeout (every repo reads in under 2.2 s). The card was in the thread \"Fix decision-watch's unknown git status\".",
+  "home": "c108",
+  "id": "c108-no-repo-notice",
+  "kind": "decision",
+  "n": 8,
+  "options": [
+    {
+      "gain": "You learn it once and the notice stops repeating.",
+      "how": "One plain line the first turn, then quiet.",
+      "key": "a",
+      "label": "Say it once per session",
+      "lose": "A later turn does not remind you."
+    },
+    {
+      "gain": "No noise.",
+      "how": "No notice in a folder with no repo.",
+      "key": "b",
+      "label": "Stay silent",
+      "lose": "You never learn the watch is not judging there."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 8,
+  "ref": "c108 (the decision watch says once, plainly, when a folder has no git repo)",
+  "stands": true,
+  "status": "closed",
+  "title": "How the decision watch speaks in a folder with no git repo",
+  "why": "It changes no rule, and a notice that repeats every turn teaches you to skip it."
+}

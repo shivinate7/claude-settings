@@ -1,0 +1,55 @@
+{
+  "added": "2026-10-29T22:10:00Z",
+  "context": "You said, 12:45 CDT: the mockups were black screens, so you couldn't see a difference. Redrawn (PR #860, checked in light and dark).\n\nA picture taller than the card's 480px box now scrolls. #806 keeps today's scale, so a tall phone picture draws about 120px wide (5A). The designer recommends drawing it about 222px wide, the width a phone picture gets in a card (5B). Not blocking: #806 merges either way.",
+  "designs": [
+    {
+      "label": "5A: today's scale, about 120 wide",
+      "option": "a",
+      "size": {
+        "h": 497,
+        "w": 300
+      },
+      "slug": "c204-5a-png"
+    },
+    {
+      "label": "5B: about 222 wide",
+      "option": "b",
+      "size": {
+        "h": 497,
+        "w": 300
+      },
+      "slug": "c204-5b-png"
+    }
+  ],
+  "group": "c204-picture-scroll",
+  "home": "c204 design notes, lane c204-scroll-222",
+  "id": "c204-scroll-width",
+  "kind": "decision",
+  "look": true,
+  "n": 84,
+  "options": [
+    {
+      "design": "c204-5a",
+      "gain": "Every picture on the page keeps one scale rule.",
+      "how": "As built in #806.",
+      "key": "a",
+      "label": "5A: keep today's scale",
+      "lose": "A tall phone screen draws narrow, so its text is hard to read without View."
+    },
+    {
+      "design": "c204-5b",
+      "gain": "A tall phone screen is readable right in the card.",
+      "how": "A follow-up lane widens the scrolling case only.",
+      "key": "b",
+      "label": "5B: draw it about 222 wide",
+      "lose": "A second scale rule; one more small lane."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 84,
+  "ref": "c204 (a tall picture on a waiting-page card scrolls), PR #806, batch 21; mockup docs/design/c204-scroll.html on its branch",
+  "status": "closed",
+  "title": "How wide should a scrolling picture draw on a card?",
+  "why": "The designer's pick: the scroll exists so you can read a tall screen in place, and at 120 wide you can't."
+}

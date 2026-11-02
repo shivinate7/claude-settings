@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-01T18:10:00Z",
+  "context": "Goal: q_max's records say what is true about its main branch.\nProblem (rule): q_max PR #997 rewrites decision entry D-537, the q_max record that says main carries branch protection. A change to a decision entry merges only when you name the act.\nBased on (notes): the q_max lane finished it, and it passed review round 3 (coordinator, Nov 1 12:08 CST).\nDeparts from: q_max main (D-537 says main carries branch protection) \u2014 #997 rewrites D-537.\n\nq_max has no waiting page of its own, so this item sits here. Read the change at the link before you pick.",
+  "home": "q_max D-537",
+  "id": "qmax-997-merge",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:23:54Z",
+    "choice": "a"
+  },
+  "n": 123,
+  "options": [
+    {
+      "gain": "The record matches the repo.",
+      "how": "On your yes, batch runner 5 merges it once its CI is green.",
+      "key": "a",
+      "label": "Merge #997",
+      "links": [
+        {
+          "label": "q_max PR #997",
+          "url": "https://github.com/shivinate7/q_max/pull/997"
+        }
+      ],
+      "lose": "None known beyond the rewrite itself; read it first."
+    },
+    {
+      "gain": "Nothing changes until you have read it.",
+      "how": "#997 stays a draft until you say otherwise.",
+      "key": "b",
+      "label": "Hold it",
+      "lose": "D-537 keeps saying main carries branch protection."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "q_max PR #997; q_max decision D-537",
+  "reply": "Sent to the coordinator and batch runner 6 to merge once its CI is green.",
+  "short": "Merge q_max #997",
+  "status": "closed",
+  "title": "May q_max PR #997, which rewrites the branch-protection record, merge?",
+  "why": "It passed three review rounds, and it corrects a record; read the change first."
+}

@@ -1,0 +1,43 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "The helper stands at the shelf with the box open. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-q2-find-card",
+  "kind": "decision",
+  "look": true,
+  "n": 14,
+  "options": [
+    {
+      "design": "d4-q2-a",
+      "gain": "One number, always true.",
+      "how": "The phone gives one number: the card's place from the front.",
+      "key": "a",
+      "label": "Count from the front",
+      "lose": "Counting 108 cards by hand is slow and easy to get wrong."
+    },
+    {
+      "design": "d4-q2-b",
+      "gain": "Short counts from a landmark.",
+      "how": "The phone names the nearest divider and a short count from it.",
+      "key": "b",
+      "label": "Count from a divider",
+      "lose": "Needs a divider about every 100 cards, named the same on the phone and in the box."
+    },
+    {
+      "design": "d4-q2-c",
+      "gain": "No counting; looks like the box.",
+      "how": "The phone shows photos of the cards on each side.",
+      "key": "c",
+      "label": "Show the two neighbours",
+      "lose": "Still needs a start point; a neighbour that sold breaks the hint."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 14,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: how does the helper find the card inside the box?",
+  "why": "Designer and reviewer both pick B, with C's neighbour photos as the fallback."
+}

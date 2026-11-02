@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-27T09:25:00Z",
+  "context": "This account gets 404 on the old project page (https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8) and on the repo pages in the third account, so no session here can read their answers or republish them. This page replaces the project one.",
+  "home": "c121",
+  "id": "old-account-pages",
+  "kind": "decision",
+  "n": 4,
+  "options": [
+    {
+      "gain": "Saved answers carry over.",
+      "how": "You share each old page (Share menu) with this account; sessions read open answers and republish on the final look.",
+      "key": "a",
+      "label": "Share them with this account",
+      "lose": "A few minutes of sharing per page."
+    },
+    {
+      "gain": "Nothing to share.",
+      "how": "Each repo gets a new page in this account at its visit; you re-answer anything still open.",
+      "key": "b",
+      "label": "Start fresh pages here",
+      "lose": "Open answers on the old pages are lost."
+    },
+    {
+      "gain": "No work.",
+      "how": "Old pages stay as they are; nothing republishes them.",
+      "key": "c",
+      "label": "Leave them",
+      "lose": "They go stale and nobody reads them."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 4,
+  "ref": "c121 (live pages republished); old project page 9PJB2skRSMtCC4XHvzbmB8",
+  "status": "closed",
+  "title": "What happens to the waiting pages on your other accounts",
+  "why": "Few items were open on them, and every open item of this project is already on this page."
+}

@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-30T20:45:00Z",
+  "context": "Goal: stop the merge commands asking you, without leaving a known hole.\n\nProblem: no way exists today for a real coordinator or batch runner to prove its role that a lane cannot fake, so 'no prompt' and 'no hole' cannot both ship now.\n\nBased on: your 15:36 CDT note 'why stop here leaving a hole known' (ruling); the lane's probes, 15:38 to 15:43 CDT: every session, the coordinator included, reads as a started session, a grant given at start only passes rules every session already holds, and a role file or brief marker can be faked (measured); session-tiers, 'no other session gains a way to merge' (record).\n\nThis replaces item 97.",
+  "group": "merge-role",
+  "home": "decision session-tiers via PR #878: shiv chose outcome A in chat 15:41 CDT; the guard checks merge --role against the session's own tags, else denies with a hand-off",
+  "kind": "decision",
+  "look": false,
+  "n": 98,
+  "options": [
+    {
+      "gain": "No merge prompts.",
+      "how": "The no-prompt merge ships as built in PR #878.",
+      "key": "a",
+      "label": "Keep the two allow rules now",
+      "lose": "A lane could merge by mistake. Goes against your uniform ruling (t18)."
+    },
+    {
+      "gain": "No known hole ships.",
+      "how": "Drop the two allow rules and file a debt naming what is missing: a harness value carrying the session's tags, or a sessions API a script can call. The no-prompt merge returns when that exists.",
+      "key": "b",
+      "label": "Keep the ask, file the missing piece",
+      "lose": "The merge prompt stays until then.",
+      "recommended": true
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7), from lane merge-role-allow (PR #878)",
+  "pick": "b",
+  "rank": 98,
+  "ref": "item 92 pick b; item 97 (replaced); decision session-tiers; PR #878",
+  "status": "closed",
+  "title": "No-prompt merge can't ship without a hole yet: wait for it?",
+  "why": "b ships no known hole, which your 15:36 ruling asks for; a removes the prompt by leaving one."
+}

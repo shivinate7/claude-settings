@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-29T20:00:00Z",
+  "context": "You asked, 15:09 CDT: what is e2? It was option A's hidden key; the page shows only A, B, C, and the item wrongly named keys. Fixed: this item now uses the letters you see. Your saves at 15:05 and 15:09 both chose A, the setup script; that stands and goes to the coordinator.\n\nThe cause: agents/builder.md names no model, so a builder spawned without one reads a setting (CLAUDE_CODE_SUBAGENT_MODEL) that a cloud session writes too late; the builder then runs Opus. Until this is built, the coordinator names Sonnet by hand on each builder spawn.\n\nRecommended: A, your pick. It fixes the cause, the missing install before start. B is a one-line stopgap that can ship today; it reverses the no-pin choice in your record agent-model-cap. C treats the symptom.",
+  "home": "decision agent-model-cap (install home), lane setup-script-install",
+  "id": "builder-model-pin",
+  "kind": "decision",
+  "n": 77,
+  "options": [
+    {
+      "gain": "Fixes the cause: every cloud session starts with your settings, builder model included.",
+      "how": "The environment's setup script fetches claude-settings and runs install.sh before Claude Code starts. You paste the script once per environment; one fresh session then proves a bare builder runs Sonnet.",
+      "key": "a",
+      "label": "Setup script installs claude-settings before start, then one test",
+      "lose": "Your paste, once per environment; a new environment misses it until pasted.",
+      "recommended": true
+    },
+    {
+      "gain": "Fixed today, everywhere, with no test and nothing for you to paste.",
+      "how": "One line in agents/builder.md. A round-3 spawn still asks for Opus.",
+      "key": "b",
+      "label": "Pin model: sonnet in agents/builder.md (stopgap)",
+      "lose": "Reverses agent-model-cap's no-pin choice: the setting can no longer move builders."
+    },
+    {
+      "gain": "Nothing for you to do; your no-pin record stays.",
+      "how": "First one test in a fresh cloud session. If it passes, the guard refuses a bare builder spawn and says to add model sonnet; an override still lifts it.",
+      "key": "c",
+      "label": "Guard refuses a builder spawn that names no model, after one test",
+      "lose": "Treats the symptom, not the late settings; one refused spawn when a session forgets."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 77,
+  "ref": "decision agent-model-cap (the model each role runs), sentence: \"agents/builder.md carries no model: key, so a builder spawn reads the fallback.\"",
+  "status": "closed",
+  "title": "Builder on Sonnet: A, B or C?",
+  "why": "It changes how every builder's model is chosen, which your record agent-model-cap set."
+}

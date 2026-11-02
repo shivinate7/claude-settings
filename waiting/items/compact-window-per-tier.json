@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-01T23:45:00Z",
+  "context": "Goal: the coordinator, triage and lanes can each summarize their context at a size that suits them, without one session changing it for all.\nProblem (risk): the built-in command that sets the size writes it into the shared settings file, so one session's choice silently applies to every session on that machine.\nBased on (measured): reproduced on Claude Code 2.1.316, Nov 1.\nDeparts from: main sets one size, 500k, for every session in the shared settings \u2014 each kind of session gets its own size.",
+  "holds": "Step c203 and its draft pull request with the measured figures.",
+  "home": "c203",
+  "id": "compact-window-per-tier",
+  "kind": "decision",
+  "n": 147,
+  "options": [
+    {
+      "gain": "Each kind of session gets its own size, and nothing shared changes.",
+      "how": "Each session gets its size from a setting given at launch; no repo change.",
+      "key": "a",
+      "label": "Set the size when a session starts",
+      "lose": "The size is set only at launch; the built-in command to change it mid-session is refused."
+    },
+    {
+      "gain": "The built-in command works on each machine.",
+      "how": "The machine's settings file is generated and refreshed, as the cloud does.",
+      "key": "b",
+      "label": "Build the local settings file and refresh it",
+      "lose": "A plain update from the repo no longer refreshes everything on your computer."
+    },
+    {
+      "gain": "No stray changes show in git.",
+      "how": "A git filter drops the written value from the repo's view.",
+      "key": "c",
+      "label": "Hide the change from git",
+      "lose": "The size still applies to every session, and the change is hidden from you."
+    }
+  ],
+  "owner": "Lane c203 (session_013NEJL1r1JaJdB53YwwcdGV)",
+  "pick": "a",
+  "ref": "step c203 (a per-session compaction size must not change the shared settings)",
+  "reply": "Withdrawn: setting the size at launch changes nothing shared and can be undone, so the lane takes a without asking.",
+  "short": "Compaction size per tier",
+  "status": "closed",
+  "title": "How should each kind of session get its own compaction size without changing it for every session?",
+  "why": "It is the only option where one session cannot change another's size, and it needs no change to how your computer updates."
+}

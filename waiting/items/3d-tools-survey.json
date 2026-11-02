@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T18:24:00Z",
+  "context": "Goal: know what you need to plan for as more of your work becomes 3D.\nProblem (goal): we have no view of which 3D and engine tools Claude can drive, or what they need.\nBased on (read): claude-settings has no 3D or engine skill or MCP today; step web-design-guidelines covers only browser 3D design.\nDeparts from: main (no 3D tool survey) \u2014 adds a ranked survey of 3D and engine MCPs and the things to plan for.\n\nAsked and answered in chat with triage. Your words, Nov 1 12:24 CST: \"spawn another opus session that looks at 3d and engine mcps (unity/blender/adobe/everything) to determine as we start doing more 3d what i may need to start thinking about\". Filed as roadmap step 3d-tools-survey.",
+  "home": "3d-tools-survey",
+  "id": "3d-tools-survey",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T18:24:00Z",
+    "choice": "a",
+    "note": "spawn another opus session that looks at 3d and engine mcps"
+  },
+  "n": 126,
+  "options": [
+    {
+      "gain": "A ranked list of tools, their needs, and what to plan for, before 3D work grows.",
+      "how": "The lane researches Unity, Blender, Adobe and other 3D tools Claude can drive, and lists what to plan for.",
+      "key": "a",
+      "label": "Send an Opus lane to survey 3D and engine MCPs",
+      "lose": "An Opus lane costs more than Sonnet."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "step 3d-tools-survey",
+  "short": "3D tools survey",
+  "status": "closed",
+  "title": "Should an Opus lane survey 3D and game-engine MCP servers?",
+  "why": "Your chat words."
+}

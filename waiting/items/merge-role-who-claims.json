@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-30T20:26:00Z",
+  "context": "Being reworked. You said, 15:36 CDT: 'sounds like we just need to think this through more? why stop here leaving a hole known on this piece'. Agreed: neither a known hole (old A) nor the prompt (old B). The lane is probing ways a real batch runner proves its role that a lane cannot fake, such as a grant given only to the batch runner when it is started. New options come here when it reports; nothing to answer yet. PR #878 stays a draft.\n\nGoal: stop the merge commands asking you, without letting a lane merge.\n\nProblem: your item 92 pick b lets `merge --role coordinator` and `merge N --confirm` run with no prompt. A lane that misreads its role could claim coordinator and merge. Your record session-tiers says 'no other session gains a way to merge'.\n\nBased on: item 92 pick b (your ruling); session-tiers, 'no other session gains a way to merge' (record); the reviewer's finding (read).",
+  "group": "merge-role",
+  "home": "off the page while reworked; returns as a new item when lane merge-role-allow (PR #878) sends new options",
+  "kind": "decision",
+  "look": false,
+  "n": 97,
+  "options": [
+    {
+      "gain": "No merge prompts at all.",
+      "how": "The two allow rules stay as built; the debt is filed and session-tiers is rewritten to match.",
+      "key": "a",
+      "label": "Accept it",
+      "lose": "A lane that misreads its role could merge by mistake. Goes against your uniform ruling (t18)."
+    },
+    {
+      "gain": "Only you or a real coordinator merges, and the record's promise holds.",
+      "how": "The merge commands keep asking, as today.",
+      "key": "b",
+      "label": "Drop the two allow rules",
+      "lose": "The prompt you wanted gone stays.",
+      "recommended": true
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7), from lane merge-role-allow (PR #878)",
+  "pick": "b",
+  "rank": 97,
+  "ref": "item 92 pick b; decision session-tiers; PR #878 review round 1",
+  "status": "closed",
+  "title": "Merge with no prompt, with no hole: being reworked",
+  "why": "b keeps the record's promise that only you or a real coordinator merges; a tag check was ruled out (the merge tool cannot read session tags)."
+}

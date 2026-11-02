@@ -1,0 +1,74 @@
+{
+  "added": "2026-10-29T01:50:00Z",
+  "context": "The redraw you asked for is done: three blind directions, each drawn folded and unfolded on the Duo, light and dark. All screens, both Duo poses and themes: designs/d4-banchi-phone-v2/phone-blind-1.html (open one with #s=c3-full) and its notes on the roadmap branch. All cards, orders and buyers are made up. Unmeasured: the unfolded Duo height and insets and the folded top inset (drawn 644 pt).\n\nThis re-asks old items 14, 15, 18 and 21 on the new pictures (items 63 to 66 below). Old 16 (a home of its own for the helper) and 19 (the camera fires on its own) are not in the new drawings; they can be asked again once a direction is chosen.\n\nThe designer's note names three unknowns every direction leans on, C3 most: can the app name a card from the camera and how sure, can it list on TCGplayer without you and how fast, and where a price comes from.",
+  "designs": [
+    {
+      "label": "C1 Stack run",
+      "option": "a",
+      "size": {
+        "h": 151,
+        "w": 390
+      },
+      "slug": "d4v2-c1-option"
+    },
+    {
+      "label": "C2 Shelf",
+      "option": "b",
+      "size": {
+        "h": 151,
+        "w": 390
+      },
+      "slug": "d4v2-c2-option"
+    },
+    {
+      "label": "C3 Only what needs you",
+      "option": "c",
+      "size": {
+        "h": 155,
+        "w": 390
+      },
+      "slug": "d4v2-c3-option"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "holds": "The Banchi phone redraw (items 63 to 66) waits on this.",
+  "home": "d4",
+  "id": "d4v2-direction",
+  "kind": "decision",
+  "look": true,
+  "n": 62,
+  "options": [
+    {
+      "design": "d4v2-c1-option",
+      "gain": "The safest to build and to learn; you see the stack before anything goes public.",
+      "how": "A stack is the unit of work: scan it, check the few cards the app is unsure of, then list the whole stack with one press. Bottom tabs: Stacks, Orders, Places.",
+      "key": "a",
+      "label": "C1 Stack run: the task comes first",
+      "lose": "One press per stack and a card list to scroll; a stack can sit as drafts if you forget."
+    },
+    {
+      "design": "d4v2-c2-option",
+      "gain": "Answers \"where is it\" with a picture.",
+      "how": "The first screen is the boxes as they sit on the table: each box is a bar of slots, each card a sliver in its listing state. Tabs: Shelf, Orders, Search.",
+      "key": "b",
+      "label": "C2 Shelf: the place comes first",
+      "lose": "Listing takes one more step here; needs a local copy of the places."
+    },
+    {
+      "design": "d4v2-c3-option",
+      "gain": "Near zero attention per card; the hand presses only when the app asks.",
+      "how": "Folded, the phone is a scanner showing one count. Unfolded, it is a desk showing only unsure cards, orders to pull and a Where is field. Each sure card goes live as it is read.",
+      "key": "c",
+      "label": "C3 Only what needs you (bold): no list, no tab bar",
+      "lose": "The newest pattern and the most unproven; no card list to scroll; departs from the tab-bar rule (item 63); a wrong price can be public for a short time."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "b",
+  "rank": 62,
+  "ref": "d4 (Banchi phone app, redrawn blind: roadmap designs/d4-banchi-phone-v2/)",
+  "reply": "Picked b, Oct 29 16:45 CDT: C2 Shelf leads if Banchi's phone app is ever built.",
+  "status": "closed",
+  "title": "Banchi phone app: which of the three redrawn directions leads?",
+  "why": "The designer's pick: C3 for listing, with C2's shelf picture as the answer to \"Where is\". Its cost is the three unknowns, so a yes from you also means checking them first."
+}

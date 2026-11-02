@@ -1,0 +1,61 @@
+{
+  "added": "2026-10-28T20:22:00Z",
+  "context": "Each option card on this page shows a small picture of the option it describes. The step that fixes the page's sizes (c193, PR #783) caps that picture at 480 px high, as built. The other way is to let the picture fill the card, whatever the height. This reverses nothing, and you can flip it later with a small change.\n\nYour call, because it changes how the page looks. The two pictures below show the three-option row, the two-option row and the phone card, drawn at a quarter of real size.",
+  "designs": [
+    {
+      "focus": "#q1-cap-card",
+      "label": "Capped at 480 px",
+      "option": "a",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q1-cap"
+    },
+    {
+      "focus": "#q1-fill-card",
+      "label": "Fills the card",
+      "option": "b",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q1-fill"
+    }
+  ],
+  "group": "c193-sizes",
+  "home": "c193",
+  "id": "c193-pic-height",
+  "kind": "decision",
+  "look": true,
+  "n": 54,
+  "options": [
+    {
+      "design": "c193-choices",
+      "gain": "The cards stay a manageable height; nothing overflows.",
+      "how": "The picture stops at 480 px high and is centred in the card.\nBefore: a tall picture can overflow its card. After: in a three-option row it is 222 wide by 480 high.",
+      "key": "a",
+      "label": "Cap at 480 px high (as built)",
+      "lose": "The picture is smaller, so fine detail is harder to read."
+    },
+    {
+      "design": "c193-choices",
+      "gain": "The picture is larger and easier to read.",
+      "how": "The picture is as wide as the card and as tall as that makes it.\nBefore: capped at 480 high. After: 232 by 501 (three options), 368 by 795 (two options), 289 by 625 (phone).",
+      "key": "b",
+      "label": "Let the picture fill the card",
+      "lose": "With two options the card is about 800 px high."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 54,
+  "ref": "c193 (waiting page: pictures and chips fit), PR #783, designer's rule Oct 28 13:19 CDT",
+  "reply": "Answered, Oct 28 17:50 CDT: the picture stays capped at 480 px high (a), as built.",
+  "stands": true,
+  "status": "closed",
+  "title": "How tall may the picture in an option card be?",
+  "why": "The designer picked the cap, and it keeps every card a manageable height; it ships as built unless you say otherwise."
+}

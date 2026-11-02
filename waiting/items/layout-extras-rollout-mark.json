@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-27T16:58:00Z",
+  "context": "Today any layout-extras file marks its repo as rolled out. degen and mailaudit already hold one, with a waiting-page key and no visit, so lint/layout.py reads them as rolled out. This was item 29 on the old page; its answer, if you gave one, is on your other account.",
+  "group": "o2-rollout-mark",
+  "holds": "o8 lane (c) and c132 (repo branding) wait: both add keys to this file.",
+  "home": "o2",
+  "id": "layout-extras-rollout-mark",
+  "kind": "decision",
+  "n": 3,
+  "options": [
+    {
+      "gain": "Repos can carry page keys before their visit; degen and mailaudit read right.",
+      "how": "The file gains a rolled-out field; other keys (waiting page, colour, icon) no longer imply a visit.",
+      "key": "a",
+      "label": "A separate rolled-out mark",
+      "lose": "One more field to set at each visit."
+    },
+    {
+      "gain": "No new field.",
+      "how": "degen and mailaudit get their visit, or their files move aside until then.",
+      "key": "b",
+      "label": "Keep it: the file means rolled out",
+      "lose": "No repo can hold a page key before its visit."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "o2 (one layout), o8, c132; was item 29 on the old page",
+  "status": "closed",
+  "title": "What marks a repo as rolled out in .claude/layout-extras.json",
+  "why": "It was the advisor's pick on item 29, and it unblocks two steps without touching child repos."
+}

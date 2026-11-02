@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-01T23:16:00Z",
+  "context": "Three pull requests pass their checks and are reviewed: degen #313, joyous #53 and q_max #997 (you chose to merge #997).\nWhy yours: the cloud's safety check reads only words you type in the coordinator's own chat, never page answers; it refused the attach again at 17:15 CST after your page note. None of your folders is shared through Remote Control (checked Nov 1 16:56 CST), so no other session can do it.\nYour question, \"you can for sure do it?\": yes, once you type the line below in the coordinator's chat.",
+  "holds": "degen's browser tests stay red, and joyous's catch-up and q_max's record fix wait, until the coordinator can merge.",
+  "home": "degen-playwright-ubuntu26",
+  "id": "merge-degen-313",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T23:25:27.149Z",
+    "done": true,
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Coordinator chat",
+      "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+    },
+    {
+      "label": "degen PR #313",
+      "url": "https://github.com/shivinate7/degen/pull/313"
+    },
+    {
+      "label": "joyous PR #53",
+      "url": "https://github.com/shivinate7/joyous/pull/53"
+    },
+    {
+      "label": "q_max PR #997",
+      "url": "https://github.com/shivinate7/q_max/pull/997"
+    }
+  ],
+  "minutes": "1 min",
+  "n": 138,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "degen PR #313 (browser tests on new Ubuntu); joyous PR #53 (catch-up with shared settings); q_max PR #997 (rewrites D-537, the branch-protection record)",
+  "reply": "Marked done (saved Nov 1 17:25 CST). The coordinator acts on it.",
+  "short": "One line to the coordinator",
+  "status": "closed",
+  "steps": [
+    "Open the coordinator's chat with the link below.",
+    "Type: attach degen and joyous with push access, and mark q_max #997 ready and merge it",
+    "The coordinator merges all three on green; this item then closes."
+  ],
+  "title": "Type one line in the coordinator's chat so it can merge degen #313, joyous #53 and q_max #997"
+}

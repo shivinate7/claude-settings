@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-01T17:52:00Z",
+  "context": "Goal: a session stays in its own tier: the coordinator plans and briefs, lanes build, triage asks you questions, the batch runner merges. You asked for \"an actual fix\", a check, not more written rules (Oct 31 15:31 CDT).\nProblem (rule): the lane building that check (tier-boundaries-enforced, PR #919) needs to know how hard it stops a session that steps outside its tier. Your rule lets the coordinator make a tiny fix itself when it cannot change any check's result, and a check cannot judge that, so any hard stop also blocks those tiny fixes.\nBased on (notes): what happened Oct 31: the coordinator took owner questions that were triage's, ran its own build and review agents, and merged in other repos.\nBased on (read): decision session-tiers says no hard block applies to tiers today.\nDeparts from: session-tiers (no hard block) \u2014 a: the check refuses, and your typed override lets one act through.\n\nWhat the check would stop, in plain terms: the coordinator editing code or guard files instead of sending a lane; the coordinator putting a question on your page instead of triage; a session other than the batch runner merging; the coordinator writing into another repo. Each option says what happens when a session tries one of these.\n\nMeanwhile: PR #919 is built with a (refuse, with your override) and waits for this answer and item 111 before it merges.",
+  "group": "tier-boundaries",
+  "holds": "PR #919, the tier check, waits for this answer before it merges.",
+  "home": "session-tiers",
+  "id": "tier-guard-strength",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:45:12.393Z",
+    "choice": "a",
+    "note": "i want to also keep logging to see how this is working"
+  },
+  "n": 112,
+  "options": [
+    {
+      "gain": "The coordinator cannot drift, which is the fix you asked for.",
+      "how": "The check refuses the act and names the right tier. You type override to let one act through.",
+      "key": "a",
+      "label": "Refuse, with your typed override",
+      "lose": "A tiny fix by the coordinator needs your override or a lane."
+    },
+    {
+      "gain": "No hard stop; you decide each case.",
+      "how": "The check stops and asks you before the act.",
+      "key": "b",
+      "label": "Ask you each time",
+      "lose": "More prompts to you, and you may not be there to answer."
+    },
+    {
+      "gain": "No friction.",
+      "how": "The check writes the act to a log and lets it run.",
+      "key": "c",
+      "label": "Log only",
+      "lose": "The same as today: drift goes on."
+    }
+  ],
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv), for lane tier-boundaries-enforced",
+  "pick": "a",
+  "ref": "tier-boundaries-enforced; rule roles-orchestrator-never-builds; decision session-tiers",
+  "reply": "Filed on step tier-boundaries-enforced (roadmap 4e711fe9): the check refuses, your override lets one act through, and every refusal and override is logged for you to read. The item closes when the lane takes it.",
+  "short": "Tier guard strength",
+  "status": "closed",
+  "title": "How hard does the guard stop a session working outside its tier?",
+  "why": "Only a refusal stops the drift you saw on Oct 31; your override keeps the rare exception open."
+}

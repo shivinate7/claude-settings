@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-02T04:55:00Z",
+  "context": "Goal: green, reviewed q_max PRs merge without waiting on you.\nProblem (risk): the merge tool will not merge while main's own run reads unknown, and only your word lets it skip that check, so #1011 waits.\nBased on (read): q_max browser run 40740294267 on main was cancelled and has no red job.\nBased on (ruling): never merge failing CI.\nDeparts from: main, where the merge tool refuses while main's run reads unknown \u2014 (a) merges #1011 past it once; (b) re-runs main's browser run and merges only on green.",
+  "holds": "q_max PR #1011.",
+  "home": "git-never-merge-failing-ci",
+  "id": "qmax-1011-base-unknown",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T04:54:06.086Z",
+    "choice": "none",
+    "note": "why did it fail? we have no details?w"
+  },
+  "links": [
+    {
+      "label": "q_max PR #1011",
+      "url": "https://github.com/shivinate7/q_max/pull/1011"
+    },
+    {
+      "label": "Batch runner 8's session",
+      "url": "https://claude.ai/code/session_013NEJL15CmUPTsMgxECh1fX"
+    }
+  ],
+  "n": 151,
+  "options": [
+    {
+      "gain": "#1011 lands now.",
+      "how": "Batch runner 8 merges #1011 with the flag that skips main's unknown run, this once.",
+      "key": "a",
+      "label": "Merge now",
+      "links": [
+        {
+          "label": "q_max PR #1011",
+          "url": "https://github.com/shivinate7/q_max/pull/1011"
+        }
+      ],
+      "lose": "If main is in fact broken, #1011 lands on a broken base and the break is harder to trace."
+    },
+    {
+      "gain": "#1011 lands on a main known to be green; no check is skipped.",
+      "how": "Batch runner 8 re-runs main's browser run, then merges #1011 the normal way if it goes green.",
+      "key": "b",
+      "label": "Re-run main first",
+      "links": [
+        {
+          "label": "q_max run 40740294267",
+          "url": "https://github.com/shivinate7/q_max/actions/runs/40740294267"
+        }
+      ],
+      "lose": "#1011 waits one browser run, and the re-run costs GitHub minutes."
+    }
+  ],
+  "owner": "batch runner 8 (session_013NEJL15CmUPTsMgxECh1fX)",
+  "pick": "none",
+  "rank": 1,
+  "ref": "q_max PR #1011; q_max browser run 40740294267",
+  "reply": "It did not fail a test. Run 40740294267 (Oct 28, 12:55 CDT, the first manual browser run) ran its browser-test step for exactly 3 hours and GitHub stopped it at the job's time limit, so it reads cancelled with no red step: a hang, not a broken test. Applied by the coordinator, 22:59 CST: batch runner 8 does not merge past it; it waits for run 41377928751 (time limit about 23:28 CST) and merges #1011 if that run is green. If that run also hits the limit, a q_max lane fixes the browser tier's runtime.",
+  "short": "q_max #1011 merge",
+  "status": "closed",
+  "title": "q_max #1011: merge now past main's unknown run, or re-run main first?",
+  "why": "q_max PR #1011 is green, but the merge tool refuses it: main's last browser run was cancelled with no red job, so main's state reads unknown, not green."
+}

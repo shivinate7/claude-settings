@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-02T05:44:00Z",
+  "context": "Goal: replaced PRs close without waiting on you.\nProblem (rule): auto mode refuses a PR close with no word of yours in that chat, so each replaced PR waits for you.\nBased on (measured): the close of q_max #969 was refused at 23:30 CST.\nBased on (ruling): a repo changes to fit a shared tool, never the tool to fit a repo.\nDeparts from: today auto mode refuses those closes \u2014 (a) adds an allow line for a PR close plus one comment by the merging and coordinating sessions.",
+  "holds": "Closing replaced PRs in every repo.",
+  "home": "session-tiers",
+  "id": "runner-pr-close-allow",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "q_max PR #969",
+      "url": "https://github.com/shivinate7/q_max/pull/969"
+    }
+  ],
+  "n": 160,
+  "options": [
+    {
+      "gain": "Replaced PRs close without your word each time.",
+      "how": "A lane adds an allow line so the merging and coordinating sessions may close a PR and post one comment.",
+      "key": "a",
+      "label": "Allow the close",
+      "links": [
+        {
+          "label": "q_max PR #969",
+          "url": "https://github.com/shivinate7/q_max/pull/969"
+        }
+      ],
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. A wrong close by those sessions goes through with no check; it can be reopened.",
+      "widens": true
+    },
+    {
+      "gain": "No PR closes without your word.",
+      "how": "You close each replaced PR yourself, or say yes to each close on this page.",
+      "key": "b",
+      "label": "Keep the refusal",
+      "links": [
+        {
+          "label": "q_max PR #969",
+          "url": "https://github.com/shivinate7/q_max/pull/969"
+        }
+      ],
+      "lose": "Each replaced PR waits for you."
+    }
+  ],
+  "owner": "batch runner 8 (session_013NEJL15CmUPTsMgxECh1fX)",
+  "rank": 3,
+  "ref": "q_max PR #969 close refused at 23:30 CST",
+  "reply": "Withdrawn 23:44 CST: the coordinator's session can close a replaced PR without a new allow line (it closed q_max #969 at 23:43), so nothing needs widening.",
+  "short": "runner PR close",
+  "status": "closed",
+  "title": "Let the merging sessions close a replaced PR without asking you each time?",
+  "why": "Auto mode refused the merging session's close of q_max #969, a PR replaced by #1010, at 23:30 CST. Today you close each replaced PR, or say yes to each close."
+}

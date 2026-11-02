@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-30T00:34:00Z",
+  "context": "The compliance check's design part expects web screens (a design folder, tokens, a screenshot config). ios-adblock is an iPhone app plus a Chrome extension, so it fails a check that does not fit it. home is the same kind of repo.",
+  "home": "r1",
+  "id": "ios-design-check",
+  "kind": "decision",
+  "n": 89,
+  "options": [
+    {
+      "gain": "No false failure in iPhone repos.",
+      "key": "a",
+      "label": "Mark design not applicable for iPhone-only screens, and fix the shared check",
+      "lose": "iPhone screens get no automatic screen check."
+    },
+    {
+      "gain": "A real check of iPhone screens.",
+      "how": "The check shoots each screen in the simulator (one at a time, under your item 73 a) and judges it like a web screen.",
+      "key": "b",
+      "label": "Build an iPhone screenshot check",
+      "lose": "New tooling, and Mac time for every run."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 89,
+  "ref": "r1 (compliance visit, ios-adblock); c91 (one iOS standard)",
+  "reply": "Withdrawn Oct 29 19:32 CDT: the coordinator took this undoable pick itself. ios-adblock's design result stays a known finding, with no lane and no exception in the shared check. Overturn it in chat if you disagree.",
+  "status": "closed",
+  "title": "How should the compliance check judge an iPhone app's screens?",
+  "why": "It stops a false failure now; an iPhone screenshot check can come later with c91."
+}

@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T19:20:00Z",
+  "context": "Your Oct 11 ruling for home: iPhone tests run in GitHub CI only. The shared iOS standard (c91) runs the UI tests once per batch on the Mac through sim-test. Your note, Oct 29 14:46 CDT: some tests belong on CI; too many iOS sessions each start their own simulator and overload your computer; find the balance. Roadmap c196 (cap parallel builds on the Mac) is the step that would set such a cap.",
+  "home": "child-repo-gap",
+  "id": "home-iphone-tests-where",
+  "kind": "decision",
+  "n": 73,
+  "options": [
+    {
+      "gain": "CI carries the load; your Mac never runs more than one simulator.",
+      "how": "Unit and UI tests run on GitHub CI for every batch. The Mac runs only a short final check per batch, and only one simulator runs at a time across all repos (the cap from c196).",
+      "key": "a",
+      "label": "CI for the bulk; one short Mac check per batch, one simulator at a time",
+      "lose": "c196's cap must land first; a Mac check waits its turn behind other repos."
+    },
+    {
+      "gain": "No simulator load on your Mac at all.",
+      "how": "No session starts a simulator on its own; you run one by hand when you want it.",
+      "key": "b",
+      "label": "All iPhone tests on CI; the Mac only when you ask",
+      "lose": "Nothing checks the app on a simulator per batch."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 73,
+  "ref": "child-repo-gap (home checked); c91 (one iOS standard); your Oct 11 ruling for home",
+  "reply": "Picked a, Oct 29 14:55 CDT: CI runs the bulk of home's iPhone tests; one short Mac check per batch, one simulator at a time across repos once c196's cap lands.",
+  "status": "closed",
+  "title": "home: where do the iPhone tests run, GitHub CI or the Mac?",
+  "why": "It keeps a per-batch check while capping what runs on your Mac at one simulator."
+}

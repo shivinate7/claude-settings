@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-01T20:31:00Z",
+  "context": "Goal: 3D work that a cloud session can build and a reviewer can check.\nProblem (goal): each choice sets the licence cost, where the work can run, and how a reviewer checks a scene, so the survey lane's next step depends on it.\nBased on (read): the 3D tools survey lane found browser 3D (three.js with glTF models) is free and can be fully checked in a cloud container with no graphics card.\nBased on (read): the same survey found Unity and Unreal need their editor open on your computer, and Unity needs a licence even when run without its window.\nDeparts from: main \u2014 adds a first 3D target.\n\nNot blocking: the survey goes on; this sets what it plans next.",
+  "home": "3d-tools-survey",
+  "id": "3d-first-target",
+  "kind": "decision",
+  "n": 130,
+  "options": [
+    {
+      "gain": "Free, and cloud sessions can build and check it.",
+      "how": "3D that runs in a web page.",
+      "key": "a",
+      "label": "Browser 3D (three.js and glTF)",
+      "lose": "No game-engine extras such as a scene editor or physics tools."
+    },
+    {
+      "gain": "A full engine at no cost.",
+      "how": "A free, full game engine.",
+      "key": "b",
+      "label": "Godot",
+      "lose": "Cloud checks cover only the file structure; checking how a scene looks is not proven."
+    },
+    {
+      "gain": "The largest asset stores and tooling.",
+      "how": "The two big commercial engines.",
+      "key": "c",
+      "label": "Unity or Unreal",
+      "lose": "Licence cost, and the work runs only on your computer."
+    }
+  ],
+  "owner": "Lane 3d-tools-survey (session_013NEJL1nELFhJD5Rm3xiUS3)",
+  "pick": "a",
+  "ref": "step 3d-tools-survey; docs/plans/3d-tools-survey.md (draft PR to follow)",
+  "short": "First 3D target",
+  "status": "open",
+  "title": "What should your first 3D work be built in?",
+  "why": "Free, and the cloud can build and check it end to end."
+}

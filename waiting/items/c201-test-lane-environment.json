@@ -1,0 +1,22 @@
+{
+  "added": "2026-10-28T21:30:00Z",
+  "context": "You picked a on item 53: test whether a cloud environment can carry its own context limit. A coordinator then starts one lane session in it and checks that it condenses its history at that number. Only you can make the environment (it is your login).\n\nThe variable is `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. It overrides every other setting, so put it only in this test environment, never in a shared one. 200000 is a suggested test number: lower than the 500k your repo sets, and inside the 100000 to 1000000 range the docs allow for agent files.\n\nI could not check the button names below (no tool of mine creates an environment); if they differ, tell the coordinator what you see.",
+  "home": "c201",
+  "id": "c201-test-lane-environment",
+  "kind": "task",
+  "minutes": 5,
+  "n": 58,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 58,
+  "ref": "c201 (how the build's sessions are organized), your answer to item 53 (a)",
+  "reply": "Done, Oct 28 17:46 CDT: you say the variable works in an experimental cloud session you made. That is your report; no session of mine has read its context limit yet. The coordinator can now read it from a lane started there (get_session shows the limit), so ask it for the environment's name if it does not have it.",
+  "status": "closed",
+  "steps": [
+    "Open your cloud environment settings (the environment menu in a cloud session's title bar, then Edit, or the environments list on claude.ai/code).",
+    "Make a new environment named lane-test, with the same settings as your current one.",
+    "In lane-test, add the environment variable CLAUDE_CODE_AUTO_COMPACT_WINDOW with the value 200000.",
+    "Tell the coordinator the name lane-test; it starts one lane session in it and checks it condenses at about that number."
+  ],
+  "title": "Make one extra cloud environment to test a lower context limit for lanes",
+  "why": "It is the one step of the test that only you can do."
+}

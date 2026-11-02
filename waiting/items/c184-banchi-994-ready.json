@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-29T19:05:00Z",
+  "context": "banchi's PR 994 is a draft that re-pins banchi's code check to claude-settings and stops excluding the two model files. The coordinator's session cannot mark it ready: the classifier refuses that press from any session, so it is yours. A draft runs no CI; after your press and green CI the coordinator merges it.",
+  "home": "c184",
+  "id": "c184-banchi-994-ready",
+  "kind": "task",
+  "minutes": 1,
+  "n": 68,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 68,
+  "ref": "c184 (banchi re-pins code-check), banchi PR 994",
+  "reply": "Superseded, Oct 29 14:00 CDT (coordinator): the new banchi lane replaces banchi#994, so there is nothing to press.",
+  "status": "closed",
+  "steps": [
+    "Open https://github.com/shivinate7/banchi/pull/994.",
+    "Press Ready for review."
+  ],
+  "title": "Press Ready for review on banchi's PR 994",
+  "why": "Your login is the only way to mark another repo's PR ready."
+}

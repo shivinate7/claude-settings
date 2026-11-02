@@ -1,0 +1,16 @@
+{
+  "added": "2026-11-02T19:13:00Z",
+  "context": "Goal: a writer's reported filing is proved, not trusted.\nAnswered in chat 13:12 and 13:13 CST: grant for one narrow check, kept in the feedback guard, in line with triage.\nFound: hooks/feedback_guard.py already proves ruling and task homes in git; for page:<n> it checks only that a send happened.\nDeparts from: main's page:<n> check (send only) \u2014 it requires the item in the repo's waiting store.\nNext: build after lane waiting-data-in-repo merges (your hold). Until then the sender reads each page item back.",
+  "home": "hooks/feedback_guard.py",
+  "id": "filing-check-in-guard",
+  "kind": "decision",
+  "links": [],
+  "n": 175,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "hooks/feedback_guard.py; lane waiting-data-in-repo",
+  "short": "prove a filing landed",
+  "status": "closed",
+  "title": "Is there a check that triage filed what it said?",
+  "why": "send_message confirms delivery only."
+}

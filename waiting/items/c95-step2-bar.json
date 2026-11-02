@@ -1,0 +1,46 @@
+{
+  "added": "2026-10-28T18:35:00Z",
+  "context": "What this is: every change goes through the automatic test runs on GitHub (CI) before it reaches main. Today each branch runs every test, on Linux, Windows and Mac. Step 2 would run only the Linux tests on a branch and run the Windows and Mac tests only after the change lands on main.\n\nWhy it was raised: it would save about 12,800 machine-minutes a week (47%). You confirmed Oct 28 13:23 CDT that no minutes are billed for claude-settings, so those minutes cost $0 here. It would also save almost no waiting, because the Linux tests are the slowest part anyway.\n\nWhat it risks: a bug that only shows on Windows or Mac would slip through to main. Read from 551 runs, Oct 13 to 28: 5 such bugs would have slipped through in 15.5 days, about 3 a week, plus about 20 failures from flaky timing tests. Separately, main itself turned red 34 times, and 24 of those were flaky timing tests, not real bugs.\n\nYou rejected judging it by green runs on main (02:36 CDT). The question now: what do we count to decide?",
+  "group": "c95-step2",
+  "home": "c95",
+  "id": "c95-step2-bar",
+  "kind": "decision",
+  "n": 34,
+  "options": [
+    {
+      "gain": "It weighs exactly what step 2 trades, flaky tests cannot skew it, and it works per repo.",
+      "how": "Count only real Windows or Mac bugs that reach main. Take step 2 in a repo only when the money and waiting it saves is worth more than the cost of fixing those bugs.\nBefore: no rule. After, today: claude-settings saves $0, so step 2 stays off here; a repo that pays for minutes can turn it on.",
+      "key": "b",
+      "label": "Count the real bugs that slip through against what it saves",
+      "lose": "It needs a price for each repo's minutes. Here that price is $0, so the answer is simply \"not worth it in claude-settings\"."
+    },
+    {
+      "gain": "Simple, and readable from past runs today.",
+      "how": "Allow step 2 while the number of those failures stays under a limit in a set period.\nBefore: no rule. After: a plain count, read from past runs.",
+      "key": "a",
+      "label": "Count every failure that only the full set catches",
+      "lose": "Flaky timing failures outnumber real bugs about 4 to 1, so the count mostly measures noise."
+    },
+    {
+      "gain": "It measures what you feel: a broken main.",
+      "how": "Measure how many hours a week main is red before and after the change, and block merges while main is red.\nBefore: main can be red and merges go on (it was not green for 311 of 366 hours). After: merges stop until main is green.",
+      "key": "c",
+      "label": "Count the hours main sits red, and stop merges while it is red",
+      "lose": "It shows harm only after the change is made, so it cannot warn you first."
+    },
+    {
+      "gain": "Main goes green for real and nothing new slips through.",
+      "how": "Keep running every test on each branch. Make the flaky timing tests dependable, then judge again by option b.\nBefore: main turns red from flaky tests. After: main goes green for real, and no new bugs slip through.",
+      "key": "d",
+      "label": "No step 2 here; fix the flaky timing tests first",
+      "lose": "The 47% of minutes stays in use, which costs nothing here since they are free."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 4,
+  "ref": "c95 (CI runs at milestones), step 2; plan plans/c95-step2-escapes.md on the roadmap branch",
+  "status": "closed",
+  "title": "Run only quick tests on each branch, and the full set only on main? How do we decide?",
+  "why": "Minutes are free here, so step 2 would save nothing and risk about 3 slipped-through bugs a week; (b) says that in numbers and leaves other repos free to decide for themselves."
+}

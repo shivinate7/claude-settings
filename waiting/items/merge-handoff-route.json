@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-31T20:44:00Z",
+  "context": "Goal: reviewed PRs merge without a classifier refusal.\nProblem (risk): at 15:31 CDT the auto-mode classifier refused the coordinator's message handing banchi #1002 to the batch runner as \"Merge Without Review\"; that message is an MCP tool call, so #878's allow rules do not cover it, and a merge can stall.\nBased on (measured): that refusal, Oct 31 15:31 CDT.",
+  "group": "tier-boundaries",
+  "home": "tier-boundaries-enforced",
+  "id": "merge-handoff-route",
+  "kind": "decision",
+  "lane": "tier-boundaries-enforced",
+  "lastAnswer": {
+    "at": "2026-11-01T10:26:46.313Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 113,
+  "options": [
+    {
+      "gain": "Closes the fault: no merge request message exists to refuse.",
+      "how": "Each lane posts a fixed review record on its PR (PR, head, each round with reviewer and verdict, CI state); the batch runner finds reviewed, green PRs itself at each wake, and no merge message is sent. Until then the handoff message uses the same form. Cost: one PR comment per round, one GitHub read per wake.",
+      "key": "a",
+      "label": "A review record on each PR",
+      "lose": "Whether the classifier judges the lane's comment write is unmeasured."
+    },
+    {
+      "gain": "Text only, no new step.",
+      "how": "The handoff message carries the review record; nothing else changes.",
+      "key": "b",
+      "label": "The fixed form in the message only",
+      "lose": "It only lowers the odds of a refusal."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq), for lane tier-boundaries-enforced",
+  "pick": "a",
+  "ref": "tier-boundaries-enforced; #878 (merge --role allow rules); banchi #1002",
+  "short": "Merge handoff route",
+  "status": "closed",
+  "title": "How does a reviewed PR reach the batch runner without a classifier refusal?",
+  "why": "It removes the refused act instead of rewording it."
+}

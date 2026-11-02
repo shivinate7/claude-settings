@@ -1,0 +1,26 @@
+{
+  "added": "2026-10-28T09:20:00Z",
+  "context": "Answered yes (Oct 28 12:49 CDT). A lane dispatches q_max's browser.yml on main and reports the verdict on c78.\n\nq_max#978 merged Oct 28 (8e2c160af). It moved q_max's browser.yml to the shared Playwright setup with no apt step. browser.yml runs only when started, so nothing had run it since.",
+  "home": "c78",
+  "id": "qmax-browser-dispatch",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Run 41377928751",
+      "url": "https://github.com/shivinate7/q_max/actions/runs/41377928751"
+    }
+  ],
+  "minutes": 2,
+  "n": 40,
+  "owner": "Triage the roadmap (10)",
+  "rank": 30,
+  "ref": "c78 (one shared browser-test setup), q_max#978",
+  "reply": "Run again, Nov 1 20:20 CST: q_max PR #1003 merged (main 5ab167f2f), and the browser tests were started once on main as run 41377928751. Result pending; this item gets the result when the run ends. Earlier (Oct 28): run cancelled at the 180-minute cap with 578 pass and 45 fail, the first fail a 30-second click timeout that likely cascaded.",
+  "status": "closed",
+  "steps": [
+    "Open q_max's browser workflow on GitHub (link below).",
+    "Press Run workflow on main.",
+    "Mark done; triage reads the run's result and files it on c78."
+  ],
+  "title": "Run q_max's browser tests once, so the new setup is proven"
+}

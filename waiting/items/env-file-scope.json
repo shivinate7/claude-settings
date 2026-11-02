@@ -1,0 +1,57 @@
+{
+  "added": "2026-11-02T05:44:00Z",
+  "context": "Goal: Claude never reads or writes a file that may hold secrets, without needless refusals.\nProblem (risk): the shell and read checks let .envrc, .env-prod and .env_local through while the editing tools refuse them, so a secret in one of those files can be read; only you can set which names count.\nBased on (read): the editing tools refuse every name that starts with .env; shell commands and reads refuse only .env and .env.something.\nBased on (read): the coordinator took the wider rule at 22:42 CST as a reversible pick, and PR #1057 builds it.\nDeparts from: today shell commands and reads refuse only .env and .env.something \u2014 the wider rule refuses every name that starts with .env, except .env.example, in every form.",
+  "holds": "claude-settings draft PR #1057.",
+  "home": "env-file-stays-unread",
+  "id": "env-file-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T06:56:26.205Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Draft PR #1057",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1057"
+    }
+  ],
+  "n": 159,
+  "options": [
+    {
+      "gain": "Secrets in .envrc, .env-prod or .env_local stay unread, whichever tool touches them.",
+      "how": "Refuse every file whose name starts with .env, except .env.example, for edits, shell commands and reads alike, as PR #1057 builds.",
+      "key": "a",
+      "label": "Every .env name, in every form",
+      "links": [
+        {
+          "label": "Draft PR #1057",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1057"
+        }
+      ],
+      "lose": "A harmless command such as making a folder named .envs, or a jq filter on .environment, is refused once and needs a retry."
+    },
+    {
+      "gain": "Fewer false refusals on names that only start with .env.",
+      "how": "Narrow every form to .env and .env.something; drop the wider editing refusal.",
+      "key": "b",
+      "label": "Only .env and .env.something",
+      "links": [
+        {
+          "label": "Draft PR #1057",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1057"
+        }
+      ],
+      "lose": "Writes to .envrc, which today's editing tools refuse, go through, and a secret there can be read."
+    }
+  ],
+  "owner": "lane refusal-uncited-rewrites (session_013NEJKzR8JpxAWs6w94tW1D)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "claude-settings draft PR #1057; decision env-file-stays-unread",
+  "reply": "Routed 00:58 CST to lane refusal-uncited-rewrites: every name that starts with .env, except .env.example, is refused in every form, as PR #1057 builds.",
+  "short": "env file names",
+  "status": "closed",
+  "title": "Which file names count as secret env files that Claude never reads or writes?",
+  "why": "Today the editing tools refuse any file whose name starts with .env, but shell commands and file reads refuse only .env and .env.something. So a file like .envrc is blocked one way and readable another. The coordinator picked the wider rule for now, which you have not seen; PR #1057 builds it."
+}

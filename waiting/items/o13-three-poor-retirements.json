@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T19:59:00Z",
+  "context": "You questioned the retired-word list itself (item 49). An Opus reviewer read the glossary (14:57 CDT). Most retirements hold; three do not:\n- claim became statement. The #780 lane made this swap with no ruling from you, and it reads \"stating the statement\".\n- try became round. A build attempt is not a review round, and the glossary's round row contradicts itself.\n- gap became debt. It merges the missing thing with its filed record, and \"debt\" reads as money.\n\nAlso: the list's \"(prose)\" tags dropped the plan's \"(this sense)\" qualifier, so correct text such as \"GitHub issue\" or \"blockquote\" gets flagged. A separate blind redo of the vocabulary, built without seeing the glossary, also chose \"coordinator\", plus park, remark and handle; its table is available on request.",
+  "home": "o13",
+  "id": "o13-three-poor-retirements",
+  "kind": "decision",
+  "n": 51,
+  "options": [
+    {
+      "gain": "Plainer words, and no false flags.",
+      "how": "Restore the three old words, put \"(this sense)\" back, and run one prose lane for the leftovers.\nBefore: the three words are retired and correct text is flagged. After: they are plain words again and only the retired sense is flagged.",
+      "key": "a",
+      "label": "Bring back claim, try and gap",
+      "lose": "One more lane, and a partial undo of #780."
+    },
+    {
+      "gain": "No churn.",
+      "how": "No change to the glossary or the check.\nBefore and after: the same.",
+      "key": "b",
+      "label": "Keep today's words",
+      "lose": "The awkward prose and the false flags stay."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 51,
+  "ref": "o13 (one name per thing: the glossary), item 49's cross review, lane B PR #780",
+  "reply": "Answered, Oct 28 16:15 CDT: bring back claim, try and gap (a). One lane puts the three words back as plain words, restores the \"(this sense)\" qualifier, and fixes the leftover prose. It partly undoes #780.\n\nBuilt, Oct 28 18:07 CDT (draft PR 792, reviewed, joins the next batch). Two things to know; no pick needed. (1) \"(this sense)\" still keeps your item 49 a reach into file paths, rule anchors and record slugs, so a new path such as docs/github-issue-notes.md is still refused; leaving that out reopened a safety hole in review. So \"no false flags\" holds for code names and prose, not for paths. (2) The rule anchors that lane B renamed (such as outcomes-tests-are-statements) stay renamed; claim, try and gap come back in prose only (claim 32 places, try 13, gap 4). If you want the anchors back too, that is a new lane.",
+  "stands": true,
+  "status": "closed",
+  "title": "Three retired words look like poor swaps: keep them or bring them back?",
+  "why": "Three swaps read worse than the words they replaced, and false flags teach people to ignore the check."
+}

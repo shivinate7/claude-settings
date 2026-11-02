@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T18:21:00Z",
+  "context": "Goal: every browser page and site you build follows good, sourced design rules.\nProblem (goal): our UX house rules cover general screens and iPhone, but have no browser-specific dos and don'ts, and nothing for full 3D sites.\nBased on (read): docs/design/principles.md and the design skills (impeccable, frontend-design) hold general rules; none covers 3D sites.\nDeparts from: main (no browser or 3D design rules) \u2014 adds sourced browser rules to the house rules and a list of design MCPs to vet.\n\nAsked and answered in chat with triage. Your words, Nov 1 12:21 CST: \"we need browser design guidelines dos and donts etc send an opus lane surf the web look through suggested mcps get me everything and remember my own preferences avoiding hard coding, outcomes based, etc. plus the university that is claude-settings that goes into full fledged 3d sites and static web apps\". Filed as roadmap step web-design-guidelines.",
+  "home": "web-design-guidelines",
+  "id": "web-design-guidelines",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T18:23:00Z",
+    "choice": "a",
+    "note": "Nov 1 12:23 CST: guidelines become house rules only when they make a better build; regulation that is not required is left out, so builders carry no extra load."
+  },
+  "n": 125,
+  "options": [
+    {
+      "gain": "Sourced browser rules, from static pages to 3D sites, in the one place designers and reviewers read.",
+      "how": "The lane reads what we have, researches the web and design MCPs, and drafts new house rules with sources.",
+      "key": "a",
+      "label": "Send an Opus lane to research and draft the rules",
+      "lose": "An Opus lane costs more than Sonnet."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "step web-design-guidelines; record ux-house-rules",
+  "short": "Browser design guidelines",
+  "status": "closed",
+  "title": "Should an Opus lane research browser design dos and don'ts, from static web apps to 3D sites?",
+  "why": "Your chat words."
+}

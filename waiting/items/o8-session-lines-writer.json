@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T11:55:00Z",
+  "context": "Pick taken by the orchestrator, Oct 28 07:45 CDT, without your answer: (a), one writer only. It follows your later ruling for c136 (Oct 27 12:15 CDT) that sessions never write the page; sessions send their state to the writer, option (a), already on main. o8's option (c) is dropped and its lane ends with no code. Reversible: say so and (c) comes back.\n\nWas asked: two of your rulings conflicted. o8, Oct 26: each session writes its own line after the local-write measure. c136, Oct 27 12:15 CDT: sessions never write the page; one writer does.",
+  "holds": "The o8 lane (session lines on the roadmap page) is paused until you answer.",
+  "home": "o8",
+  "id": "o8-session-lines-writer",
+  "kind": "decision",
+  "n": 42,
+  "options": [
+    {
+      "gain": "One writer, as c136 says.",
+      "how": "Sessions send their state to the writer, which publishes it. This is option (a), already built.",
+      "key": "a",
+      "label": "One writer only; drop (c)",
+      "lose": "A session's state shows only once the writer publishes again."
+    },
+    {
+      "gain": "Live lines with no wait.",
+      "how": "Each session writes only its own unranked live/<session id> record; the writer keeps the items and their order.",
+      "key": "b",
+      "label": "Keep (c) as a narrow exception",
+      "lose": "A second writer to the database; the Windows cost is unmeasured."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 5,
+  "ref": "o8 (a living roadmap page per repo), c136 (one page, one writer)",
+  "status": "closed",
+  "title": "May each session write its own live line on the roadmap page, or does only the writer write it?",
+  "why": "It keeps c136's one-writer rule with nothing new to build; the only cost is a short delay before a session's line shows."
+}

@@ -1,0 +1,75 @@
+{
+  "added": "2026-11-02T17:57:00Z",
+  "context": "Goal: one page answer starts the lane it approves, with no second click, on the right branch.\nProblem (rule): two records disagree on what a lane is, and the Mac path cost you three clicks and two lanes on the wrong branch.\nBased on (record): lanes-start-as-agents says a lane is an agent the coordinator starts, which needs no click from you.\nBased on (read): in a cloud session, a coordinator starts a lane session on any turn with no card; this coordinator has started more than 30 since Nov 1.\nDeparts from: main lets the two records disagree \u2014 the place a run happens decides: on the Mac a lane is an agent started from the coordinator's own checkout; in the cloud it is a session.",
+  "holds": "Any lane started from a page answer; no lane starts until you pick. A debt record for the second click is filed meanwhile.",
+  "home": "session-tiers",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Coordinator session",
+      "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+    }
+  ],
+  "n": 168,
+  "options": [
+    {
+      "gain": "No card and the right branch, on the Mac and in the cloud.",
+      "how": "On the Mac, a page answer starts its lane as an agent with its own worktree, cut from the coordinator's checkout, so the coordinator's branch stays the base. In the cloud, a lane session. Every lane brief also opens by creating its branch from the named base.",
+      "key": "a",
+      "label": "Agent on the Mac, session in the cloud",
+      "links": [
+        {
+          "label": "Coordinator session",
+          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+        }
+      ],
+      "lose": "On the Mac a lane ends when the coordinator's session ends, and it shares the Mac's load brake."
+    },
+    {
+      "gain": "Lanes outlive the coordinator.",
+      "how": "At the start of a run, on your word in chat, the coordinator starts idle lane sessions; later page answers reach them by message.",
+      "key": "b",
+      "label": "Idle lane sessions at run start",
+      "links": [
+        {
+          "label": "Coordinator session",
+          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+        }
+      ],
+      "lose": "The coordinator must guess how many lanes to start; idle sessions wait; a card still drops the branch unless each brief creates its branch."
+    },
+    {
+      "gain": "No new tool.",
+      "how": "The coordinator asks for the lane start in chat in the same turn it files the page item.",
+      "key": "c",
+      "label": "Ask for the start in chat",
+      "links": [
+        {
+          "label": "Coordinator session",
+          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+        }
+      ],
+      "lose": "It works only when you answer in chat, not on the page."
+    },
+    {
+      "gain": "No relay of answers.",
+      "how": "Let a session in another account read page answers directly, so no relay is needed.",
+      "key": "d",
+      "label": "Fix the page read across accounts only",
+      "links": [
+        {
+          "label": "Coordinator session",
+          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
+        }
+      ],
+      "lose": "The account limit is outside the repo; the waiting-data copy in each repo already lets the owning session read answers from git; it does not remove the click."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 1,
+  "ref": "decisions session-tiers and lanes-start-as-agents; debt page-answer-second-click",
+  "short": "page answer starts its lane",
+  "status": "open",
+  "title": "How should one page answer start the lane it approves, with no second click and on the right branch?",
+  "why": "Two records disagree. session-tiers (the session shapes) says the coordinator starts lane sessions. lanes-start-as-agents says a lane is a background agent, and a new session starts only on your own words. On the Mac, a session started by another session needs you to press a card, and the card drops the branch. The apartment coordinator took the session path: you pressed three cards, and two lanes started from main instead of the apartment-tv branch."
+}

@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-28T18:35:00Z",
+  "context": "Both already passed on your Mac on Oct 27. Each step (c29 and c58) can only close when Windows passes too.\n\nThe decision watch (c29) is a small program that reads each turn and records whether it followed your recorded decisions; \"judged\" means it ran and gave a verdict, \"UNKNOWN\" means it could not run. The mods (c58) are the small add-ons claude-settings installs into the Claude app; each should update itself to the version on main.",
+  "home": "c29",
+  "id": "windows-live-checks",
+  "kind": "task",
+  "minutes": 5,
+  "n": 10,
+  "owner": "Triage the roadmap (9)",
+  "rank": 10,
+  "ref": "c29 (decision watch runs again), c58 (mods update themselves)",
+  "status": "closed",
+  "steps": [
+    "Restart the Claude app on your Windows PC and take one turn (any message).",
+    "Open the file %USERPROFILE%\\.claude\\decision-watch-shadow\\shadow.log and read its last lines. The newest END line should name a verdict (such as ALLOW or FLAG); if it says UNKNOWN, the decision watch could not judge the turn.",
+    "In a terminal, run: claude plugin list. Each claude-settings mod should show the version on main (the decision watch shows 0.0.11 or later).",
+    "Mark done. If either check failed, add a note saying which and what it showed."
+  ],
+  "title": "Two checks on your Windows PC: the decision watch and the mod updates"
+}

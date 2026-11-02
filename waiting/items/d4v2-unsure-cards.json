@@ -1,0 +1,56 @@
+{
+  "added": "2026-10-29T01:50:00Z",
+  "context": "Banchi cannot always tell a card's printing, or a price looks far from recent sales. Either way the card stays a draft and the app asks one question with big answers, with the reason on the card. C1 shows these behind a \"2 to check\" filter in the stack list. C3 shows them as a deck, one card at a time. All screens, both Duo poses and themes: designs/d4-banchi-phone-v2/phone-blind-1.html (open one with #s=c3-full) and its notes on the roadmap branch. All cards, orders and buyers are made up. Unmeasured: the unfolded Duo height and insets and the folded top inset (drawn 644 pt).",
+  "designs": [
+    {
+      "label": "C1: the filter",
+      "option": "a",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c1-full"
+    },
+    {
+      "label": "C3: the deck",
+      "option": "b",
+      "size": {
+        "h": 264,
+        "w": 390
+      },
+      "slug": "d4v2-c3-desk"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "home": "d4",
+  "id": "d4v2-unsure-cards",
+  "kind": "decision",
+  "look": true,
+  "n": 65,
+  "options": [
+    {
+      "design": "d4v2-c1-full",
+      "gain": "You see them in context, beside the cards that are fine.",
+      "how": "The few cards sit among the rest of the list; one press on the filter shows only them.",
+      "key": "a",
+      "label": "A \"2 to check\" filter in the stack",
+      "lose": "A list to scroll; the question is smaller than in the deck."
+    },
+    {
+      "design": "d4v2-c3-desk",
+      "gain": "Your attention goes only to cards that need a person, one at a time.",
+      "how": "One card, one question (\"Which printing is it?\"), big answers, and \"Not sure: keep as draft\" (the picture shows the unfolded desk).",
+      "key": "b",
+      "label": "A one-card deck",
+      "lose": "No view of the other cards; the reason on each card must be clear or the question is noise."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "b",
+  "rank": 65,
+  "ref": "d4 (Banchi phone app, redrawn blind: roadmap designs/d4-banchi-phone-v2/)",
+  "reply": "Parked with item 63: a Banchi build detail, asked again only when a build is asked for.",
+  "status": "closed",
+  "title": "Banchi phone app: how do you settle the cards the app is not sure of?",
+  "why": "The designer's pick, because it matches your goal of near zero attention per card; it works best with C3."
+}

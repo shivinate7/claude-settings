@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-02T05:30:00Z",
+  "context": "Goal: a grant you type in one session reaches the session it names.\nProblem (rule): auto mode in each session counts only words typed in its own chat, so a grant had to be typed again in each session, and the plan waits on your word before any build.\nBased on (read): draft PR #1049: the receiving session reads your own typed message from the server, then checks the named act itself before auto mode sees it, since text added by a script never counts as your words.\nBased on (read): the plan's recommended picks: a fixed grant wording, not free text; the first grants are merge and self-edit; a self-edit grant also covers the target's agents, a merge grant stays with the lead session; test the check that runs before each tool call first; the server-read path only; keep today's cloud merge rule.\nDeparts from: main \u2014 adds a grant relay path: a session acts on a grant you typed in another session.",
+  "holds": "Building the grant relay, and the later step that lets an answer saved on this page count as your words.",
+  "home": "grant-reaches-lanes",
+  "id": "grant-plan-signoff",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Draft PR #1049",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1049"
+    }
+  ],
+  "n": 152,
+  "options": [
+    {
+      "gain": "One grant reaches the session it names; no free-text grant can widen by a misread.",
+      "how": "Every question takes the plan's recommended pick, listed above, and a lane builds the server-read path.",
+      "key": "a",
+      "label": "Sign off as written",
+      "links": [
+        {
+          "label": "Draft PR #1049",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1049"
+        }
+      ],
+      "lose": "Only the listed grant wordings work; a new kind of grant needs a plan change."
+    },
+    {
+      "gain": "The plan matches what you want before anything is built.",
+      "how": "Say in your reply which picks to change, for example: free-text grants judged by a model; merge grants only at first; grants for the lead session only, not its agents; or a cloud merge rule that needs a merge grant for every merge.",
+      "key": "b",
+      "label": "Sign off with changes",
+      "links": [
+        {
+          "label": "Draft PR #1049",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1049"
+        }
+      ],
+      "lose": "Building waits for the revision."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "draft PR #1049, docs/plans/grant-reaches-lanes.md, section 6; roadmap step grant-reaches-lanes",
+  "short": "grant plan sign-off",
+  "status": "open",
+  "title": "Sign off the plan for grants that reach another session, as written or with changes?",
+  "why": "You said a grant typed in one session should count in the session it names. The plan in draft PR #1049 does that; nothing is built until you sign off its seven questions."
+}

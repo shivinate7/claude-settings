@@ -1,0 +1,27 @@
+{
+  "added": "2026-10-27T17:30:00Z",
+  "context": "#715 merged Oct 28 00:25 CDT in batch #725 (main 0fb91de), and .github/stamp.json now lists 13 required checks. Checked 00:32 CDT by the orchestrator: branch protection still lists the old 11, with no gates-guard and no gates-windows-sweep. Branch protection is your setting, so no session can change it.",
+  "group": "branch-protection",
+  "holds": "Main's protection still requires only 11 checks, so gates-guard and gates-windows-sweep can be red on a merge.",
+  "home": "c95",
+  "id": "c95-branch-protection-checks",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Branch rules for claude-settings",
+      "url": "https://github.com/shivinate7/claude-settings/settings/branches"
+    }
+  ],
+  "minutes": 3,
+  "n": 1,
+  "owner": "Triage the roadmap (9)",
+  "rank": 1,
+  "ref": "c95 (CI runs at milestones), step 1a, PR #715",
+  "status": "closed",
+  "steps": [
+    "Open the branch protection rule for main.",
+    "Under required status checks, add gates-guard and gates-windows-sweep.",
+    "Save, then mark this done."
+  ],
+  "title": "Add two required checks to main's branch protection (#715 has merged)"
+}

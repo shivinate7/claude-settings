@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T10:29:00Z",
+  "context": "Goal: the feedback check stops blocking sessions on messages that are not yours.\nProblem (rule): the check treats a message from another session as an owner message, so it blocks until the session jots items for it.\nBased on (notes): the Apple TV session loop, Nov 1 (coordinator).\nDeparts from: hooks/feedback_guard.py \u2014 a: the check skips peer-session messages, as a named bandaid with a debt.\n\nAsked and answered in chat with the coordinator. Your answer, Nov 1 04:29 CST: \"neither seem like great options A likely the better bandaid with a debt\". Filed on step feedback-block-names-file.",
+  "home": "feedback-block-names-file",
+  "id": "feedback-skip-peer-messages",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T10:29:00Z",
+    "choice": "a",
+    "note": "neither seem like great options A likely the better bandaid with a debt"
+  },
+  "n": 116,
+  "options": [
+    {
+      "gain": "The loop stops now.",
+      "how": "The check skips messages from other sessions; note inbox-saves-other-notices becomes a debt that names the proper fix.",
+      "key": "a",
+      "label": "Skip peer messages, as a bandaid with a debt",
+      "lose": "A bandaid until the proper fix lands."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "a",
+  "ref": "step feedback-block-names-file; note inbox-saves-other-notices",
+  "short": "Feedback check skips peer messages",
+  "status": "closed",
+  "title": "Should the feedback check skip messages from other sessions?",
+  "why": "Your chat answer."
+}

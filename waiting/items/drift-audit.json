@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-02T19:45:00Z",
+  "context": "Goal: fix existing drift, then keep it fixed.\nAnswered in chat 13:45 CST: pick a, an Opus-planned, read-only sonnet audit workflow now, simulator first.\nDeparts from: main \u2014 adds a per-capability drift map on branch audit/drift-map.\nNext: the coordinator runs it; its lane plan goes to the next coordinator.",
+  "home": "docs/todo.md",
+  "id": "drift-audit",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "sim-standard.md",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude/sim-lease-592a4d/docs/plans/sim-standard.md"
+    }
+  ],
+  "n": 176,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "branch claude/sim-lease-592a4d docs/plans/sim-standard.md; branch audit/drift-map",
+  "short": "audit existing drift",
+  "status": "closed",
+  "title": "How do we fix drift that already exists?",
+  "why": "One capability can have several homes that disagree, like the three Duo standards in docs/plans/sim-standard.md."
+}

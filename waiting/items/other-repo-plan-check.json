@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-27T16:31:00Z",
+  "context": "You picked this plan Oct 27 11:31 CDT but never said yes. A yes lifts \"never push to the other repos\" for these rows only, and only through PRs in each repo. Each repo still gets its own visit (r1 to r6), with a warning first about which sessions there to pause. Plan: https://claude.ai/artifact/S6Eou4tPnLmypAXzoUdyEA",
+  "holds": "c76, c78, c89, c47 part 2, c127's other repos and c141 all wait on it.",
+  "home": "c76",
+  "id": "other-repo-plan-check",
+  "kind": "decision",
+  "n": 2,
+  "options": [
+    {
+      "gain": "Six parked steps start; stale pins and copied tools stop costing lanes.",
+      "how": "Sessions open PRs in each child repo for these rows only, one repo visit at a time.",
+      "key": "a",
+      "label": "Yes, run the plan",
+      "lose": "Other repos change, through PRs you can review."
+    },
+    {
+      "gain": "No other repo changes.",
+      "how": "Every child-repo part stays parked; claude-settings work goes on.",
+      "key": "b",
+      "label": "Not yet",
+      "lose": "Six steps stay parked, and child repos keep drifting."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "c76, c78, c89, c47, c127, c141; plan page https://claude.ai/artifact/S6Eou4tPnLmypAXzoUdyEA",
+  "status": "closed",
+  "title": "Say yes to the one plan for every child-repo part",
+  "why": "Each change is a PR in its own repo, so you still see every one, and the claude-settings parts it builds on are on main."
+}

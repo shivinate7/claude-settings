@@ -1,0 +1,61 @@
+{
+  "added": "2026-10-28T20:22:00Z",
+  "context": "When a picture is more than four times as tall as it is wide (a long page, more than 1560 px high for a 390 px wide drawing), the 480 px height cap would squeeze it into a thin strip. As built, a floor stops that: the picture never goes narrower than 120 px, so it can run past 480 px high. The other way is no floor, so the cap always wins.\n\nCorrection: an earlier note called this a minimum height. It is a minimum width (page.html reads `a capped picture is never narrower than this, however tall the mockup`). Reversible, and the pictures below show a 390 by 2400 drawing both ways.",
+  "designs": [
+    {
+      "focus": "#q2-floor-card",
+      "label": "120 px minimum width",
+      "option": "a",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q2-floor"
+    },
+    {
+      "focus": "#q2-nofloor-card",
+      "label": "No minimum",
+      "option": "b",
+      "size": {
+        "h": 480,
+        "w": 358
+      },
+      "slug": "c193-choices",
+      "state": "q2-nofloor"
+    }
+  ],
+  "group": "c193-sizes",
+  "home": "c193",
+  "id": "c193-pic-min-width",
+  "kind": "decision",
+  "look": true,
+  "n": 55,
+  "options": [
+    {
+      "design": "c193-choices",
+      "gain": "A tall picture stays wide enough to see.",
+      "how": "A very tall picture stays 120 px wide and may be taller than 480 px.\nBefore: a thin strip. After: 120 by 738 for a 390 by 2400 drawing.",
+      "key": "a",
+      "label": "Keep the 120 px minimum width (as built)",
+      "lose": "That card is taller than 480 px, so one tall picture makes its row taller."
+    },
+    {
+      "design": "c193-choices",
+      "gain": "No card is ever taller than the cap.",
+      "how": "A very tall picture is cut down to 480 px high and becomes narrow.\nBefore: 120 wide. After: 78 by 480 for a 390 by 2400 drawing.",
+      "key": "b",
+      "label": "No minimum: the 480 px cap always wins",
+      "lose": "A tall picture becomes a thin strip that is hard to see."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 55,
+  "ref": "c193 (waiting page: pictures and chips fit), PR #783; the floor is MIN_PIC in skills/waiting-page/page.html",
+  "reply": "Answered, Oct 28 17:50 CDT: the 120 px minimum width stays (a). Your note asks two things. (1) Zoom to the area that needs review: the page already does this when a mockup names a focus element; the card then shows that element, fitted to the card. (2) Scroll inside the picture when it is bigger than its box: the card picture does not scroll today (it is clipped, and a tap opens the full-size sheet, which does scroll). I filed (2) on c193 as a new want, to be scoped after the sizes PR (#783) merges.",
+  "stands": true,
+  "status": "closed",
+  "title": "Should a very tall picture keep a minimum width of 120 px?",
+  "why": "A picture too thin to see does no good in a card, and the case is rare; it ships as built unless you say otherwise."
+}

@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "Every mockup assumes the Duo at 360\u00d7780 folded and 760\u00d7780 unfolded, printed on each one. Nothing in the repos gives a size (lint/layout.json has null).",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-duo-size",
+  "kind": "decision",
+  "n": 17,
+  "options": [
+    {
+      "gain": "The mockups stand as drawn.",
+      "how": "The sizes become the Duo's entry in c113's device list.",
+      "key": "a",
+      "label": "Keep 360\u00d7780 and 760\u00d7780",
+      "lose": "If the real Duo differs, the next pass redraws."
+    },
+    {
+      "gain": "Exact sizes.",
+      "how": "A Mac session reads the size from the device or simulator before the next pass.",
+      "key": "b",
+      "label": "Measure the real Duo first",
+      "lose": "One more step before any redraw."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 17,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "reply": "Your pick (b, measure the real Duo first) is met, Oct 28 19:47 CDT, by a record the coordinator cites: mailaudit's measurement duo-fold-and-keyboard (Oct 27 14:03 CDT) on the simulator, inner 951 pt wide with a 40 pt fold strip, outer 382 by 644 pt safe. I cannot read mailaudit from here, so these figures are the coordinator's report. The redraw lane uses them in place of the 360 by 780 and 760 by 780 the first mockups assumed.",
+  "status": "closed",
+  "title": "Banchi phone app: confirm the Duo size the mockups assume",
+  "why": "One measurement fixes every later mockup on the Duo, and nothing waits on it now."
+}

@@ -1,0 +1,46 @@
+{
+  "added": "2026-10-29T01:50:00Z",
+  "context": "This folds in old items 14 (how a helper finds the card in the box) and 21 (box labels). In all three directions each card gets the next free slot of the chosen box, in the order read; copies take one slot each (\"Marsh Strider x3\" takes slots 46 to 48). You box the stack in the same order, so you type no place. The pull screen names the box and slot first and has a \"Not in its slot\" control for a card put back out of order. The shelf names each box (\"Box 3\") and shows its slots 1 to 250. All screens, both Duo poses and themes: designs/d4-banchi-phone-v2/phone-blind-1.html (open one with #s=c3-full) and its notes on the roadmap branch. All cards, orders and buyers are made up. Unmeasured: the unfolded Duo height and insets and the folded top inset (drawn 644 pt).",
+  "designs": [
+    {
+      "label": "C2 shelf: next free slot",
+      "option": "a",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c2-full"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "home": "d4",
+  "id": "d4v2-place-from-order",
+  "kind": "decision",
+  "look": true,
+  "n": 66,
+  "options": [
+    {
+      "design": "d4v2-c2-full",
+      "gain": "Zero typing; finding a card is Box 3, Slot 49.",
+      "how": "No typing a place; the shelf picture shows the next free slot (\"Slot 227\").",
+      "key": "a",
+      "label": "Yes, the place comes from the stack order",
+      "lose": "A card put back out of order breaks the map until \"Not in its slot\" fixes it."
+    },
+    {
+      "gain": "The map stays right even if the order is lost.",
+      "how": "Each card's place is typed or scanned by you.",
+      "key": "b",
+      "label": "No, you set each place",
+      "lose": "Attention on every card, against your goal."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "a",
+  "rank": 66,
+  "ref": "d4 (Banchi phone app, redrawn blind: roadmap designs/d4-banchi-phone-v2/)",
+  "reply": "Parked with item 63: a Banchi build detail, asked again only when a build is asked for.",
+  "status": "closed",
+  "title": "Banchi phone app: does a card's box and slot come from the stack order?",
+  "why": "The designer's pick in all three directions; the loss is one repair control, not a step per card."
+}

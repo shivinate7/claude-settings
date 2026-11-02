@@ -1,0 +1,22 @@
+{
+  "added": "2026-11-01T23:10:00Z",
+  "context": "On home's page, item 51 (speaker sheet: what colour fills the volume bar in light mode) shows two warnings: option A's picture shows nothing of the part it should focus on, and the item carries a field the page does not draw. Item 43 (after using the Duo: keep sheets on the right page, or switch?) shows each option's picture as a thin strip too short to read, even in the viewer: each mockup lays several screens side by side, so scaling it to fit the width leaves it a few pixels high.\nWhy yours: home's page writer is a session on your Mac, and none of your folders is shared through Remote Control (checked which of your folders are shared, Nov 1 16:56 CST), so no session here can reach it.",
+  "home": "dismissed by you, Nov 1 17:16 CST; page sort ask filed as step page-stale-asks-sink",
+  "id": "home-item-51-fix",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T23:16:12.836Z",
+    "note": "dismiss this item from here -- also, after triage here sorts questions into severity, there needs to be another sort withint he subgroups where items that have been previously asked and weren't answered sink lower (and their answer choices collapse <i can be able to uncollapse it though> and newer questions come higher) "
+  },
+  "minutes": "1 min",
+  "n": 142,
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "ref": "home's waiting page, item 51 (speaker sheet volume fill, step duo-fold-3); step page-item-checked-at-write (the check that stops this next time)",
+  "short": "Fix home's items 51, 43",
+  "status": "closed",
+  "steps": [
+    "In home's Claude session on your Mac, say: \"fix waiting page items 51 and 43: give item 51's option A a picture that shows its focus and drop the field the page does not draw; redraw item 43's pictures one screen per picture at phone width, with a focus on the sheet, then republish\".",
+    "Mark this done once both items show readable pictures and no warnings."
+  ],
+  "title": "Tell home's session to fix items 51 and 43 on home's page"
+}

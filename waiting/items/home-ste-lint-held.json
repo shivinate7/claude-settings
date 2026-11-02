@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T19:50:00Z",
+  "context": "The home fix lane's item 3 adds the plain-English lint (ste-lint) to CI and cleans up home's prose in the same PR. The CI step passed review in round 1. The prose cleanup failed all three review rounds, and the round-3 net-value score was zero, so the change is held, as your three-round rule requires. Only you can lift a hold.",
+  "home": "child-repo-gap",
+  "id": "home-ste-lint-held",
+  "kind": "decision",
+  "n": 76,
+  "options": [
+    {
+      "gain": "New prose in home is checked from now on; the part that passed review lands.",
+      "how": "The PR keeps only the ste-lint CI step and drops the prose cleanup. home's 94 old lint errors stay until each line is next edited.",
+      "key": "a",
+      "label": "Ship the CI check alone",
+      "lose": "The 94 old errors stay for now, and the scope differs from what was reviewed."
+    },
+    {
+      "gain": "No change to home until you look.",
+      "how": "Nothing from item 3 merges.",
+      "key": "b",
+      "label": "Keep it parked",
+      "lose": "home's CI still does not check its prose."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 76,
+  "ref": "child-repo-gap, home fix lane item 3 (branch cs-plan-ste-lint, head 18fd8234); rule roles-review-cap-three",
+  "reply": "Picked a, Oct 29 14:55 CDT: home ships the ste-lint CI step alone; the prose cleanup is dropped and old lines get fixed when next edited.",
+  "status": "closed",
+  "title": "home: ship the plain-English lint check in CI alone, without the prose cleanup?",
+  "why": "The CI step passed on its own; only the cleanup failed, and old lines get fixed as they are touched."
+}

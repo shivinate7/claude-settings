@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-01T17:51:00Z",
+  "context": "Goal: every question that reaches you is checked for sense, not only shape.\nProblem (risk): a chat question box gets a form check and a model review; a waiting-page item gets only the form check, so weak questions reach you unchecked.\nBased on (read): hooks/call_judge.py runs question-judge on the chat box only; hooks/question_form.py checks both places for form.\nDeparts from: main (page writes get the form check only) \u2014 page writes also get the model review.\n\nAsked and answered in chat with triage. Your answer, Nov 1 11:51 CST: \"yes please add it that's incredibly important\". Filed as roadmap step page-question-judge.",
+  "home": "page-question-judge",
+  "id": "page-question-judge",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:51:00Z",
+    "choice": "a",
+    "note": "yes please add it that's incredibly important"
+  },
+  "n": 121,
+  "options": [
+    {
+      "gain": "Page questions get the same review as chat questions.",
+      "how": "Extend question-judge in hooks/call_judge.py to waiting-page item writes.",
+      "key": "a",
+      "label": "Add the model review to page writes",
+      "lose": "One model call per page item write."
+    },
+    {
+      "gain": "No added cost.",
+      "how": "Page writes keep only the form check.",
+      "key": "b",
+      "label": "Leave as is",
+      "lose": "Weak questions reach you unchecked."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "step page-question-judge; hooks/call_judge.py rule question-judge; decision question-form",
+  "short": "Model review of page questions",
+  "status": "closed",
+  "title": "Should waiting-page questions get the same model review as chat questions?",
+  "why": "Your chat answer."
+}

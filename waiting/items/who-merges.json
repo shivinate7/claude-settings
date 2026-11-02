@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-01T17:52:00Z",
+  "context": "Goal: in a coordinator build, each session does only its own tier's work.\nProblem (rule): two records disagree. standing-merge-grant says the coordinator merges and uses its own agents to build, review and batch; session-tiers gives merges to the batch runner and says the coordinator holds only lane state.\nBased on (read): standing-merge-grant and session-tiers on main.\nBased on (ruling): your words Oct 31 15:31 CDT: sessions keep to their tier.\nDeparts from: standing-merge-grant (the coordinator merges and runs agents) \u2014 a: in a coordinator build the batch runner merges; solo and one-lane sessions keep merging their own work as today.\n\nThis question is only about a coordinator build. A solo or one-lane session merges its own pull request as it does today, under the repo's grant.",
+  "group": "tier-boundaries",
+  "home": "session-tiers",
+  "id": "who-merges",
+  "kind": "decision",
+  "lane": "tier-boundaries-enforced (session_013NEJKzVTWMbokJ3KFanBBC)",
+  "lastAnswer": {
+    "at": "2026-11-01T17:53:56Z",
+    "choice": "a",
+    "note": "a repo merges only while a batch runners up makes no sense because remember there can be solo sessions that do work and handle a merge i dislike the way you expresesd the fault in A"
+  },
+  "n": 111,
+  "options": [
+    {
+      "gain": "The tiers match what you asked for on Oct 31.",
+      "how": "The coordinator runs no build or review agents and merges nothing; its batch runner merges in each repo it covers. standing-merge-grant is rewritten to match. Solo and one-lane sessions are unchanged.",
+      "key": "a",
+      "label": "In a coordinator build, the batch runner merges",
+      "lose": "When a coordinator build has no batch runner running, the coordinator starts one before anything merges."
+    },
+    {
+      "gain": "No change to how merges run.",
+      "how": "The coordinator keeps merging and running agents, and session-tiers is rewritten to match.",
+      "key": "b",
+      "label": "Keep the coordinator merging",
+      "lose": "What you complained about on Oct 31 stays allowed."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq), for lane tier-boundaries-enforced",
+  "pick": "a",
+  "ref": "tier-boundaries-enforced (sessions keep to their tier); decisions standing-merge-grant and session-tiers",
+  "short": "Who merges",
+  "status": "closed",
+  "title": "Does only the batch runner merge, with no review agents in the coordinator?",
+  "why": "Your pick, Nov 1 11:53 CST. Filed on roadmap step tier-boundaries-enforced; the lane took it into scope at 11:55 CST."
+}

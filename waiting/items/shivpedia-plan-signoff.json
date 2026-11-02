@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-02T04:15:00Z",
+  "context": "Goal: a shared shivpedia that makes each next project faster, as experiences, not commandments.\nProblem (rule): you asked (21:07 CST) that nothing be built until you sign off the whole plan, so every shivpedia lane waits on your word.\nBased on (read): draft PR #1034, docs/plans/prose-homes-shivpedia.md, 3 review rounds by 2 blind reviewers each.\nBased on (read): the plan's four picks, each with a recommended answer: an entry is called an \"experience\"; triage reads each repo's outbox for cross-repo lessons; only builder reports carry a Lessons line; no registry of generated pages for now.\nDeparts from: main \u2014 adds skills/shivpedia/, moves GLOSSARY.md into it, and makes 16 prose moves so each kind of prose has one home.",
+  "holds": "Every shivpedia lane: the new skill, the glossary move, and the 16 prose moves.",
+  "home": "craft-book",
+  "id": "shivpedia-plan-signoff",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Draft PR #1034",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1034"
+    }
+  ],
+  "n": 150,
+  "options": [
+    {
+      "gain": "Building starts now. No cross-repo PRs, less report noise, and no new code for a page registry.",
+      "how": "The plan lands with its four recommended picks, and lanes start building it.",
+      "key": "a",
+      "label": "Sign off as written",
+      "lose": "Lessons from roles other than builders may slip, and triage reads one more thing per repo."
+    },
+    {
+      "gain": "The plan matches what you want before anything is built.",
+      "how": "Name your changes in the reply, such as calling an entry an \"entry\", having each lane open a claude-settings PR for lessons, a Lessons line in every landing report, or a page registry lane now. The plan is revised, then lanes start.",
+      "key": "b",
+      "label": "Sign off with changes",
+      "lose": "Building waits for the revision."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "draft PR #1034, docs/plans/prose-homes-shivpedia.md; roadmap step craft-book",
+  "short": "shivpedia plan sign-off",
+  "status": "open",
+  "title": "Sign off the shivpedia plan as written, or name changes?",
+  "why": "You asked at 21:07 CST that nothing be built until you sign off the whole plan. The plan is in draft PR #1034, after 3 review rounds by 2 blind reviewers each."
+}

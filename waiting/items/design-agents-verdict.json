@@ -1,0 +1,54 @@
+{
+  "added": "2026-10-29T22:02:00Z",
+  "context": "Banchi's phone app was only the test bed: the question is whether the designer, design reviewer and design skills we built make clearly better-looking work. Two passes so far. First pass (Oct 28): you said it was not blind and read as a web page, not a phone app; that led to c191 (no repo colours in a blind brief) and c192 (iPhone and Duo guidance). Redraw (Oct 28 evening), after both fixes: three directions; you picked C2 Shelf. Compare the two Shelf drawings below. Found Oct 29 16:50 CDT: the designer never used the design skills we forked. agents/designer.md names only design-explore and ios-apps; frontend-design (visual direction) is loaded only by builders, and impeccable (critique and polish) only by the design-review skill's second reviewer. The redraw's notes mention neither. So both passes tested the designer without the taste skills. My own read: the redraw is phone-shaped with real Duo proportions, but I can't judge taste for you.",
+  "designs": [
+    {
+      "label": "First pass: Shelf (D3)",
+      "slug": "d4-q1-d3"
+    },
+    {
+      "label": "Redraw: C2 Shelf, folded",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c2-full"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "home": "d4",
+  "id": "design-agents-verdict",
+  "kind": "decision",
+  "look": true,
+  "n": 82,
+  "options": [
+    {
+      "gain": "The designer and design-review flow becomes the default for every screen lane in every repo; d4 closes.",
+      "key": "a",
+      "label": "Yes, clearly better: the design flow passes",
+      "lose": "The forked skills stay unused by the designer."
+    },
+    {
+      "gain": "The test finally covers the skills we forked, and you judge one screen against the two you have.",
+      "how": "A lane makes the designer load frontend-design before it draws and run an impeccable critique on its own mockup before it hands off; then it redraws the Shelf screen. Add a note on what still looks off and the lane folds that in too.",
+      "key": "b",
+      "label": "Not yet: give the designer the forked skills, then redraw one screen",
+      "lose": "One more design round before the flow counts as proven."
+    },
+    {
+      "gain": "A fair answer to whether the agents add anything at all.",
+      "how": "One session with no design agents or skills draws the same Shelf screen from the same brief; you look at both side by side.",
+      "key": "c",
+      "label": "Compare against a plain session first",
+      "lose": "One more drawing round, and it still leaves the forked skills untested."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "b",
+  "rank": 82,
+  "ref": "d4 (the first test of the design agents and skills, on Banchi's phone app)",
+  "reply": "Filed Oct 30 12:50 CDT on roadmap step d4: a lane makes the designer load frontend-design and run an impeccable critique before hand-off, then redraws the Shelf screen; brief sent to the coordinator.",
+  "status": "closed",
+  "title": "Do the design agents draw a materially better-looking app?",
+  "why": "Only your eye can say whether it looks better; every later screen lane in every repo leans on the answer."
+}

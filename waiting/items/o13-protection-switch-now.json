@@ -1,0 +1,26 @@
+{
+  "added": "2026-10-28T14:58:00Z",
+  "context": "PR #746 (o13) had 13 of 13 required checks green on head 8c593ccf. Done Oct 28 12:35 CDT (shiv): main's branch protection now requires the 13 checks* names, confirmed by the orchestrator. #746 merges next; c139, c183 and c182 follow.",
+  "group": "branch-protection",
+  "home": "o13",
+  "id": "o13-protection-switch-now",
+  "kind": "task",
+  "links": [
+    {
+      "label": "PR #746",
+      "url": "https://github.com/shivinate7/claude-settings/pull/746"
+    }
+  ],
+  "minutes": 2,
+  "n": 45,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 1,
+  "ref": "o13 (rename the CI checks from gates to checks), PR #746; your item 33 pick a (switch protection in the merge act)",
+  "status": "closed",
+  "steps": [
+    "On your Mac, in bash, run:\ngh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks -f 'contexts[]=scope' -f 'contexts[]=checks' -f 'contexts[]=checks-windows' -f 'contexts[]=checks-windows-guard' -f 'contexts[]=checks-mutate-guard' -f 'contexts[]=checks-windows-merge' -f 'contexts[]=checks-windows-rest' -f 'contexts[]=checks-macos' -f 'contexts[]=shell-macos' -f 'contexts[]=pointer-windows' -f 'contexts[]=checks-shoot' -f 'contexts[]=checks-guard' -f 'contexts[]=checks-windows-sweep'",
+    "Mark done and send: that is your yes, and the orchestrator merges #746 at once.",
+    "If it fails, add a note with the error and send instead."
+  ],
+  "title": "Switch main's required checks to the new checks names now"
+}

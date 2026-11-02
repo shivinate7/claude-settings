@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-02T17:28:00Z",
+  "context": "Goal: stop builders undoing earlier lane work, with a check that does not cry wolf.\nProblem (rule): read word for word, your 10:41 CST ruling makes the check red on most batches; narrowing it departs from your words, so it needs your word.\nBased on (measured): a sweep of the 31 batches merged since Oct 31 by the lane building the check; both of this morning's undo incidents go red under either option.\nBased on (measured): option a, re-measured on the same 31 batches, is red on 9 batches with 10 findings (b: 22 batches, 84 findings): 4 real undos, 4 deliberate drops that need an excuse line, 2 rewordings.\nDeparts from: main checks only drops of main's own work \u2014 adds a check on drops of a lane's earlier work: (a) only a commit that puts a file or hunk back to a state the lane already had, and a net loss of lane-added lines in a test file; (b) any deleted line a lane added.",
+  "holds": "How wide the check reads; the lane builds a meanwhile, which can be undone.",
+  "home": "no-undo-lane-commits",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Lane building the check",
+      "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+    }
+  ],
+  "n": 167,
+  "options": [
+    {
+      "gain": "Catches both of this morning's undos, with far fewer false alarms.",
+      "how": "The check flags a commit that puts a file or hunk back to an earlier state of the lane, and a net loss of lane-added lines in a test file; the lane re-measures and reports the new red count.",
+      "key": "a",
+      "label": "Narrow to the two undo shapes",
+      "links": [
+        {
+          "label": "Lane building the check",
+          "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+        }
+      ],
+      "lose": "A lane can still drop its own non-test lines without an excuse line."
+    },
+    {
+      "gain": "Nothing a lane added is dropped without a named reason.",
+      "how": "The check flags every deleted line a lane added; each deliberate drop carries a Drops-lines: line.",
+      "key": "b",
+      "label": "Any line",
+      "links": [
+        {
+          "label": "Lane building the check",
+          "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+        }
+      ],
+      "lose": "Most batches go red today, so builders learn to ignore the check."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "step no-undo-lane-commits; decision silent-undo-check-design; inbox fb-1041-1",
+  "short": "how wide the no-undo check reads",
+  "status": "open",
+  "title": "Should the no-undo check flag any deleted line a lane added, or only the two shapes real undos take?",
+  "why": "Your 10:41 CST words were: a test case or a line that an earlier lane commit added is deleted, refuse it. Read that way, the check goes red on 22 of the last 31 merged batches (84 findings). Most are not undos: 27 are the restore commits themselves, 13 are deliberate deletes of debt or record files, and the rest mix real undos with second-round fixes a reviewer asked for. A check that is red on most batches gets scrolled past."
+}

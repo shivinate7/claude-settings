@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "Today MAP_FORMAT_VERSION is 2. Plan: plans/c146-checked-prose-map.md on the roadmap branch, section 7 (Sonnet fact-check clear).",
+  "group": "c146-checked-map",
+  "home": "c146",
+  "id": "c146-format-v3",
+  "kind": "decision",
+  "n": 25,
+  "options": [
+    {
+      "gain": "Nothing passes silently.",
+      "how": "An old pinned copy refuses a fact map.",
+      "key": "a",
+      "label": "Yes, version 3",
+      "lose": "Every repo runs the upgrade command once."
+    },
+    {
+      "gain": "No work in other repos.",
+      "how": "No upgrade.",
+      "key": "b",
+      "label": "No, stay at 2",
+      "lose": "A silent green in q_max's old copy until r5."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 25,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Checked map: raise the map format to version 3?",
+  "why": "A silent green is the failure the map exists to prevent."
+}

@@ -1,0 +1,17 @@
+{
+  "added": "2026-10-26T20:00:00Z",
+  "context": "Your word Oct 26: none of banchi's design work goes into ux/ unvetted; each idea needs its own case (the outcome it protects and a check). Candidates: spacing by relationship, motion roles. ux/principles.md already holds one banchi rule, the icon rule.",
+  "home": "d5",
+  "id": "d5-banchi-design-ideas",
+  "kind": "task",
+  "minutes": "5 min to start",
+  "n": 12,
+  "owner": "Triage the roadmap (9)",
+  "rank": 12,
+  "ref": "d5 (decide which design ideas belong in ux/)",
+  "status": "closed",
+  "steps": [
+    "Mark done when you want a session to bring the ideas to you one by one, each with its case."
+  ],
+  "title": "When you have time: vet banchi's design ideas for ux/, one at a time"
+}

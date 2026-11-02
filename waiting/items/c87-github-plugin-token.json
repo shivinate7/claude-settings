@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T07:45:00Z",
+  "context": "Answered Oct 28 02:43 CDT, (a): a Mac session finds which GitHub connection fails and whether its token expired, changing nothing; the fix follows from the cause. Brief: briefs/c87-mac-github-token-check.md on the roadmap branch. A clue it carries: in the cloud the GitHub plugin fails with \"Authorization header is badly formatted\" while gh works.",
+  "home": "c87",
+  "id": "c87-github-plugin-token",
+  "kind": "decision",
+  "n": 7,
+  "options": [
+    {
+      "gain": "You learn whether a token expired before anything changes.",
+      "how": "A local session lists every GitHub connection on the Mac, checks each token (gh auth status, expiry), and reports which one fails and why; it changes nothing.",
+      "key": "a",
+      "label": "A Mac session finds the cause",
+      "lose": "Needs a Mac session for a few minutes."
+    },
+    {
+      "gain": "Fixes it fast if the token is the cause.",
+      "how": "You create a new fine-grained token and a Mac session puts it where the failing piece reads it.",
+      "key": "b",
+      "label": "Make a fresh token now",
+      "lose": "If the token is not the cause, it fixes nothing."
+    },
+    {
+      "gain": "The failure stops now.",
+      "how": "Remove the failing GitHub connection from the Mac and Windows.",
+      "key": "c",
+      "label": "Turn it off on both machines",
+      "lose": "No GitHub plugin locally; sessions use the gh CLI only."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 7,
+  "ref": "c87 (local sessions stop failing on the GitHub plugin's empty token)",
+  "status": "closed",
+  "title": "The GitHub plugin fails on the Mac too: find out why first?",
+  "why": "It answers your token question without changing anything, and the fix then follows from the cause."
+}

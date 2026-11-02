@@ -1,0 +1,25 @@
+{
+  "added": "2026-10-28T08:40:00Z",
+  "context": "15 claude-settings branches older than 14 days each hold 1 to 5 commits not on main. Every one is now copied to archive/<branch>, checked equal to its head, so nothing is lost. The cloud proxy refuses branch deletes, so the delete runs on your Mac. The command checks each archive copy first and refuses a branch that moved since. Also from the Mac, the child-repo lane branches the cloud could not delete: home lane/c89-sim-test and lane/c163-layout; degen ste-lint-pin-c76, playwright-setup-c78 and sim-test-shared-c89; q_max claude/c76-stamp-pin; banchi claude/c76-stamp-pin and the head branch of banchi#990 (c78), if still there; ios-adblock's 4 claude/code-check-red-* branches (c127, merged in ios-adblock#121).",
+  "home": "c152",
+  "id": "c152-branch-deletes",
+  "kind": "task",
+  "links": [
+    {
+      "label": "The command",
+      "url": "https://github.com/shivinate7/claude-settings/blob/roadmap/plans/c152-stale-branch-deletes.md"
+    }
+  ],
+  "minutes": 3,
+  "n": 39,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 25,
+  "ref": "c152 (stale claude-settings branches) and c44 (lane branches left after merges)",
+  "status": "closed",
+  "steps": [
+    "Open plans/c152-stale-branch-deletes.md on the claude-settings roadmap branch.",
+    "In a claude-settings checkout on your Mac, run its command (or ask a Mac session to run it).",
+    "Mark done; a session then checks the branches are gone and the archive copies stay."
+  ],
+  "title": "Delete 15 archived stale branches from your Mac (the cloud cannot delete)"
+}

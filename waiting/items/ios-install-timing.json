@@ -1,0 +1,45 @@
+{
+  "added": "2026-10-28T07:58:00Z",
+  "context": "Answered Oct 28 02:36 CDT: no change. Keep today's flow: when the Mac and iPhone share wifi, install straight to the iPhone; otherwise TestFlight is the backup. Nothing is built (c91).",
+  "home": "c91",
+  "id": "ios-install-timing",
+  "kind": "decision",
+  "n": 6,
+  "options": [
+    {
+      "gain": "Works from cloud merges with no Mac; the phone updates itself.",
+      "how": "CI uploads each app to TestFlight when its main moves; the phone's TestFlight app updates it.",
+      "key": "a",
+      "label": "TestFlight on every merge",
+      "lose": "TestFlight review and upload time, about 15 to 30 minutes; the Mac-first ruling becomes TestFlight-first."
+    },
+    {
+      "gain": "Mac-first, fast, no session needed.",
+      "how": "A small Mac job notices main moved and installs the app when the phone is on the Mac's network.",
+      "key": "b",
+      "label": "A Mac watcher installs within minutes",
+      "lose": "A background job on the Mac; nothing installs while the phone is away."
+    },
+    {
+      "gain": "Nothing runs behind your back; one step brings everything current.",
+      "how": "You run one command (or tap one button) that installs every app whose main moved since the last install.",
+      "key": "c",
+      "label": "One command, any time",
+      "lose": "You have to remember to run it."
+    },
+    {
+      "gain": "No churn on apps you are not using now.",
+      "how": "Each app has an install switch; only switched-on apps install, by (b)'s watcher.",
+      "key": "d",
+      "label": "Only apps you are testing",
+      "lose": "One more setting to keep."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "c",
+  "rank": 6,
+  "ref": "c91 (one iOS standard)",
+  "status": "closed",
+  "title": "How should a merged iOS change reach your phone?",
+  "why": "It keeps the Mac-first ruling with nothing running unasked, which is what the earlier options got wrong; (a) is the fallback if you want no step at all."
+}

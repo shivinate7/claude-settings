@@ -1,0 +1,12 @@
+{
+  "added": "2026-10-31T19:49:00Z",
+  "context": "Answered in chat, 14:49 CDT: \"this option is fine\". Process only.\n\nThe coordinator adds q_max and banchi to its scope and finishes their near-landing items: q_max #995, and banchi c183/c184. If a repo asks for the trust card, it stops and tells you. Done: both repos attached with no card, and lanes started.",
+  "home": "process only (coordinator handoff)",
+  "id": "qmax-banchi-in-scope",
+  "kind": "decision",
+  "n": 100,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "q_max #995 (all-jobs-passed bridge); banchi c183/c184 (code-check pin)",
+  "status": "closed",
+  "title": "Coordinator takes q_max and banchi into scope"
+}

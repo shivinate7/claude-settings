@@ -1,0 +1,41 @@
+{
+  "added": "2026-10-28T18:17:00Z",
+  "context": "Your word, Oct 28 13:10 and 13:12 CDT: the pass was not blind (\"how did it know what kinda colors banchi currently used today?\"), and the mockups read as a web app with no proportions, not an iPhone and Duo design, with no check of current iOS guidance.\n\nWhat I read: the blind brief template carries a Palette section for the repo's brand palette, and the designer's notes say \"Banchi blue #3d5af1\", the same colour as the banchi entry in docs/design/repo-colours.json. Unread so far: what the orchestrator put in that section, and what else the designer opened. So the colour leak is real; fonts and spacing are not yet traced.\n\nFiled on the roadmap: c191 (a blind brief carries no repo colours, fonts or spacing, with a check) and c192 (an iPhone mockup reads current iOS guidance and draws the Duo fold first). Items 14 to 16, 18, 19 and 21 ask about these same three designs, so they stand or fall with this answer.",
+  "group": "d4-banchi-phone",
+  "holds": "The Banchi phone redraw, and items 14 to 16, 18, 19 and 21, wait on this.",
+  "home": "d4",
+  "id": "d4-q1-direction",
+  "kind": "decision",
+  "look": false,
+  "n": 13,
+  "options": [
+    {
+      "gain": "The pass is blind in fact and looks like an iPhone app; your picks rest on sound designs.",
+      "how": "Nothing is built from the three designs. After c191 and c192 land, a new blind pass is drawn, iPhone-native, Duo fold first, and you pick from that.",
+      "key": "a",
+      "label": "Redraw after the two fixes",
+      "lose": "Waits for two fixes; today's three directions are set aside, and the open picks on them (14 to 16, 18, 19, 21) get closed unanswered."
+    },
+    {
+      "gain": "Sooner, with no wait for the fixes.",
+      "how": "A new blind pass starts at once; the orchestrator writes the brief with no colour, font or spacing values, and a reviewer reads it before the designer starts.",
+      "key": "b",
+      "label": "Redraw now, brief checked by hand",
+      "lose": "A check by hand is the same thing that failed; the iOS guidance step is also by hand, so a repeat of today's result is possible."
+    },
+    {
+      "gain": "No wait; the structure questions (which direction, how a helper finds a card) may still be worth answering.",
+      "how": "You answer items 14 to 16, 18, 19 and 21 on the existing mockups, accepting that the colours leaked.",
+      "key": "c",
+      "label": "Pick from the three designs anyway",
+      "lose": "You judged the designs web-like and the pass unblind; answers built on them may need redoing."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 13,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: redraw it, or pick from the three leaked designs?",
+  "why": "The two failures you named are mechanical, and a redraw on the same broken brief would repeat them; (a) fixes the cause before drawing again."
+}

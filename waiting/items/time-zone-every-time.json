@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-02T19:10:00Z",
+  "context": "Goal: every time I give you names its zone and uses 24-hour time.\nProblem (rule): rule style-time-central-24h asked for the zone only once per message.\nAnswered in chat 13:10 CST: \"every time claude ever speaks to me about time it specifies the time zone and uses 24 hour time\".\nDeparts from: main's \"zone named once\" \u2014 the zone goes on every time.\nDone: draft PR #1104 rewrites decision local-time-central and the style rule; review round 1 clear 13:36 CST. Next: batch #1104; build the Stop-guard check (roadmap step time-zone-every-time).",
+  "home": "docs/decisions/local-time-central.md",
+  "id": "time-zone-every-time",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Draft PR #1104",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1104"
+    }
+  ],
+  "n": 171,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "decision local-time-central; rule style-time-central-24h; draft PR #1104 (3a3375fb); roadmap step time-zone-every-time",
+  "short": "zone on every time",
+  "status": "closed",
+  "title": "Does every clock time name its time zone?",
+  "why": "A reply said \"since 12:36\" with no zone."
+}

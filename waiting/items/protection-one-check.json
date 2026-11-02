@@ -1,0 +1,21 @@
+{
+  "added": "2026-10-31T19:49:00Z",
+  "command": "gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks -F strict=false -f \"checks[][context]=all-jobs-passed\" -F \"checks[][app_id]=15368\"\ngh api repos/shivinate7/claude-settings/branches/main/protection/required_status_checks --jq \".checks[].context\"",
+  "context": "Done: you ran the switch at 14:52 CDT (the PowerShell block from the coordinator). The coordinator read it back: main requires only all-jobs-passed, with strict false.\n\nYou agreed in chat, 14:49 CDT, to run it yourself. #882 merged the rollup job, so main now requires just that one job.\n\nWhy yours: the auto-mode classifier refused the coordinator's PATCH as a CI bypass (14:49 CDT), though the cloud login is an admin. A session on your computer was not asked: request_computer_folder is barred in build sessions until step trust-card-guard lands.",
+  "home": "main-branch-protection",
+  "id": "protection-one-check",
+  "kind": "task",
+  "minutes": "1 min",
+  "n": 101,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "decision main-branch-protection (main requires one check); #882 (all-jobs-passed rollup, merged 5bf37105)",
+  "short": "Protection: one check",
+  "status": "closed",
+  "steps": [
+    "Open a terminal where gh is signed in as you (an admin of claude-settings).",
+    "Paste the command below. The first line switches the check, and the second prints what main now requires.",
+    "Done when the second line prints only all-jobs-passed. Then press Done here."
+  ],
+  "title": "Switch main's protection to the one check all-jobs-passed",
+  "why": "Batches merge on one check, so a new CI job never needs a protection change."
+}

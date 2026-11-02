@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-01T13:20:00Z",
+  "context": "Goal: every design skill stays global and pinned (decision design-skills) while Claude Code keeps moving up.\nProblem (rule): from claude-code 2.1.312, frontend-design comes from claude-plugins-official at main, which changes under us. No marketplace setting can pin it: a commit hash is ignored, a ref takes only a branch or tag, and that repo has no tags.\nBased on (measured): lane/fd-official-pin, 2 review rounds, head 6ea3b529 (lane renovate-917-918).\nDeparts from: main pins claude-code below 2.1.312 \u2014 options b and c change how frontend-design is pinned; option a holds claude-code at 2.1.311.",
+  "home": "decision design-skills, lane/fd-float-cc-newest 37fa928b",
+  "id": "frontend-design-pin",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:43:28.942Z",
+    "choice": "c",
+    "note": "\"Goal: every design skill stays global and pinned (decision design-skills) while Claude Code keeps moving up\" I thought we agreed that any sort of update thing our rule now is that we stay as current without conflicts or somtehing like that -- kinda means this ruling was out of date and somehow our audits didnt catch this ??? (makes me concerned.)"
+  },
+  "n": 120,
+  "options": [
+    {
+      "gain": "Frontend-design stays pinned, with no change.",
+      "how": "Keep the claude-code pin at 2.1.311 and close Renovate's 2.1.312+ PRs until a pinned route exists.",
+      "key": "a",
+      "label": "Hold Claude Code at 2.1.311 for now",
+      "lose": "You miss newer Claude Code fixes."
+    },
+    {
+      "gain": "Claude Code moves up and the skill stays pinned.",
+      "how": "Copy the frontend-design skill folder into this repo at a fixed version, as impeccable is.",
+      "key": "b",
+      "label": "Keep our own pinned copy of frontend-design",
+      "lose": "Someone updates the copy by hand."
+    },
+    {
+      "gain": "No upkeep.",
+      "how": "Accept claude-plugins-official at main and rewrite decision design-skills to allow it.",
+      "key": "c",
+      "label": "Let frontend-design float, and rewrite design-skills",
+      "lose": "Goes against your design-skills ruling: each design skill is global and pinned."
+    }
+  ],
+  "owner": "Lane renovate-917-918 (session_013NEJKzNV4Bjg5u8KncVxyQ)",
+  "pick": "a",
+  "ref": "step renovate-917-918; decision design-skills; Renovate PR #917",
+  "reply": "Built pick c: design-skills now says frontend-design floats and pins take the newest version that passes. Claude Code stays at 2.1.311 for now: from 2.1.312 a fresh session does not install frontend-design (0 of 8 starts), so that bump fails the check.",
+  "short": "Frontend-design pin",
+  "status": "closed",
+  "title": "Newer Claude Code makes frontend-design float. How do we keep it pinned?",
+  "why": "Your pick c, Nov 1 11:43 CST: frontend-design follows Claude Code's newest version, and decision design-skills is rewritten to match (lane fd-float-cc-newest, 37fa928b, with the batch runner)."
+}

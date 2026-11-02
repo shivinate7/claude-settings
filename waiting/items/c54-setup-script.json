@@ -1,0 +1,21 @@
+{
+  "added": "2026-10-28T08:00:00Z",
+  "context": "Siberia is done (Oct 28 13:01 CDT), with the right script. Two environments are left.\n\nQ_Env (q_max): your current script has no #!/bin/bash and no pipefail line, so a failed download starts the session silently unguarded. Replace it with this; the q_max lines are kept exactly:\n#!/bin/bash\nset -o pipefail\npython3 --version && git --version\ncurl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud\ncd /home/user/q_max && npm run setup && bash harness/local-postgres.sh && { npm run setup:db || echo '[setup] seed skipped \u2014 store already holds rows'; }\n\nDefault: use Siberia's script:\n#!/bin/bash\nset -o pipefail\npython3 --version && git --version\ncurl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud\n\nWhy: you chose the full install in every cloud container (item 31, c). Network access needs Trusted, or a custom list with raw.githubusercontent.com, github.com and codeload.github.com.",
+  "holds": "Cloud sessions keep running with no guard until each environment has this setup script.",
+  "home": "c54",
+  "id": "c54-setup-script",
+  "kind": "task",
+  "minutes": 5,
+  "n": 36,
+  "owner": "Triage the roadmap (9)",
+  "rank": 2,
+  "ref": "c54 part 3 (your item 31, c: full install in every cloud container)",
+  "status": "closed",
+  "steps": [
+    "Open the cloud environment menu in a session's title bar, then Edit on Q_Env.",
+    "Replace its setup script with the Q_Env script above, and save.",
+    "Edit Default the same way, with the Default script.",
+    "In a new cloud session on each, check that ~/.claude/hooks/guard.py exists; then mark done. If one fails, add a note with its name and the error."
+  ],
+  "title": "Set the claude-settings install as the setup script on Q_Env and Default"
+}

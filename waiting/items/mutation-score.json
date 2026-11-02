@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-01T22:51:00Z",
+  "context": "Goal: know whether your tests would catch a broken change.\nProblem (rule): no repo measures this on product code, so weak tests pass unseen; your 12:23 CST ruling says a practice joins only when it makes the build better.\nBased on (measured): q_max has about 1000 merged pull requests, and banchi and degen hundreds; the lines each one changed are a ready test bed.\nBased on (ruling): your Nov 1 12:23 CST ruling: measured value first.\nDeparts from: main (no such measure on product code) \u2014 adds a one-time replay over past merged pull requests.\n\nYour question, \"don't these repos have tons of history already?\": yes, so the measure can come from history, with no two-week wait.",
+  "home": "docs/plans/test-ci-standard.md lane 6 (PR #969)",
+  "id": "mutation-score",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T23:14:42.453Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 134,
+  "options": [
+    {
+      "gain": "Measured value from history, today, with no load on builders.",
+      "how": "One lane plants small bugs in the lines changed by the last 50 merged pull requests in q_max and banchi, offline, and reports which bugs the tests missed and how many later real bugs those misses pointed at. Then you rule on a merge check.",
+      "key": "a",
+      "label": "Replay the last 50 merged pull requests",
+      "lose": "One lane of compute."
+    },
+    {
+      "gain": "Weak tests are stopped at once.",
+      "how": "A low score blocks the batch merge from the start.",
+      "key": "b",
+      "label": "Block merges now",
+      "lose": "Unmeasured extra load on builders."
+    },
+    {
+      "gain": "No cost.",
+      "how": "Nothing changes.",
+      "key": "c",
+      "label": "No measure",
+      "lose": "Weak tests keep passing."
+    }
+  ],
+  "owner": "Lane test-ci-standard (session_013NEJKzZKg4SDYVSpNbVmv8)",
+  "pick": "a",
+  "ref": "step test-ci-standard",
+  "short": "Do tests catch broken code?",
+  "status": "closed",
+  "title": "Should your repos measure whether their tests catch a deliberately broken change?",
+  "why": "History gives the measure today, and your ruling asks for measured value first."
+}

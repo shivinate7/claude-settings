@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T08:05:00Z",
+  "context": "19 cloud sessions from other chats, Oct 27 or earlier, are still open (for example \"Ultrawide monitor window snapping\", \"Build the Excel UI kit repo\", \"Agent Q speed audit\"). The orchestrator did not start them, so archiving them is your call. 10 are marked completed; 9 are blocked or waiting for review. An archived session can be unarchived later.",
+  "home": "c55",
+  "id": "old-cloud-sessions",
+  "kind": "decision",
+  "n": 37,
+  "options": [
+    {
+      "gain": "A clean session list; any one can come back.",
+      "how": "The orchestrator archives every one of them.",
+      "key": "a",
+      "label": "Archive all 19",
+      "lose": "The 9 blocked or review-ready ones leave your list until you unarchive them."
+    },
+    {
+      "gain": "Nothing unfinished leaves your view.",
+      "how": "Completed sessions are archived; the 9 blocked or review-ready stay.",
+      "key": "b",
+      "label": "Archive the 10 completed only",
+      "lose": "The list keeps 9 old sessions."
+    },
+    {
+      "gain": "No change.",
+      "how": "Nothing is archived.",
+      "key": "c",
+      "label": "Leave them",
+      "lose": "The list stays cluttered."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 20,
+  "ref": "Cloud session list upkeep (orchestrator)",
+  "status": "closed",
+  "title": "Archive the 19 idle cloud sessions the orchestrator did not start?",
+  "why": "Archiving loses nothing, since any session can be unarchived, and a clean list makes the live lanes easy to see."
+}

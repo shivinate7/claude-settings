@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-02T03:45:00Z",
+  "context": "Goal: a native accessibility check that flags only what a person can see.\nProblem (rule): your Oct 28 ruling names text, but the parked code skips every element, buttons too, so it waits on your word. The Packages check stays red meanwhile on \"Alpha Cards\" and the Stamp button, both under the bar. This now gates the milestone run's native audit reds.\nBased on (ruling): your Oct 28 16:40 CDT ruling: the skip covers text with any overlap with the tab bar, or wholly below the window.\nBased on (read): mailaudit's decision on audit skips says the check stays red until this is ruled.\nDeparts from: main skips an element only when the bar covers more than half of it \u2014 the wider skip applies to text only (a), or to every element (b).",
+  "holds": "The mailaudit iPhone accessibility check, and the parked code on branch archive/step5-tabbar-skip-any-element.",
+  "home": "audit-skips-measured-flags",
+  "id": "mailaudit-tabbar-skip-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T04:16:17.633Z",
+    "choice": "none",
+    "note": "do whatever requires less building at this time and then leave the item deferred"
+  },
+  "n": 148,
+  "options": [
+    {
+      "gain": "A button or control partly under the bar is still checked.",
+      "how": "Only text partly under the bar is skipped; buttons and controls are still checked.",
+      "key": "a",
+      "label": "Text only",
+      "lose": "The Stamp button finding stays red until the button moves; the parked code needs rework."
+    },
+    {
+      "gain": "The Packages and masthead reds caused by the bar clear, and the milestone run's audit can go green.",
+      "how": "Any element partly under the bar is skipped; the parked code lands as is.",
+      "key": "b",
+      "label": "Any element",
+      "lose": "A control partly hidden by the bar is never checked, so a real tap or contrast fault there could hide."
+    }
+  ],
+  "owner": "mailaudit lane (session_013NEJKzn1fifK4dRyquE9WH)",
+  "pick": "none",
+  "rank": 1,
+  "ref": "mailaudit decision audit-skips-measured-flags (the iPhone accessibility check skips what the tab bar covers); re-filed from mailaudit's page, which is gone",
+  "reply": "Routed 22:17 CST to the mailaudit lane: the parked any-element code lands as is, since it needs no rework, and this item stays deferred for a later look.",
+  "short": "mailaudit tab-bar skip",
+  "status": "deferred",
+  "title": "mailaudit: should the tab-bar skip cover text only, or any element?",
+  "why": "The iPhone app's accessibility check skips anything the iOS tab bar covers, since no one can see it there. Your Oct 28 ruling widened the skip for text. The parked code widens it for every element, so it waits on your word."
+}

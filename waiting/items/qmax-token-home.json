@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-01T23:42:00Z",
+  "context": "Goal: q_max keeps each color and size value in one place.\nProblem (goal): the same values repeat in three places in q_max's main style file, under two name sets (156 names starting aq, 233 starting f2), and whether to merge the name sets is yours to say.\nBased on (read): the shared layout decision for every repo with screens puts design values in one tokens file, and the styles are built from it.\nDeparts from: main keeps the values in q_max's main style file \u2014 they move to one tokens file that builds the styles.\nThe lane works on its other two roll-out steps meanwhile.",
+  "holds": "The q_max roll-out step that merges its design values.",
+  "home": "r2",
+  "id": "qmax-token-home",
+  "kind": "decision",
+  "n": 146,
+  "options": [
+    {
+      "gain": "One place to change a value; nothing on screen moves; a small change.",
+      "how": "Values move to the tokens file and the styles are built from it; every name stays.",
+      "key": "a",
+      "label": "One file, keep both name sets",
+      "lose": "Two name sets stay, one pointing at the other."
+    },
+    {
+      "gain": "One name set, simpler to read.",
+      "how": "Same as a, plus every f2 name is renamed to its aq name across about 90 files.",
+      "key": "b",
+      "label": "One file, and one name set",
+      "lose": "A much larger change touching every screen, so more to review and more risk."
+    }
+  ],
+  "owner": "Lane q_max roll-out (session_013NEJL2hUNJQEdygCh3zSxo)",
+  "pick": "a",
+  "ref": "step r2 (q_max merges its three layers of design values into one)",
+  "reply": "Withdrawn: one tokens file is already the shared rule, and keeping both name sets changes nothing on screen and can be undone, so the lane takes a without asking.",
+  "short": "q_max design values",
+  "status": "closed",
+  "title": "q_max: move its design values into one file, and keep or merge its two name sets?",
+  "why": "It gives one place for each value now with no screen change; the rename can follow later if the two names start to hurt."
+}

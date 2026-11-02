@@ -1,0 +1,55 @@
+{
+  "added": "2026-10-30T18:25:00Z",
+  "context": "Closed 13:27 CDT: you are landing home's Duo fold (#386/#390) yourself, so this is yours to decide when you land it; the coordinator's home lane stopped. The pictures and trade-offs below stay for reference.\n\nGoal: on the folded Duo, you reach the room picker (the Rooms pill) easily. The built screen moved the pill from where mockup RM1a drew it; SPEC.md records the departure. Per the builder, the nav bar draws nothing on the folded Duo once a card scrolls, so a pill there hides on scroll (claim, no shot proves it).",
+  "designs": [
+    {
+      "label": "A: built, pill at the end of the room strip",
+      "option": "a",
+      "size": {
+        "h": 1000,
+        "w": 687
+      },
+      "slug": "home-rooms-pill-a"
+    },
+    {
+      "label": "B: mockup RM1a, pill in the nav bar",
+      "option": "b",
+      "size": {
+        "h": 1546,
+        "w": 984
+      },
+      "slug": "home-rooms-pill-b"
+    }
+  ],
+  "home": "r1",
+  "id": "home-rooms-pill-place",
+  "kind": "decision",
+  "look": true,
+  "n": 93,
+  "options": [
+    {
+      "design": "home-rooms-pill-a",
+      "gain": "One thumb reaches it, next to the room strip, and it stays put when a card scrolls.",
+      "how": "As built in PR 386; SPEC.md keeps the departure note.",
+      "key": "a",
+      "label": "Keep it at the strip end",
+      "lose": "It differs from the mockup you approved.",
+      "recommended": true
+    },
+    {
+      "design": "home-rooms-pill-b",
+      "gain": "Matches the approved mockup.",
+      "how": "The lane moves the pill into the nav bar.",
+      "key": "b",
+      "label": "Move it to the nav bar, as drawn",
+      "lose": "One more reach to the top of the folded screen, and per the builder it hides once a card scrolls."
+    }
+  ],
+  "owner": "shiv (home Duo fold, #386/#390)",
+  "pick": "a",
+  "rank": 93,
+  "ref": "home PR 386 (duo-fold-1), SPEC.md departure from mockup RM1a; pictures on branch claude/gallant-faraday-1ec752 at 9df6451",
+  "status": "closed",
+  "title": "Where should the Rooms pill sit on the folded Duo screen?",
+  "why": "The design reviewer's pick: the pill sits by the thumb and stays visible on scroll."
+}

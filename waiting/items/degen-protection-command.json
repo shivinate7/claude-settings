@@ -1,0 +1,19 @@
+{
+  "added": "2026-10-29T20:05:00Z",
+  "context": "Done, verified 14:50 CDT: degen's main now holds admins to the rules and requires the one check all-jobs-passed (coordinator, gh api).\n\nYou ran the PowerShell line from your Windows terminal.",
+  "home": "child-repo-gap",
+  "id": "degen-protection-command",
+  "kind": "task",
+  "n": 78,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 78,
+  "ref": "child-repo-gap; your item 71 a (protect degen's main like claude-settings)",
+  "status": "closed",
+  "steps": [
+    "Open Windows PowerShell (the same window works).",
+    "Paste and run this one line: '{\"required_status_checks\":{\"strict\":true,\"checks\":[{\"context\":\"all-jobs-passed\",\"app_id\":15368}]},\"enforce_admins\":true,\"required_pull_request_reviews\":{\"required_approving_review_count\":0,\"dismiss_stale_reviews\":false,\"require_code_owner_reviews\":false},\"restrictions\":null,\"allow_force_pushes\":false,\"allow_deletions\":false}' | gh api -X PUT repos/shivinate7/degen/branches/main/protection --input -",
+    "Check: gh api repos/shivinate7/degen/branches/main/protection --jq .enforce_admins.enabled prints true. Then Mark done."
+  ],
+  "title": "Run one command to finish protecting degen's main",
+  "why": "The classifier refuses this change from any session; only your login can make it."
+}

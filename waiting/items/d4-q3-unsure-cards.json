@@ -1,0 +1,43 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "Banchi cannot always tell a card's printing from the photo. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-q3-unsure-cards",
+  "kind": "decision",
+  "look": true,
+  "n": 15,
+  "options": [
+    {
+      "design": "d4-q3-a",
+      "gain": "The card is still in hand.",
+      "how": "The app stops on each unsure card.",
+      "key": "a",
+      "label": "During the sitting",
+      "lose": "Breaks \"zero attention per card\"; the stack waits."
+    },
+    {
+      "design": "d4-q3-b",
+      "gain": "The sitting never stops; nothing is guessed.",
+      "how": "Unsure cards go to one pile, settled together at the end.",
+      "key": "b",
+      "label": "After, in a pile",
+      "lose": "The seller may need to find the card again (its place is shown)."
+    },
+    {
+      "design": "d4-q3-c",
+      "gain": "Zero attention.",
+      "how": "Unsure cards are skipped.",
+      "key": "c",
+      "label": "Never by hand",
+      "lose": "Unsure cards are often the valuable printings, and they never get listed."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "b",
+  "rank": 15,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: when does the seller settle the cards Banchi is not sure of?",
+  "why": "Designer and reviewer both pick B: it keeps the sitting moving and guesses nothing."
+}

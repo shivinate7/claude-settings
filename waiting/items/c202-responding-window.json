@@ -1,0 +1,40 @@
+{
+  "added": "2026-10-28T20:09:00Z",
+  "context": "Your ruling (chat, Oct 28 15:10 CDT, correcting your 15:06 note): a session asks you in chat first. If you have not answered in chat after a set time, the question goes to triage for this page. When you do answer in chat, the session sends your answer to triage anyway, so the page record is always complete. So \"never chat only\" means every question and answer ends on the page, not that both are posted at once.\n\nThe open part was the set time. You picked 5 minutes.",
+  "home": "c202",
+  "id": "c202-responding-window",
+  "kind": "decision",
+  "n": 52,
+  "options": [
+    {
+      "gain": "Fewer questions on the page when you answer in chat a bit late.",
+      "how": "A question goes to the page after 15 minutes with no answer in chat.\nBefore: no rule. After: a question you leave for 15 minutes appears here.",
+      "key": "a",
+      "label": "15 minutes without a chat answer",
+      "lose": "A question you walk away from waits 15 minutes before it shows here."
+    },
+    {
+      "gain": "A question you walk away from reaches the page quickly.",
+      "how": "A question goes to the page after 5 minutes with no answer in chat.\nBefore: no rule. After: a question you leave for 5 minutes appears here.",
+      "key": "b",
+      "label": "5 minutes without a chat answer",
+      "lose": "A slow chat answer can leave the same question in both places for a while."
+    },
+    {
+      "gain": "No guessing about time.",
+      "how": "A question goes to the page when the session finishes its turn with no chat answer.\nBefore and after: no clock; the session's turn decides.",
+      "key": "c",
+      "label": "Only when the session ends its turn",
+      "lose": "A session that keeps working for a long time leaves the question out of the page that whole while."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 52,
+  "ref": "c202 (ask in chat first, then the page; every answer ends on the page), your chat rulings Oct 28 15:06 and 15:10 CDT",
+  "reply": "Answered in chat, Oct 28 15:07 CDT: \"5 minutes.\" Then your correction, 15:10 CDT: a session asks in chat first; if you have not answered after 5 minutes, the question goes to triage for the page; when you answer in chat, the session sends your answer to triage anyway. The trigger is no chat answer after 5 minutes. The 5 minutes is your number.",
+  "stands": true,
+  "status": "closed",
+  "title": "How long should a session wait for your chat answer before the question goes to the page?",
+  "why": "Your own number and your own rule; (b) is the one you picked."
+}

@@ -1,0 +1,56 @@
+{
+  "added": "2026-11-02T05:30:00Z",
+  "context": "Goal: cloud sessions reach the sessions on your computer without the trust card.\nProblem (risk): cloud to local is refused, and the trust card that might open it limits a session to trusted devices for good; in one incident it blocked every message into the session.\nBased on (read): the plan asks two things: how a cloud session should answer a session on your computer, and whether more sessions should take the trust card.\nBased on (read): on Oct 30 a session that took the trust card stopped receiving every message from other sessions, so the card is refused in coordinator, lane and runner sessions.\nDeparts from: main, with no reply path from cloud to local \u2014 adds a read path: the local session reads the cloud transcript, else a shared artifact board.",
+  "holds": "Building the way cloud sessions reach your computer's sessions.",
+  "home": "local-session-reach",
+  "id": "local-reach-plan",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T06:56:26.205Z",
+    "choice": "b",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Draft PR #1051",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1051"
+    }
+  ],
+  "n": 153,
+  "options": [
+    {
+      "gain": "No session is limited for good; coordinators, lanes and runners keep taking messages.",
+      "how": "The local session reads the cloud session's transcript at its own wake, and falls back to an artifact board if it cannot. The trust card stays refused in coordinator, lane and runner sessions.",
+      "key": "a",
+      "label": "Read path, keep the guard",
+      "links": [
+        {
+          "label": "Draft PR #1051",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1051"
+        }
+      ],
+      "lose": "The local session hears only at its own wake; board rows are data, never grants."
+    },
+    {
+      "gain": "Direct two-way messages, or a measured answer on why trust blocked messages.",
+      "how": "Say in your reply what you want instead: the board only; one trusted bridge session per computer session; the trust card allowed on your word each time; or one test of the card in a throwaway session.",
+      "key": "b",
+      "label": "Other picks",
+      "links": [
+        {
+          "label": "Draft PR #1051",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1051"
+        }
+      ],
+      "lose": "Each trusted session is limited to trusted devices for good, which cannot be undone."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "draft PR #1051, docs/plans/local-session-reach.md, section 4; roadmap step local-session-reach",
+  "reply": "00:58 CST: you picked other picks but named none. Still open: say which you want: the board only; one trusted bridge session per computer session; the trust card on your word each time; or one test of the card in a throwaway session.",
+  "short": "local reach plan",
+  "status": "open",
+  "title": "How cloud sessions answer your computer's sessions, and whether to take the trust card more widely",
+  "why": "A cloud session cannot send a message to a session on your computer. Draft PR #1051 plans a way around it without the trust card, which limits a session for good."
+}

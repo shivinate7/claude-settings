@@ -1,0 +1,36 @@
+{
+  "added": "2026-10-31T20:34:00Z",
+  "context": "Goal: a guard that refuses wrongly gets caught, not quietly worked around.\nProblem (rule): no rule makes an agent or orchestrator check a refusal against the guard's record before taking another route; on Oct 31 three sessions routed around the builder-test refusal without asking. Asked in chat at 15:21 CDT.\nBased on (read): rule verification-cry-wolf-guard-is-spent says a guard that cries wolf is ignored, but names no one who checks.\nBased on (notes): lane merge-role-allow's report, Oct 31 about 14:20 CDT. That refusal turned out right; only the record's wording was unclear (step test-merge-conflict-role).",
+  "home": "verification-cry-wolf-guard-is-spent",
+  "id": "question-refusal-first",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T10:26:46.313Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 110,
+  "options": [
+    {
+      "gain": "False alarms get found and fixed instead of trained into habit.",
+      "how": "Before routing around a refusal, the agent reads the guard's record; if the record seems to allow the act, its report flags a possible false alarm.",
+      "key": "a",
+      "label": "Add the rule",
+      "lose": "One more CLAUDE.md line, and a little more work at each refusal."
+    },
+    {
+      "gain": "No change.",
+      "how": "Agents keep routing around refusals as now.",
+      "key": "b",
+      "label": "No rule",
+      "lose": "A wrong refusal can be worked around for a long time unseen."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "test-merge-conflict-role (who resolves a test-file conflict); rule verification-cry-wolf-guard-is-spent",
+  "short": "Question refusals",
+  "status": "closed",
+  "title": "Must an agent check a guard's record before routing around a refusal?",
+  "why": "This case was a right refusal with unclear wording, and the check is what found that."
+}

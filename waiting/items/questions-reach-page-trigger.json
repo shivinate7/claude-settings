@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-02T05:34:00Z",
+  "context": "Goal: every question for you is on this page, so none is lost.\nProblem (rule): questions waited 5 minutes in chat before reaching this page, and some never arrived.\nBased on (read): your rules sent a question to this page only after 5 minutes with no chat answer.\nDeparts from: today's 5-minute wait \u2014 every question goes to this page in the same turn it is asked, and a chat answer closes its item.",
+  "holds": "Nothing; answered.",
+  "home": "questions-reach-page",
+  "id": "questions-reach-page-trigger",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T05:31:00Z",
+    "choice": "a",
+    "note": "answered in chat"
+  },
+  "n": 158,
+  "options": [
+    {
+      "gain": "No question is lost or waits.",
+      "how": "Every question for you goes to this page in the same turn it is asked; a chat answer closes the item.",
+      "key": "a",
+      "label": "At once",
+      "lose": "The page holds questions you may answer in chat a minute later."
+    },
+    {
+      "gain": "Fewer page items for questions you answer quickly.",
+      "how": "Keep the 5-minute wait in chat.",
+      "key": "b",
+      "label": "After 5 minutes",
+      "lose": "Questions wait, and some never arrive."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "a",
+  "rank": 9,
+  "ref": "rule questions-go-to-owner; roadmap step questions-reach-page",
+  "reply": "Your chat answer, 23:31 CST: a. A lane builds it.",
+  "short": "questions reach page at once",
+  "status": "closed",
+  "title": "Should every question for you go to this page at once, or after 5 minutes unanswered in chat?",
+  "why": "Questions asked in chat reached this page only after 5 minutes unanswered, and some never arrived."
+}

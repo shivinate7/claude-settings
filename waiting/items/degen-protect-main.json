@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T19:00:00Z",
+  "context": "The check of the child repos found degen's main has no branch protection, so the merge tool has no list of checks to wait for. This changes a live GitHub setting on degen, which only you can change (no session can). Your Oct 28 12:49 CDT ruling on c42 set the direction: the merge tool reads the checks from branch protection, and adopting a repo sets that protection. This asks whether to do it for degen now.",
+  "home": "child-repo-gap",
+  "id": "degen-protect-main",
+  "kind": "decision",
+  "n": 71,
+  "options": [
+    {
+      "gain": "A red or unchecked change cannot reach degen's main; the merge tool has one list to read.",
+      "how": "No direct push to main; a merge needs green checks. Then the merge tool's required checks are set to the protection list.",
+      "key": "a",
+      "label": "Yes, protect degen's main like claude-settings",
+      "lose": "You change one GitHub setting on degen, and a hotfix can no longer be pushed straight to main."
+    },
+    {
+      "gain": "No setting to change; direct pushes stay possible.",
+      "how": "Merges rely on the local hooks only.",
+      "key": "b",
+      "label": "Leave it unprotected",
+      "lose": "Nothing on GitHub stops a red or direct merge to degen's main; the merge tool still has no check list."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 71,
+  "ref": "child-repo-gap (degen measured, a fix lane runs); your Oct 28 12:49 CDT ruling on c42 (adopting a repo sets branch protection, so no repo starts with none)",
+  "reply": "Picked a, Oct 29 14:46 CDT: degen's main gets protection like claude-settings. The coordinator sets it up; if the setting needs your login, you get one ready command as a task item.",
+  "status": "closed",
+  "title": "degen: protect main on GitHub, and make the merge tool wait for the protection's checks?",
+  "why": "It is the direction you already set for every repo (c42), and the loss is one setting and a slower hotfix."
+}

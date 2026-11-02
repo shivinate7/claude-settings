@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T10:55:00Z",
+  "context": "Banchi's guard refused a write to the Claude app's side-session notes folder (your ask). claude-settings now has its own rule for writes outside a checkout (c156, merged in batch 6), which allows paths that sit in no checkout. Banchi's guard still refuses them. The fix is in banchi: skip Banchi's tree clause for Claude Code, since the shared rule now covers it (Codex keeps Banchi's copy). Your item 2 (a) green light approved one plan for child-repo changes; this change was filed after that plan, so it is not clearly covered. Nothing else waits on it.",
+  "home": "c174",
+  "id": "c174-banchi-guard-grant",
+  "kind": "decision",
+  "n": 41,
+  "options": [
+    {
+      "gain": "Banchi sessions stop hitting the refusal; one rule, kept in claude-settings.",
+      "how": "A banchi lane reads banchi's open branches and PRs first, then skips the tree clause for Claude Code through a PR, red first on a write to the notes folder.",
+      "key": "a",
+      "label": "Yes, under item 2's green light",
+      "lose": "Banchi's own tree check stops applying to Claude Code sessions."
+    },
+    {
+      "gain": "The smallest change to Banchi's guard.",
+      "how": "The lane adds the notes folder to Banchi's allowed outside paths and leaves the tree clause on.",
+      "key": "b",
+      "label": "Only the stopgap",
+      "lose": "Two rules keep covering the same writes, and the next harmless folder hits the same refusal."
+    },
+    {
+      "gain": "Banchi is untouched.",
+      "how": "c174 stays parked; Banchi keeps refusing the notes folder.",
+      "key": "c",
+      "label": "Not now",
+      "lose": "The refusal you reported stays."
+    }
+  ],
+  "owner": "Triage the roadmap (10)",
+  "pick": "a",
+  "rank": 31,
+  "ref": "c174 (Banchi's guard allows notes folders), c156 (one write-outside-the-checkout guard), item 2 (your green light for child repos)",
+  "status": "closed",
+  "title": "May a lane change Banchi's guard so it stops refusing the notes folder?",
+  "why": "The shared rule already covers what Banchi's tree clause did, and it allows the harmless folders; keeping both means two homes for one check."
+}

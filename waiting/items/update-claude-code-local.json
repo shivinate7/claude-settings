@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-01T22:57:00Z",
+  "command": {
+    "powershell": "claude update\nclaude --version"
+  },
+  "context": "Your PC's setup audit read Claude Code 2.1.310 from the copy a terminal runs, with auto-update on; cloud sessions run 2.1.316 today.\nYour question, \"does this work for the desktop app?\": not known yet. The audit read only the terminal copy; whether the desktop app runs that same copy or its own is not read. So first check the version the desktop app itself runs.\nWhy yours: the app is on your PC only, and none of your folders is shared through Remote Control (checked which of your folders are shared, Nov 1 16:56 CST), so no session here can reach it.",
+  "home": "local-cc-version-lag",
+  "id": "update-claude-code-local",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-02T00:30:15.478Z",
+    "done": true,
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Newest Claude Code version",
+      "url": "https://www.claudeupdates.dev/update"
+    },
+    {
+      "label": "Claude Code setup docs (updates)",
+      "url": "https://code.claude.com/docs/en/setup"
+    }
+  ],
+  "minutes": "2 min",
+  "n": 141,
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "ref": "step local-cc-version-lag (your PC's Claude Code is behind)",
+  "reply": "The desktop app is already the newest; its copy moves only when Anthropic ships a new app. Cloud sessions still cannot start a session on your PC: at 18:10 CST it was refused because your PC is not yet a trusted device for them. So the terminal update is yours to run, with the command below.",
+  "short": "Update Claude Code",
+  "status": "closed",
+  "steps": [
+    "Paste the command below into PowerShell.",
+    "Mark this done with the version it prints."
+  ],
+  "title": "Update Claude Code on your PC to the newest version"
+}

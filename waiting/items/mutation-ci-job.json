@@ -1,0 +1,63 @@
+{
+  "added": "2026-11-02T10:30:00Z",
+  "context": "Goal: tests that catch real faults, in every repo.\nProblem (money): a CI job for the test-strength check spends GitHub minutes on every batch, so it waits on your word.\nBased on (measured): on the last 50 merged PRs per repo, 5 deliberate breaks each: q_max's tests caught 73% (155 tried); banchi's Python tests caught 50% (52 tried); banchi's TypeScript tests caught 0 of 10.\nBased on (read): banchi cannot run only the tests for one file, so an uncaught break there may mean no test reaches that file, not a weak test.\nDeparts from: today the check runs only by hand \u2014 adds a test-strength job to CI.",
+  "holds": "Any CI job for test strength; meanwhile a lane fixes two faults in how the tool picks its targets.",
+  "home": "test-practices-first-principles",
+  "id": "mutation-ci-job",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Results draft PR #1080",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1080"
+    }
+  ],
+  "n": 163,
+  "options": [
+    {
+      "gain": "Each batch shows its untested lines, with no risk to merges.",
+      "how": "A CI job on each batch PR breaks its new product lines, lists each break no test caught, and never fails the run.",
+      "key": "a",
+      "label": "Report only",
+      "links": [
+        {
+          "label": "Results draft PR #1080",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1080"
+        }
+      ],
+      "lose": "About one extra job per batch, cost not yet measured; weak tests still merge."
+    },
+    {
+      "gain": "Weak tests stop merging.",
+      "how": "The same job fails the batch when its tests catch fewer than a set share of breaks, for example 60% of new product lines.",
+      "key": "b",
+      "label": "Block below a floor",
+      "links": [
+        {
+          "label": "Results draft PR #1080",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1080"
+        }
+      ],
+      "lose": "GitHub minutes on every batch, and false reds in banchi until it can run tests per file."
+    },
+    {
+      "gain": "No CI cost.",
+      "how": "No CI job; the check runs when someone asks for it.",
+      "key": "c",
+      "label": "By hand only",
+      "links": [
+        {
+          "label": "Results draft PR #1080",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1080"
+        }
+      ],
+      "lose": "Nothing watches test strength between hand runs."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "PRs #996, #1010, #1080 and banchi #1052; roadmap step test-practices-first-principles",
+  "short": "test-strength CI job",
+  "status": "open",
+  "title": "Should CI check test strength on each batch, and should a weak result block the merge?",
+  "why": "A tool now checks whether tests catch real faults: it makes small deliberate breaks in new code and sees whether any test fails. It runs only by hand today. A CI job would run it on every batch, at a cost in GitHub minutes, so it needs your word."
+}

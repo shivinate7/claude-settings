@@ -1,0 +1,16 @@
+{
+  "added": "2026-11-02T19:38:00Z",
+  "context": "Goal: your \"say it once, cite everywhere\" rule is enforced.\nAnswered in chat 13:38 CST: pick a, both checks (retired terms fail CI; a copied rule sentence without its id fails CI), and account for child repos' local nuance.\nDeparts from: main's unmechanized rule \u2014 lint/find_copies.py gains an in-repo mode, a reword trigger and child override tags.\nNext: plan docs/plans/one-home-check.md on branch one-home-check-design (draft PR); a lane builds it, red test first.",
+  "home": "docs/todo.md",
+  "id": "one-home-check",
+  "kind": "decision",
+  "links": [],
+  "n": 174,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "rule building-one-home-per-capability; lint/rule_mechanisms.json; lint/find_copies.py; branch one-home-check-design",
+  "short": "mechanize say-it-once",
+  "status": "closed",
+  "title": "Should the one-home rule be enforced by a check?",
+  "why": "Rule building-one-home-per-capability is marked unmechanized, so copies of a rule outlive a ruling (9 agent files kept old STE wording 16 days)."
+}

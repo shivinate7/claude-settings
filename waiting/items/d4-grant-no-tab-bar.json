@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "The house rule says phone navigation uses a bottom tab bar. D2 and D3 break it on purpose (see question 1's pictures). Only matters if you keep D2 or D3. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-grant-no-tab-bar",
+  "kind": "decision",
+  "n": 18,
+  "options": [
+    {
+      "gain": "D2 or D3 stays as drawn.",
+      "how": "The rule gains a named exception for Banchi's phone app.",
+      "key": "a",
+      "label": "Yes, for this app",
+      "lose": "One exception to a house rule."
+    },
+    {
+      "gain": "The house rule holds everywhere.",
+      "how": "D2 or D3 gains a tab bar in the next pass.",
+      "key": "b",
+      "label": "No, keep the rule",
+      "lose": "D2 and D3 lose part of what makes them simple."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 18,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: may D2 and D3 skip the bottom tab bar?",
+  "why": "It follows the pick on question 1; a tab bar adds seller tabs the helper never uses."
+}

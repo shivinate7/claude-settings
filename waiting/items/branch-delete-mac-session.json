@@ -1,0 +1,22 @@
+{
+  "added": "2026-11-02T16:45:00Z",
+  "context": "Goal: claude-settings keeps only live branches.\nProblem (rule): only a session on your Mac can delete branches, and only you can start one there.\nBased on (read): the cloud proxy refused a branch delete with an access error at 06:40 CST.\nBased on (read): the list of your connected computer folders was empty at 10:42 CST.\nDeparts from: main \u2014 adds a Mac session that deletes merged branches.",
+  "holds": "Deleting merged branches in claude-settings.",
+  "home": "branch-cleanup",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Branch-cleanup lane",
+      "url": "https://claude.ai/code/session_013NEJL3uZAsA15jmb5o2vuD"
+    }
+  ],
+  "n": 164,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "lane branch-cleanup (session_013NEJL3uZAsA15jmb5o2vuD); owner ask 10:41 CST",
+  "reply": "Closed 13:05 CST: folded into item 170, which holds the same Mac session step plus the ready delete command.",
+  "short": "Mac session for branch deletes",
+  "status": "closed",
+  "title": "Start a Claude Code session on your Mac in the claude-settings folder, so old branches can be deleted",
+  "why": "claude-settings has 240 branches (10:41 CST). The cloud cannot delete a branch: GitHub's proxy here refuses it (checked 06:40 CST). No Mac folder is connected to these sessions (checked 10:42 CST). A session on your Mac can do the deletes under your standing grant for merged branches."
+}

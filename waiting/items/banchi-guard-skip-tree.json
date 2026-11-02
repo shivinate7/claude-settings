@@ -1,0 +1,60 @@
+{
+  "added": "2026-11-01T22:31:00Z",
+  "context": "Goal: banchi's guard runs its folder-tree check once, from the shared guard, and branch c174 merges.\nProblem (goal): banchi's docs check passes only if line 90 of .claude/settings.json ends with the guard script call after the skip value, and only you can edit that file.\nBased on (read): the coordinator's read of banchi branch c174 and scripts/docs_audit/env_map.py, Nov 1 16:29 CST.\nBased on (measured): the cloud refuses an agent's edit of banchi's .claude/settings.json (auto-mode check), so no agent can make this edit for you.\nDeparts from: main (banchi runs its own tree check on every edit) \u2014 option a stops banchi's copy, so only the shared guard's check runs.",
+  "holds": "Lane c174 waits: its selftest, docs check, review and draft PR come after this edit.",
+  "home": "c174",
+  "id": "banchi-guard-skip-tree",
+  "kind": "decision",
+  "lane": null,
+  "lastAnswer": {
+    "at": "2026-11-01T22:34:00Z",
+    "choice": "a",
+    "done": true,
+    "note": "done"
+  },
+  "links": [
+    {
+      "label": "Edit banchi .claude/settings.json on branch c174-guard-skip-tree",
+      "url": "https://github.com/shivinate7/banchi/edit/c174-guard-skip-tree/.claude/settings.json"
+    }
+  ],
+  "minutes": "1 min",
+  "n": 99,
+  "options": [
+    {
+      "gain": "Branch c174 merges, and the tree check runs once, from the shared guard.",
+      "how": "Open the file with the link and make line 90 read exactly: \"command\": \"GUARD_SHELL_SKIP=tree scripts/guard-shell.py --hook\". Commit to branch c174-guard-skip-tree.",
+      "key": "a",
+      "label": "Paste the full line",
+      "links": [
+        {
+          "label": "Edit banchi .claude/settings.json on branch c174-guard-skip-tree",
+          "url": "https://github.com/shivinate7/banchi/edit/c174-guard-skip-tree/.claude/settings.json"
+        }
+      ],
+      "lose": "One more edit for you."
+    },
+    {
+      "gain": "Nothing for you to do.",
+      "how": "The coordinator closes the branch; nothing for you to do.",
+      "key": "b",
+      "label": "Drop branch c174",
+      "lose": "banchi's own tree check keeps running beside the shared one, so one edit can get two refusals."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "a",
+  "ref": "c174 (banchi guard skips the whole tree); banchi branch c174-guard-skip-tree",
+  "reply": "The fault was ours: we gave you only part of the line, so following it exactly dropped the script call.",
+  "short": "banchi guard line",
+  "status": "closed",
+  "steps": [
+    "Open the file on the lane branch with the link below.",
+    "Find the line that now reads GUARD_SHELL_SKIP=tree (about line 90).",
+    "Make it read exactly: GUARD_SHELL_SKIP=tree scripts/guard-shell.py --hook. Change nothing else.",
+    "Commit to branch c174-guard-skip-tree directly, with the message: Keep the shell guard script call (c174).",
+    "Press Done here."
+  ],
+  "title": "Paste one line in banchi so its guard branch can merge, or drop that branch?",
+  "why": "One paste ends the double check for good."
+}

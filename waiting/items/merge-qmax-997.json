@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T22:57:00Z",
+  "context": "You chose to merge q_max PR #997, which rewrites D-537 so it says what is true about q_max's main branch.\nWhy yours: the cloud refused to attach q_max with push access to the coordinator (safety check, Nov 1), and no folder of yours is shared through Remote Control (list_computer_folders, Nov 1 16:56 CST), so no session can press it.",
+  "home": "folded into page item 138",
+  "id": "merge-qmax-997",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T23:14:42.453Z",
+    "note": "you can for sure do it?"
+  },
+  "links": [
+    {
+      "label": "q_max PR #997",
+      "url": "https://github.com/shivinate7/q_max/pull/997"
+    }
+  ],
+  "minutes": "2 min, plus the check run",
+  "n": 139,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "ref": "q_max PR #997 (rewrites D-537, the branch-protection record)",
+  "short": "Merge q_max #997",
+  "status": "closed",
+  "steps": [
+    "Open the pull request with the link below.",
+    "Press Ready for review.",
+    "When its checks are green, press Merge."
+  ],
+  "title": "Mark q_max PR #997 ready, then merge it when its checks pass"
+}

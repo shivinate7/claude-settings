@@ -1,0 +1,19 @@
+{
+  "checked": "claude-settings roadmap 0b550887 and main 4b8037d4, Nov 1 16:17 CST",
+  "identity": {
+    "brand": "#b45f06",
+    "face": "sans",
+    "name": "claude-settings"
+  },
+  "parked": [
+    {
+      "note": "parked until you ask for a Banchi build; Banchi feature work, not a claude-settings lane (step d4)",
+      "ref": "Banchi phone build (items 14 to 21, 63 to 66)"
+    },
+    {
+      "note": "a session on your Windows PC runs the two checks; step c29 closes when Windows passes",
+      "ref": "10 windows-live-checks"
+    }
+  ],
+  "writer": "Triage (session_013NEJL1qEunLpTi68de3Jrv)"
+}

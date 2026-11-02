@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-02T04:07:00Z",
+  "context": "Goal: batch runner 8 does every child-repo merge.\nProblem (rule): auto mode in runner 8's chat blocks its merges because your merge grant was never said in that chat, so each merge waits on you.\nBased on (ruling): your 17:37 CST grant: mark ready, merge and review in all your repos.\nBased on (ruling): your 21:34 CST roster: batch runners run every merge; the coordinator never merges.\nDeparts from: main, where a merge passes auto mode only in a chat holding your words \u2014 (a) puts your grant in runner 8's chat; (b) adds an auto-mode allow line for batch-runner merges in every session.",
+  "holds": "Merges in q_max, banchi, degen, joyous and mailaudit; now q_max #1011, mailaudit #176, joyous #64 and joyous #66.",
+  "home": "session-tiers",
+  "id": "runner8-merge-grant",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T04:16:17.633Z",
+    "choice": "b",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Runner 8's session",
+      "url": "https://claude.ai/code/session_013NEJL15CmUPTsMgxECh1fX"
+    }
+  ],
+  "n": 149,
+  "options": [
+    {
+      "gain": "Merges start now, with no settings change.",
+      "how": "Open runner 8's session and paste this line: \"Batch runner 8 may merge green, reviewed PRs in q_max, banchi, degen, joyous and mailaudit under my standing merge grant.\"",
+      "key": "a",
+      "label": "Paste your grant into runner 8",
+      "lose": "Each new batch runner needs the line once."
+    },
+    {
+      "gain": "Future runners need nothing from you.",
+      "how": "A lane adds an auto-mode allow line for batch-runner merges to the shared settings; it needs your typed word in that lane.",
+      "key": "b",
+      "label": "Add an allow line",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. A lasting widening in every session.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "b",
+  "rank": 1,
+  "ref": "decision session-tiers, Batch runner bullet (PR #1038); your 17:37 CST merge grant",
+  "reply": "Routed 22:17 CST to the coordinator: a lane adds the batch-runner merge allow line; your save here is the typed word that lane needs.",
+  "short": "runner 8 merge grant",
+  "status": "closed",
+  "title": "Batch runner 8 can't merge: put your grant in its chat, or add an allow line?",
+  "why": "Batch runner 8 does every merge in the child repos. Auto mode blocks its merges because your words are not in that chat. Four green PRs wait only on this: q_max #1011, mailaudit #176, joyous #64 and joyous #66."
+}

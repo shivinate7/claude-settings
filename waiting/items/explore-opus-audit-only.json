@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-02T00:38:00Z",
+  "context": "Goal: a search agent runs Opus only where it judges meaning, is blocked otherwise, and you can allow a one-off.\nProblem (money): since your Nov 1 ruling, a search agent on Opus with no audit mark is refused, and only you can say whether the audit mark also unlocks Opus or only Sonnet.\nBased on (ruling): your Nov 1 17:25 CST ruling: a model above the role's is refused, and your typed override lifts it.\nBased on (read): the model-per-role record gives an audit search Sonnet when its brief carries the mark Audit:, and Opus on your grant of Oct 21.\nDeparts from: the setup running today lets every search run Opus without asking \u2014 Opus for a search only as picked below.\n\nYour question on the earlier idea of letting every search run Opus without asking: it would not need a lift. The guard would never ask, so every search would run Opus silently; a lift only applies where the guard refuses or asks. Your override can be scoped to most roles, but not yet to search agents, so lifting for searches would be a blanket Opus lift. So yes: without a, you cannot keep some searches on Opus and block others.\nYour other question, whether every way an agent can get the wrong model is covered: not yet. Four ways still slip through: Opus is only asked about, not refused (your Nov 1 ruling fixes this, being built now); workflow scripts that start many agents skip the model check; an agent with no model named while a default model is set; and a new model name the guard cannot rank, on the Plan and designer roles. Each check was added for one incident, so coverage grew piece by piece; the next two fixes being built close the first two (the Opus refusal and the check on workflow scripts).",
+  "group": "one-model-rule",
+  "home": "one-model-rule",
+  "id": "explore-opus-audit-only",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T00:38:48.267Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 137,
+  "options": [
+    {
+      "gain": "Deep audits use the best model with no question; plain searches stay cheap.",
+      "how": "A search whose brief carries the audit mark may run Sonnet or Opus; a search on Opus with no mark is refused, and your override lifts it.",
+      "key": "a",
+      "label": "The audit mark unlocks Sonnet or Opus",
+      "lose": "A session can put Opus on any audit without asking you."
+    },
+    {
+      "gain": "You approve every Opus search.",
+      "how": "Opus on any search needs your typed override, which gets a search-only form (Opus for searches for 2 hours).",
+      "key": "b",
+      "label": "The audit mark unlocks Sonnet only",
+      "lose": "More stops for you on deep audits."
+    },
+    {
+      "gain": "Cheapest.",
+      "how": "Your Oct 21 grant is withdrawn; only your override allows it.",
+      "key": "c",
+      "label": "Never Opus for a search",
+      "lose": "The same stops as b, and the Oct 21 grant is gone."
+    }
+  ],
+  "owner": "Lane explore-audit-marker (session_013NEJL1W9hdjvYuy1gvkVEz)",
+  "pick": "a",
+  "ref": "step explore-audit-marker (the Audit: line on search agents); decision agent-model-cap (model per role)",
+  "reply": "Pick a taken (saved Nov 1 18:38 CST). The lane explore-audit-marker builds it.",
+  "short": "Search agent models",
+  "status": "closed",
+  "title": "Which model may a search agent run: the table says Haiku, Sonnet for an audit, Opus only on your grant; the guard lets any search run Opus",
+  "why": "Deep audits keep the best model and plain searches stay cheap, with no new stops for you."
+}

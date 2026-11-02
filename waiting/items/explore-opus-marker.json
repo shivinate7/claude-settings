@@ -1,0 +1,74 @@
+{
+  "added": "2026-11-01T23:17:00Z",
+  "context": "Goal: one clear verdict for each way an agent can run a bigger model than its role allows.\nProblem (rule): today a two-step jump to Opus only asks while a one-step jump to Sonnet is refused for good, so the costliest jump gets the softest check, and each case needs your verdict.\nBased on (code): the guard refuses a Haiku role on Sonnet with no override and skips Opus; a separate check only asks for Opus (the lane's read of main, Nov 1).\nDeparts from: main (Haiku role on Sonnet refused for good; any role on Opus asks) \u2014 the verdicts you pick.\n\nThree cases: (1) a Haiku role on Sonnet, one step up; (2) a Sonnet role on Opus, one step up; (3) a Haiku role on Opus, two steps up. Four verdicts fit each: allow, ask you, refuse with your typed override as the way out, or refuse with no way out. In every option a marker (Round N of 3, or Audit:) or a standing grant still lets an agent through. To set each case on its own, pick None of these and write the three verdicts in your note.",
+  "group": "one-model-rule",
+  "home": "one-model-rule",
+  "id": "explore-opus-marker",
+  "kind": "decision",
+  "lane": "Lane explore-audit-marker writes the analysis",
+  "lastAnswer": {
+    "at": "2026-11-01T23:25:27.149Z",
+    "choice": "a",
+    "note": "A is fine -- but separately, I thought we've covered all the ways a session/agent can pick the wrong model -- so is this moot? and if we haven't covered all the ways, how /why?"
+  },
+  "n": 127,
+  "options": [
+    {
+      "gain": "One rule, no softer path for Opus, and you keep a way out.",
+      "how": "Every case is refused; you type override to let one through.",
+      "key": "a",
+      "label": "All three: refuse, your override lifts it",
+      "lose": "Opus agents that only asked today stop until you type override."
+    },
+    {
+      "gain": "The fewest hard stops.",
+      "how": "Every case stops and asks you.",
+      "key": "b",
+      "label": "All three: ask you",
+      "lose": "Case 1, refused today, runs on one yes."
+    },
+    {
+      "gain": "The strictest cost control.",
+      "how": "Every case is refused, with no override.",
+      "key": "c",
+      "label": "All three: refuse, nothing lifts it",
+      "lose": "No way past, even for you."
+    },
+    {
+      "gain": "The biggest jump is the strictest.",
+      "how": "One step up (cases 1 and 2): refuse, your override lifts it. Two steps up (case 3): refuse, nothing lifts it.",
+      "key": "d",
+      "label": "By distance, strict",
+      "lose": "Two rules to remember."
+    },
+    {
+      "gain": "Small jumps go quickly.",
+      "how": "One step up asks you; two steps up is refused, your override lifts it.",
+      "key": "e",
+      "label": "By distance, softer",
+      "lose": "More questions, and case 1 is softer than today."
+    },
+    {
+      "gain": "Strictness follows cost.",
+      "how": "Up to Sonnet (case 1) asks you; up to Opus (cases 2 and 3) is refused, your override lifts it.",
+      "key": "f",
+      "label": "By model",
+      "lose": "Case 1 is softer than today."
+    },
+    {
+      "gain": "No work.",
+      "how": "Case 1 refused for good; cases 2 and 3 ask.",
+      "key": "g",
+      "label": "Keep today",
+      "lose": "The costliest jump keeps the softest check."
+    }
+  ],
+  "owner": "Lane explore-audit-marker (session_013NEJL1W9hdjvYuy1gvkVEz)",
+  "pick": "a",
+  "ref": "step explore-audit-marker; PR #957; page item 107",
+  "reply": "Filed as a: a model above the role's is refused, and your typed override lifts it. Your question is answered on item 137.",
+  "short": "Above the row: verdicts",
+  "status": "closed",
+  "title": "When an agent runs a bigger model than its role allows, what happens in each case?",
+  "why": "One rule for every case, with no softer path for the costliest model, and your override keeps the rare yes."
+}

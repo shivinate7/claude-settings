@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-28T18:03:00Z",
+  "context": "You picked b (13:01 CDT), but this session's permissions refused the orchestrator marking home#374 ready, so b cannot run. Please take a: open home#374 (link below), mark it ready for review, wait for scope, test, addon and ios to go green, then press Merge.\n\nhome#374 is your item 44 fix: it names home's 4 test runs and adds the line about draft tests. It cannot merge through the merge tool, which reads its settings from home's main, where there is no list and no branch protection yet. Once #374 is on main, home's merge tool works from then on.",
+  "group": "branch-protection",
+  "holds": "home#374 waits, and with it home's merge tool, which cannot merge any home PR until #374 lands.",
+  "home": "c42",
+  "id": "c42-merge-home-374",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "home#374 on GitHub",
+      "url": "https://github.com/shivinate7/home/pull/374"
+    }
+  ],
+  "n": 47,
+  "options": [
+    {
+      "gain": "Home's merge tool works from then on; you see the 4 tests pass.",
+      "how": "Open https://github.com/shivinate7/home/pull/374, mark it ready for review, wait for scope, test, addon and ios to go green, then press Merge.",
+      "key": "a",
+      "label": "You mark it ready and press Merge",
+      "lose": "Two presses by you, with a wait between."
+    },
+    {
+      "gain": "No waiting on your side.",
+      "how": "Tried after your 13:01 pick: this session's permissions refused marking #374 ready, so this cannot run from here.",
+      "key": "b",
+      "label": "Grant the orchestrator to do it with gh",
+      "lose": "Blocked by the session's permissions."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "c42 (home's merge checks, your item 44 a and b), home#374; same bootstrap as item 46",
+  "status": "closed",
+  "title": "How does home#374 merge, since home's merge tool cannot merge yet?",
+  "why": "Two presses by you land it with home's own 4 tests green, and nothing needs a special grant."
+}

@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-01T20:31:00Z",
+  "context": "Goal: the right licence tier, with no surprise if a vendor audits.\nProblem (money): free tiers end at a revenue line: Unity Personal at $200K of revenue plus funding, Fab (the Unreal asset store) Personal at $100K, and Unreal charges for non-game seats above $1M. Which tier applies depends on who buys.\nBased on (read): Unity's pricing page and Fab's licence page, read by the 3D tools survey lane.\nDeparts from: main \u2014 adds who owns 3D licences.\n\nNot blocking, and it matters only if you pick Unity or Unreal on item 130.",
+  "home": "3d-tools-survey",
+  "id": "3d-licence-buyer",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:23:54Z",
+    "note": "doesnt matter"
+  },
+  "links": [
+    {
+      "label": "Unity pricing updates",
+      "url": "https://unity.com/products/pricing-updates"
+    }
+  ],
+  "n": 132,
+  "options": [
+    {
+      "gain": "The right tier for company work.",
+      "how": "Company work uses a company licence.",
+      "key": "a",
+      "label": "Your employer buys, for work done for them",
+      "lose": "Needs purchase approval; Unity Pro is $2,310 per seat a year."
+    },
+    {
+      "gain": "Free tiers likely apply.",
+      "how": "You hold the licence yourself.",
+      "key": "b",
+      "label": "You buy personally",
+      "lose": "Free tiers are the wrong tier for company work."
+    }
+  ],
+  "owner": "Lane 3d-tools-survey (session_013NEJL1nELFhJD5Rm3xiUS3)",
+  "pick": "a",
+  "ref": "step 3d-tools-survey",
+  "short": "Who buys 3D licences",
+  "status": "closed",
+  "title": "If you use a paid 3D tool, who buys the licence?",
+  "why": "Right when the work is for your employer; pick b only for personal projects."
+}

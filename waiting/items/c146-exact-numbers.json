@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "A fact line like \"waits 300 s\" cites the constant it describes. Plan: plans/c146-checked-prose-map.md on the roadmap branch, section 7 (Sonnet fact-check clear).",
+  "group": "c146-checked-map",
+  "home": "c146",
+  "id": "c146-exact-numbers",
+  "kind": "decision",
+  "n": 24,
+  "options": [
+    {
+      "gain": "A simple, exact check.",
+      "how": "\"300 s\", never \"5 minutes\".",
+      "key": "a",
+      "label": "Same number as the cite",
+      "lose": "Slightly stiff prose."
+    },
+    {
+      "gain": "Freer prose.",
+      "how": "The check converts units.",
+      "key": "b",
+      "label": "A unit conversion table",
+      "lose": "More code, and more ways to be wrong."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 24,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Checked map: must the prose show the same number as the code?",
+  "why": "The check stays exact and small."
+}

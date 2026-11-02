@@ -1,0 +1,69 @@
+{
+  "added": "2026-11-02T05:33:00Z",
+  "context": "Goal: banchi's CLAUDE.md under its size target, and Codex still reads every rule Claude reads.\nProblem (rule): Codex does not read the folder rule files, and the fix now in PR #1005 is a generated file, which your ruling that Codex reads the same rules forbids (\"the fix is not a sync script\"), so only you can choose.\nBased on (read): main's CLAUDE.md is 37,613 bytes; on PR #1005 it is 28,752. The generated file for Codex is 39,285 bytes, over Codex's default 32 KB limit.\nBased on (read): Codex reads AGENTS.md files from the repo root down to the folder it runs in, so a folder's own AGENTS.md is read there.\nDeparts from: main, where Codex's AGENTS.md is a link to CLAUDE.md with every rule in one file \u2014 the rules split by folder, and Codex reads them through links placed in each folder.",
+  "holds": "banchi PR #1005, held at its current commit.",
+  "home": "banchi D135",
+  "id": "banchi-codex-rules",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T06:56:26.205Z",
+    "choice": "none",
+    "note": "why ks claide md splittomg"
+  },
+  "links": [
+    {
+      "label": "banchi PR #1005",
+      "url": "https://github.com/shivinate7/banchi/pull/1005"
+    }
+  ],
+  "n": 155,
+  "options": [
+    {
+      "gain": "Codex reads the same rules by construction, as your ruling asks; no script; each file stays under Codex's limit.",
+      "how": "The root AGENTS.md stays a link to CLAUDE.md. Each of the app, server, pipeline and codes folders gets its own AGENTS.md, linked to that folder's rule file.",
+      "key": "a",
+      "label": "Links in each folder",
+      "links": [
+        {
+          "label": "banchi PR #1005",
+          "url": "https://github.com/shivinate7/banchi/pull/1005"
+        }
+      ],
+      "lose": "Codex sees a folder's rules only when it runs in or under that folder, not from the root."
+    },
+    {
+      "gain": "Codex reads every rule from the root.",
+      "how": "Keep the generated AGENTS.md and raise Codex's size limit in banchi's Codex settings; rewrite your ruling to allow it.",
+      "key": "b",
+      "label": "Generated file, raised limit",
+      "links": [
+        {
+          "label": "banchi PR #1005",
+          "url": "https://github.com/shivinate7/banchi/pull/1005"
+        }
+      ],
+      "lose": "It is the sync script your ruling rules out, and it needs a Codex settings change."
+    },
+    {
+      "gain": "Nothing changes in how Codex reads rules.",
+      "how": "Close PR #1005; CLAUDE.md keeps every rule in one file.",
+      "key": "c",
+      "label": "Drop the split",
+      "links": [
+        {
+          "label": "banchi PR #1005",
+          "url": "https://github.com/shivinate7/banchi/pull/1005"
+        }
+      ],
+      "lose": "CLAUDE.md stays at 37.6 KB and misses its size target."
+    }
+  ],
+  "owner": "banchi lane (session_013NEJL3SffaYSu5tzgYVhAv)",
+  "rank": 2,
+  "ref": "banchi PR #1005; banchi decision D135 (Codex reads the same rules as Claude)",
+  "reply": "Why split: Claude Code loads CLAUDE.md whole into every session, so every line costs reading time in every banchi session. The shared size check warns past 200 lines, and banchi's is 37.6 KB. The split moves rules that matter only in one folder (app, server, pipeline, codes) into files Claude loads only when it reads that folder. Still open: pick a, b or c, or say not to split.",
+  "short": "banchi Codex rules",
+  "status": "open",
+  "title": "banchi: when CLAUDE.md is split by folder, how should Codex read the moved rules?",
+  "why": "banchi's CLAUDE.md is over its size target. PR #1005 moves the rules that matter only in one folder into separate rule files that Claude loads by path. Codex does not read those files, and your earlier ruling says Codex must read the same rules, without a sync script."
+}

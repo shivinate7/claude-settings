@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "Answered Oct 28 02:46 CDT, (b): the home check also runs a copy search inside the repo now (find_copies.py compares a repo with itself), not later in r5. Filed on c146.",
+  "group": "c146-checked-map",
+  "home": "c146",
+  "id": "c146-home-check",
+  "kind": "decision",
+  "n": 27,
+  "options": [
+    {
+      "gain": "Small and exact.",
+      "how": "The cited file is tracked and the symbol exists.",
+      "key": "a",
+      "label": "Pointer resolves, now",
+      "lose": "Misses a second copy inside the repo."
+    },
+    {
+      "gain": "Catches copies.",
+      "how": "find_copies.py compares a repo with itself.",
+      "key": "b",
+      "label": "Also a copy search",
+      "lose": "More work, and it overlaps r5."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 27,
+  "ref": "c146 (the map says how the code fits together, in checked prose)",
+  "status": "closed",
+  "title": "Checked map: how strong is the home check inside one repo?",
+  "why": "(a) now and (b) as part of r5, as the plan says."
+}

@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-29T19:30:00Z",
+  "context": "The mailaudit lane adopted project-ops and pushed mailaudit's roadmap record branch (draft PR 164). The last step of the skill is to copy the operating model and the roster into the project's instructions on claude.ai. I checked: no tool in this session can edit a claude.ai project's instructions, so a session cannot do it. The templates are in claude-settings under skills/project-ops/templates/.",
+  "home": "child-repo-gap",
+  "id": "mailaudit-project-instructions",
+  "kind": "task",
+  "n": 74,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 74,
+  "ref": "child-repo-gap (mailaudit lane done: mailaudit draft PR 164, head ffa2827, project-ops adopted)",
+  "reply": "Done, Oct 29 14:49 CDT. Your note goes to the coordinator: mailaudit and at least one other repo adopted the new way of working before it was finished, so fix lanes go to every child repo (child-repo-gap, then each repo's compliance visit, r1).",
+  "status": "closed",
+  "steps": [
+    "Open the mailaudit project on claude.ai and its project instructions.",
+    "Paste skills/project-ops/templates/operating-model.md and replace each <placeholder>.",
+    "Paste skills/project-ops/templates/roster.md under it and fill in who holds each role."
+  ],
+  "title": "Paste the operating model and roster into mailaudit's claude.ai project instructions",
+  "why": "Project instructions on claude.ai can only be edited from your login in the claude.ai app."
+}

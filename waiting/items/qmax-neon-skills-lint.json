@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-30T00:34:00Z",
+  "context": "q_max carries copies of outside skills under .claude/skills/neon*. All 69 plain-English lint errors in q_max are in those copies, not in your own prose.",
+  "home": "r1",
+  "id": "qmax-neon-skills-lint",
+  "kind": "decision",
+  "n": 88,
+  "options": [
+    {
+      "gain": "The lint score reflects only your own prose.",
+      "key": "a",
+      "label": "Skip them in the linter, as degen does",
+      "lose": "Those files go unchecked."
+    },
+    {
+      "gain": "One copy for every repo, kept current in one place.",
+      "key": "b",
+      "label": "Load them from claude-settings instead of copying",
+      "lose": "A bigger change, and every repo then carries them."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 88,
+  "ref": "r1 (compliance visit, q_max)",
+  "reply": "Withdrawn Oct 29 19:32 CDT: the coordinator took this undoable pick itself. q_max loads the neon skills from claude-settings instead of copying them, because a lint exclusion would widen the shared check (your uniform ruling t18). Overturn it in chat if you disagree.",
+  "status": "closed",
+  "title": "q_max's copied neon skills: skip them in the prose linter, or stop copying them?",
+  "why": "It is the same call degen already made, and the copies are not yours to rewrite."
+}

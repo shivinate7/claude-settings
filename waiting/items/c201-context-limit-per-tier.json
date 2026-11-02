@@ -1,0 +1,40 @@
+{
+  "added": "2026-10-28T20:16:00Z",
+  "context": "Not urgent. Your want (chat, 15:08 CDT): set a context limit per kind of session, not only per model, for example a different limit for orchestrators on Opus 5.5 than for the coordinator. \"Context limit\" here means how much of a conversation a session holds before it condenses its history (compaction).\n\nWhat a docs check found (code.claude.com/docs: model-config, settings, sub-agents, env-vars):\n- Sessions on your own computer: yes. Each launch can set its own window with `claude --autocompact <tokens>` or `--settings '{\"autoCompactWindow\": N}'`. Nothing raises a window above the model's own cap.\n- Helper agents: an agent file's setting `autoCompactWindow` (100000 to 1000000) lowers the window for that kind of agent.\n- The environment variable `CLAUDE_CODE_AUTO_COMPACT_WINDOW` overrides all of the above, so it must stay out of shared environment files.\n- Cloud sessions (the kind these sessions run in): no documented per-session setting. The likely route is one cloud environment per kind of session, each with its own `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. A coordinator can already start a session in a chosen environment, so lanes could start in a \"lane\" environment. That is an inference, not in the docs, and untested.\n\nYour measurement (chat, 15:20 CDT): once claude-settings was installed, cloud sessions moved from a 1M window to the 500k that its settings.json sets (`autoCompactWindow: 500000`, line 433 on main). So the repo's settings already reach cloud sessions, which makes the one-environment-per-kind route more plausible. It is still not proven for a different number per kind.",
+  "home": "c201",
+  "id": "c201-context-limit-per-tier",
+  "kind": "decision",
+  "n": 53,
+  "options": [
+    {
+      "gain": "A real answer for cloud sessions, which is where most lanes run.",
+      "how": "You make one extra cloud environment with the variable set to a lower number. A coordinator starts a lane session in it, and we check that it condenses at that number.\nBefore: all cloud sessions share one limit. After: you know whether a lane environment can have its own.",
+      "key": "a",
+      "label": "Test the cloud route",
+      "lose": "One extra environment for you to make and keep, and one test session."
+    },
+    {
+      "gain": "No test and no new environment; uses what is documented.",
+      "how": "Set limits only where the docs document them: on each local launch and in each agent file. Do nothing for cloud sessions.\nBefore: one limit everywhere. After: tiers on your computer and helper agents can differ; cloud sessions stay as they are.",
+      "key": "b",
+      "label": "Local sessions and agent files only",
+      "lose": "Cloud sessions cannot have a different limit per kind."
+    },
+    {
+      "gain": "Nothing to build or keep up.",
+      "how": "No change; every session keeps its model's default limit.\nBefore and after: the same.",
+      "key": "c",
+      "label": "Drop the want",
+      "lose": "You cannot tune cost or memory per kind of session."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 53,
+  "ref": "c201 (how the build's sessions are organized): your want, Oct 28 15:08 CDT",
+  "reply": "Answered, Oct 28 16:15 CDT: test the cloud route (a). The step that is yours is item 58: make one extra cloud environment with the variable set.",
+  "stands": true,
+  "status": "closed",
+  "title": "Can each kind of session get its own context limit? Test it for cloud sessions?",
+  "why": "Most lanes run in the cloud, so the cloud answer is the one that matters, and one test settles what the docs leave open."
+}

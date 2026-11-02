@@ -1,0 +1,25 @@
+{
+  "added": "2026-10-27T05:00:00Z",
+  "context": "The fix is on main since Oct 26 (#645 in #649). The step closes on your test's verdict. The brief is briefs/c82-cross-account-ping-retest.md on the roadmap branch; paste its block into the session on the account where your ping was blocked.",
+  "home": "c82",
+  "id": "c82-ping-retest",
+  "kind": "task",
+  "links": [
+    {
+      "label": "The brief",
+      "url": "https://github.com/shivinate7/claude-settings/blob/roadmap/briefs/c82-cross-account-ping-retest.md"
+    }
+  ],
+  "minutes": 10,
+  "n": 5,
+  "owner": "Triage the roadmap (9)",
+  "rank": 5,
+  "ref": "c82 (an override pass lifts the SendMessage wording judge)",
+  "status": "closed",
+  "steps": [
+    "Open the brief and copy its block.",
+    "Paste it into the sending session and follow it: reinstall, type an override, send the ping, then one bare ping.",
+    "Mark done; the session reports the guard.log lines."
+  ],
+  "title": "Re-run the cross-account ping test"
+}

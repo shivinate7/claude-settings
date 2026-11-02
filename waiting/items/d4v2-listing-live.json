@@ -1,0 +1,56 @@
+{
+  "added": "2026-10-29T01:50:00Z",
+  "context": "After a stack is read, each card has a price. The directions differ on when it goes public. C1 and C2 make a draft of each card and list the stack with one press. C3 lists each sure card as soon as it is read and priced. A card is sure only when its name, printing and price all pass the app's checks; everything else stays a draft. All screens, both Duo poses and themes: designs/d4-banchi-phone-v2/phone-blind-1.html (open one with #s=c3-full) and its notes on the roadmap branch. All cards, orders and buyers are made up. Unmeasured: the unfolded Duo height and insets and the folded top inset (drawn 644 pt).",
+  "designs": [
+    {
+      "label": "C1: one press lists",
+      "option": "a",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c1-full"
+    },
+    {
+      "label": "C3: lists as read",
+      "option": "b",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c3-full"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "home": "d4",
+  "id": "d4v2-listing-live",
+  "kind": "decision",
+  "look": true,
+  "n": 64,
+  "options": [
+    {
+      "design": "d4v2-c1-full",
+      "gain": "You see the stack before anything goes public.",
+      "how": "Cards are drafts until you press List (C1 picture: \"List 184 cards\").",
+      "key": "a",
+      "label": "One press lists the stack",
+      "lose": "One more step; a stack can stay as drafts if you forget."
+    },
+    {
+      "design": "d4v2-c3-full",
+      "gain": "Zero presses.",
+      "how": "No press (C3 picture: \"184 listed this stack\").",
+      "key": "b",
+      "label": "Each sure card lists as it is read",
+      "lose": "A wrong price is public for a short time."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "b",
+  "rank": 64,
+  "ref": "d4 (Banchi phone app, redrawn blind: roadmap designs/d4-banchi-phone-v2/)",
+  "reply": "Parked with item 63: a Banchi build detail, asked again only when a build is asked for.",
+  "status": "closed",
+  "title": "Banchi phone app: does a listing go live on one press, or as each card is read?",
+  "why": "The designer's pick for C3: it keeps the stack moving and the sure test keeps risky cards as drafts."
+}

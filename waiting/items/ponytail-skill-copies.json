@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-01T22:36:00Z",
+  "command": null,
+  "context": "You said you kept custom versions of ponytail's skills. The lane searched the whole git history of claude-settings and claude-sharables and found none, so they may be only on your computer, in ~/.claude/skills or ~/.claude/backups/skills.\n\nWhy yours: no session can read your computer from here. list_computer_folders (Nov 1 12:08 CST) shows no folder of yours shared through Remote Control, so a cloud session cannot connect to it.\n\nWhat else the dive found: ponytail has been on since PR #96 (Sep 22), not Oct 27 as the page said before (that came from a partial clone). It was never pinned, so sessions took new versions on their own: v5.0.0 (Oct 8), v5.3.0 (Oct 16, which added the per-turn ledger and board), and v5.3.3 (Oct 29). PR #951 turns it off.",
+  "home": "ponytail-off-deep-dive",
+  "id": "ponytail-skill-copies",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T22:35:06Z",
+    "done": true,
+    "note": "ponytail 4.10.0 (e3ba2aa, Sep 14), installed Sep 22, never updated; enabledPlugins ponytail false; no custom skill copies found."
+  },
+  "minutes": "2 min",
+  "n": 122,
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "ref": "step ponytail-off-deep-dive; PR #951",
+  "reply": "This explains the change you noticed. Your computer still runs ponytail 4.10.0 from Sep 22, while cloud sessions install fresh and took the newest each time (5.0.0 Oct 8, 5.3.0 Oct 16, 5.3.3 Oct 29). 5.3.0 added the per-turn ledger and board hooks, so cloud sessions behaved differently from your local ones. No custom copies exist; ponytail is off on main and on your computer.",
+  "short": "Find your ponytail skill copies",
+  "status": "closed",
+  "steps": [
+    "Open the Claude desktop app on the computer where you use Claude Code, and start a local Claude Code session.",
+    "Paste this prompt and send it: Read only, change nothing. On this computer, find how the ponytail plugin and any custom copies of its skills are set up. 1) Read ~/.claude/plugins/installed_plugins.json and say which ponytail version is installed and when. 2) Read enabledPlugins in ~/.claude/settings.json. 3) List ~/.claude/skills and ~/.claude/backups/skills, and any folder whose name starts with ponytail anywhere under ~/.claude. 4) For each skill folder that matches a ponytail skill (ponytail, ponytail-audit, ponytail-debt, ponytail-gain, ponytail-help, ponytail-review), diff its SKILL.md against the plugin's own copy in ~/.claude/plugins/cache. Report in 15 lines: the version, each custom copy found with its path and date, and how it differs from the plugin's copy.",
+    "Paste that session's report into the note here and press Done."
+  ],
+  "title": "Check your computer for the custom copies of ponytail's skills",
+  "why": "Only you can read your computer's files from here; the answer tells the lane whether to restore your copies."
+}

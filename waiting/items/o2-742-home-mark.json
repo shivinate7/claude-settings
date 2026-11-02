@@ -1,0 +1,40 @@
+{
+  "added": "2026-10-28T06:50:00Z",
+  "context": "Answered Oct 28 02:30 CDT. You asked whether (a) would leave home passing without a proper roll-out: yes, it would mark home rolled out without its visit and hide that its plan files match neither layout. So, by your own condition, (c): #742 waits. home's roll-out visit (c163) comes first and adds the mark itself; #742 merges after it.",
+  "group": "o2-rollout-mark",
+  "holds": "PR #742 is held out of batch 4 until you answer.",
+  "home": "o2",
+  "id": "o2-742-home-mark",
+  "kind": "decision",
+  "n": 32,
+  "options": [
+    {
+      "gain": "home reads as it does today; #742 stays as built.",
+      "how": "A session pushes \"rolled-out\": true to home's extras file before #742 merges.",
+      "key": "a",
+      "label": "Push the mark to home first",
+      "lose": "A one-line change in another repo, which needs your yes."
+    },
+    {
+      "gain": "No change to home.",
+      "how": "The o2 lane changes #742 so an extras file with a kinds map counts as rolled out.",
+      "key": "b",
+      "label": "A kinds map counts as rolled out",
+      "lose": "Two ways to read rolled out, against the uniform ruling (t18)."
+    },
+    {
+      "gain": "No change to home now.",
+      "how": "#742 waits for home's own visit.",
+      "key": "c",
+      "label": "Hold #742 until home's roll-out",
+      "lose": "o8 lane (c) and c132 keep waiting."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "o2 (one layout for every repo), PR #742 (rolled-out mark)",
+  "status": "closed",
+  "title": "#742 adds the rolled-out mark: how is home treated?",
+  "why": "One line keeps home as it is, and the mark keeps one meaning."
+}

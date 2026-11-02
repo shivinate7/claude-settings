@@ -1,0 +1,28 @@
+{
+  "added": "2026-11-01T23:22:00Z",
+  "command": {
+    "powershell": "cd C:\\Users\\ShivamSemwal\\Clones\\claude-settings\nRemove-Item Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue\nclaude remote-control"
+  },
+  "context": "You asked at 17:19 CST why so much of the roadmap stays undone. The largest single cause: about ten steps need your computer, and no session can reach it, because none of your folders is shared through Remote Control. They include the iPhone app checks on your Mac, a limit on how many app builds run at once, your local settings for when a session summarizes its context, reading your local safety log, checking which GitHub sign-in fails, cleaning up finished branches, turning off the old plugin that still runs on your PC, and updating Claude Code there. One share unblocks them all, and lets a session there do the acts you already allowed on Oct 30 (protect branches, delete merged branches, close replaced pull requests).\nWhy yours: only you can choose which folders a cloud session may use; the check of your shared folders found none (Nov 1 16:56 CST).",
+  "holds": "About ten roadmap steps wait only on a session reaching your computer.",
+  "home": "local-folder-for-owner-acts",
+  "id": "share-folder-remote-control",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-02T00:09:27.611Z",
+    "done": true,
+    "note": "Remote Control connected, claude-settings, worktree mode"
+  },
+  "minutes": "2 min",
+  "n": 144,
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "ref": "step local-folder-for-owner-acts (a session on your computer runs the acts the cloud cannot)",
+  "reply": "Confirmed: your PC's claude-settings folder shows as an active environment for cloud sessions (checked 18:10 CST). The coordinator can now start sessions there, each in its own worktree. Keep that window open while they run.",
+  "short": "Share a folder",
+  "status": "closed",
+  "steps": [
+    "At the prompt, type 2 and press Enter.",
+    "Leave that window open, and mark this done; I check the folder list again."
+  ],
+  "title": "Share your claude-settings folder through Remote Control, so cloud sessions can finish the work that needs your computer"
+}

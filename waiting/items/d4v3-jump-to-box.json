@@ -1,0 +1,47 @@
+{
+  "added": "2026-10-30T19:05:00Z",
+  "context": "Goal: you reach the box you want fast when you have many boxes. Problem: the Shelf lists 30 boxes and the folded screen shows about 7, so you scroll; whether to add a jump or a filter is a feature call, yours. Pick any, or None of these to keep scrolling only. Based on: the v3 sample has 30 boxes (read); the folded picture shows boxes 1 to 7 (read); how many boxes you really keep (unmeasured).",
+  "designs": [
+    {
+      "label": "Shelf v3, folded: boxes 1 to 7 of 30",
+      "size": {
+        "h": 678,
+        "w": 466
+      },
+      "slug": "d4v3-shelf-full-light"
+    }
+  ],
+  "group": "d4v3-shelf",
+  "home": "roadmap step d4 (v3 rulings), 1adea163",
+  "id": "d4v3-jump-to-box",
+  "kind": "decision",
+  "look": false,
+  "multi": true,
+  "n": 96,
+  "options": [
+    {
+      "gain": "Any box in two taps, nothing new on screen.",
+      "how": "Tapping the Box heading opens a number pad; type a box number to scroll there.",
+      "key": "a",
+      "label": "Tap the Box column to jump",
+      "lose": "A hidden gesture to learn.",
+      "recommended": true
+    },
+    {
+      "gain": "Pulling sold cards skips the other boxes.",
+      "how": "A filter chip above the ruler shows only boxes with a sold card to pull.",
+      "key": "b",
+      "label": "A 'boxes with a sale' filter",
+      "lose": "One more control on a full screen; the Orders tab already lists what to pull."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7), from lane d4-designer-critique",
+  "pick": [
+    "a"
+  ],
+  "rank": 96,
+  "ref": "d4 v3 Shelf notes, Checks: 'no way to jump to a box or filter boxes with a sale' (PR #866)",
+  "status": "closed",
+  "title": "Banchi Shelf: which ways to reach a box? Pick any.",
+  "why": "The jump fixes the reach with no new control; Orders already lists what to pull, so the filter is optional."
+}

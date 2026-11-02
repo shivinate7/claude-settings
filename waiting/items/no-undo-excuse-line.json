@@ -1,0 +1,57 @@
+{
+  "added": "2026-11-02T16:49:00Z",
+  "context": "Goal: a builder cannot drop work an earlier commit of its own lane added, unless the commit says why.\nProblem (rule): your ruling names a new excuse line, but the check already has one; two names for one excuse break your one-home rule.\nBased on (read): the silent-undo check and the guard both accept only Drops-lines: today.\nBased on (measured): today's check passes two commits from this morning that dropped a lane's own earlier work, so the gap is real.\nDeparts from: main, where Drops-lines: excuses only dropping main's work \u2014 it also excuses dropping the lane's own earlier work.",
+  "holds": "Which excuse line the lane builds; it builds option a meanwhile.",
+  "home": "no-undo-lane-commits",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T16:52:00Z",
+    "choice": "a",
+    "note": "Removes: was the advisor's word, not mine. One excuse line. (owner, chat, via the coordinator)"
+  },
+  "links": [
+    {
+      "label": "Lane no-undo-lane-commits",
+      "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+    }
+  ],
+  "n": 165,
+  "options": [
+    {
+      "gain": "One excuse line, no guard change; builders learn one form.",
+      "how": "The check also reads Drops-lines: when a builder drops its own lane's earlier work.",
+      "key": "a",
+      "label": "Reuse Drops-lines",
+      "links": [
+        {
+          "label": "Lane no-undo-lane-commits",
+          "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+        }
+      ],
+      "lose": "It names a file, not one test case, and it is not the word Removes: you used."
+    },
+    {
+      "gain": "Your word, and it can name one test case.",
+      "how": "A new Removes: line excuses only the drop of the lane's own earlier work.",
+      "key": "b",
+      "label": "Add Removes",
+      "links": [
+        {
+          "label": "Lane no-undo-lane-commits",
+          "url": "https://claude.ai/code/session_013NEJL1u37uQd9keyjLx7eM"
+        }
+      ],
+      "lose": "Two excuse lines for one check, a change to what the guard accepts, and more review. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "lane no-undo-lane-commits; decision silent-undo-check-design; inbox fb-1041-1",
+  "reply": "Closed 10:54 CST: a, reuse Drops-lines. Home: decision silent-undo-check-design, written by lane no-undo-lane-commits.",
+  "short": "excuse line for dropping lane work",
+  "status": "closed",
+  "title": "When a builder drops work its own lane added, which line excuses it: the existing Drops-lines line, or a new Removes line?",
+  "why": "Your 10:41 CST ruling says builders never undo earlier lane work unless the commit says so, and names a new Removes: line for that. The check that catches silent undos already accepts one excuse line, Drops-lines: <file> -- <reason>. Two names for one excuse would break your rule that each thing has one home."
+}

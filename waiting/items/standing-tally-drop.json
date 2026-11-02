@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-02T18:50:00Z",
+  "context": "Goal: standing sessions run until autocompact with no extra reporting.\nProblem (rule): the decision on session shapes says dropping the self-reported tally needs your word.\nBased on (ruling): your ruling of Nov 1 17:56 CST: no usage limit; a standing session runs until autocompact.\nBased on (measured): the coordinator reads each session's context use itself, from the session record (Oct 28).\nDeparts from: main has each standing session report its own use \u2014 drops that report.",
+  "holds": "Only the tally lines of the session-shapes decision; the rotation text fix goes ahead without it.",
+  "home": "rotation-text-current",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Lane handoff (branch rotation-text-current)",
+      "url": "https://github.com/shivinate7/claude-settings/blob/092b733f/handoffs/rotation-text-current.md"
+    }
+  ],
+  "n": 169,
+  "options": [
+    {
+      "gain": "One less report per standing session, and no rule that nothing reads.",
+      "how": "The decision and the project-ops template stop asking standing sessions to report their use; the coordinator reads it when it needs it.",
+      "key": "a",
+      "label": "Drop the tally",
+      "links": [
+        {
+          "label": "Lane handoff (branch rotation-text-current)",
+          "url": "https://github.com/shivinate7/claude-settings/blob/092b733f/handoffs/rotation-text-current.md"
+        }
+      ],
+      "lose": "The coordinator must read use itself if it ever needs it."
+    },
+    {
+      "gain": "The coordinator sees each session's use without reading it.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "Keep the tally",
+      "links": [
+        {
+          "label": "Lane handoff (branch rotation-text-current)",
+          "url": "https://github.com/shivinate7/claude-settings/blob/092b733f/handoffs/rotation-text-current.md"
+        }
+      ],
+      "lose": "A report that nothing reads stays in every standing session's routine."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "decision session-tiers (rotation of standing sessions); lane handoff handoffs/rotation-text-current.md on branch rotation-text-current at 092b733f; its stale line 'Open: the context limit for each tier' is for the coordinator to fix",
+  "short": "drop the self-reported use tally",
+  "status": "open",
+  "title": "Should standing sessions stop reporting their own use to the coordinator?",
+  "why": "The rule on standing sessions (triage, batch runners, the arbiter) still has each one report a tally of its own use to the coordinator. Since your no-limit ruling, nothing reads that tally, and the coordinator can read each session's context use itself. The record says dropping the self-report needs your word. Not urgent: the lane that fixes the rotation text does not wait on it."
+}

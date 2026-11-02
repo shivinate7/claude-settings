@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-01T22:57:00Z",
+  "command": {
+    "mac": "claude plugin uninstall ponytail@ponytail\nclaude plugin list",
+    "powershell": "claude plugin uninstall ponytail@ponytail\nclaude plugin list"
+  },
+  "context": "Your PC runs ponytail 4.10.0 although your Claude Code settings list it as turned off (your setup audit session, 16:40 CST); cloud sessions stopped running it once the shared settings turned it off at 12:38 CST. Removing it from your PC is the fix on that machine. Why that setting did not stop it is still being looked into.\nWhy yours: the plugin is on your PC only, and no folder of yours is shared through Remote Control (list_computer_folders, Nov 1 16:56 CST), so no session here can reach it.",
+  "home": "ponytail-local-still-on",
+  "id": "ponytail-off-local",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T23:56:23.552Z",
+    "done": true,
+    "note": ""
+  },
+  "minutes": "2 min",
+  "n": 140,
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "ref": "step ponytail-local-still-on (ponytail still runs on your PC)",
+  "reply": "No prompt needed. Open a new session in the desktop app and type /plugin. If ponytail is not in the list, mark this done.",
+  "short": "Remove ponytail locally",
+  "status": "closed",
+  "steps": [
+    "Done: the command removed ponytail from your user plugins.",
+    "In a new desktop app session, type /plugin.",
+    "If ponytail is not listed, mark this done."
+  ],
+  "title": "Remove ponytail from your PC, where it still runs although your settings turn it off"
+}

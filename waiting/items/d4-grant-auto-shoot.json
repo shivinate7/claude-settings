@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "In the mockups the camera fires when a still card fills the guide, so the seller taps nothing per card. Keep it only if it can be built. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-grant-auto-shoot",
+  "kind": "decision",
+  "n": 19,
+  "options": [
+    {
+      "gain": "Zero taps per card.",
+      "how": "A build lane proves it on the phone before it ships; else a tap stays.",
+      "key": "a",
+      "label": "Yes, if it can be built",
+      "lose": "A wrong fire costs a retake."
+    },
+    {
+      "gain": "Nothing fires by surprise.",
+      "how": "The seller taps to shoot.",
+      "key": "b",
+      "label": "No, a tap per card",
+      "lose": "One tap per card, against \"zero attention per card\"."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 19,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: may the camera fire on its own?",
+  "why": "Zero attention per card is the job, and the condition keeps it honest."
+}

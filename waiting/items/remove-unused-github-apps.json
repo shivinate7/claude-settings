@@ -1,0 +1,26 @@
+{
+  "added": "2026-11-01T23:30:00Z",
+  "context": "Your GitHub audit on Oct 27 found three apps installed on claude-settings beside Claude. A check today (Nov 1 17:28 CST): Renovate has opened 2 pull requests here and the repo has its config file, so it is in use. Cloudflare and Render have opened none, and the repo has no config for either, so they only add read access you do not need.\nWhy yours: the app access page asks for your GitHub sign-in again, so a session cannot change it.",
+  "holds": "One cleanup step: fewer apps that can read your settings repo.",
+  "home": "c153",
+  "id": "remove-unused-github-apps",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-01T23:35:25.403Z",
+    "note": "why remove them? I thought I already said I'd prefer to keep them? are triage past sessions properly logging feedback and giving good handoffs? is this a cloud gap?"
+  },
+  "minutes": "3 min",
+  "n": 145,
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "ref": "step c153 (keep each GitHub app on claude-settings only if it needs the repo)",
+  "reply": "You did: on Oct 28 at 14:40 CDT you ruled to keep them. That ruling was saved on the old page item but never copied onto its roadmap step, and I filed this from the step without checking. A filing miss, not a cloud gap. Withdrawn; the step now carries your ruling and is closed, and a new step makes the roadmap build flag any page ruling missing from its step.",
+  "short": "Remove two apps",
+  "status": "closed",
+  "steps": [
+    "Open https://github.com/settings/installations.",
+    "Next to Cloudflare Workers and Pages, press Configure. Under Repository access, remove claude-settings (or uninstall if it serves no repo), then Save.",
+    "Do the same for Render.",
+    "Leave Renovate as it is, and mark this done."
+  ],
+  "title": "Take claude-settings out of the Cloudflare and Render GitHub apps; keep Renovate"
+}

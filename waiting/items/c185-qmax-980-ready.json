@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-29T19:05:00Z",
+  "context": "q_max's PR 980 is a draft that moves q_max's pin for the code check to claude-settings. The coordinator's session cannot mark it ready: the classifier refuses that press from any session, so it is yours. A draft runs no CI; after your press and green CI the coordinator merges it.",
+  "home": "c185",
+  "id": "c185-qmax-980-ready",
+  "kind": "task",
+  "minutes": 1,
+  "n": 69,
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 69,
+  "ref": "c185 (q_max re-pins code-check), q_max PR 980",
+  "reply": "Superseded, Oct 29 14:00 CDT (coordinator): the new q_max lane (all pins to 1cc47f01) replaces q_max#980, so there is nothing to press.",
+  "status": "closed",
+  "steps": [
+    "Open https://github.com/shivinate7/q_max/pull/980.",
+    "Press Ready for review."
+  ],
+  "title": "Press Ready for review on q_max's PR 980",
+  "why": "Your login is the only way to mark another repo's PR ready."
+}

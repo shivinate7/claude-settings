@@ -1,0 +1,55 @@
+{
+  "added": "2026-11-02T05:34:00Z",
+  "context": "Goal: q_max's open PR list shows only live work.\nProblem (rule): closing a PR needs your word in the closing session's own chat, and auto mode found none there, so #969 stays open.\nBased on (read): #969 and #1010 are both open drafts that move the map skill into claude-settings; #1010 is the newer one.\nDeparts from: today both drafts are open \u2014 a yes closes #969, which can be reopened.",
+  "holds": "q_max PR #969.",
+  "home": "q_max PR #969",
+  "id": "qmax-969-close",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "q_max PR #969",
+      "url": "https://github.com/shivinate7/q_max/pull/969"
+    },
+    {
+      "label": "q_max PR #1010",
+      "url": "https://github.com/shivinate7/q_max/pull/1010"
+    }
+  ],
+  "n": 157,
+  "options": [
+    {
+      "gain": "One PR for the map skill move; no duplicate review.",
+      "how": "Open #969 and press Close pull request, or answer yes here and the coordinator has it closed.",
+      "key": "a",
+      "label": "Yes, close #969",
+      "links": [
+        {
+          "label": "q_max PR #969",
+          "url": "https://github.com/shivinate7/q_max/pull/969"
+        }
+      ],
+      "lose": "#969's discussion is only on a closed PR; it can be reopened if needed."
+    },
+    {
+      "gain": "Nothing is closed.",
+      "how": "#969 stays open beside #1010.",
+      "key": "b",
+      "label": "No, keep it open",
+      "links": [
+        {
+          "label": "q_max PR #969",
+          "url": "https://github.com/shivinate7/q_max/pull/969"
+        }
+      ],
+      "lose": "Two open PRs for the same move; a lane could review or merge the wrong one."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 1,
+  "ref": "q_max PRs #969 and #1010",
+  "reply": "No answer needed: the coordinator closed q_max #969 at 23:43 CST, with a comment linking #1010. It can be reopened.",
+  "short": "close q_max #969",
+  "status": "closed",
+  "title": "Close q_max #969 as replaced by #1010?",
+  "why": "q_max #969 and #1010 are both open drafts that move the map skill into claude-settings; #1010 replaces #969. The session that merges q_max's PRs tried to close #969, and auto mode refused it as a write to GitHub with no word from you in that chat."
+}

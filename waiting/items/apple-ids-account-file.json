@@ -1,0 +1,19 @@
+{
+  "added": "2026-10-30T00:49:00Z",
+  "context": "You asked, Oct 30 12:44 CDT, for one prompt that does it end to end. Steps below are that prompt.\n\ndegen's tools/ios-ship.json (main 448ae96) holds your Apple team id, your phone's id and your App Store Connect key id and issuer id, and ios-adblock's holds overrides. Both repos are public. The iOS standard keeps these in one file on your Mac, ~/.config/ios-ship/account.json, so the repos can drop them. mailaudit's make phone now needs team_id there too. Once the file is complete, the coordinator's lanes delete the ids from both repos. Ids already in git history stay public.\n\nWhy yours: the file lives only on your Mac, and no cloud session can write it.",
+  "home": "r1",
+  "id": "apple-ids-account-file",
+  "kind": "task",
+  "n": 91,
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 2,
+  "ref": "r1 (compliance visits, degen and ios-adblock); the iOS standard (skill ios-apps, account ids row)",
+  "status": "open",
+  "steps": [
+    "Open the Claude app on your Mac and start a local Claude Code session.",
+    "Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read tools/ios-ship.json. Merge its Apple team id, device id, App Store Connect key id and issuer id into ~/.config/ios-ship/account.json as team_id, device_udid, asc_key_id, asc_issuer_id, plus asc_key_path (the AuthKey_<key id>.p8 path on this Mac; search ~/.appstoreconnect and ~/private_keys). Keep any keys already there, write the file mode 600, and never print a value: prove it by printing the five key names only. Then tell the claude-settings coordinator (session_013NEJL2pASwRjgJDnsvnpNe) the file is complete, so its lanes remove the ids from degen and ios-adblock.",
+    "Done when that session prints the five key names: team_id, device_udid, asc_key_id, asc_issuer_id, asc_key_path."
+  ],
+  "title": "Put your Apple account ids in the Mac account file",
+  "why": "Moves your account ids out of two public repos, so new commits stop exposing them."
+}

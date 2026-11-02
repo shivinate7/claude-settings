@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-01T22:56:00Z",
+  "context": "Goal: a turn never sends a second reply just to satisfy the report guard.\nProblem (rule): your 16:23 CST ruling asks for the full report only on turns that push, but the report guard also asks on turns that commit, merge or open a PR, so those still send a second reply unless you widen your rule.\nBased on (notes): lane tracking-turn-report-clash, PR #966, Nov 1 16:35 CST.\nBased on (read): the double replies you saw came from turns the guard flagged where nothing was pushed (the lane's read).\nDeparts from: main (a turn that only tracks work gets one line, with no report exception) \u2014 PR #966 adds the exception for turns that push; option B widens it to turns that land work (commit, push, merge or PR).\n\nThis does not block: PR #966 is built with \"pushes\" and changes one word for option B.",
+  "home": "tracking-turn-report-clash",
+  "id": "report-on-push-or-land",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:45:12.393Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 136,
+  "options": [
+    {
+      "gain": "The rule matches your words exactly.",
+      "how": "Only a turn that pushes ends with the full report.",
+      "key": "a",
+      "label": "Keep \"pushes\", as you ruled",
+      "lose": "A turn that only commits or merges can still send one line and then a second reply for the guard."
+    },
+    {
+      "gain": "The rule matches every turn the guard checks, so no double reply.",
+      "how": "A turn that commits, pushes, merges or opens a PR ends with the full report.",
+      "key": "b",
+      "label": "Widen to \"lands\"",
+      "lose": "A few more small turns end with a report block."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL2pASwRjgJDnsvnpNe), for lane tracking-turn-report-clash",
+  "pick": "b",
+  "ref": "PR #966 (tracking turns and the report); step tracking-turn-report-clash (the one-line rule clashes with the report rule)",
+  "short": "Report on push or land",
+  "status": "closed",
+  "title": "Which turns must end with the full report: ones that push, or any that land work?",
+  "why": "The double replies came from turns the guard flagged where nothing was pushed; only b stops those."
+}

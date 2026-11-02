@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-28T18:00:00Z",
+  "context": "Done Oct 28 12:58 CDT: you pressed Merge on #746 in GitHub (a). Main is f1f7fa92; the orchestrator ran the after-merge install by hand (pass). Main's settings file now names the new checks, so the merge tool works again for claude-settings. The lasting fix is c189.",
+  "group": "branch-protection",
+  "home": "o13",
+  "id": "o13-merge-746-by-hand",
+  "kind": "decision",
+  "n": 46,
+  "options": [
+    {
+      "gain": "#746 lands now, through GitHub's own protection.",
+      "how": "Open PR #746 and press Merge. GitHub still requires all 13 green checks. The orchestrator then runs the merge tool's after-merge install by hand.",
+      "key": "a",
+      "label": "You press Merge on #746 in GitHub",
+      "lose": "The merge tool's after-merge step runs by hand once."
+    },
+    {
+      "gain": "The merge tool does the whole merge, after-merge step included.",
+      "how": "You type a grant for one run of: merge.py 746 --config .github/no-such-stamp.json --confirm. With no settings file it reads protection's 13 checks instead of the stale list (its preview passed). The session's guard refused it as a CI bypass, so it needs your typed grant.",
+      "key": "b",
+      "label": "Grant one run of the merge tool with protection's list",
+      "lose": "Needs a typed grant for a command the guard flags."
+    },
+    {
+      "gain": "Nothing unusual happens.",
+      "how": "Nothing merges until another way is found.",
+      "key": "c",
+      "label": "Wait",
+      "lose": "Every batch stays blocked."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 1,
+  "ref": "o13 (rename the CI checks from gates to checks), PR #746; root fix c189",
+  "status": "closed",
+  "title": "How does #746 merge, now the merge tool waits on the old check names?",
+  "why": "It lands #746 now, with protection still checking all 13 tests; nothing needs a special grant."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-01T23:40:00Z",
+  "context": "Goal: long sessions keep every ruling and detail when their context fills up.\nProblem (rule): decision session-tiers says sessions rotate by usage but sets no limit; only you set it.\nBased on (measured): cloud sessions get the same handoff checkpoints as local ones; in this triage session the usage checkpoint asked for a handoff rewrite 5 times, first at about 290k tokens, and after compaction the hooks asked again (transcript read, Nov 1 17:27 CST).\nBased on (read): after compaction, the handoff is rewritten from the compaction summary plus a digest, not from full context; before compaction, it is written from full context. Autocompact starts at 384k of 500k.\nDeparts from: session-tiers sets no limit \u2014 a sets rotation at 70%; b records that no rotation limit is needed and compaction plus the handoff rewrite carries a session.\n\nYour question, \"is the missed handoff work because of cloud sessions?\": no. The checkpoints and the after-compaction prompts fire in the cloud too (measured above). The miss was this session's own: after compaction it rewrote the handoff but did not read it back until a hook made it. That is a slip by the session, not a cloud gap, and a hook caught it.",
+  "home": "session-tiers",
+  "id": "rotation-limit",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T23:56:23.552Z",
+    "choice": "b",
+    "note": "I lean towards B if it works and maybe somehow log to see if i should revisit this consideration."
+  },
+  "n": 109,
+  "options": [
+    {
+      "gain": "The handoff is written from full context, so nothing the summary drops is lost.",
+      "how": "A session writes its handoff and a fresh session takes over at 350k of 500k, local or cloud.",
+      "key": "a",
+      "label": "Hand off at 70%, before compaction",
+      "lose": "More fresh sessions, each re-reading its handoff and files."
+    },
+    {
+      "gain": "No rotations; it already worked once today.",
+      "how": "Sessions run until autocompact; the compaction hooks make the session rewrite its handoff and go on, local or cloud.",
+      "key": "b",
+      "label": "No limit; let compaction and the handoff rewrite carry the session",
+      "lose": "Detail the summary drops can be lost, and the session works from a summary after each compaction."
+    }
+  ],
+  "owner": "Triage (session_013NEJL1qEunLpTi68de3Jrv)",
+  "pick": "a",
+  "ref": "decision session-tiers (rotation by usage tally)",
+  "reply": "Filed: no rotation limit, in the session-tiers record (draft PR #978). To revisit it, step compaction-carry-watch has each session name in its next report anything it had to recover after a summary; triage reads those lines and brings it back to you if losses repeat.",
+  "short": "Rotation limit",
+  "status": "closed",
+  "title": "At what context fill does a session hand off to a fresh one?",
+  "why": "Both work; a keeps full detail for the coordinator and triage, whose rulings must not drift. Pick b if fewer sessions matters more."
+}

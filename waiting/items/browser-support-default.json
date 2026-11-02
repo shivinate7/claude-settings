@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-01T20:30:00Z",
+  "context": "Goal: browser rules that make the build better, with no load nobody needs.\nProblem (rule): the new browser rules (PR #962) say a repo that names no browsers must use only web features that every major browser has supported for about two and a half years (the web's \"Baseline Widely available\" list). That is a standard level set by default, and your 12:23 CST ruling says no standard level is taken on by choice.\nBased on (read): the round 3 reviewer of PR #962 flagged it as a note; your ruling of Nov 1 12:23 CST.\nDeparts from: main (no browser-support rule) \u2014 adds a default: features every major browser has had for about two and a half years.\n\nNot blocking: #962 is in the batch with option a, and the rule works as written until you pick.",
+  "home": "web-design-guidelines",
+  "id": "browser-support-default",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:23:54Z",
+    "choice": "a"
+  },
+  "links": [
+    {
+      "label": "Baseline, on web.dev",
+      "url": "https://web.dev/baseline"
+    }
+  ],
+  "n": 129,
+  "options": [
+    {
+      "gain": "Pages work in the browsers people actually have, with no setup per repo.",
+      "how": "A repo that names no browsers uses features on the Baseline Widely available list.",
+      "key": "a",
+      "label": "Keep the default: features all major browsers have had for a while",
+      "lose": "A repo that wants a newer feature adds a fallback or names its own browsers."
+    },
+    {
+      "gain": "No house-set level.",
+      "how": "The rule checks nothing until a repo writes one line naming its browsers.",
+      "key": "b",
+      "label": "No default: each web repo names its own browsers",
+      "lose": "Each repo needs that line once; until then, nothing is checked."
+    },
+    {
+      "gain": "No load at all.",
+      "how": "Remove the browser-support rule from the house rules.",
+      "key": "c",
+      "label": "Drop the rule",
+      "lose": "A new web feature can ship broken in some browsers with no check."
+    }
+  ],
+  "owner": "Lane web-design-guidelines (session_013NEJKzug33CK1dqaU9Q9Tp)",
+  "pick": "a",
+  "ref": "step web-design-guidelines; PR #962; rule ux-feature-baseline-or-fallback",
+  "reply": "Kept: the rule shipped with a in batch 56 (#965).",
+  "short": "Default browser support",
+  "status": "closed",
+  "title": "Which browsers should a web page work in when its repo names none?",
+  "why": "It is the browsers people really use, not an extra standard: a page that breaks in them is a worse build."
+}

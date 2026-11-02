@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-29T19:50:00Z",
+  "context": "Your item 74 note asked for fix lanes in every repo; these three PRs are those fixes for home, degen and mailaudit, and each passed review in round 2: home#391 (head b8b3ddbe), degen#303 (head 7032c72), mailaudit#164 (head ffa2827). This only confirms the merge. Your 14:35 CDT grant covered banchi and q_max only. degen's rule lanes-hand-off-to-point-guard says only its point guard merges, and no degen point guard runs in the cloud, so a yes also lets the coordinator merge degen#303. Fix lanes for joyous and ios-adblock start now.",
+  "home": "child-repo-gap",
+  "id": "child-align-merges",
+  "kind": "decision",
+  "n": 75,
+  "options": [
+    {
+      "gain": "All seven child repos carry today's alignment, and their compliance-check visits (r1) can start once cloud-refresh-clone lands.",
+      "how": "The coordinator merges each PR with its repo's merge tool once its CI is green, degen#303 included.",
+      "key": "a",
+      "label": "Yes, merge all three on green CI",
+      "lose": "degen#303 merges without degen's point guard, which its own rule asks for."
+    },
+    {
+      "gain": "You can read them first.",
+      "how": "The three PRs stay open.",
+      "key": "b",
+      "label": "Not yet",
+      "lose": "The r1 visits for home, degen and mailaudit wait until they merge."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 75,
+  "ref": "child-repo-gap (the fix lanes that align each child repo with claude-settings main)",
+  "reply": "Picked a, Oct 29 14:55 CDT: the coordinator merges home#391, degen#303 and mailaudit#164 on green CI, degen#303 included.",
+  "status": "closed",
+  "title": "Confirm: merge home#391, degen#303 and mailaudit#164 when their CI is green?",
+  "why": "Each passed review in round 2, and the merge waits on green CI; the degen exception is only that no point guard runs in the cloud."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-28T11:58:00Z",
+  "context": "Pick taken by the orchestrator, Oct 28 07:45 CDT, without your answer: (c), keep hiding empty tiers. That is today's behaviour, a test pins it, and #770 (c122) ships it that way; c122's note drops the item. Reversible: say so and an empty line comes back as its own step.\n\nWas asked: c122's note listed hidden empty tiers as a defect, while the page hides them on purpose.",
+  "home": "c122",
+  "id": "c122-empty-tier-line",
+  "kind": "decision",
+  "look": true,
+  "n": 43,
+  "options": [
+    {
+      "gain": "You always see all four tiers, so an empty one reads as empty, not missing.",
+      "how": "Each empty tier shows its heading with a short 'Nothing here' line, in the list and in the overview rail.",
+      "key": "a",
+      "label": "Empty line in the list and the rail",
+      "lose": "More lines on the page when little is waiting."
+    },
+    {
+      "gain": "The list reads as complete; the rail stays short.",
+      "how": "The list shows each empty tier with a 'Nothing here' line; the rail keeps showing only tiers that have items.",
+      "key": "b",
+      "label": "Empty line in the list only",
+      "lose": "The list and the rail show different sets of tiers."
+    },
+    {
+      "gain": "The shortest page; nothing to build.",
+      "how": "No change; c122 drops the item from its note.",
+      "key": "c",
+      "label": "Keep hiding empty tiers",
+      "lose": "An empty tier can look missing rather than empty."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "rank": 32,
+  "ref": "c122 (the waiting page shows what differs between options), c100 (the page's final look)",
+  "status": "closed",
+  "title": "Should an empty tier on this page show a line saying it is empty?"
+}

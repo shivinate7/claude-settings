@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-29T22:56:00Z",
+  "context": "You asked, 14:45 CDT: can it be a true/false switch, in a file or a guard, that turns the grant on or off, instead of a line in the parent CLAUDE.md? Yes: that is option c below. Your rules already allow a grant to live in the merge tool's settings instead of CLAUDE.md.\n\nYou asked, 12:45 CDT: why not keep the grant in the coordinator's handoff or memory? A handoff and memory belong to one session and are deleted when it ends, so the next coordinator would not see the grant. Its lasting home is the record standing-merge-grant on main.\n\nYour 16:47 CDT grant (the coordinator merges in every repo until you withdraw it) has a record, #824. claude-settings' own .claude/CLAUDE.md has no line for it. Meanwhile the coordinator keeps merging under the grant.",
+  "home": "decision standing-merge-grant, lane merge-grant-switch",
+  "id": "merge-grant-claude-md-line",
+  "kind": "decision",
+  "n": 85,
+  "options": [
+    {
+      "gain": "A session here sees the grant before it reads any file, like the child repos.",
+      "how": "One line in claude-settings' .claude/CLAUDE.md, written by a lane on your yes.",
+      "key": "a",
+      "label": "Add the line",
+      "lose": "One more line in a file every session here loads."
+    },
+    {
+      "gain": "Nothing to build; the grant still lives on main for every coordinator.",
+      "how": "The record standing-merge-grant on main stays the only home.",
+      "key": "b",
+      "label": "Keep it in the record only",
+      "lose": "A session here must find the record to know the grant; no switch to turn it off."
+    },
+    {
+      "gain": "One true/false switch turns the grant on or off; the merge tool obeys it, so no session has to remember it.",
+      "how": "A lane adds standing_grant: true to the merge tool's settings file on main; the merge tool refuses a coordinator merge when it is false. You flip it in one line, or tell a session to.",
+      "key": "c",
+      "label": "A true/false switch in the merge tool's settings",
+      "lose": "A small code change to the merge tool and its test.",
+      "recommended": true
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "c",
+  "rank": 85,
+  "ref": "coordinator-merge-grant; your standing merge grant, chat Oct 29 16:47 CDT; record standing-merge-grant (#824)",
+  "status": "closed",
+  "title": "Put your standing merge grant in claude-settings' own CLAUDE.md?",
+  "why": "A switch the merge tool reads does the job your question asks for: one place to turn it off, nothing added to CLAUDE.md."
+}

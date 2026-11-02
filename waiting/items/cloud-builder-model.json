@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-01T17:52:00Z",
+  "context": "Goal: a builder spawned with no model runs Sonnet in every cloud session, with the fewest steps for you.\nProblem (rule): the cloud drops the builder-model setting from your settings file, so your item 77 pick (a setup script, no pin) cannot work. The fix reverses that ruling or adds a paste per environment.\nBased on (measured): the CLI code drops CLAUDE_CODE_SUBAGENT_MODEL from settings.json when the host manages the provider. A bare spawn ran Opus (Nov 1 01:22 CST).\nBased on (ruling): item 77 (Oct 30 15:05 and 15:09 CDT): no pin in agents/builder.md. Record agent-model-cap, \"No pin, and the ceiling is an ask\".\nDeparts from: main (agent-model-cap: no pin; the variable comes from settings.json) \u2014 the model comes from a pin in agents/builder.md (a), or from each cloud environment's variables (b).\n\nYour questions:\n- Is the old A the same as a pin? Nearly, yes. Either way, a spawn that names no model runs Sonnet, and a spawn that names a model (a third-try Opus builder) wins. A pin is one line in one file in git, for every environment and machine at once. The old A lived in each cloud environment's settings, outside git: one paste per environment, and it can drift. You ruled out a pin so the setting could move builders, for example to Opus. In cloud that reason is gone: the cloud ignores that setting from your settings file, so it cannot move builders under either choice.\n- Why was the old B a problem? It was a pin written as hook code: same effect as a pin, but as new code in the guard that reads every agent spawn, where a bug gives every agent the wrong model. It is dropped.",
+  "holds": "None. Lanes name sonnet meanwhile.",
+  "home": "agent-model-cap",
+  "id": "cloud-builder-model",
+  "kind": "decision",
+  "lane": "Lane setup-script-install reworks this item",
+  "lastAnswer": {
+    "at": "2026-11-01T22:23:54Z",
+    "note": "i am completely confident that there was a period in time where sessions could and did CORRECTLy do like final rounds at a higher model like a round 3 builder on opus etc WITHOUT prompting me for approval and WITHOUT overusing opus incorrectly from the rules -- that's all i've been trying to implore, yet you seem rigid in your forms of what can actually occur?"
+  },
+  "n": 115,
+  "options": [
+    {
+      "gain": "Works in every environment and on every machine at once, kept in git, nothing for you to paste.",
+      "how": "One line, model: sonnet, in agents/builder.md, landed by PR; the lane rewrites agent-model-cap's no-pin paragraph.",
+      "key": "a",
+      "label": "Pin sonnet in the builder's agent file",
+      "lose": "Reverses your item 77 ruling; moving builders to another model takes a one-line PR, not a setting."
+    },
+    {
+      "gain": "Keeps your no-pin record as written.",
+      "how": "In a session of the environment: the environment menu in the title bar, then Edit, then Environment variables. Add CLAUDE_CODE_SUBAGENT_MODEL=sonnet and CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet.",
+      "key": "b",
+      "label": "You add two variables to each cloud environment",
+      "links": [
+        {
+          "label": "A session of this environment (menu in its title bar)",
+          "url": "https://claude.ai/code/session_013NEJL13ECnrysq2pDxMrWZ"
+        }
+      ],
+      "lose": "One paste per environment; a new environment runs Opus builders until you paste; the value lives outside git. Unverified until a fresh session after the paste proves it."
+    },
+    {
+      "gain": "No change for you.",
+      "how": "No change; guard #899, which refuses a builder spawn that names no model, stays.",
+      "key": "c",
+      "label": "Keep naming the model on each spawn",
+      "lose": "Every builder brief must name sonnet; a missed one is refused, and the session retries."
+    }
+  ],
+  "owner": "Lane setup-script-install (session_013NEJL13ECnrysq2pDxMrWZ)",
+  "pick": "a",
+  "ref": "step setup-script-install; decision agent-model-cap",
+  "reply": "You're right, and it still works today. A builder's third try on Opus runs with no prompt to you; every other agent stays on Sonnet. What allows it: hooks/guard.py opus_spawn_hit asks nothing for a builder whose brief carries 'Round 3 of 3' (builder_third_round), and a guard test pins it. Still asks, by your rules: a reviewer's round 3 on Opus, and Opus on any agent without that marker. The cloud gap touches only a builder spawned with no model named: guard #899 refuses that spawn, the session names sonnet and retries, so nothing runs Opus by mistake. The question is dropped; your no-pin ruling (item 77) stands.",
+  "short": "Cloud builder model",
+  "status": "closed",
+  "title": "The cloud ignores the builder model in your settings file. Where should it come from?",
+  "why": "It gives the same effect as b with no paste, and in cloud the reason for no pin no longer holds."
+}

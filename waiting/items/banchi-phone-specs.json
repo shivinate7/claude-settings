@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-01T22:35:00Z",
+  "context": "Goal: banchi works on your phone.\nProblem (risk): a switch turns off every banchi screen test narrower than 768 px, so phone widths (390 and 720 px) are never checked, and banchi's own debt record says a sideways scroll at 390 px would reach your phone.\nBased on (measured): banchi app/tests/phoneSwitch.ts line 12 sets the switch off.\nBased on (ruling): your earlier ruling, recorded in that banchi debt, to keep them off.\nDeparts from: main (phone-size tests off) \u2014 turns them on in banchi's automatic checks.",
+  "home": "docs/plans/test-ci-standard.md on branch claude/test-ci-standard (banchi phone lane dropped)",
+  "id": "banchi-phone-specs",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T22:45:12.393Z",
+    "choice": "none",
+    "note": "Banchi is used on a desktop primarily -- what made yu think it's used mainly on a phone?"
+  },
+  "n": 135,
+  "options": [
+    {
+      "gain": "Phone layouts are proven before they ship.",
+      "how": "The tests run again; a lane fixes whatever goes red.",
+      "key": "a",
+      "label": "Turn them on and fix what fails",
+      "lose": "One fix lane, and a longer screen check."
+    },
+    {
+      "gain": "No work.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "Keep them off",
+      "lose": "A broken phone layout can ship with green checks."
+    }
+  ],
+  "owner": "Lane test-ci-standard (session_013NEJKzZKg4SDYVSpNbVmv8)",
+  "pick": "a",
+  "ref": "step test-ci-standard; banchi app/tests/phoneSwitch.ts",
+  "reply": "Wrong guess, now dropped: the lane read banchi debt DEBT77 (\"a sideways scroll at 390 would reach his phone\") as phone use. The banchi phone lane is out of the plan.",
+  "short": "banchi phone-size tests",
+  "status": "closed",
+  "title": "Should banchi's phone-size screen tests run again?",
+  "why": "Your phone is where banchi is used."
+}

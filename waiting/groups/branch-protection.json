@@ -1,0 +1,4 @@
+{
+  "title": "main's branch protection (your setting)",
+  "why": "Both change the list of required checks on main; doing them together means one visit to the settings page."
+}

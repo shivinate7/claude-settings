@@ -1,0 +1,56 @@
+{
+  "added": "2026-10-29T01:50:00Z",
+  "context": "The house rule (tokens.md) says phone navigation uses a bottom tab bar. C3 breaks it on purpose: folded, the phone is held in one hand with a card in the other, and unfolded it rests on the table, so the pose picks the mode. Apple's tab-bar page expects a tab bar for sections, and a screen reader user gets no list of sections. Only matters if you pick C3 in item 62. All screens, both Duo poses and themes: designs/d4-banchi-phone-v2/phone-blind-1.html (open one with #s=c3-full) and its notes on the roadmap branch. All cards, orders and buyers are made up. Unmeasured: the unfolded Duo height and insets and the folded top inset (drawn 644 pt).",
+  "designs": [
+    {
+      "label": "C3 folded: no tab bar",
+      "option": "a",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c3-full"
+    },
+    {
+      "label": "C1 folded: the house tab bar",
+      "option": "b",
+      "size": {
+        "h": 567,
+        "w": 390
+      },
+      "slug": "d4v2-c1-full"
+    }
+  ],
+  "group": "d4-banchi-phone-v2",
+  "home": "d4",
+  "id": "d4v2-no-tab-bar",
+  "kind": "decision",
+  "look": true,
+  "n": 63,
+  "options": [
+    {
+      "design": "d4v2-c3-full",
+      "gain": "Each pose has one job and nothing on screen switches jobs.",
+      "how": "The rule gains a named exception for Banchi's phone app; C3 stays as drawn (no tabs, one count).",
+      "key": "a",
+      "label": "Yes, for this app",
+      "lose": "One exception to a house rule; wanting the desk while folded means unfolding."
+    },
+    {
+      "design": "d4v2-c1-full",
+      "gain": "The house rule holds everywhere.",
+      "how": "C3 gains a tab bar in the next pass, as C1 and C2 have (the picture shows C1's).",
+      "key": "b",
+      "label": "No, keep the rule",
+      "lose": "C3 loses part of what makes it simple."
+    }
+  ],
+  "owner": "Triage 12 (session_013NEJKzjtAeP99bACEE6uZw)",
+  "pick": "a",
+  "rank": 63,
+  "ref": "d4 (Banchi phone app, redrawn blind: roadmap designs/d4-banchi-phone-v2/)",
+  "reply": "Parked, Oct 29 16:45 CDT, on your note: the point of the Banchi pass was to test the design agents and skills, so that verdict comes first (item 82). Build details wait until a Banchi build is asked for.",
+  "status": "closed",
+  "title": "Banchi phone app: may C3 skip the bottom tab bar?",
+  "why": "It follows the pick on item 62; the exception is narrow and the loss is named."
+}

@@ -1,0 +1,43 @@
+{
+  "added": "2026-10-31T20:11:00Z",
+  "context": "Goal: every mod you run shows up where you work, or is gone.\nProblem (goal): two of the seven mods do not work where you use them; only you know whether you still want what they show.\nBased on (read): token-weather draws only above the prompt, a surface the host raises in the terminal only (mods types file, line 8285), so it never shows in the Claude app. You recall seeing it before, likely in a terminal session.\nBased on (measured): session-board's Stop hook is skipped this session, because the plugin cc-plugin-sec-default handles the event first.\n\nThe other five stay: plain-diff, decision-watch, ponytail, frontend-design, and desktop-statusline (kept on a condition).",
+  "home": "mods-relevance-review",
+  "id": "fix-or-drop-two-mods",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T10:26:46.313Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 105,
+  "options": [
+    {
+      "gain": "You see context fill and the session board in the app.",
+      "how": "A lane moves the context reading to a surface the app shows, and makes session-board run beside the other Stop plugin.",
+      "key": "a",
+      "label": "Fix both",
+      "lose": "One more lane, and the band may need a different look in the app."
+    },
+    {
+      "gain": "One less mod to keep up; the session board works.",
+      "how": "Remove token-weather; a lane fixes session-board only.",
+      "key": "b",
+      "label": "Fix session-board, drop token-weather",
+      "lose": "No context-fill band anywhere, the terminal included."
+    },
+    {
+      "gain": "No fix lane; less to load in each session.",
+      "how": "Remove both mods and their tests.",
+      "key": "c",
+      "label": "Drop both",
+      "lose": "No context band and no session board."
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "mods-relevance-review (keep, fix or drop each mod); mods token-weather (context band) and session-board (session list)",
+  "short": "Two mods: fix or drop",
+  "status": "closed",
+  "title": "Fix or drop the context band and the session board?",
+  "why": "You said you have seen the band and want it; the context bar is the one place your context fill shows (owner ruling Oct 14 in the mod's SOURCE.md)."
+}

@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-02T19:22:00Z",
+  "context": "Goal: one writing standard for agents, with no leftover wording.\nProblem (rule): two wordings of one rule.\nAnswered in chat 13:22 CST: pick b, drop STE everywhere and use \"write plainly\" only.\nDeparts from: main's agents/*.md (STE named) \u2014 they point at rule output-write-in-ste.\nDone: draft PR #1105 (9 agent files, decision plain-prose-lint, debt note closed); review round 1 clear 13:36 CST. Next: batch #1105; rename the lint, CI step and shared action; the child repos' CLAUDE.md files (item 173).",
+  "home": "docs/decisions/plain-prose-lint.md",
+  "id": "ste-named-standard",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Draft PR #1105",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1105"
+    }
+  ],
+  "n": 172,
+  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "rank": 3,
+  "ref": "decision plain-prose-lint; rule output-write-in-ste; draft PR #1105 (817d564b)",
+  "short": "drop STE as a named standard",
+  "status": "closed",
+  "title": "Is Simplified Technical English still the writing standard for agents?",
+  "why": "CLAUDE.md said \"write plainly\" while the agent files still said \"Simplified Technical English\"."
+}

@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T22:58:00Z",
+  "context": "You picked b (finish both checks first) and offered your computer, 12:45 CDT. Answer: Recorded b; nothing more to pick. The cloud check runs in lane c203-builder-window. For the local check: in the Claude desktop app, Settings, Claude Code, Remote Control, add your claude-settings checkout folder, then tell me in chat.\n\nYou answered none twice: you are open to the per-tier setup (A) but said it needs testing, especially for local sessions, which have no per-session environments but do have agent roles.\n\nWhat is true today (read Oct 28 from the repo): one value, 500000, for every model, set in settings.json (autoCompactWindow, line 433 on main). A per-model value exists as a form (modelSettings.<model>.autoCompactWindow, which /autocompact writes) but the repo sets none. No agent file in the repo sets its own value.\n\nMeasured since by the c203 lane (cloud, Claude Code 2.1.312, Oct 28 19:45 CDT):\n- The variable raises the window as well as lowering it: 1000000 gives an effective window of 980000, and 400000 gives 380000. So a coordinator environment can have 1M and a lane environment 400k.\n- A helper agent's own autoCompactWindow works as a ceiling: its effective window is the smaller of the session's window (the variable counts) and its own value. So a builder at 300000 in a 400000 lane gets 300000. This was read from the program's own code; a live agent test returned no reading, so it is not yet seen working.\n\nStill untested: a local session (no environments there; each launch can set its own window with the --autocompact flag, or a --settings value, per the docs), because the lane has no local machine.\n\nSo most of your testing question is answered; two checks remain.",
+  "home": "c203",
+  "id": "c203-compact-window-settings",
+  "kind": "decision",
+  "n": 61,
+  "options": [
+    {
+      "gain": "Your tiers take effect in the cloud now, on measured numbers; the two gaps are small and named.",
+      "how": "Coordinator environment 1000000, lane environment 400000, builder agent file 300000 go in now. A lane then reads a live builder's window in the cloud, and someone on your own computer tests a local launch with its own window flag.\nBefore: one 500000 value. After: three values, the cloud ones measured; local and a live agent reading checked next.",
+      "key": "a",
+      "label": "Set the numbers per tier now, then check the two leftovers",
+      "lose": "Local sessions keep 500000 until the launch test; a builder's ceiling is read from code, not yet seen live; /autocompact stays unusable where the variable is set."
+    },
+    {
+      "gain": "Nothing changes until every piece is seen working, local sessions included.",
+      "how": "A lane reads a live builder's window, and a local launch is tested on your computer. Only then do the numbers go in.\nBefore: one 500000 value, nothing changed. After: a fully measured table, then the numbers.",
+      "key": "b",
+      "label": "Finish the two checks first, then set the numbers",
+      "lose": "The limits wait on a local test that needs your computer; the cloud numbers that already work sit unused."
+    },
+    {
+      "gain": "/autocompact keeps working on your own computer.",
+      "how": "The install scripts write ~/.claude/settings.json as a generated copy that carries over only your saved window setting, so /autocompact works and never dirties claude-settings.\nBefore: /autocompact edits the tracked file through the link. After: it edits a copy.",
+      "key": "c",
+      "label": "Make settings.json a copy made at install, keeping your window",
+      "lose": "Departs from two of your rulings (the link, and the backup rule); other tool writes to the file are lost at each merge; install code to write and test on Mac and Windows; it does not give per-tier limits by itself."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 61,
+  "ref": "c203 (the compact window is set outside the tracked settings file), lane session_013NEJL4Ghu7Kthvr3kBsiVR; your item 53 a and 58",
+  "status": "closed",
+  "title": "Can each kind of session get its own context limit, and how do we set it?",
+  "why": "The cloud numbers are measured and your tiers are what you asked for; the two leftovers are small and can be checked after, with local sessions simply staying at 500000 until then."
+}

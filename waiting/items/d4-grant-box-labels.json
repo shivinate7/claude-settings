@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T04:55:00Z",
+  "context": "Finding a card by its box needs each physical box to carry a number that matches the phone. This asks the seller for a one-time physical step. All screens, both Duo sizes and themes: https://claude.ai/artifact/F2pNQsrFg6fDSqFQzKpasU (picks page) and designs/d4-banchi-phone/ on the roadmap branch. All cards, orders and buyers are made up.",
+  "group": "d4-banchi-phone",
+  "home": "d4",
+  "id": "d4-grant-box-labels",
+  "kind": "decision",
+  "n": 21,
+  "options": [
+    {
+      "gain": "Every find starts from a box number.",
+      "how": "The seller labels each box once.",
+      "key": "a",
+      "label": "Yes, label the boxes",
+      "lose": "A one-time labelling job."
+    },
+    {
+      "gain": "No physical step.",
+      "how": "Boxes are found some other way.",
+      "key": "b",
+      "label": "No labels",
+      "lose": "D3 and the box drawing lose their anchor."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 21,
+  "ref": "d4 (first design test: a blind Banchi phone app)",
+  "status": "closed",
+  "title": "Banchi phone app: a number label on each real box (Box 1 to 30)?",
+  "why": "Every direction finds cards by box, and a label is a one-time cost."
+}

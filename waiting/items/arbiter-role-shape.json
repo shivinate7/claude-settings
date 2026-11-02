@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-29T20:26:00Z",
+  "context": "On item 72 you picked a separate arbiter role to hold q_max's ruling voice. PR #808 adds it to the session-tiers decision and the glossary. Four details are still open: (1) Does an arbiter's answer count as a ruling? Recommended: yes, inside its own repo, ranked below you, and you can overrule it. (2) Does every repo get one? Recommended: no, only a repo that asks; today that is q_max. (3) Is it a standing session or just a role? Recommended: a standing session, an orchestrator on Opus, rotated before it goes stale like triage. (4) Is it started together with triage and the batch runner? Recommended: no, later, when its repo needs one.",
+  "home": "child-repo-gap",
+  "id": "arbiter-role-shape",
+  "kind": "decision",
+  "n": 81,
+  "options": [
+    {
+      "gain": "#808 merges as written; q_max gets one arbiter session whose answers count as rulings in q_max until you overrule them.",
+      "key": "a",
+      "label": "Take all four recommendations",
+      "lose": "An Opus session runs for q_max while it has work; other repos get none until they ask.",
+      "recommended": true
+    },
+    {
+      "gain": "The role fits what you meant on item 72.",
+      "key": "b",
+      "label": "Change some (say which in a note)",
+      "lose": "#808 goes back for another lane round."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 81,
+  "ref": "your item 72 b (a separate arbiter role); PR #808, head 5f3b985b, review passed in round 2",
+  "reply": "Picked a, Oct 29 16:42 CDT, with your note: you start an arbiter on demand by telling the coordinator \"spawn arbiter\", for long runs you don't want to sit through; it runs high effort for its model by default. The coordinator adds both to #808.",
+  "status": "closed",
+  "title": "Four details of the new arbiter role",
+  "why": "These set how much a session's answer counts against yours; only you can say that."
+}

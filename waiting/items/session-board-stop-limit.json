@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-01T17:50:00Z",
+  "context": "Goal: the question-box check clears finished tasks.\nProblem (rule): the session board never sees the Stop event that lists background tasks, on every surface, not only in cloud. Getting around it would weaken an org security default.\nBased on (read): the CLI puts the built-in security plugin first for any Team or Enterprise organization, on every surface where mods load: terminal, desktop and cloud (its README, \"Where it is seated\"; the same text is in the installed program). Your Compass account is such an organization.\nBased on (assumed): it holds on your desktop and terminal too; no run there has shown it, so this is read from the code, not measured.\nDeparts from: main (a session-board Stop handler that never runs) \u2014 the handler is removed and its limit recorded.",
+  "home": "mods-relevance-review",
+  "id": "session-board-stop-limit",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:53:56.907Z",
+    "choice": [
+      "a",
+      "b"
+    ],
+    "note": ""
+  },
+  "multi": true,
+  "n": 117,
+  "options": [
+    {
+      "gain": "The docs say what really happens, everywhere.",
+      "how": "Remove the handler, record the limit as the decision-watch mod does, and fix the README.",
+      "key": "a",
+      "label": "Delete the dead handler and record the limit",
+      "lose": "A missed task notice can block the question box for the rest of the session."
+    },
+    {
+      "gain": "A smaller gap.",
+      "how": "The mod clears a finished task when it sees a task stop or a later tool call.",
+      "key": "b",
+      "label": "Also clear on task stop or tool calls",
+      "lose": "More code, and still a gap."
+    },
+    {
+      "gain": "The real fix.",
+      "how": "File a request so the turn-complete event carries the background task list.",
+      "key": "c",
+      "label": "Ask Anthropic for the task list on turn complete",
+      "lose": "It waits on Anthropic."
+    }
+  ],
+  "owner": "Lane mods-relevance-review (session_013NEJKzyYxHchp1Vz6BvPpd)",
+  "pick": [
+    "a"
+  ],
+  "ref": "step mods-relevance-review (your 105 a: fix both mods); mod session-board",
+  "short": "Session board fix",
+  "status": "closed",
+  "title": "The session board cannot see finished tasks. What should it do? (pick any)",
+  "why": "Your pick, Nov 1 11:53 CST. Home: decision record session-board-stop-limit, built by lane mods-relevance-review."
+}

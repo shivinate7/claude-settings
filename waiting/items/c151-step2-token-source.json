@@ -1,0 +1,38 @@
+{
+  "added": "2026-10-28T05:05:00Z",
+  "context": "Step 1 measured (PR #731, record hook-inputs-carry-token-counts): PreCompact and Stop inputs carry no token counts; only the statusLine input (interactive sessions only) has context_window.current_usage, equal to the transcript's last usage. Nothing splits fixed overhead (36.6k to 42.1k in this container) from messages.",
+  "home": "c151",
+  "id": "c151-step2-token-source",
+  "kind": "decision",
+  "n": 30,
+  "options": [
+    {
+      "gain": "Works in cloud and local sessions alike.",
+      "how": "Messages = last usage minus first-turn usage, read from the transcript in every session.",
+      "key": "a",
+      "label": "A proxy from the transcript",
+      "lose": "A proxy, not an exact split."
+    },
+    {
+      "gain": "The platform's own number.",
+      "how": "Thresholds read current_usage where a statusLine runs.",
+      "key": "b",
+      "label": "statusLine's count only",
+      "lose": "Cloud and non-interactive sessions get nothing."
+    },
+    {
+      "gain": "No new code.",
+      "how": "Thresholds stay on total context.",
+      "key": "c",
+      "label": "Stop at step 1",
+      "lose": "Overhead alone can still trip a hand-off."
+    }
+  ],
+  "owner": "Triage the roadmap (9)",
+  "pick": "a",
+  "rank": 30,
+  "ref": "c151 (compaction timing reads message tokens, not total context); PR #731",
+  "status": "closed",
+  "title": "Compaction timing: which token count do the hand-off and compact thresholds read?",
+  "why": "It is the only option that reaches every session, and the overhead it removes is measured."
+}

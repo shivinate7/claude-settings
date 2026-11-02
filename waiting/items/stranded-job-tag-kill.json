@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-01T17:52:00Z",
+  "context": "Goal: a session can stop a job it started that got stuck, without any risk of stopping someone else's work.\nProblem (risk): the guard that stops a session killing processes refuses a session's own stuck job in one case. Allowing it means the guard trusts one more kind of process, which is a safety rule only you change.\nBased on (ruling): your rulings Oct 10, 21 and 26: a leftover process counts as the session's own only in two exact cases, listed below.\nBased on (measured): Oct 31, Linux: when a stuck job is left behind, the shell that started it loses the session's label, so the guard reads the job as someone else's.\nDeparts from: the kill guard trusts two kinds of leftover process \u2014 b adds a third: a labelled job under a shell that lost its label.\n\nWhat the \"uniform ruling\" on option b means: when a shared tool and one case differ, the case changes to fit the tool; the tool does not gain a second accepted form for it. Option b adds a second accepted form to a shared guard, so the page marks it. (The card shows it as t18, a bare id; that is a page fault, now step widens-card-plain-words.)\n\nThe timeline:\n1. Oct 10, you: a leftover process is the session's own when the machine adopted it and it runs in one of the session's agent folders.\n2. Oct 21, you: also when the machine adopted it and it carries the session's label, from the main session only.\n3. Oct 26, you: that label rule never applies to an agent, because all agents share one label.\n4. Oct 31: a lane's test run got stuck and was left behind. The guards refused every way to wait on it.\n5. Oct 31: a lane built a safe way to wait on your own stuck job (bin/wait-pid, #907). It found this gap: waiting is allowed, stopping is not.\n6. This question. It has not been asked before; the earlier rulings answered nearby cases.",
+  "home": "a-kill-by-pid-needs-an-owned-pid",
+  "id": "stranded-job-tag-kill",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-01T17:53:56Z",
+    "choice": "b",
+    "note": "what was my uniform ruling (t18)? Remember i thought i told claude that it should never just quote a variable to me like that and expect me to understand (Separate mproblem ure doing rn)"
+  },
+  "n": 114,
+  "options": [
+    {
+      "gain": "The kill guard stays as narrow as you ruled it.",
+      "how": "The stop stays refused. The session waits for the job with bin/wait-pid, or the job ends when the session ends.",
+      "key": "a",
+      "label": "Keep today's refusal",
+      "lose": "A stuck job keeps running until it ends or the session ends."
+    },
+    {
+      "gain": "The session stops its own stuck job at once.",
+      "how": "From the main session only, a job that carries this session's label counts as its own when the shell above it lost its label.",
+      "key": "b",
+      "label": "Allow stopping a labelled job under a shell that lost its label",
+      "lose": "The guard trusts one more kind of process, so a wrong process number has one more way through.",
+      "widens": true
+    }
+  ],
+  "owner": "Triage (session_013NEJL2KiRdp1PFjjJxDuzq)",
+  "pick": "a",
+  "ref": "decision a-kill-by-pid-needs-an-owned-pid (a kill by pid needs an owned pid); lane wait-for-pid-form (#907, bin/wait-pid)",
+  "short": "Stranded job kill",
+  "status": "closed",
+  "title": "May the main session stop its own stranded job when an untagged shell sits above it?",
+  "why": "Your pick, Nov 1 11:53 CST. Filed as roadmap step stranded-job-kill-allow."
+}

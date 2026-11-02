@@ -1,0 +1,55 @@
+{
+  "added": "2026-10-29T22:10:00Z",
+  "context": "You asked, 14:45 CDT: did I build this right? You saw no picture in the card, only View. No, it wasn't right on your screen: those pictures draw by a script, and the live page most likely doesn't run a picture's script inside a card (unproven; in my headless check it drew). Now each option shows a still picture, which needs no script.\n\nSome option pictures zoom to one part of a mockup. When that part is taller than the card's 480px picture box, the picture now scrolls. #806 ships 1A; 1B is the other way. Not blocking: #806 merges either way.",
+  "designs": [
+    {
+      "label": "1A: only the zoomed part scrolls",
+      "option": "a",
+      "size": {
+        "h": 465,
+        "w": 300
+      },
+      "slug": "c204-1a-png"
+    },
+    {
+      "label": "1B: the whole mockup scrolls",
+      "option": "b",
+      "size": {
+        "h": 465,
+        "w": 300
+      },
+      "slug": "c204-1b-png"
+    }
+  ],
+  "group": "c204-picture-scroll",
+  "home": "c204 (zoomed picture decision, built in #806)",
+  "id": "c204-focus-scroll",
+  "kind": "decision",
+  "look": true,
+  "n": 83,
+  "options": [
+    {
+      "design": "c204-1a",
+      "gain": "The picture keeps showing what the option is about; matches the page rule that a zoomed picture shows that part whole.",
+      "how": "As built in #806: the scroll stays inside the zoomed part and opens at its top.",
+      "key": "a",
+      "label": "1A: only the zoomed part scrolls",
+      "lose": "You can't scroll out to see the rest of the screen from the card; View shows it."
+    },
+    {
+      "design": "c204-1b",
+      "gain": "The rest of the screen is one scroll away, right in the card.",
+      "how": "The card opens at the zoomed part but lets you scroll the whole mockup.",
+      "key": "b",
+      "label": "1B: the whole mockup scrolls",
+      "lose": "Easy to scroll off the part that matters; the page rule changes."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "a",
+  "rank": 83,
+  "ref": "c204 (a tall picture on a waiting-page card scrolls), PR #806, batch 21; mockup docs/design/c204-scroll.html on its branch",
+  "status": "closed",
+  "title": "When a card's picture zooms to one part, what scrolls?",
+  "why": "The builder, reviewers and designer all chose 1A; it keeps each card about one thing."
+}

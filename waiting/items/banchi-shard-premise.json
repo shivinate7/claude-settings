@@ -1,0 +1,70 @@
+{
+  "added": "2026-11-02T05:33:00Z",
+  "context": "Goal: banchi's browser tests run as fast as they safely can, and no flaky test is hidden.\nProblem (rule): the decision to keep one worker per shard rests on a failure rate the measurements now contradict, and only you can rewrite a settled decision's reason.\nBased on (measured): 0 of 19 first-try reds in the last 100 main runs were the Escape-key test (flake records in banchi PR #1007).\nBased on (read): the decision cites the Escape-key test's one-in-thirteen red rate as its reason.\nDeparts from: main, whose decision says workers stay at one because of that one-in-thirteen red \u2014 the reason becomes \"that red is not seen on the runner now (0 of 19 recent reds)\", and the cites in the CI config and a later decision point to the new flake record.",
+  "holds": "Nothing waits on this; the lane does other work.",
+  "home": "banchi D136",
+  "id": "banchi-shard-premise",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-02T06:56:26.205Z",
+    "choice": "b",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "banchi integration PR #1017",
+      "url": "https://github.com/shivinate7/banchi/pull/1017"
+    }
+  ],
+  "n": 156,
+  "options": [
+    {
+      "gain": "You and the lanes can trust why CI runs one worker per shard; CI speed and flake risk do not change.",
+      "how": "The decision and its cites say what is measured now; CI stays at one worker per shard.",
+      "key": "a",
+      "label": "Rewrite the reason, keep one worker",
+      "links": [
+        {
+          "label": "banchi integration PR #1017",
+          "url": "https://github.com/shivinate7/banchi/pull/1017"
+        }
+      ],
+      "lose": "A speed-up that may now be safe stays untried."
+    },
+    {
+      "gain": "banchi's browser tests may get faster.",
+      "how": "As (a), plus a lane runs two workers per shard and measures the red rate before it stays.",
+      "key": "b",
+      "label": "Rewrite, and try two workers",
+      "links": [
+        {
+          "label": "banchi integration PR #1017",
+          "url": "https://github.com/shivinate7/banchi/pull/1017"
+        }
+      ],
+      "lose": "More tests share each worker, the very thing the old Escape red was blamed on, so there is flake risk until it is measured."
+    },
+    {
+      "gain": "No work.",
+      "how": "The decision keeps its old reason.",
+      "key": "c",
+      "label": "Leave it",
+      "links": [
+        {
+          "label": "banchi integration PR #1017",
+          "url": "https://github.com/shivinate7/banchi/pull/1017"
+        }
+      ],
+      "lose": "Anyone weighing a CI speed-up is misled by a red rate that no longer happens."
+    }
+  ],
+  "owner": "banchi lane (session_013NEJL3SffaYSu5tzgYVhAv)",
+  "pick": "b",
+  "rank": 3,
+  "ref": "banchi decision D136 (the browser suite is split into shards, never widened); banchi PR #1007, now in integration PR #1017",
+  "reply": "Routed 00:58 CST to the banchi lane. Correction from the lane, 01:00 CST: the question rested on an old fact. Your Sep 19 word already moved banchi to two workers per shard (twelve shards at two workers each), so the two-worker trial is moot. Only the decision's text and its old failure-rate cite were stale; a lane is rewriting them now. A real speed trial would be three workers per shard, which no one is raising now.",
+  "short": "banchi shard premise",
+  "status": "closed",
+  "title": "banchi: the reason for one browser worker per shard no longer holds. Rewrite it, and try two?",
+  "why": "banchi keeps one browser-test worker per shard because an Escape-key test was red once in thirteen runs. In the last 100 runs on main, none of the 19 first-try reds was that test. Rewriting a settled decision's reason needs your word."
+}

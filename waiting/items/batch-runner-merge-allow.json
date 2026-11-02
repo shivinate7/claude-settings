@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-30T08:22:00Z",
+  "context": "You asked, 14:45 CDT: does b make a lot more sense? On the outcome, yes: b lets batches land with no wait for the coordinator, and nothing else is lost. The only thing against it is your own rule t18 (one way to merge in every repo), which is why a is marked. If you are fine bending t18 here, pick b.\n\nYou said, 12:46 CDT: the trade-offs were not clear. Rewritten below.\n\nThe batch runner builds each batch; today only the coordinator may merge it, because the allow list for cloud sessions holds one merge form (merge N --confirm). The runner's own form, merge --role batch-runner, was refused at 03:04 CDT. Your ruling t18 (one way for every repo) is why the list holds one form. Measured: a batch waits 1 to 15 min for the coordinator to wake. Task home: docs/todo.md line fb-0303-1 (#845).",
+  "home": "decision that owns the merge role, lane merge-role-allow",
+  "id": "batch-runner-merge-allow",
+  "kind": "decision",
+  "n": 92,
+  "options": [
+    {
+      "gain": "No new rule on the shared allow list.",
+      "how": "The coordinator merges each batch the runner builds.",
+      "key": "a",
+      "label": "Keep it as is",
+      "lose": "Each batch waits for the coordinator to wake (today 1 to 15 min).",
+      "recommended": true
+    },
+    {
+      "gain": "The runner merges alone; batches land without that wait.",
+      "how": "Lane merge-role-allow adds merge --role to the auto-mode allow list, for the coordinator and batch-runner tiers only.",
+      "key": "b",
+      "label": "Allow merge --role",
+      "lose": "A second merge command form on the shared allow list. Goes against your uniform ruling (t18)."
+    }
+  ],
+  "owner": "Coordinator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 92,
+  "ref": "merge-role-allow; the runner's refusal text (measured, 03:04 CDT); merge/cloud_allow.json on main covers --confirm only (measured); ruling t18 (one way for every repo)",
+  "status": "closed",
+  "title": "Let the batch runner merge each batch on its own?",
+  "why": "a keeps your one-form ruling; the cost is a short wait per batch."
+}

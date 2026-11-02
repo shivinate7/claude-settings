@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T19:59:00Z",
+  "context": "Your rulings, chat, Oct 28 (no longer asked):\n- 14:59 CDT: \"one coordinator per repo is exactly/indeed what i meant ... coordinators even talk to one another on my local setup if they need to share something like an iphone simulator ... coordinators can touch multiple repos if need be, but yes it's largely to manage its own repo's lanes.\" So: one coordinator per repo; coordinators may message each other to share a resource such as a simulator or a loaded machine; a coordinator may touch another repo when needed, but its main job is its own repo's lanes; claude-settings is a special case that touches every repo a little.\n- 15:03 CDT: \"triage should always be a standing session that if anything is the first thing a coordinator spawns before it spawns any other orchestrator sessions\". So: triage is always a standing session, never on demand, and each coordinator starts it first, before any lane session. Triage stays the only writer of the roadmap, and the coordinator owns the repo's question page, so you face one writer.\n\nStill open, one question: what model should a lane session (the one that builds a change) run? Sonnet, stepping up to Opus only on round 3 or when the coordinator says so, or Opus all the way through.\n\nWhat the review found (an Opus reviewer with web research, 14:58 CDT; sources: Anthropic's multi-agent research system, Building effective agents, the Claude Code subagents and agent-teams docs, Cognition's two multi-agent posts): in Anthropic's own system the gain came from an Opus lead over Sonnet workers, so Opus on every lane multiplies cost by the number of lanes.",
+  "home": "c201",
+  "id": "c201-session-structure",
+  "kind": "decision",
+  "n": 50,
+  "options": [
+    {
+      "gain": "Costs least; matches current practice and the research system, where an Opus lead directs Sonnet workers.",
+      "how": "A lane session builds itself and starts a fresh reviewer. It steps up to Opus only on round 3 or when the coordinator flags it.\nBefore: lane leads on Opus proposed. After: lanes run Sonnet; the coordinator stays on Opus.",
+      "key": "a",
+      "label": "Lane sessions on Sonnet",
+      "lose": "A lane has less judgment until round 3 or a flag."
+    },
+    {
+      "gain": "More judgment in each lane from the start.",
+      "how": "Each lane session runs Opus all the way through.\nBefore and after: your original proposal for lanes.",
+      "key": "b",
+      "label": "Lane sessions on Opus",
+      "lose": "Highest cost: Opus in every lane, multiplied by the number of lanes."
+    }
+  ],
+  "owner": "Orchestrator (session_013NEJL1XXYYo8v15nsrgKv7)",
+  "pick": "b",
+  "rank": 50,
+  "ref": "c201 (how the build's sessions are organized), shiv's chat ruling Oct 28 14:59 CDT",
+  "reply": "Answered, Oct 28 16:15 CDT: lane sessions on Opus (b). Your note: lane sessions need top reasoning about what they were asked, and then, in their lanes, hand work to builder, design and other helper agents, which could run at 5.5 low effort \"if anything\". That is a new question about the helper agents, filed as item 59.",
+  "stands": true,
+  "status": "closed",
+  "title": "Should lane sessions run Sonnet or Opus?",
+  "why": "The research system you can read gained from an Opus lead over Sonnet workers, not Opus everywhere, and a lane that needs more steps up on round 3 or a flag."
+}
