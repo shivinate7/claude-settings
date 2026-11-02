@@ -15,6 +15,7 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
     - A node or bash suite is hit when its source names any of those words.
     - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
+- Main's commits since the merge base change no path: the green run stands with no lint or suite run, because the merge of the head and the tip is the head's tree. This is the next batch after the merge commit of the batch it was built on (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs).
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
 
@@ -24,7 +25,7 @@ Cost of a small move check: only when the head lacks the base tip, at most three
 
 Residual risk: some suites that read a doc are not hit. One reads it through a module two imports away, or one that resolves to no file. One reads it through a root not bound from `__file__`, such as an attribute or an argument. One passes a root to a call this tool reads as a path builder. Node and bash suites are matched by words only, which fails safe.
 
-Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28.
+Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28; the empty move 2026-11-02.
 
 Kind: process
 Home: merge/merge.py
