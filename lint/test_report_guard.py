@@ -2875,6 +2875,10 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         reply = "Answered: no permission rule can lift it.\n\nAll done."
         self.assert_blocked(reply, "Report-shape guard", "Answered: no permission rule can lift it.", landed=True)
 
+    def test_an_red_and_or_is_not_a_repo_path_blocks(self):
+        # Ruling (lane orchestrator, process-only): "and/or" is not a repo path, so the slash in it cites nothing.
+        self.assert_blocked("Answered: use a and/or b.", "Answered: use a and/or b.")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):
@@ -2949,6 +2953,18 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         for reply in rows:
             with self.subTest(reply=reply):
                 self.assert_allowed(reply)
+
+    def test_an_green_not_yet_answered_passes(self):
+        # Ruling (lane orchestrator, process-only): "not yet answered" is exempt, like "not answered".
+        for line in ("The owner has not yet answered.", "Not yet answered."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_source_inside_a_code_span_counts(self):
+        # Ruling (lane orchestrator, process-only): a source in an inline code span counts.
+        for line in ("Answered in `report_guard.py`.", "Answered at `https://github.com/o/r/pull/1`."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_an_green_word_forms_that_are_not_the_word_pass(self):
         # Catches: answers, answering, or answer is read as answered.
