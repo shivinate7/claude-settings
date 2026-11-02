@@ -245,14 +245,22 @@ def resolve_default_base(where: str, remote: str = "origin"):
 def branch_is_ancestor(where: str, base: str, branch: str):
     """True when `branch`'s tip is already reachable from `base`, False when it plainly is not,
     None when the question could not be answered (an unresolvable revision, a git that would not
-    run)."""
+    run, or a shallow clone).
+
+    `--is-ancestor` exits 1 both for "not an ancestor" and for a shallow clone that cut the history
+    between the two, so a shallow clone's exit 1 is unknown, never False. The shallow probe runs only
+    on that exit, so an ancestor answer costs no extra process. A probe that fails is unknown too.
+    The helper never fetches: guards call it, and a read must not change the clone."""
     answer = _git(where, "merge-base", "--is-ancestor", branch, base)
     if answer is None:
         return None
     if answer.returncode == 0:
         return True
     if answer.returncode == 1:
-        return False
+        shallow = _git(where, "rev-parse", "--is-shallow-repository")
+        if shallow is None or shallow.returncode != 0:
+            return None
+        return False if shallow.stdout.strip() == "false" else None
     return None
 
 

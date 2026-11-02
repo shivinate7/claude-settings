@@ -316,7 +316,10 @@ MUTATIONS = [
      '    if answer.returncode == 0:\n'
      '        return True\n'
      '    if answer.returncode == 1:\n'
-     '        return False\n'
+     '        shallow = _git(where, "rev-parse", "--is-shallow-repository")\n'
+     '        if shallow is None or shallow.returncode != 0:\n'
+     '            return None\n'
+     '        return False if shallow.stdout.strip() == "false" else None\n'
      '    return None',
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
