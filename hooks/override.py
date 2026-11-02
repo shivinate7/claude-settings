@@ -56,8 +56,7 @@ OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its uni
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
 # grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
-# refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (owner, 2026-11-01 18:38 CST,
-# item 137 pick a; option b was not picked).
+# refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (decision agent-model-cap).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
               "general-purpose", "claude")
 LOG_REASON_MAX = 300

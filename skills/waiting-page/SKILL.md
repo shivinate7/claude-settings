@@ -32,7 +32,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
-  record the answer goes to), `context` (plain text, line breaks kept).
+  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
@@ -47,7 +47,14 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
-    ranked items, oldest first. A group sits together at its best member's `rank`.
+    ranked items, oldest first. A group sits together at its best member's `rank`. Inside a tier,
+    new items come first, then seen ones, each part in that order. Seen: the item is open, has no
+    `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
+    `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
+    never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
+    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
+    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
+    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -67,6 +74,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
     Never use the key `none`. The page adds its own "None of these" option
     with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
@@ -125,6 +133,15 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
   time. With `filed`, it says "Answered, filed in <home>" (the item's `home`) and the filed time. With only `read`, it
   also says "Read by <owner>" and the time.
+- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
+  (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
+  `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
+  went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
+  guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
+  An ask with `reply` is answered. The page lists asks newest first by `at`. It shows each waiting ask, each new answer
+  (whatever its age) and the newest 3 answers already seen; no session deletes or replaces an ask.
+  An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
@@ -204,6 +221,10 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.
 
+The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
+repo's waiting page from a file behind main is refused, and its reason repeats steps 1 to 3. An allowed
+publish of main's page stamps main's page version, and the next session start says when the page is behind.
+
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
 one short read-only git process, with no fetch. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
@@ -280,7 +301,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" step 3 (new options, or a close when they are not ready) or step 4 (context) says. With no answer, there is no
+  Do it as "Route and close" says: steps 1 and 2 for a `none` note with a clear direction (close, and file the note as a step), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -295,45 +316,58 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
-- `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
-  it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
+- `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
+  With a clear direction (see "An answer is clear only when"), it closes the item and the note becomes
+  a step: "Route and close" steps 1 and 2. The owner is not asked again. Otherwise treat it as step 3 of
+  "Route and close" says. Who judges: the routing session decides when it reads the answer. The page judge
+  (`hooks/call_judge.py`, whose rule name is `question-judge`) also checks a re-ask write: one that gives the
+  item new `options` and carries a `lastAnswer` note. It refuses that write when the note already names a
+  clear direction (decision `question-reviewer-agent-hook`, the judge's record). In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.
 - `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
   overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling. On a `multi` item,
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling,
+  or `none` with a clear direction. A clear direction is a note that names an act a session can take with no
+  further pick from the owner. A note that asks for other choices (cheaper, different, more) is not a direction:
+  that `none` answer takes step 3. On a `multi` item,
   `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
   A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
+- The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
 
 ## Route and close
 
-Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
 turn it is filed. An answer whose lane is busy is filed at
 once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
-item and leaves it open until the lane takes the answer. Then it closes the item. A chat answer has no
+item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path. The note is filed at once on the step. The item closes when the lane takes it, with no new options. A chat answer has no
 `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
-   home) says. When it is there, update the receipt with `filed` set to now.
+   home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
+   direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
+   `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
+   (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
+   roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none` and you write the new `options`, `pick` and `why` from the
-   owner's note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
+   note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
-   ready. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
+   ready. A `none` answer with a clear direction never takes this fallback: it closes at step 2. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
@@ -346,6 +380,18 @@ item and leaves it open until the lane takes the answer. Then it closes the item
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+
+## Route an ask
+
+An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
+holds its subject:
+
+1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
+2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
+   (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
+4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
 
 ## Make a repo's page
 
@@ -389,6 +435,7 @@ carry shows a warning line in its card in place of the picture.
 
 Each option gets its own mockup, drawn in that option's state. Two options never show the same picture with the same `focus`.
 The page refuses an item where they do, or where a `focus` finds nothing.
+The guard runs `check_designs.mjs` on the published page at each item write that carries a design, and refuses a write the page would refuse or draw as a strip (rule `page-item-design`, decision `page-item-design`). Republish the design first: the check reads the page you last published.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it at the width of the first device that
