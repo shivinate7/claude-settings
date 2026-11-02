@@ -874,3 +874,5 @@
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
+- archive-no-record-any-repo: rule lane-closes-after-records denies any archive_session with no get_session record of the target, lane or not, in every repo; the steer costs one turn (hooks/guard_merge.py archive_hit). Decision: session-tiers
+- archive-tag-literals: archive_hit repeats the `cs-step:` and `cs-repo:` literals from skills/roadmap/build.py; a rename there fails closed with "no step or repo tag" (hooks/guard_merge.py). Decision: session-tiers
