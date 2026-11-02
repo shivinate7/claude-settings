@@ -241,7 +241,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
             return
-        raise Stop(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
+        raise Liftable(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\".")
     problems, notes = res
     for n in notes:
         say("merge: " + n)
@@ -2266,7 +2266,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
 
-        def fail(why):
+        def fail(why, kind=Stop):  # `kind` keeps a Liftable stop's class through the claim revert
             if claim_sha:
                 if not os.path.exists(os.path.join(wt, ".git")):  # the tree is gone (swept or cleaned): the revert needs one
                     shutil.rmtree(tmp, ignore_errors=True)
@@ -2277,7 +2277,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     if c:
                         raise Stop(f"{why}\nmerge: the worktree is gone and cannot be rebuilt ({out}). The claim {claim_sha[:9]} stays on {branch}. Run again to resume, or revert it by hand.")
                 revert_claim(root, wt, branch, claim_sha)
-            raise Stop(why)
+            raise kind(why)
 
         try:  # after the push only a Stop may leave: any other error reverts the claim first
             try:
@@ -2299,7 +2299,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
                 except Stop as e:
-                    stop(str(e))
+                    stop(str(e), Liftable if isinstance(e, Liftable) else Stop)
                 if not os.path.exists(os.path.join(wt, ".git")):
                     stop("the worktree is gone, so the claim cannot be proved fresh.")
                 try:  # the config is the base tip's, read just after the fetch
@@ -2343,8 +2343,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 except Stop as e:
                     ok, why = False, str(e)
 
-                def keep(why):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
-                    raise Stop(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
+                def keep(why, kind=Stop):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
+                    raise kind(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
                 if not ok:
                     keep(f"the checks on the merge commit {merged[:9]} are not green.\n{why}")
                 sha = merged
