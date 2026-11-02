@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 484.1,
  "why": "Owner ruling in chat, Nov 2 10:41 CST (inbox fb-1041-1): builders never undo earlier lane work; extend the silent-undo scan.",
- "note": "Home: decision silent-undo-check-design. Lane no-undo-lane-commits (session_013NEJL1u37uQd9keyjLx7eM), started 10:43 CST by the coordinator. Port: yes, the scan is shared.",
- "updatedAt": "2026-11-02T16:46:00Z"
+ "note": "Home: decision silent-undo-check-design. Lane no-undo-lane-commits (session_013NEJL1u37uQd9keyjLx7eM), started 10:43 CST by the coordinator. Port: yes, the scan is shared. Owner ruling, chat 10:52 CST (page item 165, pick a): reuse the existing Drops-lines: excuse line, one excuse line; \"Removes: was the advisor's word, not mine.\" Home: decision silent-undo-check-design (this lane writes it).",
+ "updatedAt": "2026-11-02T16:54:00Z"
 }
