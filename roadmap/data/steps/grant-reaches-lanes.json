@@ -1,0 +1,9 @@
+{
+ "title": "A grant typed in one session reaches the session it names",
+ "phase": "now",
+ "status": "doing",
+ "order": 477,
+ "why": "Owner, chat, Nov 1 22:37 CST: \"a grant here should allow for a grant there\". Auto mode in each session sees only grants typed in its own chat (incident: item 149 b, step runner-merge-allow).",
+ "note": "Plan only. Lane session_013NEJL39Nqs8Q3RkY1N7Vz7, started Nov 1 22:55 CST. Covers step page-save-reaches-auto-mode's ask too; fold that step in if the plan does. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T04:59:00Z"
+}
