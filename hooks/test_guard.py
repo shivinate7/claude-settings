@@ -11777,6 +11777,31 @@ add("impeccable: a focus first word with an audit after the semicolon is denied"
     "impeccable-review-only", tool="Skill", skill=IMP, args="focus the page on a11y; audit")
 add("impeccable: shape with a review target is denied", "deny", "impeccable-review-only", tool="Skill",
     skill=IMP, args="shape the page; audit")
+# After a `;`, a part is a second command only when it opens with a command verb. The verbs are the
+# Commands table of the skill itself, read here so this file holds no copy of the list. A word that is
+# no command verb, such as `check`, is target text and passes.
+def impeccable_command_verbs():
+    """The command verbs in the Commands table of skills/impeccable/SKILL.md, in table order."""
+    with open(os.path.join(REPO, "skills", "impeccable", "SKILL.md"), encoding="utf-8") as fh:
+        table = fh.read()
+    verbs = re.findall(r"^\| `([a-z]+)[^`]*` \| (?:Build|Evaluate|Refine|Enhance|Fix|Iterate) \|",
+                       table, re.M)
+    if "polish" not in verbs or "animate" not in verbs or len(verbs) < 20:
+        sys.exit("impeccable verbs: the Commands table of the skill did not parse (%d verbs)" % len(verbs))
+    return verbs
+
+
+add("impeccable: audit with a check after the semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit the header; check the contrast on mobile")
+add("impeccable: audit then polish with no target after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="audit; polish")
+add("impeccable: critique then animate after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="critique; animate the hero")
+for _verb in impeccable_command_verbs():
+    if _verb in ("audit", "critique"):   # the two reviews, which a `;` may follow
+        continue
+    add("impeccable: audit then %s after the semicolon is denied" % _verb, "deny",
+        "impeccable-review-only", tool="Skill", skill=IMP, args="audit the page; %s the page" % _verb)
 
 add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
     args="polish")
