@@ -2,7 +2,9 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST and 2026-11-01 21:34 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. A batch runner runs every merge under the coordinator's grant, so it has the same scope. The coordinator never merges (owner, 2026-11-01 21:34 CST).
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST and 2026-11-01 19:23 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
+
+Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges.
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
