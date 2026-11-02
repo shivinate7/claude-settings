@@ -477,12 +477,12 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("coordinator", "batch-runner")
+ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is a coordinator or batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session: hand the branch, head and PR to the batch runner "
+    "If this session is the batch runner: run get_session (no argument) alone in its own "
+    "turn, then retry. Any other session, the coordinator too: hand the branch, head and PR to the batch runner "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo)."
 )
 

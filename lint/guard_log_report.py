@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
+from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER, is_cloud  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
@@ -215,7 +215,7 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     if args.between and any(t.tzinfo is None for t in args.between):
         ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
-    if args.between and args.rule == BRAKE_RULE and os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+    if args.between and args.rule == BRAKE_RULE and is_cloud():
         print("n/a (cloud)")  # owner ruling 2026-11-01 21:34 CST: the brake is a local-session read
         return 0
     ids = None
