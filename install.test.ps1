@@ -1087,9 +1087,17 @@ function New-RetiredClone([string]$Root) {
 }
 
 # Commit everything the clone holds now. Call it only when no ignored-only leftover is on disk yet.
+# Then move the pinned checkout <clone>-live, made by an earlier run, to the new main, as
+# merge/install_from_main.sh does: install.ps1 refuses a pin that is not detached at main.
 function Save-RetiredClone([string]$Clone, [string]$Msg) {
     git -C $Clone add -A | Out-Null
     git -C $Clone -c user.email=t@example.com -c user.name=t commit -q -m $Msg | Out-Null
+    if (Test-Path -LiteralPath "${Clone}-live") { git -C "${Clone}-live" checkout -q --detach main | Out-Null }
+}
+
+# Show-FailedRun CASE LABEL RUN: prints a run's exit code and output when it exited non-zero, so a red CI run shows its cause.
+function Show-FailedRun([string]$Case, [string]$Label, $Run) {
+    if ($Run.Exit -ne 0) { Write-Host "${Case} ${Label}: exit $($Run.Exit), output:"; Write-Host $Run.Text }
 }
 
 # retiredps1-a (retired2): a copy of a hook and a skill main stopped tracking is removed on the next run.
@@ -1110,6 +1118,8 @@ try {
         Save-RetiredClone $rtAclone 'retire the copies'
         $rtA2 = Invoke-InstallProc (Join-Path $rtAclone 'install.ps1') $RtAcfg $RtAhome $RtAlogs
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    Show-FailedRun 'retiredps1-a' 'run 1' $rtA1
+    Show-FailedRun 'retiredps1-a' 'run 2' $rtA2
     Check "retiredps1-a: both runs exit 0" ($rtA1.Exit -eq 0 -and $rtA2.Exit -eq 0)
     Check "retiredps1-a: the retired hook copy is removed by the second run" (-not (Test-Path -LiteralPath (Join-Path $RtAcfg 'hooks\retired_copy.py')))
     Check "retiredps1-a: the retired skill copy is removed by the second run" (-not (Test-Path -LiteralPath (Join-Path $RtAcfg 'skills\retired-skill')))
@@ -1130,6 +1140,8 @@ try {
         $rtB2 = Invoke-InstallProc (Join-Path $rtBclone 'install.ps1') $RtBcfg $RtBhome $RtBlogs
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
     $rtBgot = if (Test-Path -LiteralPath (Join-Path $RtBcfg 'hooks\owner_tool.py')) { (Get-Content -Raw -LiteralPath (Join-Path $RtBcfg 'hooks\owner_tool.py')).Trim() } else { $null }
+    Show-FailedRun 'retiredps1-b' 'run 1' $rtB1
+    Show-FailedRun 'retiredps1-b' 'run 2' $rtB2
     Check "retiredps1-b: both runs exit 0" ($rtB1.Exit -eq 0 -and $rtB2.Exit -eq 0)
     Check "retiredps1-b: an owner's file the manifest does not list keeps its content" ($rtBgot -eq 'mine')
 } finally {
@@ -1153,6 +1165,8 @@ try {
         $rtC2 = Invoke-InstallProc (Join-Path $rtCclone 'install.ps1') $RtCcfg $RtChome $RtClogs
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
     $rtCgot = if (Test-Path -LiteralPath (Join-Path $RtCcfg 'hooks\edited_hook.py')) { (Get-Content -Raw -LiteralPath (Join-Path $RtCcfg 'hooks\edited_hook.py')).Trim() } else { $null }
+    Show-FailedRun 'retiredps1-c' 'run 1' $rtC1
+    Show-FailedRun 'retiredps1-c' 'run 2' $rtC2
     Check "retiredps1-c: both runs exit 0" ($rtC1.Exit -eq 0 -and $rtC2.Exit -eq 0)
     Check "retiredps1-c: the hand-edited copy keeps the owner's edit" ($rtCgot -eq 'print("mine")')
     Check "retiredps1-c: the second run names edited_hook.py in its output" ($rtC2.Text -match 'edited_hook\.py')
@@ -1176,6 +1190,7 @@ try {
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
     $rtDkept = @(Get-ChildItem -LiteralPath (Join-Path $RtDcfg 'backups\retired') -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match 'owner skill text' })
+    Show-FailedRun 'retiredps1-d' 'run 1' $rtD1
     Check "retiredps1-d: the run exits 0" ($rtD1.Exit -eq 0)
     Check "retiredps1-d: the owner's folder is gone from skills\" (-not (Test-Path -LiteralPath (Join-Path $RtDcfg 'skills\tile-windows')))
     Check "retiredps1-d: the owner's SKILL.md is under backups\retired" ($rtDkept.Count -ge 1)
@@ -1204,6 +1219,8 @@ try {
         Set-Content -Path (Join-Path $rtEclone 'skills\ghost-skill\cache.local') -Value 'cache' -Encoding utf8
         $rtE2 = Invoke-InstallProc (Join-Path $rtEclone 'install.ps1') $RtEcfg $RtEhome $RtElogs
     } finally { Remove-Item Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue }
+    Show-FailedRun 'retiredps1-e' 'run 1' $rtE1
+    Show-FailedRun 'retiredps1-e' 'run 2' $rtE2
     Check "retiredps1-e: both runs exit 0" ($rtE1.Exit -eq 0 -and $rtE2.Exit -eq 0)
     Check "retiredps1-e: the old copy of tile-windows is removed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\tile-windows')))
     Check "retiredps1-e: ghost-skill, never tracked, is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'skills\ghost-skill')))
