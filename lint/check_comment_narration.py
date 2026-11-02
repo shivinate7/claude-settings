@@ -14,6 +14,8 @@ TypeScript. Swift comments come from a one-pass scanner in this file. The same w
 Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
 Exit 2 when the base or a file cannot be read: an unread diff is never a clean one. An unread file does not stop
 the scan: every other file is read, every hit prints, and the run then exits 2.
+Exit 3 when the node tool for JS, TS and Astro cannot run (no npx, an npx error, comment_scan.mjs missing,
+typescript not found). Every Python and Swift hit prints first. Exit 3 wins over exit 2.
 """
 import argparse
 import ast
@@ -46,6 +48,10 @@ SCANNED = ("python", "swift") + NODE_LANGUAGES
 
 class Unread(Exception):
     pass
+
+
+class NodeToolFailed(Exception):
+    """The node tool could not run at all, as opposed to one file it could not read."""
 
 
 def git(*args):
@@ -220,24 +226,28 @@ def swift_comments(path):
 
 
 def node_comments(paths, std):
-    """Run comment_scan.mjs once over every JS, TS and Astro path. Returns ({path: [(line, text)]}, [unread])."""
+    """Run comment_scan.mjs once over every JS, TS and Astro path, each named with its language row.
+    Returns ({path: [(line, text)]}, [unread]); raises NodeToolFailed when the tool cannot run."""
+    if not os.path.isfile(SCAN_SCRIPT):
+        raise NodeToolFailed("%s is missing" % os.path.normpath(SCAN_SCRIPT))
+    args = [SCAN_SCRIPT] + ["%s:%s" % (lang, p) for p, lang in paths]
     if os.environ.get("CODE_CHECK_TOOLS") == "path":
-        cmd = ["node", SCAN_SCRIPT, *paths]
+        cmd = ["node", *args]
     else:
-        cmd = ["npx", "--yes", "-p", "typescript@" + std["tools"]["typescript"], "node", SCAN_SCRIPT, *paths]
+        cmd = ["npx", "--yes", "-p", "typescript@" + std["tools"]["typescript"], "node", *args]
     try:
         r = _nowindow.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
     except OSError as e:
-        raise Unread("comment scan for JS, TS and Astro could not start: %s" % e)
+        raise NodeToolFailed("comment scan for JS, TS and Astro could not start: %s" % e)
     if r.returncode:
         reason = (r.stderr.strip().splitlines() or ["exit %d" % r.returncode])[-1]
-        raise Unread("comment scan for JS, TS and Astro failed: %s" % reason)
+        raise NodeToolFailed("comment scan for JS, TS and Astro failed: %s" % reason)
     found, unread = {}, []
     for row in r.stdout.splitlines():
         try:
             item = json.loads(row)
         except ValueError:
-            raise Unread("comment scan for JS, TS and Astro printed a row that is not JSON: %s" % row[:80])
+            raise NodeToolFailed("comment scan for JS, TS and Astro printed a row that is not JSON: %s" % row[:80])
         if "error" in item:
             unread.append("%s: cannot read: %s" % (item["path"], item["error"]))
         else:
@@ -264,14 +274,15 @@ def main(argv=None):
                 comments[path] = list(narrated_lines(path) if lang == "python" else swift_comments(path))
             except Unread as e:
                 unread.append(str(e))
-    node_paths = [p for p, (lang, _) in sorted(files.items()) if lang in NODE_LANGUAGES]
+    node_paths = [(p, lang) for p, (lang, _) in sorted(files.items()) if lang in NODE_LANGUAGES]
+    node_failure = None
     if node_paths:
         try:
             found, bad = node_comments(node_paths, std)
             comments.update(found)
             unread += bad
-        except Unread as e:
-            unread.append(str(e))
+        except NodeToolFailed as e:
+            node_failure = str(e)
     hits = 0
     for path in sorted(comments):
         for n, text in sorted(set(comments[path])):
@@ -282,6 +293,10 @@ def main(argv=None):
                         hits += 1
     if unread:
         print("UNKNOWN: %s (base %s)" % ("; ".join(" ".join(u.split()) for u in unread), args.base), file=sys.stderr)
+    if node_failure:
+        print("COULD NOT RUN: %s (base %s)" % (" ".join(node_failure.split()), args.base), file=sys.stderr)
+        return 3
+    if unread:
         return 2
     return 1 if hits else 0
 

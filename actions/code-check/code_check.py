@@ -50,8 +50,9 @@ def comment_check(root, base, exclude):
         return hits
     if p.returncode == 1 and rows:
         return hits
-    # exit 1 with no hit row is a crash, and any other code is no verdict: never a clean diff
-    return hits + ["comment check could not run: %s" % err]
+    # Exit 3 is the node tool failing to run; exit 1 with no hit row is a crash. Neither is a verdict, so neither is
+    # a clean diff.
+    return hits + ["comment check could not run: %s" % err.replace("COULD NOT RUN: ", "", 1)]
 
 
 def load_standard():

@@ -37,6 +37,9 @@ try {
 
 const NEWLINE = /\r\n|\r|\n/;
 
+// The text with every character but its line breaks turned to a space, so offsets and line numbers hold.
+const blank = (text) => text.replace(/[^\r\n]/g, " ");
+
 // Text a comment opener cannot start in: JSX text and the text pieces of a template literal.
 function isTextToken(kind) {
   return kind === ts.SyntaxKind.JsxText || kind === ts.SyntaxKind.TemplateMiddle || kind === ts.SyntaxKind.TemplateTail;
@@ -45,7 +48,11 @@ function isTextToken(kind) {
 // Every comment in a source text as {pos, end}, deduplicated by position. Parsing is error tolerant, so a
 // file with a syntax error still yields the comments the parser reached.
 function commentRanges(text, name, kind) {
-  const file = ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, kind);
+  return commentRangesOf(ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, kind));
+}
+
+function commentRangesOf(file) {
+  const text = file.text;
   const found = new Map();
   const textSpans = [];
   // Leading ranges hold the comments after a line break, trailing ranges those on the token's own line.
@@ -83,19 +90,19 @@ function emitComments(file, source, ranges, out) {
 
 // Blank everything except the given [start, end) ranges, keeping every line break, so offsets and line numbers hold.
 function keepOnly(text, ranges) {
-  const blank = text.replace(/[^\r\n]/g, " ");
+  const blanked = blank(text);
   let out = "";
   let at = 0;
   for (const [s, e] of ranges) {
-    out += blank.slice(at, s) + text.slice(s, e);
+    out += blanked.slice(at, s) + text.slice(s, e);
     at = e;
   }
-  return out + blank.slice(at);
+  return out + blanked.slice(at);
 }
 
 function astroRegions(text) {
   const code = [];
-  const front = /^﻿?\s*---[ \t]*\r?\n/.exec(text);
+  const front = /^\uFEFF?\s*---[ \t]*\r?\n/.exec(text);
   let templateFrom = 0;
   if (front) {
     const start = front[0].length;
@@ -118,7 +125,7 @@ function blankRanges(text, ranges) {
   let out = "";
   let at = 0;
   for (const [s, e] of ranges) {
-    out += text.slice(at, s) + text.slice(s, e).replace(/[^\r\n]/g, " ");
+    out += text.slice(at, s) + blank(text.slice(s, e));
     at = e;
   }
   return out + text.slice(at);
@@ -128,29 +135,38 @@ function scanAstro(file, text, out) {
   const code = astroRegions(text);
   const script = keepOnly(text, code);
   emitComments(file, script, commentRanges(script, file, ts.ScriptKind.TS), out);
-  // The template is everything outside the code regions: its comments are `<!-- -->` and `{/* */}`.
+  // The template is everything outside the code regions. Its HTML comments come from a pattern. Its expression
+  // comments come from parsing it as TSX inside a fragment: JSX text is then text, and a `{...}` is code.
+  // HTML comments, declarations and style content are blanked first, as the parser cannot read them.
   const body = blankRanges(text, code);
-  const found = [];
-  for (const m of body.matchAll(/<!--[\s\S]*?-->|\{\s*\/\*[\s\S]*?\*\/\s*\}/g)) {
-    found.push({ pos: m.index, end: m.index + m[0].length });
-  }
-  emitComments(file, body, found, out);
+  const html = [];
+  for (const m of body.matchAll(/<!--[\s\S]*?-->/g)) html.push({ pos: m.index, end: m.index + m[0].length });
+  emitComments(file, body, html, out);
+  const plain = body
+    .replace(/<!--[\s\S]*?-->|<![^>]*>/g, blank)
+    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/g, (_, open, css, close) => open + blank(css) + close);
+  const wrapped = ts.createSourceFile(file, `<>${plain}</>`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const ranges = commentRangesOf(wrapped).map((r) => ({ pos: r.pos - 2, end: r.end - 2 }));
+  emitComments(file, body, ranges, out);
 }
 
-const KIND = {
-  ".ts": ts.ScriptKind.TS, ".mts": ts.ScriptKind.TS, ".cts": ts.ScriptKind.TS, ".tsx": ts.ScriptKind.TSX,
-  ".js": ts.ScriptKind.JS, ".mjs": ts.ScriptKind.JS, ".cjs": ts.ScriptKind.JS,
-};
+// The language row picks the script kind. TypeScript reads `.ts` and `.tsx` itself from the file name, so no
+// extension list lives here.
+const KIND = { javascript: ts.ScriptKind.JS, typescript: undefined };
 
-for (const file of process.argv.slice(2)) {
+for (const arg of process.argv.slice(2)) {
+  const colon = arg.indexOf(":");
+  const language = arg.slice(0, colon);
+  const file = arg.slice(colon + 1);
   try {
     const text = fs.readFileSync(file, "utf8");
     const out = [];
-    const ext = path.extname(file).toLowerCase();
-    if (ext === ".astro") {
+    if (language === "astro") {
       scanAstro(file, text, out);
+    } else if (language in KIND) {
+      emitComments(file, text, commentRanges(text, file, KIND[language]), out);
     } else {
-      emitComments(file, text, commentRanges(text, file, KIND[ext] ?? ts.ScriptKind.JS), out);
+      throw new Error(`no scanner for language ${language}`);
     }
     for (const row of out) console.log(JSON.stringify(row));
   } catch (e) {
