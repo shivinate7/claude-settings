@@ -3760,6 +3760,32 @@ guardset3() {
   rm -rf "$h"
 }
 
+# guardset4: the guard set's lists. guard_merge.py imports own_session.py at load, so each list that copies
+# the guard set must name it. A list without it ships a guard that cannot import.
+# The check reads the list line only (the loop or the case line), never the comments above it.
+listed_in() {  # $1 file, $2 sed address of the one list line, $3 label
+  lines=$(sed -n "$2" "$1")
+  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then miss="$miss $3 (not one list line);"; return; fi
+  case "$lines" in
+    *own_session.py*) ;;
+    *) miss="$miss $3;" ;;
+  esac
+}
+
+guardset4() {
+  name="guardset4: own_session.py is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  miss=""
+  listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop"
+  listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop"
+  listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop"
+  listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|/p' "ci-scope.sh case"
+  if [ -n "$miss" ]; then
+    bad "$name" "own_session.py is not in:$miss"
+  else
+    ok "$name"
+  fi
+}
+
 guardset2() {
   name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py or git_reads.py beside it"
   guardset_install guardset2
@@ -4893,6 +4919,7 @@ run pinlive2
 run guardset1
 run guardset2
 run guardset3
+run guardset4
 run win_sh1
 run win_sh2
 run win_sh3
