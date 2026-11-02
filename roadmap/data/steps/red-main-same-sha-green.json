@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.210102,
  "why": "banchi PR #1003, Nov 2 11:13 CST: the merge tool refused it on a nightly run on banchi main (run 41436198024) that failed one timing test, though a re-run on the same commit 471dc268 (run 41483723188) passed every job.",
- "note": "Lane red-main-same-sha-green (session_013NEJKzjNAqNMb6b9s2s1Vg), started by the coordinator 11:13 CST. Batch runner 8 holds banchi #1003 until it merges. No owner override asked: the owner's 00:56 CST pick on page item 161 (wait for the merge tool fix rather than override a red a newer run cleared) answers the same question. Related steps: merge-tool-stale-run-unknown, merge-ignores-superseded-runs. Port: yes, the merge tool is shared.",
- "updatedAt": "2026-11-02T17:14:00Z"
+ "note": "Lane red-main-same-sha-green (session_013NEJKzjNAqNMb6b9s2s1Vg), started by the coordinator 11:13 CST. Batch runner 8 holds banchi #1003 until it merges. No owner override asked: the owner's 00:56 CST pick on page item 161 (wait for the merge tool fix rather than override a red a newer run cleared) answers the same question. Related steps: merge-tool-stale-run-unknown, merge-ignores-superseded-runs. Port: yes, the merge tool is shared. 11:18 CST: the fix needs a change to decision no-merge-onto-red-main (every job of the red run must pass in the newer run; a hand-started run skips the nightly-only alarm job). Owner question: page item 166. The lane builds option a in a draft; nothing merges before the owner's word.",
+ "updatedAt": "2026-11-02T17:18:00Z"
 }
