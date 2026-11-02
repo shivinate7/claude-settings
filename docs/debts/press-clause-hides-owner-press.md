@@ -1,8 +1,8 @@
 # A session clause can hide an owner press that names no actor
 
-**What.** The press-link check excuses a clause whose subject is the session when it holds no `you` and no owner word with an act verb after it. A press with no named actor inside such a clause still passes. These pass with no link: "The session merges PR #374 after clicking Approve.", "...after Approve is clicked.", "...after your click on Merge.", "...after owner clicks Approve." (no article). The owner presses in each, and the check cannot tell.
+**What.** The press-link check excuses a clause whose subject is the session when it holds no `you` and no owner's name as the subject of a present or future press or act verb. A press with no named actor inside such a clause still passes. These pass with no link: "The session merges PR #374 after clicking Approve.", "...after Approve is clicked.", "...after your click on Merge.", "...after owner clicks Approve." (no article). The owner presses in each, and the check cannot tell.
 
-**Where.** `hooks/question_form.py`, `_owner_press_text`, `OWNER_WORD` and `OWNER_ACT`, rule `press-link`.
+**Where.** `hooks/question_form.py`, `_owner_press_text`, `OWNER_NAME` and `OWNER_ACT`, rule `press-link`.
 
 **Decision.** act-in-place (the owner acts where he reads).
 
