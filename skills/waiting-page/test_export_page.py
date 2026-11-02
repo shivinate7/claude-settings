@@ -583,5 +583,107 @@ class Rebuild(Base):
         self.assertEqual(r.returncode, 2, shown(r))
 
 
+class All(Base):
+    """--all: each artifact in the repo's registry (the "artifacts" key of its extras file) exports its collections to
+    its export path under --worktree: the waiting page to waiting/, any other artifact to artifacts/<id>/. Each artifact
+    gets the same scan and mirror as a single export, and one verdict line of its own, named by its id."""
+    WAIT, QUEUE = "page01", "queue02"
+    VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
+
+    def repo(self):
+        root = os.path.join(self.tmp.name, "repo")
+        registry = {"kinds": {}, "artifacts": [
+            {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
+            {"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
+             "collections": ["items"]}]}
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
+        return root
+
+    def docs(self):
+        """What each artifact's fetch holds. The queue lists items only, so its answers are fetched but never exported."""
+        return {self.WAIT: dict(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
+                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
+                self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
+
+    def fetched_all(self, docs):
+        """One fetched folder per artifact id, each shaped as a single fetch is."""
+        root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
+        for artifact_id, parts in docs.items():
+            os.rename(self.fetch(**parts), os.path.join(root, artifact_id))
+        return root
+
+    def export_folder(self, worktree, artifact_id):
+        """Where an artifact's export lands: the waiting page's `waiting/`, any other artifact's `artifacts/<id>/`."""
+        return os.path.join(worktree, "waiting") if artifact_id == self.WAIT else os.path.join(worktree, "artifacts", artifact_id)
+
+    def run_all(self, root, fetched, worktree):
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+        if r.returncode == 2 and "unrecognized arguments" in r.stderr:
+            self.fail("export_page.py has no --all mode: argparse refused it. Output:\n" + shown(r))
+        return r
+
+    def verdict_of(self, r, artifact_id):
+        """The one verdict line of an artifact: a line that names its id and carries a verdict word."""
+        found = [line for line in verdict_lines(r) if artifact_id in line and re.search(self.VERDICT, line)]
+        self.assertEqual(len(found), 1, "%s needs one verdict line, found %d. Output:\n%s" % (artifact_id, len(found), shown(r)))
+        return found[0]
+
+    def assertVerdictOf(self, r, artifact_id, word):
+        line = self.verdict_of(r, artifact_id)
+        self.assertTrue(re.search(word, line), "%s: its verdict line is not %r: %r. Output:\n%s" % (artifact_id, word, line, shown(r)))
+
+    def test_each_artifact_exports_its_collections_to_its_export_path(self):
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs()), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        waiting = self.export_folder(worktree, self.WAIT)
+        for name in COLLECTIONS:
+            self.assertTrue(os.path.isdir(os.path.join(waiting, name)), "the waiting page did not export its %s/ collection" % name)
+        self.assertEqual(read_text(os.path.join(waiting, "items", "i1.json")), canonical(item(1)), "the waiting page's item did not land")
+        self.assertEqual(read_text(os.path.join(waiting, "meta", "page.json")), canonical(META), "the waiting page's meta did not land")
+        queue = self.export_folder(worktree, self.QUEUE)
+        self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)), "the queue's item did not land")
+        self.assertFalse(os.path.exists(os.path.join(queue, "answers")), "an artifact exported a collection its entry does not list")
+
+    def test_each_artifact_gets_one_verdict_line_with_its_verdict(self):
+        root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
+        first = self.run_all(root, fetched, worktree)
+        self.assertEqual(first.returncode, 0, shown(first))
+        self.assertVerdictOf(first, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+        self.assertVerdictOf(first, self.QUEUE, r"changed\s+1\b")  # one item; the answers are not exported
+        second = self.run_all(root, fetched, worktree)
+        self.assertEqual(second.returncode, 0, shown(second))
+        self.assertVerdictOf(second, self.WAIT, r"\bsame\b")
+        self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
+
+    def test_an_artifact_with_no_docs_exports_nothing_and_reports_same(self):
+        docs = self.docs()
+        docs[self.QUEUE] = dict(items={}, answers={})  # the empty state a new page starts in
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(docs), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertVerdictOf(r, self.QUEUE, r"\bsame\b")
+        found = glob.glob(os.path.join(self.export_folder(worktree, self.QUEUE), "**", "*.json"), recursive=True)
+        self.assertEqual(found, [], "an artifact with no docs exported files")
+
+    def test_a_find_refuses_only_its_artifact_and_the_run_exits_1(self):
+        for leaky, clean in ((self.WAIT, self.QUEUE), (self.QUEUE, self.WAIT)):
+            with self.subTest(leaky=leaky):
+                root, worktree = self.repo(), self.out("worktree-" + leaky)
+                self.assertEqual(self.run_all(root, self.fetched_all(self.docs()), worktree).returncode, 0, "the clean first run failed")
+                before = snapshot(self.export_folder(worktree, leaky))
+                docs = self.docs()
+                docs[leaky]["items"]["leak"] = dict(item(9), note="ghp_" + TAIL)
+                docs[clean]["items"]["fresh"] = item(10)
+                r = self.run_all(root, self.fetched_all(docs), worktree)
+                self.assertEqual(r.returncode, 1, "a find in one artifact must exit 1. Output:\n" + shown(r, [TAIL]))
+                self.assertNotIn(TAIL, r.stdout + r.stderr, "the matched value was printed")
+                self.assertVerdictOf(r, leaky, r"\brefused\b")
+                self.assertVerdictOf(r, clean, r"changed\s+1\b")
+                self.assertEqual(snapshot(self.export_folder(worktree, leaky)), before, "a refused artifact changed its copy")
+                self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, clean), "items", "fresh.json")),
+                                "the clean artifact was held back by the refused one")
+
+
 if __name__ == "__main__":
     unittest.main()

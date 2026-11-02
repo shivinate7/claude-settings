@@ -651,6 +651,98 @@ class SetWaitingPage(Tree):
         self.assertTrue(out.strip(), "the failure printed nothing")
 
 
+class Registry(Tree):
+    """The artifacts registry: each claude.ai artifact a repo holds is one entry under "artifacts" in its extras file.
+    The waiting page is the entry whose role is "waiting-page". The old "waiting-page" key stays a fallback after it."""
+    PAGE = "https://claude.ai/artifact/page01"
+    OLD = "https://claude.ai/artifact/old001"
+    QUEUE = "https://claude.ai/code/artifact/queue02"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def registry(self, entries, key=None):
+        data = {"kinds": {}, "artifacts": entries}
+        if key is not None:
+            data["waiting-page"] = key
+        self.put(EXTRAS, json.dumps(data))
+
+    def page_entry(self, **changes):
+        return dict({"id": "page01", "url": self.PAGE, "role": "waiting-page", "account": "work"}, **changes)
+
+    def queue_entry(self, **changes):
+        return dict({"id": "queue02", "url": self.QUEUE, "role": "queue-page", "account": "work",
+                     "collections": ["items"]}, **changes)
+
+    def artifacts(self):
+        self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
+        return self.layout.artifacts(self.tree)
+
+    def assertReported(self, entry_id, cause):
+        """layout.artifacts() refuses the registry, and its message names the entry by id."""
+        with self.assertRaises(self.layout.LayoutError, msg="%s was not reported" % cause) as caught:
+            self.artifacts()
+        self.assertIn(entry_id, str(caught.exception), "the report for %s does not name entry %s" % (cause, entry_id))
+
+    def test_artifacts_reads_each_registry_entry_in_order(self):
+        self.registry([self.page_entry(), self.queue_entry()])
+        found = self.artifacts()
+        self.assertEqual([e["id"] for e in found], ["page01", "queue02"], "the registry entries were not read in order")
+        self.assertEqual([e["role"] for e in found], ["waiting-page", "queue-page"], "an entry's role was not read")
+        self.assertEqual([e["url"] for e in found], [self.PAGE, self.QUEUE], "an entry's url was not read")
+
+    def test_a_repo_with_no_extras_file_has_no_artifacts(self):
+        self.assertEqual(self.artifacts(), [], "a repo with no extras file was given registry entries")
+
+    def test_the_waiting_page_is_the_waiting_page_role_entry(self):
+        self.registry([self.queue_entry(), self.page_entry()])
+        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the waiting-page role entry was not read as the page")
+
+    def test_the_waiting_page_role_entry_beats_the_old_key(self):
+        self.registry([self.page_entry()], key=self.OLD)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the old key won over the waiting-page role entry")
+
+    def test_the_old_key_is_the_fallback_when_no_role_entry_is_set(self):
+        self.registry([self.queue_entry()], key=self.OLD)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.OLD, "the old key was not read as the fallback page")
+
+    def test_a_queue_page_entry_is_not_the_waiting_page(self):
+        self.registry([self.queue_entry()])
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a queue-page entry was read as the waiting page")
+
+    def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
+        self.registry([self.page_entry(url="https://example.com/x")])
+        with self.assertRaises(self.layout.LayoutError, msg="a role entry that is not an artifact link was not an error"):
+            self.layout.waiting_page(self.tree)
+
+    def test_an_email_as_account_is_reported_by_its_entry(self):
+        self.registry([self.page_entry(account="someone@example.com")])
+        self.assertReported("page01", "an email as account")
+
+    def test_a_duplicate_id_is_reported_by_its_entry(self):
+        self.registry([self.page_entry(), self.queue_entry(id="page01")])
+        self.assertReported("page01", "a duplicate id")
+
+    def test_an_id_over_32_characters_is_reported_by_its_entry(self):
+        long_id = "a" * 33
+        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
+        self.assertReported(long_id, "an id of 33 characters")
+
+    def test_an_id_of_32_characters_is_accepted(self):
+        long_id = "b" * 32
+        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
+        self.assertEqual([e["id"] for e in self.artifacts()], [long_id], "an id of 32 characters was refused")
+
+    def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
+        self.registry([self.queue_entry()])
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.OLD), "set_waiting_page did not write the key")
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
+        self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
+
+
 class WaitingPageBranding(Tree):
     """A repo states its waiting page's colour and icon in its own extras file (roadmap step c132)."""
 
