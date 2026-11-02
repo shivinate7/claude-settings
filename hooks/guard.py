@@ -26,7 +26,8 @@ lifts it: then the call is allowed and no later rule runs, so `never_lifted` che
 override lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
-Every tool the guard judges, first (`judge`, right after the Read and Grep exit):
+Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
+set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
                        unread. The reason names the handoff and says to Read it. A payload with
                        `agent_id` passes. An override lifts it. A failed import allows.
@@ -3225,7 +3226,7 @@ def judge(payload) -> None:
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
-    # 0, handoff-unread. After compaction, nothing runs from the main session until it reads its handoff.
+    # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
     try:
         from reread_check import unread_handoff
