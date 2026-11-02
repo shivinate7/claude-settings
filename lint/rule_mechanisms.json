@@ -216,7 +216,7 @@
       "mechanism": {
         "kind": "check",
         "ref": "merge/merge.py",
-        "test": "merge/test_merge.py::Guards.test_red_check_reverts_the_claim"
+        "test": "merge/test_merge.py::GhHalf.test_red_required_check_reverts_the_claim_and_merges_nothing"
       }
     },
     "git-ci-wait-checks-in": {
