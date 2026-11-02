@@ -935,136 +935,6 @@ try {
     if ($lfDi -and $lfDi.LinkType) { [IO.Directory]::Delete($lfDDst) }
     Remove-Item -Recurse -Force $LfTmp -ErrorAction SilentlyContinue
 }
-} else {
-    Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: firstinstall1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinnedps1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinnedwt1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinlivewt1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinlivewt2: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinlivehook1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: hookgone1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: hookkeep1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: hookkeepagents1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: hookgonefail1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: hookwrite1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
-    Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
-}
-
-# ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
-# Loaded on its own so a missing function fails these cases, not the whole file.
-$jb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Join-BinPath' }, $false) | Select-Object -First 1
-if (-not $jb) {
-    Check "joinbin: install.ps1 defines function Join-BinPath" $false
-} else {
-    Invoke-Expression $jb.Extent.Text
-    $Bin = 'C:\Users\x\.claude\bin'
-    Check "joinbin: absent bin is appended with ';'" ((Join-BinPath 'C:\a;C:\b' $Bin) -eq "C:\a;C:\b;$Bin")
-    Check "joinbin: present bin returns Current unchanged" ((Join-BinPath "C:\a;$Bin;C:\b" $Bin) -eq "C:\a;$Bin;C:\b")
-    Check "joinbin: match ignores case" ((Join-BinPath 'C:\a;c:\users\X\.CLAUDE\bin' $Bin) -eq 'C:\a;c:\users\X\.CLAUDE\bin')
-    Check "joinbin: match ignores a trailing backslash" ((Join-BinPath "C:\a;$Bin\" $Bin) -eq "C:\a;$Bin\")
-    Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
-    Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
-}
-# Contract: pure function Get-UserEnvKey returns $env:CLAUDE_SETTINGS_USER_ENV_KEY when set, else
-# 'HKCU:\Environment'; the installer passes its result to Set-UserBinPath. Behaviour, not text.
-$ge = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-UserEnvKey' }, $false) | Select-Object -First 1
-if (-not $ge) {
-    Check "envkey: install.ps1 defines function Get-UserEnvKey" $false
-} else {
-    Invoke-Expression $ge.Extent.Text
-    $savedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
-    try {
-        Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
-        $pre = $null -eq $env:CLAUDE_SETTINGS_USER_ENV_KEY
-        Check "envkey: with the var unset, Get-UserEnvKey returns HKCU:\Environment" ($pre -and (Get-UserEnvKey) -eq 'HKCU:\Environment')
-        $env:CLAUDE_SETTINGS_USER_ENV_KEY = 'HKCU:\Software\claude-settings-test-x'
-        Check "envkey: with the var set, Get-UserEnvKey returns it" ((Get-UserEnvKey) -eq 'HKCU:\Software\claude-settings-test-x')
-    } finally {
-        if ($savedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $savedKey } else { Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue }
-    }
-}
-
-# Join-BinPath edge cases. Contract: Join-BinPath Current Bin Kind; a %VAR% entry counts as
-# present only when Kind is ExpandString. Under String (REG_SZ) it is a dead literal entry.
-if ($jb) {
-    # Concatenate with '\', not Join-Path: Join-Path joins with '/' on Linux, while the expanded
-    # %USERPROFILE%\.claude\bin entry always has '\', so the two would never match there.
-    $Abs = "$env:USERPROFILE\.claude\bin"
-    $KExp = [Microsoft.Win32.RegistryValueKind]::ExpandString
-    $KStr = [Microsoft.Win32.RegistryValueKind]::String
-    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs $KExp) -eq "C:\a;$Abs")
-    Check "joinbin: ExpandString: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KExp) -eq 'C:\a;%USERPROFILE%\.claude\bin')
-    Check "joinbin: String: a %USERPROFILE% entry is dead, absolute bin appended, dead entry kept" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KStr) -eq "C:\a;%USERPROFILE%\.claude\bin;$Abs")
-}
-
-# ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
-$sb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-UserBinPath' }, $false) | Select-Object -First 1
-if (-not $IsWin) {
-    Write-Host "SKIP: setbin (no registry off Windows)"
-} elseif (-not $sb) {
-    Check "setbin: install.ps1 defines function Set-UserBinPath" $false
-} else {
-    Invoke-Expression $sb.Extent.Text
-    $Sub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
-    $Reg = [Microsoft.Win32.Registry]::CurrentUser
-    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
-    $Raw = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
-    try {
-        $k = $Reg.CreateSubKey($Sub)
-        $k.SetValue('Path', '%TEMP%\x;C:\a', [Microsoft.Win32.RegistryValueKind]::ExpandString)
-        $k.Close()
-        $pre = $Reg.OpenSubKey($Sub)
-        $preOk = ($pre.GetValueKind('Path') -eq 'ExpandString') -and ($pre.GetValue('Path', '', $Raw) -eq '%TEMP%\x;C:\a')
-        $pre.Close()
-        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build an ExpandString value"; $Failed++ }
-        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
-        $k = $Reg.OpenSubKey($Sub)
-        Check "setbin: ExpandString kind is kept" ($k.GetValueKind('Path') -eq 'ExpandString')
-        Check "setbin: existing %TEMP%\x entry stays literal and the absolute bin is appended" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
-        $k.Close()
-        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
-        $k = $Reg.OpenSubKey($Sub)
-        Check "setbin: a second call changes nothing" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
-        $k.Close()
-        $k = $Reg.OpenSubKey($Sub, $true); $k.DeleteValue('Path'); $k.Close()
-        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
-        $k = $Reg.OpenSubKey($Sub)
-        Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
-        $k.Close()
-        # REG_SZ holding a literal %USERPROFILE% entry: it is dead, so the absolute bin is appended
-        $k = $Reg.OpenSubKey($Sub, $true)
-        $k.SetValue('Path', '%USERPROFILE%\.claude\bin', [Microsoft.Win32.RegistryValueKind]::String)
-        $k.Close()
-        $pre = $Reg.OpenSubKey($Sub)
-        $preOk = ($pre.GetValueKind('Path') -eq 'String') -and ($pre.GetValue('Path', '', $Raw) -eq '%USERPROFILE%\.claude\bin')
-        $pre.Close()
-        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build a String value"; $Failed++ }
-        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
-        $k = $Reg.OpenSubKey($Sub)
-        Check "setbin: REG_SZ with a literal %USERPROFILE% entry stays String and gets the absolute bin appended" (($k.GetValueKind('Path') -eq 'String') -and ($k.GetValue('Path', '', $Raw) -eq "%USERPROFILE%\.claude\bin;$Abs"))
-        $k.Close()
-    } finally {
-        try { $Reg.DeleteSubKeyTree($Sub, $false) } catch { }
-    }
-}
-
-# ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
-# covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
-# a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can
-# load or call directly. Exercising it for real needs a real git repo, a real merge that
-# changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
-# of which this harness drives. Reported as a gap, not faked.
-
-} finally {
-    if ($IsWin) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { } }
-    Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
-}
 
 # ---- retired files: ps1 twins of hooks/test_install_src.sh retired2, 3, 4, 5, 6 -----------------
 # Copy mode (CLAUDE_SETTINGS_FORCE_COPY=1) lands every file as a copy, the mode the incident hit.
@@ -1237,6 +1107,142 @@ try {
     Check "retiredps1-e: an ignored-only file in hooks is not landed" (-not (Test-Path -LiteralPath (Join-Path $RtEcfg 'hooks\cache.local')))
 } finally {
     Remove-Item -Recurse -Force $RtEroot -ErrorAction SilentlyContinue
+}
+
+} else {
+    Write-Host "SKIP: copymode1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: settingsrepeat1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: firstinstall1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: envkey1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: refusewt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: keepwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedps1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinnedwt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivewt1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivewt2: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivehook1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookgone1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookkeep1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookkeepagents1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookgonefail1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: hookwrite1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: pinlivestale1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: linkfallback1: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-a: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-b: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-c: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-d: install.ps1 runs only on Windows"
+    Write-Host "SKIP: retiredps1-e: install.ps1 runs only on Windows"
+}
+
+# ---- Join-BinPath: pure PATH-string function; never reads or writes the real user PATH ------
+# Loaded on its own so a missing function fails these cases, not the whole file.
+$jb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Join-BinPath' }, $false) | Select-Object -First 1
+if (-not $jb) {
+    Check "joinbin: install.ps1 defines function Join-BinPath" $false
+} else {
+    Invoke-Expression $jb.Extent.Text
+    $Bin = 'C:\Users\x\.claude\bin'
+    Check "joinbin: absent bin is appended with ';'" ((Join-BinPath 'C:\a;C:\b' $Bin) -eq "C:\a;C:\b;$Bin")
+    Check "joinbin: present bin returns Current unchanged" ((Join-BinPath "C:\a;$Bin;C:\b" $Bin) -eq "C:\a;$Bin;C:\b")
+    Check "joinbin: match ignores case" ((Join-BinPath 'C:\a;c:\users\X\.CLAUDE\bin' $Bin) -eq 'C:\a;c:\users\X\.CLAUDE\bin')
+    Check "joinbin: match ignores a trailing backslash" ((Join-BinPath "C:\a;$Bin\" $Bin) -eq "C:\a;$Bin\")
+    Check "joinbin: empty Current returns Bin alone" ((Join-BinPath '' $Bin) -eq $Bin)
+    Check "joinbin: a longer sibling dir is not a match" ((Join-BinPath "C:\a;$Bin-old" $Bin) -eq "C:\a;$Bin-old;$Bin")
+}
+# Contract: pure function Get-UserEnvKey returns $env:CLAUDE_SETTINGS_USER_ENV_KEY when set, else
+# 'HKCU:\Environment'; the installer passes its result to Set-UserBinPath. Behaviour, not text.
+$ge = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-UserEnvKey' }, $false) | Select-Object -First 1
+if (-not $ge) {
+    Check "envkey: install.ps1 defines function Get-UserEnvKey" $false
+} else {
+    Invoke-Expression $ge.Extent.Text
+    $savedKey = $env:CLAUDE_SETTINGS_USER_ENV_KEY
+    try {
+        Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
+        $pre = $null -eq $env:CLAUDE_SETTINGS_USER_ENV_KEY
+        Check "envkey: with the var unset, Get-UserEnvKey returns HKCU:\Environment" ($pre -and (Get-UserEnvKey) -eq 'HKCU:\Environment')
+        $env:CLAUDE_SETTINGS_USER_ENV_KEY = 'HKCU:\Software\claude-settings-test-x'
+        Check "envkey: with the var set, Get-UserEnvKey returns it" ((Get-UserEnvKey) -eq 'HKCU:\Software\claude-settings-test-x')
+    } finally {
+        if ($savedKey) { $env:CLAUDE_SETTINGS_USER_ENV_KEY = $savedKey } else { Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue }
+    }
+}
+
+# Join-BinPath edge cases. Contract: Join-BinPath Current Bin Kind; a %VAR% entry counts as
+# present only when Kind is ExpandString. Under String (REG_SZ) it is a dead literal entry.
+if ($jb) {
+    # Concatenate with '\', not Join-Path: Join-Path joins with '/' on Linux, while the expanded
+    # %USERPROFILE%\.claude\bin entry always has '\', so the two would never match there.
+    $Abs = "$env:USERPROFILE\.claude\bin"
+    $KExp = [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $KStr = [Microsoft.Win32.RegistryValueKind]::String
+    Check "joinbin: Current ending in ';' gives no ';;'" ((Join-BinPath 'C:\a;' $Abs $KExp) -eq "C:\a;$Abs")
+    Check "joinbin: ExpandString: a %USERPROFILE% entry counts as the absolute bin" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KExp) -eq 'C:\a;%USERPROFILE%\.claude\bin')
+    Check "joinbin: String: a %USERPROFILE% entry is dead, absolute bin appended, dead entry kept" ((Join-BinPath 'C:\a;%USERPROFILE%\.claude\bin' $Abs $KStr) -eq "C:\a;%USERPROFILE%\.claude\bin;$Abs")
+}
+
+# ---- Set-UserBinPath: registry round trip against a THROWAWAY key, never the real HKCU:\Environment
+$sb = $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-UserBinPath' }, $false) | Select-Object -First 1
+if (-not $IsWin) {
+    Write-Host "SKIP: setbin (no registry off Windows)"
+} elseif (-not $sb) {
+    Check "setbin: install.ps1 defines function Set-UserBinPath" $false
+} else {
+    Invoke-Expression $sb.Extent.Text
+    $Sub = 'Software\claude-settings-test-' + [guid]::NewGuid().ToString('N')
+    $Reg = [Microsoft.Win32.Registry]::CurrentUser
+    $Abs = Join-Path $env:USERPROFILE '.claude\bin'
+    $Raw = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    try {
+        $k = $Reg.CreateSubKey($Sub)
+        $k.SetValue('Path', '%TEMP%\x;C:\a', [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'ExpandString') -and ($pre.GetValue('Path', '', $Raw) -eq '%TEMP%\x;C:\a')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build an ExpandString value"; $Failed++ }
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: ExpandString kind is kept" ($k.GetValueKind('Path') -eq 'ExpandString')
+        Check "setbin: existing %TEMP%\x entry stays literal and the absolute bin is appended" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a second call changes nothing" ($k.GetValue('Path', '', $Raw) -eq "%TEMP%\x;C:\a;$Abs")
+        $k.Close()
+        $k = $Reg.OpenSubKey($Sub, $true); $k.DeleteValue('Path'); $k.Close()
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: a missing Path value is created as ExpandString holding the bin" (($k.GetValueKind('Path') -eq 'ExpandString') -and ($k.GetValue('Path', '', $Raw) -eq $Abs))
+        $k.Close()
+        # REG_SZ holding a literal %USERPROFILE% entry: it is dead, so the absolute bin is appended
+        $k = $Reg.OpenSubKey($Sub, $true)
+        $k.SetValue('Path', '%USERPROFILE%\.claude\bin', [Microsoft.Win32.RegistryValueKind]::String)
+        $k.Close()
+        $pre = $Reg.OpenSubKey($Sub)
+        $preOk = ($pre.GetValueKind('Path') -eq 'String') -and ($pre.GetValue('Path', '', $Raw) -eq '%USERPROFILE%\.claude\bin')
+        $pre.Close()
+        if (-not $preOk) { Write-Host "FAIL: setbin fixture did not build a String value"; $Failed++ }
+        $null = Set-UserBinPath "HKCU:\$Sub" $Abs
+        $k = $Reg.OpenSubKey($Sub)
+        Check "setbin: REG_SZ with a literal %USERPROFILE% entry stays String and gets the absolute bin appended" (($k.GetValueKind('Path') -eq 'String') -and ($k.GetValue('Path', '', $Raw) -eq "%USERPROFILE%\.claude\bin;$Abs"))
+        $k.Close()
+    } finally {
+        try { $Reg.DeleteSubKeyTree($Sub, $false) } catch { }
+    }
+}
+
+# ---- gap: the embedded post-merge hook body (install.ps1's Install-PostMergeHook) is not --
+# covered here. It is a heredoc written into .git\hooks\post-merge and run by `git` itself on
+# a real `git pull`, under `sh` inside Git Bash, not by any PowerShell function this file can
+# load or call directly. Exercising it for real needs a real git repo, a real merge that
+# changes install.ps1 or a skill, and a real Git-Bash `sh` to run the written hook body, none
+# of which this harness drives. Reported as a gap, not faked.
+
+} finally {
+    if ($IsWin) { try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($TestEnvSub, $false) } catch { } }
+    Remove-Item Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
 }
 
 if ($Failed) { Write-Host "$Failed case(s) failed"; exit 1 }
