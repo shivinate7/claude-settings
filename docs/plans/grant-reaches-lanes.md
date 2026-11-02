@@ -53,8 +53,9 @@ What counts as the owner's word:
   Only in-process SDK callbacks "may weigh a user statement relayed in the note as user intent".
   This setup has none.
 
-Settings: `autoMode` holds `environment`, `allow`, `soft_deny`, `hard_deny` (prose rules) and
-`classifyAllShell` (https://code.claude.com/docs/en/settings-reference.md#automode). The classifier
+Settings: `autoMode` holds four lists of prose rules and one switch
+(https://code.claude.com/docs/en/settings-reference.md#automode). The lists are `environment`,
+`allow`, `soft_deny` and `hard_deny`. The switch is `classifyAllShell`. The classifier
 reads it from user, managed or `--settings` scope only, never from project settings
 (https://code.claude.com/docs/en/auto-mode-config.md#where-the-classifier-reads-configuration).
 Hot reload of `autoMode`: not documented.
@@ -114,8 +115,8 @@ gates exist:
 The static rule is today's tool (decision auto-mode-owner-acts, `add_repo` and `archive_session`).
 It cannot scope to one session or expire, so it is the baseline only.
 
-Build step 1 of any design is a probe: one session, a hook that returns `allow` on one act the
-classifier refuses today, and the result read from the transcript's `permission_decision`. If the
+Build step 1 of any design is a probe in one session. A hook returns `allow` on one act the
+classifier refuses today. The transcript's `permission_decision` shows the result. If the
 hook gate does not skip the classifier, the mod gate is next, with its own cloud probe.
 
 ### Agents
