@@ -961,8 +961,10 @@ def _segment_cd_move(tokens):
         return None
     if word == "pushd":
         operands = [t for t in tokens[index + 1:] if not (t[:1] in "<>" or REDIRECTION.match(t))]
-        # `pushd` alone swaps the top two folders, and `pushd +N` / `-N` rotates the stack: neither
-        # names a folder.
+        # `pushd -n` only adds to the stack: the shell stays. `pushd` alone swaps the top two
+        # folders, and `pushd +N` / `-N` rotates the stack: neither names a folder.
+        if "-n" in operands:
+            return None
         if not operands or re.fullmatch(r"[+-]\d+", operands[0]):
             return CD_UNKNOWN
     for token in tokens[index + 1:]:
@@ -1002,7 +1004,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), keep_on_failed_cd=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1035,10 +1037,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), keep_on_f
                 where = None
             else:
                 where = shell_abs(move or "~", where)
-                if not (where and os.path.isdir(where)):
-                    # A failed cd leaves the real shell where it was. Most rules trust nothing
-                    # after it; KEEP_ON_FAILED_CD reads the shell as still in the old folder.
-                    where = old if keep_on_failed_cd and old and os.path.isdir(old) else None
+                where = where if where and os.path.isdir(where) else None
             prev = old
         for _ in range(marks.count(")")):
             if stack:

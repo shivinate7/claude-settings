@@ -3060,8 +3060,8 @@ def _cd_targets(tool: str, command: str, where: str):
         named = _segment_cd_target(tokens, ("cd", "set-location", "pushd")) if tokens else None
         if named is None or _unexpanded(named):
             continue
-        # An absolute target needs no known folder. After a failed cd the shell stayed put.
-        at = dir_before_segment(segments, number, where, ends, keep_on_failed_cd=True)
+        # An absolute target needs no known folder.
+        at = dir_before_segment(segments, number, where, ends)
         folder = shell_abs(named, at)
         if folder and os.path.isdir(folder):
             found.append(os.path.realpath(folder))
