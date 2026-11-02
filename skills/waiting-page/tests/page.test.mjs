@@ -2064,6 +2064,253 @@ const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l,
   designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
 const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
   return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+// ---------------------------------------------------------------- the Ask box (step page-ask-box)
+// Contract: docs/design/page-ask-box-notes.md on design/page-ask-box, sections 3, 5, 6 and 8.
+// The notes name no ids, so the selectors take the mockup's: #askText (the box), #askSend, #askUndo.
+const ASK_TEXT = "Can the waiting page take a question from me?";
+const ASK_ANSWERED = { id: "ask-an1", text: "Can I see the lane queue?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes. It is on the Status tab." };
+// A missing control fails by name, not by a wait that times out.
+async function mustHave(page, sel, what) {
+  const n = await page.locator(sel).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: ${sel} is missing`);
+}
+// A text the page shows, as its box. A text the page does not show fails with the text named.
+async function shownBox(page, text) {
+  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+  const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+  assert.ok(shown, `the page does not show: ${text}`);
+  return loc.boundingBox();
+}
+
+test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const log = await page.evaluate(() => window.__log);
+  const asks = log.filter((l) => l[0] === "set" && l[1] === "asks");
+  assert.equal(asks.length, 1, "Send wrote " + asks.length + " asks records");
+  const [, , key, body] = asks[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, ASK_TEXT, "the text is not the owner's words");
+  assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "at is not an ISO time: " + body.at);
+  assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
+});
+
+test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const key = await page.evaluate(() => window.__log.find((l) => l[0] === "set" && l[1] === "asks")[2]);
+  await mustHave(page, "#askUndo", "Undo control");
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
+  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+});
+
+test("the asks list is newest first by at, whatever order the records came in", async (t) => {
+  // Insertion order and id order both differ from newest first, so only a sort by at passes.
+  const asks = {
+    "ask-zz1": { id: "ask-zz1", text: "Middle ask text", at: "2026-10-30T09:00:00Z" },
+    "ask-aa1": { id: "ask-aa1", text: "Newest ask text", at: "2026-10-31T09:00:00Z" },
+    "ask-mm1": { id: "ask-mm1", text: "Oldest ask text", at: "2026-10-29T09:00:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  const top = {};
+  for (const text of ["Newest ask text", "Middle ask text", "Oldest ask text"]) top[text] = (await shownBox(page, text)).y;
+  assert.ok(top["Newest ask text"] < top["Middle ask text"] && top["Middle ask text"] < top["Oldest ask text"], "the asks are not newest first: " + JSON.stringify(top));
+});
+
+test("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.text);
+  assert.equal(await page.getByText(ASK_ANSWERED.reply, { exact: true }).isVisible(), false, "a seen answer is open");
+  const show = page.getByRole("button", { name: "Show answer" });
+  assert.equal(await show.count(), 1, "no Show answer control on the folded ask");
+  await show.click();
+  await shownBox(page, ASK_ANSWERED.reply);
+});
+
+test("an answer the viewer has not seen stays open, with the New answer mark", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-29T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.reply);
+  await shownBox(page, "New answer");
+});
+
+test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
+  const asks = {
+    "ask-w01": { id: "ask-w01", text: "Nobody has read this yet", at: "2026-10-31T08:00:00Z" },
+    "ask-w02": { id: "ask-w02", text: "The writer has read this", at: "2026-10-31T07:00:00Z", owner: "triage", read: "2026-10-31T07:30:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  await shownBox(page, "Waiting for triage to read it.");
+  await shownBox(page, /^Read by triage/);
+  await shownBox(page, /Waiting for its answer\./);
+  assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
+});
+
+// Red cases for the Ask box: no stray null, the cap on new answers, the 4000-character limit, Ctrl+Enter, paste and Copy ask.
+test("the Ask section never shows the text null, in the waiting, answered and sent states", async (t) => {
+  const asks = {
+    "ask-n-wait": { id: "ask-n-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" },
+    "ask-n-fresh": { id: "ask-n-fresh", text: "A fresh answer", at: "2026-10-30T08:00:00Z", owner: "triage", answered: "2026-10-31T10:00:00Z", reply: "Yes, it does." },
+    "ask-n-seen": { id: "ask-n-seen", text: "A seen answer", at: "2026-10-29T08:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes, it did." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-30T11:00:00Z" } }); if (!page) return;
+  await shownBox(page, "A question still waiting");
+  const stray = () => page.evaluate(() => { const s = document.getElementById("asks").textContent, i = s.indexOf("null"); return i < 0 ? "" : s.slice(Math.max(0, i - 60), i + 10); });
+  const waiting = await stray();
+  assert.equal(waiting, "", "the waiting and answered states show the text null: " + JSON.stringify(waiting));
+  await page.fill("#askText", "A new ask for the list");
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  const sent = await stray();
+  assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
+});
+
+test("a new answer to an ask older than the newest 3 answered asks stays open in view, not behind Show older asks", async (t) => {
+  // Three answers seen at the last visit fill the cap. The new answer is older by at, so it sits fourth in the list.
+  const seen = (n, at) => ({ id: "ask-s" + n, text: "Seen answer " + n, at, owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Seen reply " + n + "." });
+  const asks = {
+    "ask-s1": seen(1, "2026-10-30T08:00:00Z"),
+    "ask-s2": seen(2, "2026-10-30T07:00:00Z"),
+    "ask-s3": seen(3, "2026-10-30T06:00:00Z"),
+    "ask-new": { id: "ask-new", text: "Old ask, new answer", at: "2026-10-01T09:00:00Z", owner: "triage", answered: "2026-10-31T08:00:00Z", reply: "The answer that came after the last visit." },
+    "ask-old": { id: "ask-old", text: "Oldest seen answer", at: "2026-09-15T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Seen long ago." },
+  };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, "The answer that came after the last visit.");
+  // Only the seen answer past the cap stays behind the button.
+  assert.equal(await page.getByRole("button", { name: "Show 1 older ask", exact: true }).count(), 1, "the button does not say Show 1 older ask");
+});
+
+test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = await page.textContent("#askHint");
+  const long = "0123456789".repeat(420); // 4200 characters
+  // A value set in script is not held to the box's maxlength, as a draft or an Undo can leave it.
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, long);
+  await mustHave(page, "#askSend", "Send ask button");
+  if (await page.locator("#askSend").isDisabled()) {
+    // Over the limit Send ask is off, so nothing is written, the words stay in the box, and the hint gives the limit.
+    const off = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+    assert.equal(off, 0, "Send ask wrote " + off + " asks records while it was off");
+    assert.equal(await page.inputValue("#askText"), long, "the words in the box changed while Send ask was off");
+    const notice = (await page.textContent("#askHint")).trim();
+    assert.ok(notice && notice !== short.trim() && /4000|limit/i.test(notice) && await page.locator("#askHint").isVisible(), "no limit notice in the hint: " + JSON.stringify(notice));
+    return;
+  }
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"), null, { timeout: 1500 }).catch(() => {});
+  const sets = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+  if (sets.length) {
+    assert.equal(sets.length, 1, "Send wrote " + sets.length + " asks records");
+    assert.equal(sets[0].text.length, long.length, `Send ask stored ${sets[0].text.length} of ${long.length} characters, with no notice`);
+    assert.equal(sets[0].text, long, "the stored text is not the owner's words");
+    return;
+  }
+  // No write: the words stay in the box, and the hint row says why.
+  assert.equal(await page.inputValue("#askText"), long, "Send ask wrote nothing and dropped the typed words");
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
+});
+
+test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
+  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+  const page = await open(t); if (!page) return;
+  const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", sent);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  await mustHave(page, "#askUndo", "Undo control");
+  const typed = "Typed after the send. ".repeat(6); // 126 characters, typed inside the window
+  await page.fill("#askText", typed);
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const value = await page.inputValue("#askText");
+  const hint = (await page.textContent("#askHint")).trim();
+  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
+  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+});
+
+test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await card(page, DECISION).locator(".title").click();
+  await page.keyboard.press("b");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  assert.equal(await page.locator("#send").isDisabled(), false, "no answer is staged, so the case proves nothing");
+  await page.focus("#askSend");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "answers"), null, { timeout: 1500 }).catch(() => {});
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "answers").length);
+  assert.equal(writes, 0, "Ctrl+Enter on Send ask wrote " + writes + " answers record(s)");
+});
+
+test("pasting 4200 characters into the ask box keeps all of them and shows the over-limit notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = (await page.textContent("#askHint")).trim();
+  const long = "0123456789".repeat(420); // 4200 characters
+  // insertText takes the same route as a paste, so the box's maxlength applies to it as it does to a paste.
+  await page.fill("#askText", "");
+  await page.click("#askText");
+  await page.keyboard.insertText(long);
+  const value = await page.inputValue("#askText");
+  assert.equal(value.length, long.length, `the box holds ${value.length} of ${long.length} pasted characters`);
+  const hint = (await page.textContent("#askHint")).trim();
+  const shown = await page.locator("#askHint").isVisible();
+  assert.ok(shown && hint !== short && /4000|limit/i.test(hint), "no over-limit notice in the hint: " + JSON.stringify(hint));
+});
+
+test("over the limit, Send ask is disabled, or a press changes the hint to the notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await mustHave(page, "#askSend", "Send ask button");
+  const over = "0123456789".repeat(420); // 4200 characters, set as a draft or an Undo can leave it
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, over);
+  if (!(await page.locator("#askSend").isDisabled())) {
+    const before = (await page.textContent("#askHint")).trim();
+    await page.click("#askSend");
+    await page.waitForFunction((b) => document.getElementById("askHint").textContent.trim() !== b || window.__log.some((l) => l[0] === "set" && l[1] === "asks"), before, { timeout: 1500 }).catch(() => {});
+    const after = (await page.textContent("#askHint")).trim();
+    assert.notEqual(after, before, "Send ask is enabled over the limit, and a press leaves the hint as it was");
+  }
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+  assert.equal(writes, 0, "Send ask wrote an ask over the limit");
+});
+
+test("Copy ask after a failed write changes the hint to the copy result", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await mustHave(page, "#askCopy", "Copy ask button");
+  await page.click("#askCopy");
+  await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
+});
+
 async function openCap(t, labels, width, design) {
   const it = capItem(labels);
   const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
@@ -4491,4 +4738,228 @@ test("Withdraw of a sent overturn removes the answer and the ruling card is back
   assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
   assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
   assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
+});
+
+// ---------------------------------------------------------------- parked lines: Unpark and Drop
+
+// A parked line is a .pk in .parked .pk-list, with two .btn.pkb acts. A meta/page.parked entry is { id, ref, note }.
+// An entry with no id has no store key, so its acts stay off. A press stages an act; Send writes answers/park.<id>.
+const PARK_A = { id: "ci-cap-raise", ref: "Step ci-cap-raise, a 20-minute cap for one CI job", note: "Wait until the mutation job is split." };
+const PARK_B = { id: "rail-filed-count", ref: "D41, a count of filed answers on the rail", note: "Wait for a month of use first." };
+const PARK_NOID = { ref: "Debt label-once-js, the label check reads script text", note: "Low harm. Look again in December." };
+const PARK_META = { writer: "triage", parked: [PARK_A, PARK_B] };
+// A dot is in no item slug, so a park key never meets an item's key.
+const parkKey = (p) => "park." + p.id;
+const parkLine = (page, p) => page.locator(".parked .pk-list .pk", { hasText: p.ref });
+const parkBtn = (page, p, act) => parkLine(page, p).locator(".btn.pkb", { hasText: act === "unpark" ? "Unpark" : "Drop" });
+// The meta doc and the answers arrive after the items. Wait until the page holds them, then read the DOM.
+const parkLoaded = (page, key = null) => page.waitForFunction((k) => !!(state.meta && state.meta.parked) && (k === null || !!state.answers[k]), key, { timeout: 3000 }).catch(() => {});
+// Off is aria-disabled (the line stays focusable) or the disabled attribute.
+const parkOff = async (b) => (await b.getAttribute("aria-disabled")) === "true" || (await b.isDisabled());
+// Each write as [kind, collection, id]: the body of a set is left out, so a case compares the write, not its content.
+const parkWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" || l[0] === "delete").map((l) => l.slice(0, 3)));
+// The sent badge on a line ("Unpark sent", "Drop sent"). It renders after the write, so wait for it, then return it.
+const parkBadge = async (page, p, text) => { await parkLine(page, p).locator(".ans", { hasText: text }).waitFor({ timeout: 3000 }).catch(() => {}); return parkLine(page, p).locator(".ans", { hasText: text }); };
+
+test("Unpark then Send writes the parked act as an unpark record and no other write", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  const dialogs = []; page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  assert.deepEqual(dialogs, [], "a press opened a dialog");
+  assert.deepEqual(await parkWrites(page), [], "a press wrote before Send");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Unpark");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  const rec = (await answers(page))[parkKey(PARK_A)];
+  assert.deepEqual(Object.keys(rec).sort(), ["act", "at", "id", "note", "parked", "ref"], "the park record has the wrong fields");
+  assert.deepEqual([rec.parked, rec.id, rec.act, rec.ref, rec.note], [true, PARK_A.id, "unpark", PARK_A.ref, PARK_A.note]);
+  assert.ok(!Number.isNaN(Date.parse(rec.at)), "at is not an ISO time");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge after Send");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", parkKey(PARK_A)]], "Send wrote more than the one park record");
+});
+
+test("Drop then Send writes the parked act as a drop record, and the line strikes at once", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "drop"), "the parked line has no Drop button");
+  await parkBtn(page, PARK_A, "drop").click();
+  assert.match((await parkLine(page, PARK_A).getAttribute("class")) || "", /\bdrop\b/, "the staged Drop does not strike the line");
+  assert.deepEqual(await parkWrites(page), [], "a Drop press wrote before Send");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Drop");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  const rec = (await answers(page))[parkKey(PARK_A)];
+  assert.deepEqual([rec.parked, rec.id, rec.act, rec.ref, rec.note], [true, PARK_A.id, "drop", PARK_A.ref, PARK_A.note]);
+  await need(await parkBadge(page, PARK_A, "Drop sent"), "the line shows no Drop sent badge after Send");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", parkKey(PARK_A)]], "Send wrote more than the one park record");
+});
+
+test("Undo after a parked Send deletes the park record and hands the press back as a draft", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  await page.locator("#undoBtn").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(page.locator("#undoBtn"), "Send shows no Undo after a parked act");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((k) => !(k in window.__answers()), parkKey(PARK_A));
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[0] === "delete"), [["delete", "answers", parkKey(PARK_A)]], "Undo did not delete answers/park.<id> once");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "Undo did not hand the Unpark back as a draft");
+});
+
+test("a parked line with no id has both acts off, a press on it stages nothing, and a line with an id stays live", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_NOID] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_NOID), "the line with no id is not a .pk in .parked .pk-list");
+  for (const act of ["unpark", "drop"]) {
+    const b = parkBtn(page, PARK_NOID, act);
+    await need(b, "the line with no id has no " + act + " button");
+    assert.equal(await parkOff(b), true, act + " is on for a line with no id");
+    await b.click({ force: true });
+  }
+  assert.equal(await page.locator("#send").isDisabled(), true, "a press on a line with no id staged an act");
+  assert.deepEqual(await parkWrites(page), [], "a press on a line with no id wrote to the store");
+  assert.equal(await parkOff(parkBtn(page, PARK_A, "unpark")), false, "the Unpark on a line with an id is off");
+});
+
+test("an existing park answer shows Unpark sent on its line at load, and counts toward no item", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(parkLine(page, PARK_A), "the parked line is not a .pk in .parked .pk-list");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a saved park answer counts as a ready act");
+  const bar = await page.locator("#barStatus").innerText();
+  assert.match(bar, /\b1 stay open/, "the bar does not count the open item: " + bar);
+  assert.doesNotMatch(bar, /All answered/, "a park answer counts as the answer to an item: " + bar);
+});
+
+// Park keys are park.<id>. These cases read a park line only through its own key and its own id: never through an item's
+// key, an Object.prototype name, or a DOM id that another element already holds.
+const PARK_X = { id: "x", ref: "Line x, a parked line whose id shares a prefix with an item", note: "Hold it." };
+const PARK_C = { id: "constructor", ref: "Line constructor, a parked line whose id is an Object.prototype name", note: "Keep it." };
+const PARK_H = { id: "h", ref: "Line h, a parked line with the id h", note: "Keep it." };
+
+test("a park line never reads an item's answer, and Unpark then Send leaves that answer alone", async (t) => {
+  const itemAnswer = { item: "park-x", n: 1, at: "2026-11-01T17:00:00.000Z", choice: "a", note: "" };
+  const page = await open(t, { items: [mk("park-x", 1)], meta: { writer: "triage", parked: [PARK_X] }, answers: { "park-x": itemAnswer } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_X), "the parked line is not a .pk in .parked .pk-list");
+  assert.equal(await parkLine(page, PARK_X).locator(".ans").count(), 0, "line x shows a sent badge it never sent, read from the item park-x");
+  await need(parkBtn(page, PARK_X, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_X, "unpark").click();
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_X));
+  assert.deepEqual((await answers(page))["park-x"], itemAnswer, "Unpark and Send changed the item's answer under park-x");
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[2] === "park-x"), [], "Send wrote under the item's key park-x");
+});
+
+test("every DOM id on the page is unique, with two parked entries that have no id and one with the id h", async (t) => {
+  const noA = { ref: "No id line A, a line the writer has not prepared", note: "A." };
+  const noB = { ref: "No id line B, a line the writer has not prepared", note: "B." };
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [noA, noB, PARK_H] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_H), "the line with the id h is not a .pk in .parked .pk-list");
+  await need(parkLine(page, noB), "the second line with no id is not a .pk in .parked .pk-list");
+  const dupes = await page.evaluate(() => { const seen = new Set(), out = []; document.querySelectorAll("[id]").forEach((el) => { if (seen.has(el.id)) out.push(el.id); seen.add(el.id); }); return out; });
+  assert.deepEqual(dupes, [], "duplicate DOM ids: " + dupes.join(", "));
+});
+
+test("a parked entry with the id constructor has both acts on, and Unpark stages and sends it", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_C] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_C), "the line with the id constructor is not a .pk in .parked .pk-list");
+  for (const act of ["unpark", "drop"]) {
+    const b = parkBtn(page, PARK_C, act);
+    await need(b, "the line with the id constructor has no " + act + " button");
+    assert.equal(await parkOff(b), false, act + " is off for the id constructor");
+  }
+  await parkBtn(page, PARK_C, "unpark").click();
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the staged Unpark on the id constructor is not counted");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_C));
+});
+
+test("a failed Send with a staged park act: the Copy text carries the park act", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META, failSet: true }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  const copied = await page.evaluate(() => window.__copied);
+  assert.ok(typeof copied === "string" && copied.includes(PARK_A.ref), "the Copy text leaves out the staged park act: " + copied);
+});
+
+test("Change then clear on a sent park line, then Send, deletes answers/park.<id>", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  const change = parkLine(page, PARK_A).locator("button", { hasText: "Change" });
+  await need(change, "the sent park line has no Change button");
+  await change.click();
+  const unpark = parkBtn(page, PARK_A, "unpark");
+  if ((await unpark.getAttribute("aria-pressed")) === "true") await unpark.click();
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer", "Send does not offer to withdraw the cleared park line");
+  await send(page);
+  await page.waitForFunction((k) => !(k in window.__answers()), parkKey(PARK_A));
+  assert.deepEqual(await parkWrites(page), [["delete", "answers", parkKey(PARK_A)]], "Withdraw did not delete answers/park.<id> once");
+});
+
+test("at 1280 wide, sending a park act does not move the parked lines below it", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_B, PARK_X] }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  const rows = () => page.evaluate(() => [...document.querySelectorAll(".parked .pk-list .pk")].map((el) => ({ text: el.textContent, top: el.getBoundingClientRect().top })));
+  const before = await rows();
+  await send(page);
+  await page.locator("#sent").waitFor({ state: "visible", timeout: 3000 }).catch(() => {}); // the Sent panel shows after any Send, whatever the key
+  const after = await rows();
+  const acted = before.findIndex((r) => r.text.includes(PARK_A.ref));
+  assert.ok(acted >= 0 && before.length === 3 && after.length === 3, "expected three parked lines, got " + before.length + " before and " + after.length + " after");
+  for (let i = acted + 1; i < before.length; i++) {
+    assert.ok(after[i].text.includes(before[i].text.slice(0, 20)), "parked lines changed order on Send");
+    assert.ok(Math.abs(after[i].top - before[i].top) <= 0.5, "the line below the sent park act moved by " + (after[i].top - before[i].top).toFixed(2) + "px: " + before[i].text.slice(0, 40));
+  }
+});
+
+// The meta listener runs keepRouted(was, now) and then renders. These cases make the same two calls, so the list change
+// goes through the same code the writer's update does.
+const changeMeta = (page, parked) => page.evaluate((list) => { const was = state.meta; state.meta = { writer: "triage", parked: list }; keepRouted(was, state.meta); render(); }, parked);
+
+test("a sent park line whose entry leaves the list while in view shows the filled badge and keeps its height", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  const line = parkLine(page, PARK_A);
+  await line.scrollIntoViewIfNeeded();
+  const sentBox = await line.boundingBox();
+  assert.ok(sentBox && sentBox.y >= 0 && sentBox.y < 900, "the line is not in view before its entry leaves");
+  await changeMeta(page, [PARK_B]); // the writer drops PARK_A while its line is in view
+  await need(line, "the line left the page when its entry left the list");
+  await need(line.locator(".ans.filed", { hasText: "Unparked" }), "the line shows no filled Unparked badge");
+  const routedBox = await line.boundingBox();
+  assert.ok(Math.abs(routedBox.height - sentBox.height) <= 0.5, "the line changed height from " + sentBox.height + " to " + routedBox.height);
+});
+
+test("a stored park draft whose entry is gone is pruned on load, and a later entry with the same id is not pre-staged", async (t) => {
+  const storage = { "waiting.draft": JSON.stringify({ [parkKey(PARK_A)]: { act: "unpark" } }) };
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_B] }, storage }); if (!page) return;
+  await parkLoaded(page);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("waiting.draft") || "{}"));
+  assert.equal(parkKey(PARK_A) in stored, false, "the draft of a gone entry is still in waiting.draft: " + JSON.stringify(stored));
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on the draft of a gone entry");
+  await changeMeta(page, [PARK_A, PARK_B]); // a later entry with the same id
+  await need(parkLine(page, PARK_A), "the later entry with the same id is not on the page");
+  assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
 });

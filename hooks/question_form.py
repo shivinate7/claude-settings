@@ -24,7 +24,9 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
-PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
+PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
+Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
+text passes). A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
 or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
@@ -71,6 +73,26 @@ BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | 
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
 BASED_MAX = 3
+# A side or a line's text that is only an angle-bracket placeholder is the template copied verbatim. The one
+# home of that check: the Goal, Problem and Based on lines and both sides of a Departs from line call it.
+PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The text after the label on each form line, for the placeholder check. Real text that holds angle
+# brackets, such as `<Button>`, is no placeholder: only the whole text must be one.
+FORM_LINE_TEXT = (("Goal", re.compile(r"^[ \t]*Goal:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Problem", re.compile(r"^[ \t]*Problem(?:[ \t]*\([^()\n]*\))?:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Based on", re.compile(r"^[ \t]*Based on[ \t]*\([^()\n]*\):[ \t]*([^\n]*)", re.I | re.M)))
+
+
+def is_placeholder(text) -> bool:
+    return bool(PLACEHOLDER_SIDE.fullmatch(str(text).strip()))
+
+
+def placeholder_form_hit(text):
+    """(rule, matched) for the first Goal, Problem or Based on line whose text is only a placeholder."""
+    for label, rx in FORM_LINE_TEXT:
+        if any(is_placeholder(value) for value in rx.findall(text)):
+            return FORM_RULE, "%s line that is only a placeholder: write the real text" % label
+    return PASS
 
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
@@ -104,7 +126,7 @@ def _lines_hit(text, stands=False):
     goal, problem, based = (rx.search(text).start() for rx in (GOAL_LINE, PROBLEM_LABEL, BASED_LABEL))
     if not goal < problem < based:
         return FORM_RULE, "lines out of order: Goal, then Problem, then Based on"
-    return PASS
+    return placeholder_form_hit(text)
 
 
 def _problem_state(text, stands):
@@ -154,13 +176,21 @@ DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
                        r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
-# A side that is only an angle-bracket placeholder is the template copied verbatim.
-PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The new-thing change side, "adds <X>": group 1 is X.
+PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
                   "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+
+
+def departs_sides(rest):
+    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
+    if len(parts) < 2:
+        return rest.strip(), "", False
+    return parts[0].strip(), parts[1].strip(), True
 
 
 def departs_hit(text) -> str:
@@ -173,13 +203,13 @@ def departs_hit(text) -> str:
     if not lines:
         return "no Departs from line"
     for rest in lines:
-        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-        if len(parts) < 2:
+        main, change, split = departs_sides(rest)
+        if not split:
             return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
-        main, change = parts[0].strip(), parts[1].strip()
         if not main or not change:
             return "Departs from line with an empty side"
-        if PLACEHOLDER_SIDE.fullmatch(main) or PLACEHOLDER_SIDE.fullmatch(change):
+        added = PORT_NEW_THING.fullmatch(change)
+        if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
@@ -197,8 +227,34 @@ PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|red
                        r"|rewrite\s+of|rebuild\s+of)\b", re.I)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
                "departs from the app, and it never holds work. Add a line to context that starts "
-               "\"Departs from: <file>:<symbol> — <what changes>\", leave out holds, or set "
-               "port to false if this is not a port.")
+               "\"Departs from: <file>:<symbol> — <what changes>\" (or \"Departs from: main — adds <X>\" "
+               "for a new thing), leave out holds, or set port to false if this is not a port.")
+
+
+# A port's Departs from line names the place on main as "<file>:<symbol>" (backticks around it are read, and
+# a path may hold [id], (group) and @ for a Next.js or alias path), or says "main" for a new thing and then
+# "adds <X>".
+PORT_MAIN_SIDE = re.compile(r"[\w./@\[\]()-]+:(?!//)[\w.$-]+(?:\(\))?")
+
+
+def port_departs_miss(text) -> str:
+    """The miss reason when a port's Departs from line, any of them, is not a valid Departs from line (the
+    one predicate, departs_hit: no placeholder or no-change side) or does not name `<file>:<symbol>` on main
+    (or `main` with `adds <X>`). "" when each does. A text with no such line is judged elsewhere."""
+    text = str(text or "")
+    miss = departs_hit(text)
+    if miss:
+        return miss
+    for rest in DEPARTS_LINE.findall(text):
+        main, change, _ = departs_sides(rest)
+        main = main.strip("`").strip()
+        if main.lower() == "main":
+            if PORT_NEW_THING.fullmatch(change):
+                continue
+        elif PORT_MAIN_SIDE.fullmatch(main):
+            continue
+        return "port item whose Departs from line names no <file>:<symbol> on main"
+    return ""
 
 
 def _item_text(data) -> str:
@@ -221,6 +277,8 @@ def port_item_hit(op: str, data) -> str:
         return "port item with holds"
     if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
         return "port item with no Departs from line"
+    if op == "set" or "context" in data:
+        return port_departs_miss(data.get("context"))
     return ""
 
 
@@ -337,19 +395,26 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
-# A shell line in a step's backtick span or fence: it chains with an operator, its first word is a
-# Verb-Noun cmdlet, or its first word is a program the owner would run with an argument after it. A
-# program alone (`git`) names the tool in prose, and any other backticked word (`main`) or a file name
-# is not a shell line. A path that starts ./ or ../ is a shell line when an argument follows it, when
-# its name has no extension (`./build`), or when it ends in a script extension and a run verb comes
-# before the span in its sentence, or the span is a fence. `./docs/a.md` and an edited
-# `./hooks/guard.py` are files.
+# A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
+# with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
+# its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
+# is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
+# x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
+# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
+# any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
+# a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
+# in a script extension and a run verb comes before the span in its sentence, or the span is a fence.
+# `./docs/a.md` and an edited `./hooks/guard.py` are files.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
                             "gcloud", "bq", "winget"))
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
-SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
+# In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
+CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
+CHAIN_COMMAND = re.compile(r"[a-z][a-z0-9._-]*")
+ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
@@ -366,11 +431,40 @@ def _flat_text(value) -> str:
     return ""
 
 
-def _press_field_ok(text, links, context="") -> bool:
+# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# no `you`: the session makes that press, so the owner presses nothing. Only that clause is excused. A
+# press in another clause stays ("..., then press Merge"), and so does a clause that names `you`.
+SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|(?<=[.!?])\s+|\n|\b(?:then|and)\b", re.I)
+OWNER_YOU = re.compile(r"\byou\b", re.I)
+_PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
+
+
+def _owner_press_text(label, how) -> tuple:
+    """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
+    text. `press_text` is the label and the how without each clause of the how that the session
+    presses (SESSION_PRESS). The label stays a press when it asks for one, unless every press verb in
+    it is a verb that such a clause also holds: "Merge it" beside "The session merges it
+    after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
+    text = label + ". " + how
+    clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
+    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)]
+    if not session:
+        return text, text
+    done = " ".join(session).lower()
+    verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
+             for m in PRESS_VERB.finditer(label)]
+    label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
+    rest = [c for c in clauses if c not in session]
+    return text, " ".join(([] if label_ok else [label]) + rest)
+
+
+def _press_field_ok(text, links, context="", press_text=None) -> bool:
     """True when this field asks for no web press, or `links` holds a link to the exact page. The
-    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
+    press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
+    session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text):
+    if not PRESS_VERB.search(text if press_text is None else press_text):
         return True
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
@@ -394,8 +488,8 @@ def press_link_hit(op, data) -> str:
             if not isinstance(o, dict):
                 continue
             # label and how are one text: the ref may sit in one and the press in the other
-            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
-            if not _press_field_ok(text, o.get("links")):
+            text, press_text = _owner_press_text(_flat_text(o.get("label")), _flat_text(o.get("how")))
+            if not _press_field_ok(text, o.get("links"), press_text=press_text):
                 return "option presses in a web app with no link to the page"
     if isinstance(steps, list) and (op == "set" or "links" in data):
         # the steps are one text, as command-in-item reads them: the page may sit in one step and
@@ -456,19 +550,42 @@ def _relative_run(words, run) -> bool:
     return len(words) >= 2 or "." not in name or (run and name.lower().endswith(SHELL_SCRIPT_EXT))
 
 
+def _chain_command(word, args) -> bool:
+    """True when the command `word`, with `args` words after it, plainly runs a command in a chain."""
+    return (word in SHELL_PROGRAMS or bool(CHAIN_CMDLET.fullmatch(word))
+            or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
+
+
 def _shell_line(span, run) -> bool:
-    """True when a line of this code span is a shell line (see SHELL_PROGRAMS). `run` is as for
-    _relative_run."""
-    for line in span.splitlines():
-        words = line.split()
-        if SHELL_OPERATOR.search(line):
-            return True
+    """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
+    _relative_run. The segments, their prefixes and their command words come from guard_core, the one
+    quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
+    starts with `|` (a table row) or `//` is text and is left out."""
+    import guard_core   # loads only for a step that holds a code span
+    kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
+    segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
+    spaced = bool(re.search(r"\s", "\n".join(kept).strip()))   # `foo|bar` is an alternation, not a pipe
+    chained = len(segments) >= 2 and spaced
+    for segment in segments:
+        tokens = guard_core.segment_tokens(segment)
+        if tokens is not None:
+            found = guard_core.command_indexes(tokens)
+            words = list(tokens[found[0]:]) if found else []
+        else:   # unparseable text: its first word after any VAR=value is the command
+            words = segment.split()
+            while words and ENV_ASSIGNMENT.match(words[0]):
+                words.pop(0)
         if not words:
             continue
+        word = guard_core.basename(words[0])
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0]) or (len(words) >= 2 and words[0] in SHELL_PROGRAMS):
+        elif SHELL_CMDLET.fullmatch(words[0]):
+            return True
+        elif chained and _chain_command(word, len(words) - 1):
+            return True
+        elif word in SHELL_PROGRAMS and len(words) >= 2:
             return True
     return False
 
@@ -510,6 +627,7 @@ GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login 
                    "Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
                    "Switch to %s instead only for a repo %s cannot reach."
                    % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
+GH_NO_SWITCH = "gh command with no gh auth switch before it"
 GH_WORD = re.compile(r"(?<![\w-])gh(?![\w-])")
 
 
@@ -528,6 +646,19 @@ def _shell_reading(guard_core, script):
     return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
 
 
+def _gh_calls(guard_core, reading):
+    """Each gh command of one shell's `reading`, in order, as its tokens from the word gh on. A segment
+    the reader cannot parse that names gh yields None: a gh command, never a switch."""
+    for segment, tokens in reading:
+        if tokens is None:
+            if GH_WORD.search(segment):
+                yield None
+            continue
+        for i in guard_core.command_indexes(tokens):
+            if guard_core.basename(tokens[i]) in ("gh", "gh.exe"):
+                yield tokens[i:]
+
+
 def _gh_script_hit(guard_core, reading, command) -> str:
     """The matched text when one shell's `reading` of `command` runs a gh command other than
     `gh auth ...` with no switch to a login in GH_LOGINS before it, or runs one as GH_FALLBACK_LOGIN
@@ -535,25 +666,65 @@ def _gh_script_hit(guard_core, reading, command) -> str:
     command when the word gh is in it, and never as a switch: the check fails closed there."""
     names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
     login = ""
-    for segment, tokens in reading:
-        if tokens is None:
-            if not GH_WORD.search(segment):
-                continue
-            calls = [None]   # unreadable text that names gh: a gh command, never a switch
+    for call in _gh_calls(guard_core, reading):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            if list(call[2:3]) == ["switch"]:
+                login = _switch_login(list(call[3:]))
+            continue
+        if login not in GH_LOGINS:
+            if login:
+                return "gh command after a switch to %s, a login outside the pair" % login
+            return GH_NO_SWITCH
+        if login == GH_FALLBACK_LOGIN and names_default_repo:
+            return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+    return ""
+
+
+def _command_reading(guard_core, shell, text):
+    """One shell's reading of `text`. The script type picks the rules, never the tool this call came
+    from. A `shell` of "" is a str_replace string: bash's rules read it, or PowerShell's when bash
+    cannot read some segment and PowerShell reads every one."""
+    if shell == "powershell":
+        return _shell_reading(guard_core, guard_core.PowerShellScript(text))
+    reading = _shell_reading(guard_core, guard_core.PosixScript(text))
+    if not shell and any(tokens is None for _, tokens in reading):
+        powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
+        if all(tokens is not None for _, tokens in powershell):
+            return powershell
+    return reading
+
+
+def _gh_counts(text):
+    """(gh commands other than `gh auth ...`, `gh auth switch` commands) in a command string."""
+    if not GH_WORD.search(text):
+        return 0, 0
+    import guard_core
+    commands = switches = 0
+    for call in _gh_calls(guard_core, _command_reading(guard_core, "", text)):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            switches += list(call[2:3]) == ["switch"]
         else:
-            calls = [tokens[i:] for i in guard_core.command_indexes(tokens)
-                     if guard_core.basename(tokens[i]) in ("gh", "gh.exe")]
-        for call in calls:
-            if call is not None and list(call[1:2]) == ["auth"]:
-                if list(call[2:3]) == ["switch"]:
-                    login = _switch_login(list(call[3:]))
-                continue
-            if login not in GH_LOGINS:
-                if login:
-                    return "gh command after a switch to %s, a login outside the pair" % login
-                return "gh command with no gh auth switch before it"
-            if login == GH_FALLBACK_LOGIN and names_default_repo:
-                return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+            commands += 1
+    return commands, switches
+
+
+def gh_edit_hit(old, new) -> str:
+    """The matched text when a str_replace on `command` turns `old` into `new` and leaves a gh command
+    that gh_login_hit refuses. The stored command is unseen, so `new` is judged alone, except that the
+    one reason GH_NO_SWITCH is excused for an edit that only changes gh commands `old` already held: it
+    adds no gh command, and it holds no switch in `old` or `new` for the edit to remove or move, so the
+    switch the stored command keeps still stands. Every other reason stands. So does an edit that adds
+    a GH_DEFAULT_LOGIN repo name, since the stored login may be GH_FALLBACK_LOGIN."""
+    hit = gh_login_hit({"command": new})
+    if hit != GH_NO_SWITCH:
+        return hit
+    old_gh, old_switch = _gh_counts(old)
+    new_gh, new_switch = _gh_counts(new)
+    if not old_gh or new_gh > old_gh or old_switch or new_switch:
+        return hit
+    repo = GH_DEFAULT_LOGIN + "/"
+    if new.lower().count(repo) > old.lower().count(repo):
+        return "gh edit that names a %s/ repo, and the stored login is unseen" % GH_DEFAULT_LOGIN
     return ""
 
 
@@ -576,16 +747,7 @@ def gh_login_hit(data) -> str:
         if not isinstance(text, str) or not GH_WORD.search(text):
             continue
         import guard_core
-        # The script type picks the rules, never the tool this call came from.
-        if shell == "powershell":
-            reading = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-        else:
-            reading = _shell_reading(guard_core, guard_core.PosixScript(text))
-            if not shell and any(tokens is None for _, tokens in reading):
-                powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-                if all(tokens is not None for _, tokens in powershell):
-                    reading = powershell
-        hit = _gh_script_hit(guard_core, reading, text)
+        hit = _gh_script_hit(guard_core, _command_reading(guard_core, shell, text), text)
         if hit:
             return "%s: %s" % (shell, hit) if shell else hit
     return ""
@@ -682,6 +844,9 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    hit = placeholder_form_hit(new)
+    if hit[0]:
+        return hit
     # A context edit that holds a Departs from line in old_str or new_str keeps a valid one: dropping it, or
     # writing one that restates main, is refused. An edit with no such line in either is not judged.
     if DEPARTS_LINE.search(old) or DEPARTS_LINE.search(new):
@@ -702,8 +867,9 @@ def item_hit(op, entry):
         if hit:
             return "task-names-check", hit
         if entry.get("field") == "command":
-            # The stored command is unseen, so new_str is judged as the whole command.
-            hit = gh_login_hit({"command": entry.get("new_str")})
+            # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
+            # a gh command old_str held.
+            hit = gh_edit_hit(str(entry.get("old_str") or ""), entry.get("new_str"))
             if hit:
                 return "gh-login-switch", hit
         hit = form_str_replace_hit(entry)
@@ -801,6 +967,22 @@ def page_item_hit(tool_input, cwd=""):
         if hit[0]:
             return hit, writes
     return PASS, writes
+
+
+def design_writes(writes):
+    """The (op, doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty
+    `designs` list, or an option with a `design`. Rule page-item-design reads only these, so a write with no
+    picture never starts the checker."""
+    found = []
+    for op, entry in writes:
+        data = _write_data(entry) if op in ("set", "update") else None
+        if not isinstance(data, dict) or data.get("status") == "closed":  # a closed item is not drawn
+            continue
+        options = data.get("options")
+        has_option = isinstance(options, list) and any(isinstance(o, dict) and o.get("design") for o in options)
+        if data.get("designs") or has_option:
+            found.append((op, entry.get("doc_id"), data))
+    return found
 
 
 def _judged_fragment(field):
@@ -1044,7 +1226,8 @@ def _chat_question_hit(question, options):
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
-        if not _press_field_ok(label + ". " + EFFECT_TEXT.sub("", desc), links):
+        text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
+        if not _press_field_ok(text, links, press_text=press_text):
             return "press-link", "option presses in a web app with no url to the page"
     text = str(question.get("question") or "")
     hit = _lines_hit(text)

@@ -1,0 +1,12 @@
+# Files install.sh and install.ps1 may remove from ~/.claude (or %USERPROFILE%\.claude) on the first run
+# after the install manifest was added, when main no longer ships them. One <folder>/<name> per line,
+# the folder as in landed-dirs.txt. Blank lines and text after # are ignored.
+#
+# A listed link into the clone is deleted. Anything else listed (a real file or folder, a link that points
+# elsewhere or dangles) is moved to backups/retired under the config folder, never deleted. A name main still ships is never touched.
+# After that first run the install manifest decides what to remove, and this list is not read.
+skills/tile-windows
+hooks/config_report.py
+bin/janitor.py
+bin/reap.py
+bin/session-teardown.sh
