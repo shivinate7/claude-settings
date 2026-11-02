@@ -16934,10 +16934,9 @@ def _oc_verdict(expect, got, reason):
     return True, "judge says %s" % expect
 
 
-def oc_incident_two_exact_case():
-    """The exact incident 2 form, `cd <notes> && git add f && git commit -m x`, from the primary.
-    No redirect and no listed command writes here, so other-checkout reads no write at 49a41651.
-    It must pass before the fix and after it."""
+def oc_git_commit_after_cd_control_case():
+    """`cd <notes> && git add f && git commit -m x` from the primary. git add and git commit carry no
+    write other-checkout reads, so this is a control: the fix must leave it allowed."""
     paths = _oc_fixture()
     got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
                              command="cd %s && git add f && git commit -m x" % slash(paths["notes"]))
@@ -17071,7 +17070,7 @@ def oc_git_dash_c_case():
     return _oc_verdict("allow", got, reason)
 
 
-LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 2 form (git add, git commit) from the primary passes", oc_incident_two_exact_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: git add and git commit after a cd into the scratchpad stay allowed (control)", oc_git_commit_after_cd_control_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 2 form with a redirect write from the primary passes", oc_incident_two_redirect_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 3 heredoc into a scratchpad worktree passes", oc_incident_three_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a Write into a scratchpad worktree from the primary passes", oc_write_tool_case))
@@ -17085,7 +17084,7 @@ LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a dot-dot path out of the s
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the redirect write with an agent_id stays refused", oc_agent_case))
 LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: git -C into a scratchpad worktree passes", oc_git_dash_c_case))
 # Each builds its own run-folder fixture and reads no lazy one, so a MUTATE_ONLY run skips the build.
-FIXTURELESS_CHECKS.update((oc_incident_two_exact_case, oc_incident_two_redirect_case,
+FIXTURELESS_CHECKS.update((oc_git_commit_after_cd_control_case, oc_incident_two_redirect_case,
                            oc_incident_three_case, oc_write_tool_case, oc_resume_shape_case,
                            oc_symlink_case, oc_other_session_case, oc_session_worktree_case,
                            oc_chained_cd_case, oc_symlink_inside_case, oc_dotdot_case,
