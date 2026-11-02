@@ -16289,9 +16289,22 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
-def _cross_checkout_fixture(name):
+# The worktrees `sessions` gets under its own scratchpad, one folder per name (see _cross_checkout_fixture).
+OC_SP_WORKTREES = ("wt-notes", "wt-roadmap")
+
+
+def _scratch_worktree_path(name, session_id, worktree):
+    """Where a session's scratchpad worktree of the `name` fixture sits:
+    `<ROOT>/<name>_sp/<session_id>/scratchpad/<worktree>`, real-pathed the way the guard reads it.
+    ROOT is this run's folder, so the teardown removes it with the run."""
+    return os.path.realpath(os.path.join(ROOT, name + "_sp", session_id, "scratchpad", worktree))
+
+
+def _cross_checkout_fixture(name, sessions=()):
     """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
-    shape the harness makes, and a scratch folder outside the clone. Returns the four paths."""
+    shape the harness makes, and a scratch folder outside the clone. Returns the four paths.
+    `sessions` adds each session's scratchpad worktrees (OC_SP_WORKTREES), made with `git worktree
+    add` under that session's own scratchpad folder, so the guard lists them as checkouts."""
     primary = os.path.join(ROOT, name + "_primary")
     lane_a = os.path.join(primary, ".claude", "worktrees", "lane-a")
     lane_b = os.path.join(primary, ".claude", "worktrees", "lane-b")
@@ -16301,6 +16314,16 @@ def _cross_checkout_fixture(name):
         run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-lane-a")
         run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-lane-b")
         os.makedirs(scratch, exist_ok=True)
+    for session_id in sessions:
+        for worktree in OC_SP_WORKTREES:
+            where = _scratch_worktree_path(name, session_id, worktree)
+            if os.path.isdir(where):
+                continue
+            os.makedirs(os.path.dirname(where), exist_ok=True)
+            made = run_vcs(primary, "worktree", "add", "-q", where, "-b", session_id + "-" + worktree)
+            if made.returncode != 0:
+                sys.exit("fixture setup failed in _cross_checkout_fixture: git worktree add %r: %s"
+                         % (where, made.stderr.strip()))
     return primary, lane_a, lane_b, scratch
 
 
@@ -16847,6 +16870,226 @@ LOG_CHECKS = (
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+
+
+# ---- other-checkout and a worktree under this session's own scratchpad. A scratchpad is in no
+# checkout, but `git worktree add` under it makes a checkout of the clone, which the guard lists.
+# The writes below must pass into this session's own scratchpad worktrees, and the refusals must
+# hold. Every label starts "other-checkout scratchpad:", so MUTATE_ONLY selects exactly these.
+OC_SID = "scwt-sess-alpha-01"        # this session: its scratchpad holds the worktrees
+OC_OTHER_SID = "scwt-sess-bravo-02"  # another session, with its own scratchpad worktrees
+OC_AGENT_ID = "scwtagent1"           # an agent that shares OC_SID's session id
+
+
+def _oc_fixture():
+    """The fixture the session-scratchpad cases share: the cross-checkout fixture, with this
+    session's and another session's scratchpad worktrees. Returns the paths the cases name."""
+    primary, lane_a, _lane_b, _scratch = _cross_checkout_fixture(
+        "scwt", sessions=(OC_SID, OC_OTHER_SID))
+    notes = _scratch_worktree_path("scwt", OC_SID, "wt-notes")
+    return {
+        "primary": primary,
+        "session_wt": lane_a,
+        "notes": notes,
+        "roadmap": _scratch_worktree_path("scwt", OC_SID, "wt-roadmap"),
+        "other_notes": _scratch_worktree_path("scwt", OC_OTHER_SID, "wt-notes"),
+        "scratchpad": os.path.dirname(notes),
+    }
+
+
+def _oc_links(paths):
+    """Two symlinks for the symlink cases. `lnk` sits in a folder outside every session scratchpad
+    and points into this session's `wt-notes`. `jump` sits in this session's scratchpad and points
+    at the session worktree. Returns (lnk, jump), or None where the platform makes no symlink."""
+    outside = os.path.join(ROOT, "scwt_linkhome")
+    os.makedirs(outside, exist_ok=True)
+    lnk = os.path.join(outside, "lnk")
+    jump = os.path.join(paths["scratchpad"], "jump")
+    try:
+        for link, target in ((lnk, paths["notes"]), (jump, paths["session_wt"])):
+            if not os.path.lexists(link):
+                os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        return None
+    return lnk, jump
+
+
+def _oc_decide(tool, cwd, session, agent_id=None, **tool_input):
+    """One full judge run for an other-checkout case. The payload names the session id, and the
+    environment's own session id is cleared for the call, so only the payload's id reaches the guard."""
+    saved = os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+    try:
+        return _decide_full(tool, cwd, agent_id=agent_id, session=session, **tool_input)
+    finally:
+        if saved is not None:
+            os.environ["CLAUDE_CODE_SESSION_ID"] = saved
+
+
+def _oc_verdict(expect, got, reason):
+    """(ok, note): the judge's decision is `expect`, and a refusal names other-checkout."""
+    if got != expect:
+        return False, "want %s, got %s (%s)" % (expect, got, reason[:120])
+    if expect == "deny" and "other-checkout" not in reason:
+        return False, "the refusal must name other-checkout: %s" % reason[:160]
+    return True, "judge says %s" % expect
+
+
+def oc_incident_two_exact_case():
+    """The exact incident 2 form, `cd <notes> && git add f && git commit -m x`, from the primary.
+    No redirect and no listed command writes here, so other-checkout reads no write at 49a41651.
+    It must pass before the fix and after it."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
+                             command="cd %s && git add f && git commit -m x" % slash(paths["notes"]))
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_incident_two_redirect_case():
+    """The incident 2 form with its write made by a redirect (`echo x > f`), from the primary into
+    this session's notes worktree. The redirect is the write other-checkout reads, so it must pass."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide(
+        "Bash", paths["primary"], OC_SID,
+        command="cd %s && echo x > f && git add f && git commit -m x" % slash(paths["notes"]))
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_incident_three_case():
+    """The incident 3 form: a heredoc written into this session's roadmap worktree after a cd, from
+    the primary. It must pass."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
+                             command="cd %s && cat > f <<'EOF'\nx\nEOF" % slash(paths["roadmap"]))
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_write_tool_case():
+    """A Write whose file_path sits in this session's notes worktree, from the primary. It must pass."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Write", paths["primary"], OC_SID,
+                             file_path=os.path.join(paths["notes"], "f"), content="x")
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_resume_shape_case():
+    """A resumed session whose cwd is its own session worktree, `.claude/worktrees/lane-a`, and whose
+    command cds into this session's notes worktree and writes there. Same session id, so it passes."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["session_wt"], OC_SID,
+                             command="cd %s && echo x > f" % slash(paths["notes"]))
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_symlink_case():
+    """A Write through a symlink that sits outside every session scratchpad and points into this
+    session's notes worktree. The target resolves into this session's scratchpad, so it must pass."""
+    paths = _oc_fixture()
+    links = _oc_links(paths)
+    if links is None:
+        return SKIP, "this platform makes no symlink"
+    lnk, _jump = links
+    if os.path.normcase(os.path.realpath(lnk)) != os.path.normcase(paths["notes"]):
+        return False, "fixture: the link resolves to %s, not the notes worktree" % os.path.realpath(lnk)
+    got, reason = _oc_decide("Write", paths["primary"], OC_SID,
+                             file_path=os.path.join(lnk, "f"), content="x")
+    return _oc_verdict("allow", got, reason)
+
+
+def oc_other_session_case():
+    """Another session's scratchpad worktree, cd'd into and written, stays refused. This session's
+    allowance covers its own scratchpad only."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
+                             command="cd %s && echo x > f" % slash(paths["other_notes"]))
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_session_worktree_case():
+    """A cd from the primary into the session worktree, `.claude/worktrees/lane-a`, then a write.
+    It stays refused."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
+                             command="cd %s && echo x > f" % slash(paths["session_wt"]))
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_chained_cd_case():
+    """A cd into this session's notes worktree, then a cd into the session worktree, then a write.
+    The write lands in the session worktree, so it stays refused."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide(
+        "Bash", paths["primary"], OC_SID,
+        command="cd %s && cd %s && echo x > f" % (slash(paths["notes"]), slash(paths["session_wt"])))
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_symlink_inside_case():
+    """A Write through a symlink inside this session's scratchpad that points at the session worktree.
+    The path is textually in the scratchpad, but it resolves into `.claude/worktrees/`, so it stays
+    refused."""
+    paths = _oc_fixture()
+    links = _oc_links(paths)
+    if links is None:
+        return SKIP, "this platform makes no symlink"
+    _lnk, jump = links
+    if os.path.normcase(os.path.realpath(jump)) != os.path.normcase(os.path.realpath(paths["session_wt"])):
+        return False, "fixture: the link resolves to %s, not the session worktree" % os.path.realpath(jump)
+    got, reason = _oc_decide("Write", paths["primary"], OC_SID,
+                             file_path=os.path.join(jump, "f"), content="x")
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_dotdot_case():
+    """A path spelled `<notes>/../../../../...` that lands in the session worktree. It starts in this
+    session's scratchpad as text and resolves out of it, so it stays refused."""
+    paths = _oc_fixture()
+    target = os.path.realpath(os.path.join(paths["session_wt"], "f"))
+    dotdot = os.path.join(paths["notes"], "..", os.path.relpath(target, paths["scratchpad"]))
+    if os.path.realpath(dotdot) != target:
+        return False, "fixture: the dot-dot path resolves to %s, not %s" % (
+            os.path.realpath(dotdot), target)
+    got, reason = _oc_decide("Write", paths["primary"], OC_SID, file_path=dotdot, content="x")
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_agent_case():
+    """The redirect form of the incident 2 command, from the primary, carrying an agent_id. An agent
+    shares its session's id, so the scratchpad allowance does not reach it. It stays refused."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide(
+        "Bash", paths["primary"], OC_SID, agent_id=OC_AGENT_ID,
+        command="cd %s && echo x > f && git add f && git commit -m x" % slash(paths["notes"]))
+    return _oc_verdict("deny", got, reason)
+
+
+def oc_git_dash_c_case():
+    """`git -C <notes> commit -m x` from the primary. A git command run with -C is no write in the
+    record, so it must pass."""
+    paths = _oc_fixture()
+    got, reason = _oc_decide("Bash", paths["primary"], OC_SID,
+                             command="git -C %s commit -m x" % slash(paths["notes"]))
+    return _oc_verdict("allow", got, reason)
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 2 form (git add, git commit) from the primary passes", oc_incident_two_exact_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 2 form with a redirect write from the primary passes", oc_incident_two_redirect_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the incident 3 heredoc into a scratchpad worktree passes", oc_incident_three_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a Write into a scratchpad worktree from the primary passes", oc_write_tool_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a resumed session cd'ing into its scratchpad worktree passes", oc_resume_shape_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a symlink outside the scratchpad into it, written through, passes", oc_symlink_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: another session's scratchpad worktree stays refused", oc_other_session_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a cd from the primary into a session worktree stays refused", oc_session_worktree_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a cd into the scratchpad, then a session worktree, stays refused", oc_chained_cd_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a symlink inside the scratchpad to a session worktree stays refused", oc_symlink_inside_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: a dot-dot path out of the scratchpad into a session worktree stays refused", oc_dotdot_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: the redirect write with an agent_id stays refused", oc_agent_case))
+LOG_CHECKS_EXTRA.append(("other-checkout scratchpad: git -C into a scratchpad worktree passes", oc_git_dash_c_case))
+# Each builds its own run-folder fixture and reads no lazy one, so a MUTATE_ONLY run skips the build.
+FIXTURELESS_CHECKS.update((oc_incident_two_exact_case, oc_incident_two_redirect_case,
+                           oc_incident_three_case, oc_write_tool_case, oc_resume_shape_case,
+                           oc_symlink_case, oc_other_session_case, oc_session_worktree_case,
+                           oc_chained_cd_case, oc_symlink_inside_case, oc_dotdot_case,
+                           oc_agent_case, oc_git_dash_c_case))
 
 
 # =========================================================================== session-home
