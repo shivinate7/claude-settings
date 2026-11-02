@@ -907,3 +907,4 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
