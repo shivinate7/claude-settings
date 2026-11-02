@@ -13,11 +13,15 @@
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
   commit added on the branch alone is the branch's, except to the lane undo read.
-- **Lane undo.** A commit of the branch removes lines that an earlier commit of the same branch added,
-  and head still lacks them. It reuses the reversal rules, with the branch's own earlier commits as the
-  earlier work, so a move, a rename, a re-wrap and a rewrite stay excused. A merge of main that drops the
-  branch's own line counts too: a conflict fix keeps both sides. A branch of one commit has nothing to
-  read. Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
+- **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
+  and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
+  flags two shapes: a whole file put back to its text before E, when E changed 6 or more non-blank lines
+  in it (`BLOCK_LINES`), on any path; and a net loss or a delete of E's lines on a test path
+  (`is_test_rel` in `hooks/guard.py`). A line is E's work only when no earlier state of the branch held
+  it, so a restore is never an undo. A merge of main that drops the branch's own lines counts too: a
+  conflict fix keeps both sides. A branch of one commit has nothing to read. Reason for two shapes: on
+  the 31 batches merged 2026-10-31 to 2026-11-02, they go red on 9, with 4 real undos in 10 findings
+  (coordinator, 2026-11-02 11:26 CST; owner's word pending). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
   2026-11-02, such as 3297d8fa, which undid 091c8708, and df25a68d, which dropped 49 test lines. Each
   cost a review round. Builders now edit in place, and a round 2 or 3 brief has a `Keep:` line
   (`agents/builder.md`, `roles-brief-contents`).
