@@ -967,6 +967,13 @@ class TodoWithOpenPull(UpkeepFixture):
         page, _ = self.build_from_main("--live", str(self.live), expect=(1,))
         self.assertIn("Feedback repeat detect", page)
 
+    def test_live_file_with_no_sessions_list_still_goes_red_on_the_pair(self):
+        # The pair gate reads readAt and pulls only. publish() leaves the sessions key out, so the gate must not need it.
+        self.commit_step("r7")
+        self.publish(pulls=[{"number": 70, "title": "r7 lane", "branch": "r7"}])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["r7 (#70)"])
+
     def test_title_token_names_the_step(self):
         self.commit_step("r5")
         self.publish(sessions=[], pulls=[{"number": 50, "title": "r5: fix x", "branch": "lane-q"}])
@@ -1047,6 +1054,22 @@ class ReadyAndDraftRows(UpkeepFixture):
                             self.draft(1002, "lone-draft", self.created_before(780))])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
+
+    def test_draft_whose_title_holds_a_live_step_id_is_still_listed(self):
+        # Only the draft's branch can lane it. The title "Follow-up for c91" holds the live step c91 and stays listed.
+        # c91 is the control: its branch is the step, so it is laned.
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c91")],
+                     pulls=[self.draft(1001, "c91-cleanup", self.created_before(780), "Follow-up for c91"),
+                            self.draft(1002, "c91", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c91-cleanup)"]))
+
+    def test_empty_step_tag_names_no_draft(self):
+        # An empty step id names nothing, so the title "a: b" does not lane this draft.
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:")],
+                     pulls=[self.draft(1001, "lone-draft", self.created_before(780), "a: b")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
 
     def test_draft_without_a_usable_created_at_reads_its_entry_unknown(self):
         bad = {"missing": None, "no zone": "2026-11-02T01:14:22", "not a time": "yesterday"}
