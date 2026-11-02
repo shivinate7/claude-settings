@@ -1384,10 +1384,17 @@ def _option_keys(reply) -> list:
     return found
 
 
+def _same_question(one, other) -> bool:
+    """True when two question lines are one question, reworded or not: they share at least half of their words
+    (lowercase words of 4+ letters, minus the stop words). Lines with no such word compare as text."""
+    a, b = _words(one), _words(other)
+    return one == other or (bool(a | b) and len(a & b) * 2 >= len(a | b))
+
+
 def key_overlap(reply, earlier_replies) -> str:
     """The option keys, comma joined, that two questions share. A key used twice in the Input Needed of `reply` is
     a clash. So is a key that an assistant reply since the last human message also uses under a different question
-    line. The same key under the same question line is a question sent again, never a clash. '' when none clash."""
+    line. The same key under the same question, reworded or not, is a question sent again, never a clash. '' when none clash."""
     seen, clash = {}, set()
     for key, question in _option_keys(reply):
         if key in seen:
@@ -1395,6 +1402,6 @@ def key_overlap(reply, earlier_replies) -> str:
         seen.setdefault(key, question)
     for earlier in earlier_replies:
         for key, question in _option_keys(earlier):
-            if key in seen and seen[key] != question:
+            if key in seen and not _same_question(seen[key], question):
                 clash.add(key)
     return ", ".join(sorted(clash))
