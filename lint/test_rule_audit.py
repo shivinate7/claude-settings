@@ -2021,6 +2021,25 @@ class RefusalCiteHelperTests(unittest.TestCase):
         body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
 
+    def test_a_generic_handler_beside_a_stop_handler_is_not_read_as_cited(self):
+        # The Stop handler binds `e` too. The generic handler's `e` is no Stop, so its text is not carried.
+        head = '    try:\n        pass\n    except Stop as e:\n        pass\n    except OSError as e:\n'
+        for tail in ('        fail(str(e))\n', '        raise Stop(str(e))\n'):
+            with self.subTest(tail=tail):
+                self.assertEqual(status_of(body_src(head + tail, FAIL), "merge:go", module="merge"), ["not resolved"])
+
+    def test_a_stop_handler_beside_a_generic_handler_still_reads_as_cited(self):
+        head = '    try:\n        pass\n    except OSError as e:\n        pass\n    except Stop as e:\n'
+        for tail in ('        fail(str(e))\n', '        raise Stop(str(e))\n'):
+            with self.subTest(tail=tail):
+                self.assertEqual(status_of(body_src(head + tail, FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_generic_handler_inside_a_stop_handler_is_not_read_as_cited(self):
+        # The nearest except clause that binds `e` is the generic one, so the Stop above it does not carry.
+        body = ('    try:\n        pass\n    except Stop as e:\n        try:\n            pass\n'
+                '        except OSError as e:\n            fail(str(e))\n')
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
+
     def test_a_nested_def_that_only_returns_is_no_site(self):
         body = '    def keep(why):\n        return False\n    return keep("see decision alpha")\n'
         src = body_src(body)
@@ -2063,6 +2082,25 @@ class RefusalCiteHelperTests(unittest.TestCase):
         src = 'from guard_core import refuse as r\ndef go(t, m):\n    r(t, "deny", "alias-id", "no cite", m)\n'
         extra = {"guard_core": 'def refuse(tool, decision, rule, reason, matched):\n    pass\n'}
         self.assertEqual(status_of(src, "alias-id", extra=extra), ["no cite"])
+
+    HELPER_DEFS = 'def keep(why):\n    raise Stop(why + " stays on branch.")\n'
+
+    def test_an_attribute_read_of_a_helper_name_does_not_make_it_a_direct_site(self):
+        # `opts.keep` reads an attribute of some object, not the helper, so the helper stays a helper.
+        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        extra = {"guard": "def read(opts):\n    return opts.keep\n"}
+        self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), [])
+        self.assertEqual(status_of(src, "merge:go", extra=extra, module="merge"), ["cited"])
+
+    def test_a_name_another_module_imports_from_the_helper_module_is_no_helper(self):
+        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        extra = {"guard": "from merge import keep\n"}
+        self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
+
+    def test_a_name_read_through_the_helper_module_alias_is_no_helper(self):
+        src = body_src('    keep("see decision alpha")\n', self.HELPER_DEFS)
+        extra = {"guard": "import merge as m\ndef read():\n    return m.keep\n"}
+        self.assertEqual(status_of(src, "merge:keep", extra=extra, module="merge"), ["no cite"])
 
 
 class RefusalCiteRatchetTests(unittest.TestCase):
