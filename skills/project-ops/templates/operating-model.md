@@ -32,7 +32,12 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
-  record `records-index-at-merge`). Then it runs `--confirm` again to merge.
+  record `records-index-at-merge`). Then it runs `--confirm` again to merge. Batches overlap
+  (claude-settings record `no-merge-during-batch-ci`: no merge while a batch's CI runs). Once
+  batch N's ready run starts, the batch runner builds batch N+1 on N's head at ready, as a PR on
+  the same base, and runs it. N may merge while N+1's run goes on, because N+1's head contains
+  N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
+  fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the

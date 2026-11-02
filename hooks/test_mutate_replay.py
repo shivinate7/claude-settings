@@ -20,7 +20,10 @@ asks for the score. The failure classes under test:
 - a banchi pull request that changes a T7 group module, harness/tests/t7/<group>.py, is scored by that group's own
   checks, in T7's order and setup, and by no other group's; a changed helper with no CHECKS is no suite; a group
   with no checks reads unusable, never green; a check that raises is a crash, never a kill; a tN module and the
-  whole t7_store_and_seams.py still score whole.
+  whole t7_store_and_seams.py still score whole;
+- a file the real q_max or banchi profile does not read as product (a `*.test.mjs` browser test, a
+  `scripts/*-selftest.py`) is never mutated: a pull request that changes only such files and a suite reads NO_PRODUCT,
+  and a product file beside them still reads OK.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
 repository root. A missing package is a FAIL, never a skip. A contract name missing from
@@ -703,13 +706,18 @@ def banchi_profile():
     return profile
 
 
+def banchi_harness(suite_text):
+    """The files of banchi's harness that a fixture needs: the shared types, the home helper, and one tN module at
+    BANCHI_SUITE holding `suite_text`."""
+    return {"harness/tests/__init__.py": BANCHI_INIT, "harness/tests/home.py": BANCHI_HOME, BANCHI_SUITE: suite_text}
+
+
 def banchi_suite(module_text):
     """A tree shaped like banchi's harness, with one module at BANCHI_SUITE. Returns (folder, argv): argv is
     the profile's own runner command, with the suite path filled in and the test's interpreter in place of
     the install's venv."""
     folder = os.path.join(fresh(), "banchi")
-    put(folder, {"harness/tests/__init__.py": BANCHI_INIT, "harness/tests/home.py": BANCHI_HOME,
-                 BANCHI_SUITE: module_text})
+    put(folder, banchi_harness(module_text))
     argv = [piece.replace("{suite}", BANCHI_SUITE) for piece in banchi_profile()["argv"]]
     return folder, argv
 
@@ -1204,6 +1212,107 @@ class ProfileTests(unittest.TestCase):
         fixture = js_fixture()
         row = replay(fixture["repo"], fixture["sha"][1], dict(JS_PROFILE, tests=r"^nothing/"))
         self.assertEqual(row["status"], "NO_TESTS")
+
+
+# ---------------------------------------------------------------------------------------------------
+# Product files under the REAL profiles. The replay reads a changed file as product when the profile's `code`
+# pattern matches it and its `code_not` pattern does not, and a pull request with no product file reads NO_PRODUCT.
+# Each case replays its pull request under the profile that hooks/mutate_guard.py names, and reads the row. So the
+# cases test that decision where it is made, with no copy of it here. Each pull request also changes a suite, so
+# NO_PRODUCT can come only from the product decision.
+
+QMAX_SUITE = "harness/tests/x.test.mjs"
+QMAX_SUITE_TEXT = JS_HEAD + "\ntest('sum', () => {\n  assert.equal(1 + 1, 2);\n});\n"
+QMAX_SUITE_CHANGED = QMAX_SUITE_TEXT + "\ntest('product', () => {\n  assert.equal(2 * 2, 4);\n});\n"
+QMAX_BROWSER_TEST = "harness/browser/verify.test.mjs"
+QMAX_BROWSER_TEST_TEXT = (JS_HEAD + "\nfunction passes(score) {\n  return score >= 50;\n}\n\n"
+                          "test('verify', () => {\n  assert.equal(passes(60), true);\n});\n")
+QMAX_BROWSER_SOURCE = "harness/browser/verify.mjs"
+QMAX_BROWSER_SOURCE_TEXT = "export function verify(score) {\n  return score >= 50;\n}\n"
+QMAX_TSX = "src/components/Chat.tsx"
+QMAX_TSX_TEXT = "export function chat(score: number): boolean {\n  return score >= 50;\n}\n"
+QMAX_BASE = {"README.md": "base\n", QMAX_SUITE: QMAX_SUITE_TEXT}
+
+BANCHI_SUITE_CHANGED = BANCHI_GREEN + "# this change touches the suite too\n"
+BANCHI_SELFTEST = "scripts/pricearchive-selftest.py"
+BANCHI_SELFTEST_TEXT = "def check(price):\n    return price >= 0\n"
+BANCHI_STATUS = "scripts/status.py"
+BANCHI_STATUS_TEXT = "def status(count):\n    return count >= 1\n"
+BANCHI_ROUTES = "server/send_routes.py"
+BANCHI_ROUTES_TEXT = 'def route(path):\n    return path == "/status"\n'
+BANCHI_BASE = {"README.md": "base\n", **banchi_harness(BANCHI_GREEN)}
+
+
+def qmax_profile():
+    """The q_max profile as hooks/mutate_guard.py names it, with its install off: these fixtures need no npm ci."""
+    return dict(mutate_guard.REPLAY_PROFILES["q_max"], install=None)
+
+
+PRODUCT_PROFILES = {"q_max": qmax_profile, "banchi": banchi_profile}
+# case: (profile name, the base commit's files, the pull request's files). A new case adds one entry here.
+PRODUCT_CASES = {
+    "qmax_test_file": ("q_max", QMAX_BASE,
+                       {QMAX_BROWSER_TEST: QMAX_BROWSER_TEST_TEXT, QMAX_SUITE: QMAX_SUITE_CHANGED}),
+    "qmax_browser_source": ("q_max", QMAX_BASE,
+                            {QMAX_BROWSER_SOURCE: QMAX_BROWSER_SOURCE_TEXT, QMAX_SUITE: QMAX_SUITE_CHANGED}),
+    "qmax_tsx_source": ("q_max", QMAX_BASE, {QMAX_TSX: QMAX_TSX_TEXT, QMAX_SUITE: QMAX_SUITE_CHANGED}),
+    "qmax_suite_alone": ("q_max", QMAX_BASE, {QMAX_SUITE: QMAX_SUITE_CHANGED}),
+    "banchi_selftest": ("banchi", BANCHI_BASE,
+                        {BANCHI_SELFTEST: BANCHI_SELFTEST_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
+    "banchi_status": ("banchi", BANCHI_BASE, {BANCHI_STATUS: BANCHI_STATUS_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
+    "banchi_routes": ("banchi", BANCHI_BASE, {BANCHI_ROUTES: BANCHI_ROUTES_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
+}
+
+
+def product_row(case):
+    """The row of the case's pull request, replayed once per run under the case's real profile."""
+    key = "product-" + case
+    if key not in CACHE:
+        profile_name, base, changes = PRODUCT_CASES[case]
+        repo = new_repo("product-" + case)
+        put(repo, base)
+        commit(repo, "Base")
+        sha = pull_request(repo, 1, "Change under test", changes)
+        CACHE[key] = replay_no_raise(repo, sha, PRODUCT_PROFILES[profile_name](), limit=3)
+    return CACHE[key]
+
+
+class QMaxProductTests(unittest.TestCase):
+    """The q_max profile reads a browser test file as test code, so a replay never mutates it. The product files
+    beside it stay product, and so does a source file of the tsx kind."""
+
+    def test_a_browser_test_file_is_not_product(self):
+        row = product_row("qmax_test_file")
+        self.assertEqual(row["status"], "NO_PRODUCT", api("format_replay_row")(row))
+
+    def test_a_browser_source_file_is_product(self):
+        row = product_row("qmax_browser_source")
+        self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
+
+    def test_a_tsx_source_file_is_product(self):
+        row = product_row("qmax_tsx_source")
+        self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
+
+    def test_a_suite_under_harness_tests_is_not_product(self):
+        row = product_row("qmax_suite_alone")
+        self.assertEqual(row["status"], "NO_PRODUCT", api("format_replay_row")(row))
+
+
+class BanchiSelftestTests(unittest.TestCase):
+    """The banchi python profile reads a self-test script as test code, so a replay never mutates it. The modules
+    under scripts/ and server/ stay product."""
+
+    def test_a_python_selftest_script_is_not_product(self):
+        row = product_row("banchi_selftest")
+        self.assertEqual(row["status"], "NO_PRODUCT", api("format_replay_row")(row))
+
+    def test_a_scripts_module_is_product(self):
+        row = product_row("banchi_status")
+        self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
+
+    def test_a_server_module_is_product(self):
+        row = product_row("banchi_routes")
+        self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
 
 
 class EdgeTests(unittest.TestCase):
