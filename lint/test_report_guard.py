@@ -1561,8 +1561,11 @@ class PickSendTests(unittest.TestCase):
         return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
 
     def wake_rows(self):
-        """The records that wake a session into a new turn, as (label, record) pairs."""
-        return (("task notification", human(self.TASK_NOTE)), ("queued command", self.queued("Next question.")))
+        """The records that wake a session into a new turn, as (label, record) pairs. A queued machine notice
+        is not the owner's message, so it wakes the turn without counting as one."""
+        return (("task notification", human(self.TASK_NOTE)),
+                ("queued command", self.queued("Next question.")),
+                ("queued notice", self.queued(self.TASK_NOTE)))
 
     def assert_wake_pick_recorded_then_blocks(self, earlier, wake):
         """A pick asked in the turn that `wake` starts, after an earlier turn made the `earlier` records (a call and
