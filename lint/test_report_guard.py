@@ -1153,8 +1153,6 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_recovered_line_in_the_wrong_place_blocks(self):
         rows = [
-            # Catches: a bold label is read as the plain Recovered line.
-            "> **Done** BUILT abc123\n> **Deviations**\n> - **Recovered:** none\n> **Next** ship it",
             # Catches: a line above the report blockquote counts, when only the blockquote may hold it.
             "Recovered: none\n\n" + REPORT_NO_LINE,
             # Catches: a word that ends in "recovered:" is read as the line.
@@ -1176,19 +1174,74 @@ class CompactionCarryTests(unittest.TestCase):
             "> **Done** BUILT abc123\n> **Next** ship it; Recovered: none",
             # Catches: a ruling named in the line is refused.
             REPORT_RECOVERED_RULING,
+            # Catches: a bold bullet line is refused. Bold passes, as it does at line start (round 2).
+            "> **Done** BUILT abc123\n> **Deviations**\n> - **Recovered:** none\n> **Next** ship it",
         ]
         for reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
 
-    def test_cc_green_no_demand_after_an_earlier_report_since_the_boundary(self):
-        # Catches: a report already given after the boundary still demands the line.
+    def test_cc_green_earlier_report_with_the_line_satisfies_the_demand(self):
+        # Catches: a Recovered line given in an earlier report since the boundary still demands it again.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(REPORT_RECOVERED_NONE),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_earlier_report_without_the_line_does_not_satisfy(self):
+        # Catches: an earlier report with no Recovered line since the boundary satisfies the demand.
         records = [human("do the task"), compact_boundary(), compact_summary(),
                    assistant_text(REPORT_NO_LINE),
                    human("next task"),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                    assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_red_same_turn_earlier_report_without_line_does_not_satisfy(self):
+        # Catches: a report given earlier in the same turn, with no line, satisfies the final report's demand.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(REPORT_NO_LINE),
+                   tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_green_bold_recovered_line_keeps_the_report_shape(self):
+        # Catches: "**Recovered:**" read as an unknown report label fails the shape and sends the
+        # missing-report block. Like "Departs from", it is not a report label.
+        reply = "> **Done** BUILT abc123\n> **Deviations** none\n> **Recovered:** none\n> **Next** ship it"
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_rewrite_without_report_shape_has_no_demand(self):
+        # Catches: the rewrite after a missing-report block demands the line on a reply that is no report.
+        first = self.stop(self.compacted_turn("All done."))
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("Send the report now", first["reason"])
+        self.assertIsNone(self.stop(self.compacted_turn("Correction: the Done line needs a PR ref."), active=True))
+
+    def test_cc_green_correction_line_satisfies_a_later_report(self):
+        # Catches: a correction line posted after a block is not read as a Recovered line, so a later report
+        # demands it again.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("All done."),
+                   assistant_text("Recovered: none"),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
         self.assertIsNone(self.stop(records))
+
+    def test_cc_red_two_text_blocks_report_in_the_second_blocks(self):
+        # Catches: a final message split into two text blocks is read from the first block only.
+        final = {"type": "assistant", "isSidechain": False,
+                 "message": {"role": "assistant", "content": [
+                     {"type": "text", "text": "Committed the guard."},
+                     {"type": "text", "text": REPORT_NO_LINE}]}}
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), final]
+        self.assertBlocksForRecovered(self.stop(records))
 
     def test_cc_red_boundary_in_an_earlier_turn_demands_the_line_on_the_next_report(self):
         # Catches: a boundary from an earlier turn, with no report since, is ignored.
