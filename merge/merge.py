@@ -17,7 +17,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, collections, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -25,7 +25,7 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
     _nowindow = subprocess
 
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
-ALARM_EVENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "ci-alarm", "events.json")  # the events the red-main check judges and their groups; one home, the CI alarm reads this file only (the merge tool also clears a stale red run, `Host.cleared`; the alarm does not)
+ALARM_EVENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "ci-alarm", "events.json")  # the events the red-main check judges and their groups; one home, the CI alarm reads this file only (the merge tool also clears a stale failing run, `Host.cleared`; the alarm does not)
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
 sys.path.insert(0, os.path.dirname(RECORDS))
 try:
@@ -948,14 +948,14 @@ class Host:
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A newer green run of the same group clears a red run (a dispatch
-        clears an older red push). A newer run of another group of the same file clears a red run with a red job only (cleared): it
-        succeeded and passed every non-skipped job of the red run, by exact name; one extra jobs read, of that run. The CI alarm does not
+        not in it is never judged), the newest completed run on `base`. A newer green run of the same group clears a failing run (a dispatch
+        clears an older failing push). A newer run of another group of the same file clears a failing run with a red job only (cleared): it
+        succeeded and ran each non-skipped job of the failing run leg for leg, each passed, by exact name; one extra jobs read, of that run. The CI alarm does not
         apply this clear. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown. A failed read of a clearing candidate leaves the red run red."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown. A failed read of a clearing candidate leaves the failing run failing."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
@@ -987,18 +987,21 @@ class Host:
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
     def cleared(self, red_jobs, cand):
-        """True when `cand` clears a red run (decision no-merge-onto-red-main). `red_jobs`: the jobs read of the red run, which had a red job.
-        `cand`: the newest completed run of the same file in another event group, newer than the red run, or None. It clears only when it
-        succeeded and each non-skipped job name of the red run is a job of it that succeeded (exact name; a skipped job does not count).
-        The only extra read is the jobs of `cand`. A failed read clears nothing: the red run stays red."""
-        required = {j["name"] for j in red_jobs if j.get("conclusion") != "skipped"}
-        if cand is None or cand["conclusion"] != "success" or not required:
+        """True when `cand` clears a failing base run (decision no-merge-onto-red-main). `red_jobs`: the jobs read of the failing run, which had a red job.
+        `cand`: the newest completed run of the same file in another event group, newer than the failing run, or None. It clears only when it
+        succeeded and ran each job name of the failing run leg for leg: for each name the failing run ran non-skipped (exact name), `cand`
+        has at least as many jobs of that name, and every one of them succeeded (a skipped or failed leg does not count).
+        The only extra read is the jobs of `cand`. A failed read clears nothing: the failing run stays failing."""
+        need = collections.Counter(j["name"] for j in red_jobs if j.get("conclusion") != "skipped")
+        if cand is None or cand["conclusion"] != "success" or not need:
             return False
         try:
-            passed = {j["name"] for j in self.pages(f"actions/runs/{cand['id']}/jobs", "jobs") if j.get("conclusion") == "success"}
+            legs = collections.defaultdict(list)
+            for j in self.pages(f"actions/runs/{cand['id']}/jobs", "jobs"):
+                legs[j["name"]].append(j.get("conclusion"))
         except Stop:
             return False
-        return required <= passed
+        return all(len(legs[n]) >= k and all(c == "success" for c in legs[n]) for n, k in need.items())
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
