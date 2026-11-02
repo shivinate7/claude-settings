@@ -41,6 +41,9 @@ FEEL_TEXT = "# Scroll jank\n\nDon't scroll the list while it loads.\n\n**Feel.**
 CHECKED_TEXT = ("# Tap lag\n\nTaps land late on the first screen.\n\n**Feel.** Touch timing is off.\n\n"
                 "**Device check.** simulator, 2026-11-01T11:44:00-06:00\n")
 PLAIN_TEXT = "# Stale link\n\nA plain debt.\n"
+BULLET_DEBT = "debts/bullet-jank.md"  # a bullet-form feel-fix with no device check
+BULLET_CHECKED = "debts/bullet-tap.md"  # a bullet-form feel-fix with a device check
+MID_LINE = "debts/mid-line.md"  # a Feel marker that is not at a line start
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -106,6 +109,17 @@ class RecordSlugsTests(unittest.TestCase):
     def delete(self, *rels):
         for rel in rels:
             os.remove(os.path.join(self.tree, *rel.split("/")))
+
+    def move(self, old, new):
+        dest = os.path.join(self.tree, *new.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        os.rename(os.path.join(self.tree, *old.split("/")), dest)
+
+    def loose_blob(self, ref_path):
+        """The loose object file of the blob at `ref_path` on origin/main. Removing it makes git show fail."""
+        sha = subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main:" + ref_path],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        return os.path.join(self.tree, ".git", "objects", sha[:2], sha[2:])
 
     # Positive controls first: a red case means nothing if the clean case fails.
 
@@ -220,6 +234,84 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()  # the same change fails with no file arguments
         self.assertEqual(rc, 1, out)
         self.assert_passes(FEEL_DEBT)  # files given: git is not read, so the feel check does not run
+
+    def test_feel_debt_renamed_out_of_the_debt_folder_fails(self):
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.move(FEEL_DEBT, "notes/scroll-jank.md")  # a rename is git's R, and it leaves the debt folder
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("check_record_slugs: FAIL: feel-fix debt deleted with no device check: " + FEEL_DEBT,
+                      out.splitlines())
+
+    def test_checked_debt_renamed_inside_the_folder_is_not_flagged(self):
+        # Paired with a rename out of the folder in the same diff: only that one is named.
+        self.put(CHECKED_DEBT, CHECKED_TEXT)
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.move(CHECKED_DEBT, "debts/tap-lag-renamed.md")  # inside the folder: keeps its check, no fail
+        self.move(FEEL_DEBT, "notes/scroll-jank.md")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [FEEL_DEBT], out)
+
+    def test_feel_line_dropped_from_a_debt_fails_only_without_a_device_check(self):
+        # Both debts drop their Feel line on the branch. Only the one with no device check on main is named.
+        self.put(CHECKED_DEBT, CHECKED_TEXT)
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        self.put(CHECKED_DEBT, PLAIN_TEXT)
+        self.put(FEEL_DEBT, PLAIN_TEXT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [FEEL_DEBT], out)
+
+    def test_device_check_lines_that_are_not_valid_count_as_no_check(self):
+        # A valid check names simulator or device, then an ISO time with a zone. Each line here is not valid.
+        lines = {
+            "debts/pending-check.md": "**Device check.** pending",
+            "debts/no-zone.md": "**Device check.** simulator, 2026-11-01T11:44:00",
+            "debts/no-time.md": "**Device check.** simulator",
+            "debts/bad-how.md": "**Device check.** tablet, 2026-11-01T11:44:00-06:00",
+        }
+        for rel, line in lines.items():
+            self.put(rel, FEEL_TEXT + "\n" + line + "\n")
+        self.commit_base()
+        self.delete(*lines)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(sorted(flagged(out)), sorted(lines), out)
+
+    def test_bullet_markers_count_at_line_start(self):
+        # The debt parts are bullets, so "- " before a marker counts. A marker inside a sentence does not.
+        bullet = "# Bullet jank\n\n- **Feel.** yes\n"
+        self.put(BULLET_DEBT, bullet)
+        self.put(BULLET_CHECKED, bullet + "- **Device check.** simulator, 2026-11-01T11:44:00-06:00\n")
+        self.put(MID_LINE, "# Mid line\n\nSee the note: **Feel.** yes\n")
+        self.commit_base()
+        self.delete(BULLET_DEBT, BULLET_CHECKED, MID_LINE)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [BULLET_DEBT], out)
+
+    def test_failed_git_show_prints_unknown(self):
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.commit_base()
+        loose = self.loose_blob(FEEL_DEBT)
+        # A packed blob would survive the removal, and git show would not fail, so the case would prove nothing.
+        self.assertTrue(os.path.isfile(loose), loose)
+        os.remove(loose)
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("check_record_slugs: UNKNOWN", out, out)
+        self.assertEqual(rc, 0, out)  # locally an unknown is not red; CI reads it as red
+        self.assertNotIn("feel-fix debt deleted", out)
 
 
 class ImportTests(unittest.TestCase):

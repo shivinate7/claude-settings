@@ -800,7 +800,7 @@ class FeelRows(UpkeepFixture):
     device row. With a valid check it reads the try-it suffix in the triage row. The triage row drops the device
     row's steps, and the in-progress row skips a feel-fix that has no valid check."""
 
-    DEVICE = "landed, waiting for a simulator or device check"
+    DEVICE = "landed, waiting for a device trial"
     TRIAGE = "landed, waiting for triage to close"
     UNLANED = StaleInProgress.ROW
     CHECK = {"how": "simulator", "at": "2026-11-01T11:44:00-06:00"}
@@ -870,13 +870,13 @@ class FeelRows(UpkeepFixture):
         _, out = self.build_live()
         count, detail = self.row(out, self.TRIAGE)
         self.assertEqual((count, self.entries(detail)),
-                         (2, ["dev (#13; open a try-it task)", "sim (#12; open a try-it task)"]))
+                         (2, ["dev (#13; open a try-it item)", "sim (#12; open a try-it item)"]))
         self.assertEqual(self.row(out, self.DEVICE), (0, ""))
 
     def test_present_but_invalid_device_check_reads_unreadable(self):
         prs = self.land_all({sid: {"feel": True, "deviceCheck": check} for sid, check in self.INVALID_CHECKS.items()}, 20)
         _, out = self.build_live()
-        want = sorted("%s (#%d; device check unreadable)" % (sid, pr) for sid, pr in prs.items())
+        want = sorted("%s (#%d; device trial unreadable)" % (sid, pr) for sid, pr in prs.items())
         count, detail = self.row(out, self.DEVICE)
         self.assertEqual((count, self.entries(detail)), (len(want), want))
         self.assertEqual(self.row(out, self.TRIAGE), (0, ""))
