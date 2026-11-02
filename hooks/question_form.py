@@ -24,7 +24,9 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
-PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
+PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
+Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
+text passes). A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
 or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
@@ -71,6 +73,26 @@ BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | 
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
 BASED_MAX = 3
+# A side or a line's text that is only an angle-bracket placeholder is the template copied verbatim. The one
+# home of that check: the Goal, Problem and Based on lines and both sides of a Departs from line call it.
+PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The text after the label on each form line, for the placeholder check. Real text that holds angle
+# brackets, such as `<Button>`, is no placeholder: only the whole text must be one.
+FORM_LINE_TEXT = (("Goal", re.compile(r"^[ \t]*Goal:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Problem", re.compile(r"^[ \t]*Problem(?:[ \t]*\([^()\n]*\))?:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Based on", re.compile(r"^[ \t]*Based on[ \t]*\([^()\n]*\):[ \t]*([^\n]*)", re.I | re.M)))
+
+
+def is_placeholder(text) -> bool:
+    return bool(PLACEHOLDER_SIDE.fullmatch(str(text).strip()))
+
+
+def placeholder_form_hit(text):
+    """(rule, matched) for the first Goal, Problem or Based on line whose text is only a placeholder."""
+    for label, rx in FORM_LINE_TEXT:
+        if any(is_placeholder(value) for value in rx.findall(text)):
+            return FORM_RULE, "%s line that is only a placeholder: write the real text" % label
+    return PASS
 
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
@@ -104,7 +126,7 @@ def _lines_hit(text, stands=False):
     goal, problem, based = (rx.search(text).start() for rx in (GOAL_LINE, PROBLEM_LABEL, BASED_LABEL))
     if not goal < problem < based:
         return FORM_RULE, "lines out of order: Goal, then Problem, then Based on"
-    return PASS
+    return placeholder_form_hit(text)
 
 
 def _problem_state(text, stands):
@@ -154,13 +176,21 @@ DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
                        r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
-# A side that is only an angle-bracket placeholder is the template copied verbatim.
-PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The new-thing change side, "adds <X>": group 1 is X.
+PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
                   "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+
+
+def departs_sides(rest):
+    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
+    if len(parts) < 2:
+        return rest.strip(), "", False
+    return parts[0].strip(), parts[1].strip(), True
 
 
 def departs_hit(text) -> str:
@@ -173,13 +203,13 @@ def departs_hit(text) -> str:
     if not lines:
         return "no Departs from line"
     for rest in lines:
-        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-        if len(parts) < 2:
+        main, change, split = departs_sides(rest)
+        if not split:
             return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
-        main, change = parts[0].strip(), parts[1].strip()
         if not main or not change:
             return "Departs from line with an empty side"
-        if PLACEHOLDER_SIDE.fullmatch(main) or PLACEHOLDER_SIDE.fullmatch(change):
+        added = PORT_NEW_THING.fullmatch(change)
+        if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
@@ -197,8 +227,34 @@ PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|red
                        r"|rewrite\s+of|rebuild\s+of)\b", re.I)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
                "departs from the app, and it never holds work. Add a line to context that starts "
-               "\"Departs from: <file>:<symbol> — <what changes>\", leave out holds, or set "
-               "port to false if this is not a port.")
+               "\"Departs from: <file>:<symbol> — <what changes>\" (or \"Departs from: main — adds <X>\" "
+               "for a new thing), leave out holds, or set port to false if this is not a port.")
+
+
+# A port's Departs from line names the place on main as "<file>:<symbol>" (backticks around it are read, and
+# a path may hold [id], (group) and @ for a Next.js or alias path), or says "main" for a new thing and then
+# "adds <X>".
+PORT_MAIN_SIDE = re.compile(r"[\w./@\[\]()-]+:(?!//)[\w.$-]+(?:\(\))?")
+
+
+def port_departs_miss(text) -> str:
+    """The miss reason when a port's Departs from line, any of them, is not a valid Departs from line (the
+    one predicate, departs_hit: no placeholder or no-change side) or does not name `<file>:<symbol>` on main
+    (or `main` with `adds <X>`). "" when each does. A text with no such line is judged elsewhere."""
+    text = str(text or "")
+    miss = departs_hit(text)
+    if miss:
+        return miss
+    for rest in DEPARTS_LINE.findall(text):
+        main, change, _ = departs_sides(rest)
+        main = main.strip("`").strip()
+        if main.lower() == "main":
+            if PORT_NEW_THING.fullmatch(change):
+                continue
+        elif PORT_MAIN_SIDE.fullmatch(main):
+            continue
+        return "port item whose Departs from line names no <file>:<symbol> on main"
+    return ""
 
 
 def _item_text(data) -> str:
@@ -221,6 +277,8 @@ def port_item_hit(op: str, data) -> str:
         return "port item with holds"
     if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
         return "port item with no Departs from line"
+    if op == "set" or "context" in data:
+        return port_departs_miss(data.get("context"))
     return ""
 
 
@@ -682,6 +740,9 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    hit = placeholder_form_hit(new)
+    if hit[0]:
+        return hit
     # A context edit that holds a Departs from line in old_str or new_str keeps a valid one: dropping it, or
     # writing one that restates main, is refused. An edit with no such line in either is not judged.
     if DEPARTS_LINE.search(old) or DEPARTS_LINE.search(new):

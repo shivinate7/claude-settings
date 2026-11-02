@@ -957,6 +957,9 @@
 - grant-root-home-any: in any block with a grant word and an act word, `settings.json` and `.claude/CLAUDE.md` pass as ruling homes, even when the grant match is false (hooks/feedback_guard.py).
 - closed-token-midline: a bare `[closed]` token in mid-line, after the home, stops the standing, page and compaction open-id checks for that item (hooks/feedback_guard.py).
 - grant-scope-misses: "all repositories", "all-repos", "all the repos" and "every repository" are not scope words. A negated "you do not have approval to push" fires the check (hooks/feedback_guard.py).
+- question-placeholder-trailing-period: a Goal, Problem or Based on line that is a placeholder followed by a period passes, because the check is a fullmatch of one `<...>` (hooks/question_form.py is_placeholder). Decision: question-form.
+- port-str-replace-no-symbol: a `context` str_replace on a port item skips the file:symbol rule, because the stored port flag is unseen there (hooks/question_form.py form_str_replace_hit). Decision: port-keeps-behaviour.
+- departs-bare-angle-name: "Departs from: main — adds <Modal>" is refused as a placeholder, though `<Modal>` can be a real component name; "adds a <Modal>" passes (hooks/question_form.py).
 - guard-log-kolkata-needs-tzdata: the forced-zone `when` test sets TZ=Asia/Kolkata, so a machine with no tzdata falls back to UTC and the test goes red with nothing wrong. Fix: a POSIX zone string such as "IST-5:30" (lint/test_guard_log_report.py). Step: guard-log-time-offset.
 - unread-early-line-east-blind: the early +05:00 line in the unread test can fail only on a clock at or west of UTC+3; CI on UTC covers it (hooks/test_decision_watch.py, mods/decision-watch/decision-watch.test.mjs). Step: guard-log-time-offset.
 - guard-log-between-untested: `--between` in main() has no test, only window(); a `Z` bound fails before Python 3.11, so a pace read passes `+00:00` (lint/guard_log_report.py). Step: guard-log-time-offset.
