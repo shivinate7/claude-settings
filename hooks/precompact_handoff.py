@@ -24,6 +24,7 @@ the desktop app has none.
   characters. A "## Refused acts" section ends it: the first line (200 characters at most) of
   the newest 50 refused tool results in that span, oldest first. Cost: one extra small JSON file
   read (~/.claude.json) at PreCompact; no process start, no file written beyond the digest.
+  The Claude config file is read at each Stop only, not at PreCompact.
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
   message: follow the installed prompt file, rewrite the session's own handoff at
@@ -37,13 +38,13 @@ the desktop app has none.
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
   the top, then the top = room - margin; limit = window_limit(model of the last such entry): env
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW (a count, or a k/m suffix such as 200k, 1.5m), then modelSettings.<model>.autoCompactWindow, then
   autoCompactWindow in <config dir>/settings.json, default 500,000). compact_threshold follows
   Claude Code's own compaction trigger: min(E - round(E * f), E - 13k), E = limit - 20k, and f =
   summary_fraction(limit), the summary buffer fraction in the flags Claude Code caches in
   $CLAUDE_CONFIG_DIR/.claude.json (else ~/.claude.json): the tengu_amber_moleskin table, then
-  tengu_amber_rokovoko, then 0.2 (384k on 500k with 0.2; 441.6k with 0.08). Up to a 200k window
-  in a remote session (CLAUDE_CODE_REMOTE), CLAUDE_AUTOCOMPACT_PCT_OVERRIDE can lower it too.
+  tengu_amber_rokovoko, then 0.2 (384k on 500k with 0.2; 441.6k with 0.08).
+  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (0 < p <= 100) can lower it in every session and window.
   The hook cannot read the session's live state, so it reads the same cached flag. The last
   checkpoint is at size = threshold - margin, margin = min(50k, room // 2), so it always sits
   below the live threshold. The bucket lives in
@@ -89,11 +90,10 @@ NUDGE_MARGIN = 50_000
 # Claude Code's effective window is window minus 20,000 (the reserve for the summary's output).
 # Auto-compact fires at the effective window minus a summary buffer of fraction f of it, and never
 # above the effective window minus 13,000. summary_fraction reads f from the flags Claude Code
-# caches. Windows of 200,000 or less in a remote session take a percent override too.
+# caches. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE can lower it in every session and window.
 OUTPUT_RESERVE = 20_000
 BUFFER_FLOOR = 13_000
 DEFAULT_SUMMARY_FRACTION = 0.2
-REMOTE_PCT_WINDOW = 200_000
 DEFAULT_WINDOW = 500_000
 # The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
@@ -165,9 +165,13 @@ def _result_text(block):
     return ""
 
 
-# A refused act: a failed tool result whose first line says a hook or a permission turned it away.
-# A plain failure (a test run, "Exit code 1") is not one.
-_REFUSAL = re.compile(r"hook error|denied|refus|blocked", re.I)
+# A refused act: a failed tool result whose first line says a hook or a permission turned it away:
+# "<Event>:<Tool> hook error", the user's "doesn't want to proceed" / "tool use was rejected",
+# "Permission to use <Tool> has been denied", or a first line that starts "denied:" or "refused:".
+# A plain failure ("Exit code 1", ECONNREFUSED, an OS "Permission denied") is not one.
+_REFUSAL = re.compile(
+    r"hook error|(?:doesn['\u2019]t|does not) want to proceed|tool use was rejected"
+    r"|permission to use \S+ has been denied|^(?:denied|refused):", re.I)
 
 
 def _refusal_line(block):
@@ -634,10 +638,8 @@ def summary_fraction(limit):
 
 
 def _remote_pct():
-    """CLAUDE_AUTOCOMPACT_PCT_OVERRIDE as a number in (0, 100] when CLAUDE_CODE_REMOTE is
-    truthy, else None."""
-    if os.environ.get("CLAUDE_CODE_REMOTE", "").strip().lower() in ("", "0", "false", "no", "off"):
-        return None
+    """CLAUDE_AUTOCOMPACT_PCT_OVERRIDE as a number in (0, 100], else None. Claude Code 2.1.316
+    applies it in every session and window."""
     try:
         p = float(os.environ.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", ""))
     except ValueError:
@@ -648,15 +650,23 @@ def _remote_pct():
 def compact_threshold(limit):
     """The context size at which Claude Code compacts a window of `limit` tokens. Mirrors Claude
     Code 2.1.316: effective window E = limit - OUTPUT_RESERVE, summary buffer fraction f, and the
-    percent override for windows up to REMOTE_PCT_WINDOW. The hook cannot read the session's live
-    state, so it reads the same cached flag (summary_fraction)."""
+    percent override. The hook cannot read the session's live state, so it reads the same cached
+    flag (summary_fraction).
+
+    Claude Code compacts at the second term, min(floor(E * p / 100), E - 13k), when the percent
+    override is set. The first term, min(E - round(E * f), E - 13k), is its early-summary
+    (precompute) point. The hook takes the lower of the two, since what a precomputed summary
+    keeps is not read."""
     eff = limit - OUTPUT_RESERVE
     cap = eff - BUFFER_FLOOR
     threshold = min(eff - math.floor(eff * summary_fraction(limit) + 0.5), cap)  # JS Math.round
-    pct = _remote_pct() if limit <= REMOTE_PCT_WINDOW else None
+    pct = _remote_pct()
     if pct is not None:
         threshold = min(threshold, min(math.floor(eff * pct / 100), cap))
     return int(threshold)
+
+
+_WINDOW_SUFFIX = re.compile(r"(\d+(?:\.\d+)?)([km])", re.I)
 
 
 def window_limit(model=None):
@@ -665,14 +675,26 @@ def window_limit(model=None):
     <config dir>/settings.json, then DEFAULT_WINDOW. A bad value falls to the next tier."""
     # shortcut: the model's own window is not read, so a model window smaller than every
     # tier makes nudges late and can skip the first one. Upgrade when hook input carries it.
-    def ok(v):
-        return isinstance(v, int) and not isinstance(v, bool) and v > 0
+    def parse(v):
+        """A token count: a positive int, or a string with a k/m suffix ("200k", "1.5M"), else None."""
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v if v > 0 else None
+        if isinstance(v, str):
+            m = _WINDOW_SUFFIX.fullmatch(v.strip())
+            if m:
+                unit = 1000 if m.group(2).lower() == "k" else 1_000_000
+                n = int(round(float(m.group(1)) * unit))
+                return n if n > 0 else None
+        return None
+    env = os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")
     try:
-        v = int(os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", ""))
+        v = int(env)
         if v > 0:
             return v
     except ValueError:
-        pass
+        v = parse(env)
+        if v:
+            return v
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
             settings = json.load(f)
@@ -685,11 +707,11 @@ def window_limit(model=None):
         want = _model_key(model)
         for key in sorted(per_model, key=lambda k: k != model):  # an exact key first
             entry = per_model[key]
-            if _model_key(key) == want and isinstance(entry, dict) and ok(
-                    entry.get("autoCompactWindow")):
-                return entry["autoCompactWindow"]
-    v = settings.get("autoCompactWindow")
-    return v if ok(v) else DEFAULT_WINDOW
+            if _model_key(key) == want and isinstance(entry, dict):
+                v = parse(entry.get("autoCompactWindow"))
+                if v:
+                    return v
+    return parse(settings.get("autoCompactWindow")) or DEFAULT_WINDOW
 
 
 def run_nudge(payload):
