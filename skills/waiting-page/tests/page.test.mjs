@@ -2064,6 +2064,100 @@ const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l,
   designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
 const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
   return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+// ---------------------------------------------------------------- the Ask box (step page-ask-box)
+// Contract: docs/design/page-ask-box-notes.md on design/page-ask-box, sections 3, 5, 6 and 8.
+// The notes name no ids, so the selectors take the mockup's: #askText (the box), #askSend, #askUndo.
+const ASK_TEXT = "Can the waiting page take a question from me?";
+const ASK_ANSWERED = { id: "ask-an1", text: "Can I see the lane queue?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Yes. It is on the Status tab." };
+// A missing control fails by name, not by a wait that times out.
+async function mustHave(page, sel, what) {
+  const n = await page.locator(sel).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: ${sel} is missing`);
+}
+// A text the page shows, as its box. A text the page does not show fails with the text named.
+async function shownBox(page, text) {
+  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+  const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+  assert.ok(shown, `the page does not show: ${text}`);
+  return loc.boundingBox();
+}
+
+test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const log = await page.evaluate(() => window.__log);
+  const asks = log.filter((l) => l[0] === "set" && l[1] === "asks");
+  assert.equal(asks.length, 1, "Send wrote " + asks.length + " asks records");
+  const [, , key, body] = asks[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, ASK_TEXT, "the text is not the owner's words");
+  assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "at is not an ISO time: " + body.at);
+  assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
+});
+
+test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
+  const key = await page.evaluate(() => window.__log.find((l) => l[0] === "set" && l[1] === "asks")[2]);
+  await mustHave(page, "#askUndo", "Undo control");
+  await page.click("#askUndo");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
+  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+});
+
+test("the asks list is newest first by at, whatever order the records came in", async (t) => {
+  // Insertion order and id order both differ from newest first, so only a sort by at passes.
+  const asks = {
+    "ask-zz1": { id: "ask-zz1", text: "Middle ask text", at: "2026-10-30T09:00:00Z" },
+    "ask-aa1": { id: "ask-aa1", text: "Newest ask text", at: "2026-10-31T09:00:00Z" },
+    "ask-mm1": { id: "ask-mm1", text: "Oldest ask text", at: "2026-10-29T09:00:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  const top = {};
+  for (const text of ["Newest ask text", "Middle ask text", "Oldest ask text"]) top[text] = (await shownBox(page, text)).y;
+  assert.ok(top["Newest ask text"] < top["Middle ask text"] && top["Middle ask text"] < top["Oldest ask text"], "the asks are not newest first: " + JSON.stringify(top));
+});
+
+test("a seen answer folds to one button row, and Show answer opens its reply", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.text);
+  assert.equal(await page.getByText(ASK_ANSWERED.reply, { exact: true }).isVisible(), false, "a seen answer is open");
+  const show = page.getByRole("button", { name: "Show answer" });
+  assert.equal(await show.count(), 1, "no Show answer control on the folded ask");
+  await show.click();
+  await shownBox(page, ASK_ANSWERED.reply);
+});
+
+test("an answer the viewer has not seen stays open, with the New answer mark", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: { "waiting.askSeen": "2026-10-29T00:00:00Z" } }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.reply);
+  await shownBox(page, "New answer");
+});
+
+test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
+  const asks = {
+    "ask-w01": { id: "ask-w01", text: "Nobody has read this yet", at: "2026-10-31T08:00:00Z" },
+    "ask-w02": { id: "ask-w02", text: "The writer has read this", at: "2026-10-31T07:00:00Z", owner: "triage", read: "2026-10-31T07:30:00Z" },
+  };
+  const page = await open(t, { dbExtra: { asks } }); if (!page) return;
+  await shownBox(page, "Waiting for triage to read it.");
+  await shownBox(page, /^Read by triage/);
+  await shownBox(page, /Waiting for its answer\./);
+  assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
+});
+
 async function openCap(t, labels, width, design) {
   const it = capItem(labels);
   const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
