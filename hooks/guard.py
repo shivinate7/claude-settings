@@ -3979,10 +3979,10 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
 # checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it).
 # The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose own tags
-# carry cs-build:coordinator: guard_merge.own_tier_tagged reads the newest get_session record of the session's own id
-# (override.remote_session_id, the environment's, never the payload's) in its transcript, or an own
-# set_session_tags call that adds the tag to that id. No role file is read. No transcript, no record or a read
-# error is no coordinator. An owner override lifts the rule: it is not in never_lifted.
+# carry cs-build:coordinator: guard_merge.own_tier_tagged reads the tags of the newest get_session record of the
+# session's own id (override.remote_session_id, the environment's, never the payload's) in its transcript, plus each
+# own set_session_tags add and minus each own remove on that id since then. No role file is read. No transcript, no
+# record and no own add, or a read error, is no coordinator. An owner override lifts the rule: it is not in never_lifted.
 # What a shell call writes: the words `_shell_write_hit` reads (a `cp` counts by its destination; an `mv`
 # source counts too, because it is removed), a python program (`-c` or a heredoc, read with the `ast` parser:
 # an `open` in a write mode, `write_text`, `write_bytes`, `touch`, `unlink`, on a path the program spells out
