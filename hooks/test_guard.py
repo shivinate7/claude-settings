@@ -482,6 +482,10 @@ PTRWT = os.path.join(ROOT, "ptrlane")
 PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
 PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
 PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
+# A pointer checkout that is OFF main: HEAD is on `feat`. The recovery cases run here, because a move back
+# to main is only a repair when HEAD is not already on it.
+PTROFFCFG = os.path.join(ROOT, "ptroffcfg")
+PTROFF = os.path.join(ROOT, "ptroffmain")
 
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
@@ -1355,6 +1359,11 @@ def _build_pointer():
     _require_pointer_branch(PTRMAIN, "main")
     # The pointer line has the same shape the installer writes and the shell readers parse.
     write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
+    # The off-main pointer checkout: a second repository whose HEAD is on `feat`.
+    make_repo(PTROFF, {"f.txt": "base\n"})
+    run_vcs(PTROFF, "checkout", "-b", "feat")
+    _require_pointer_branch(PTROFF, "feat")
+    write(os.path.join(PTROFFCFG, "CLAUDE.md"), "@" + slash(PTROFF) + "/CLAUDE.md\n")
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
@@ -1773,7 +1782,8 @@ lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
 lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
-lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
+lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND],
+             _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2914,6 +2924,21 @@ sh("pointer: a move back to main restores the invariant and passes",
    VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch main passes for the same reason",
    VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
+# refusal-vs-rule (pointer-head, recovery-independent-of-state): a move TO main is the recovery act and
+# passes. A reset of main onto origin/main is a move to main too. The pin runs both on main and in a
+# checkout that is off main, so the verdict cannot rest on HEAD already naming main.
+sh("pointer: switch -C main onto origin/main passes, from a checkout on main",
+   VCS + " switch -C main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout -B main onto origin/main passes, from a checkout on main",
+   VCS + " checkout -B main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -C main onto origin/main passes, from a checkout off main",
+   VCS + " switch -C main origin/main", "allow", cwd=PTROFF, config=PTROFFCFG)
+# Near misses, refused: a detach names no branch, so the exemption for main does not reach it, and a
+# reset onto any other branch is a new branch.
+sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --detach main", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
+   "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 
 # READS NEVER FIRE.
 sh("pointer: listing branches only reads", VCS + " branch --list", "allow", cwd=PTRMAIN,
