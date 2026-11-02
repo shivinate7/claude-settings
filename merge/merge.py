@@ -809,14 +809,35 @@ class Host:
         exists only as a status counts. The combined status is never read: its state says "pending" for a commit with no statuses.
         `sha` is the head the caller already read; with none, the head of the pull request `n` is read. The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
         A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
-        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped."""
+        A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped.
+        The check runs of a superseded workflow run are dropped (`superseded_rows`); statuses and rows with no run link stay."""
         sha = sha or self.pr(n)["head"]
         rows = []
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             rows.append(self.run_row(r, r.get("details_url")))
+        rows = self.superseded_rows(rows, sha)
         for s in self.pages(f"commits/{sha}/status", "statuses"):
             rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "link": s.get("target_url")})
         return self.buckets(rows, warn)
+
+    def superseded_rows(self, rows, sha):
+        """`rows` less the check runs of a cancelled workflow run when a run of the same workflow with a larger id is on `sha`. A concurrency group cancels
+        the older run, yet its always() fan-in job still fails. A row's run is the id in its link. The runs are read only when the rows link more than one run.
+        A failed runs read drops nothing: the cancelled run stays red, never green-washed."""
+        run_of = [(m.group(1) if (m := re.search(r"/actions/runs/(\d+)/", d.get("link") or "")) else None) for d in rows]
+        if len(set(run_of) - {None}) < 2:
+            return rows
+        try:
+            runs = self.runs(sha)
+        except NetStop:
+            raise
+        except Stop:
+            return rows
+        newest = {}
+        for r in runs:
+            newest[r.get("workflowName")] = max(newest.get(r.get("workflowName"), 0), r.get("databaseId") or 0)
+        gone = {str(r["databaseId"]) for r in runs if r.get("conclusion") == "cancelled" and r.get("databaseId") and newest[r.get("workflowName")] > r["databaseId"]}
+        return [d for d, rid in zip(rows, run_of) if rid not in gone]
 
     def run_row(self, r, link):
         """A check run, or an Actions job (the same fields), as the row `buckets` judges."""
@@ -911,7 +932,7 @@ class Host:
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name"], self.cwd)
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowName,databaseId"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
