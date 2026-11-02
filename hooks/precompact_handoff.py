@@ -36,8 +36,9 @@ the desktop app has none.
   the top, then the top = room - 50k; limit = window_limit(model of the last such entry): env
   CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
   autoCompactWindow in <config dir>/settings.json, default 500,000; compact_threshold is
-  where Claude Code compacts: (limit - 20k) * 0.8, so 384k on 500k). The last checkpoint is at
-  size = threshold - 50k (500k: 334k). The bucket lives in
+  the lowest threshold Claude Code compacts at: (limit - 20k) * (1 - summary fraction 0.2),
+  so 384k on 500k; a server flag can raise it (441,600 seen on 500k)). The last checkpoint is
+  at size = threshold - margin, margin = min(50k, room // 2) (500k: 334k). The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
@@ -491,17 +492,20 @@ def _run_reorient(payload):
 
 
 def checkpoints(room):
-    """Nudge message sizes for `room` tokens of messages before compaction: 200k, then +150k
-    while below room-50k, then room-50k itself (room 384k: 200, 334k). When room-50k <= 200k,
-    only room-50k. A step within NUDGE_STEP // 2 of room-50k is dropped: two rewrites that
-    close are one too many."""
-    top = room - NUDGE_MARGIN
+    """Nudge message sizes for `room` tokens of messages before compaction. The top is
+    room - margin, with margin = min(NUDGE_MARGIN, room // 2), so a small room keeps a
+    positive top. Below the top: 200k, then +150k while below the top. A step within
+    NUDGE_STEP // 2 of the top is dropped, the 200k floor included: two rewrites that
+    close are one too many (room 384k: 200k, 334k; room 299k: 249k). When top <= 200k, only
+    the top. For room <= 0, only room - NUDGE_MARGIN, whatever its sign."""
+    margin = min(NUDGE_MARGIN, room // 2) if room > 0 else NUDGE_MARGIN
+    top = room - margin
     if top <= NUDGE_FLOOR:
         return [top]
     cps = [NUDGE_FLOOR]
     while cps[-1] + NUDGE_STEP < top:
         cps.append(cps[-1] + NUDGE_STEP)
-    while len(cps) > 1 and top - cps[-1] < NUDGE_STEP // 2:
+    while cps and top - cps[-1] < NUDGE_STEP // 2:
         cps.pop()
     return cps + [top]
 
