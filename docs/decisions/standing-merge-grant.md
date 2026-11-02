@@ -17,6 +17,7 @@ This is the repo grant that `git-main-only-by-pr` (main moves only by pull reque
 ## Reviews
 
 Owner, 2026-11-01 19:23 CST: `just me and claude building and maintaining these repos`. This lane reads that as: a review is a reviewer agent's report only, and no session posts a GitHub review or approval, in any repo. The owner did not state the no-GitHub-review rule in those words.
+
 ## The switch
 
 Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, option c): the grant's home in each repo is a true/false switch, `merge.standingGrant`, in that repo's merge settings, `.github/stamp.json`. The rule `questions-go-to-owner` (questions go to the owner) allows the merge tool's config as a grant's home. The owner's words: "can we basically have like a =true/false on either claude.md or some sorta guard so it can be enabled / disabled on the session? adding to the parent claude.md makes less sense".
