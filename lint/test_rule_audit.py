@@ -1084,29 +1084,43 @@ def _tuple_options(expr):
     return options if all(isinstance(o, ast.Tuple) for o in options) else None
 
 
+REFUSE_PARAMS = ("tool", "decision", "rule", "reason")  # guard_core.refuse()
+ASK_PARAMS = ("rule", "reason")  # guard.ask_command()
+
+
+def _args_by_name(call, params):
+    """-> {parameter: expression} for positional and keyword arguments. None when a `*` argument
+    hides which parameter each value fills. A `**` argument names no rule or reason, so it is skipped."""
+    if any(isinstance(a, ast.Starred) for a in call.args):
+        return None
+    named = dict(zip(params, call.args))
+    named.update((k.arg, k.value) for k in call.keywords if k.arg)
+    return named
+
+
 def _refusals_of(call, locs, where, unattributed):
-    """-> [(refusal id, reason expression)] for one call that prints a refusal; [] for other calls."""
+    """-> [(refusal id, reason expression)] for one call that prints a refusal; [] for other calls.
+    A call whose rule or reason the scan cannot name goes to `unattributed`."""
     name = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
-    if name == "refuse" and len(call.args) >= 4:
-        rule, reason = call.args[2], call.args[3]
-        if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
-            return [(rule.value, reason)]
-        if isinstance(rule, ast.Name):
-            bound = locs.get(rule.id, [])
-            if any(isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == PENDING_ASK
-                   for v, _ in bound):
-                return []  # the ask_command() call sites carry these ids
-            for value, slot in bound:
-                options = _tuple_options(value) if slot == 0 else None
-                if options and all(len(t.elts) == 2 and isinstance(t.elts[0], ast.Constant) for t in options):
-                    return [(t.elts[0].value, t.elts[1]) for t in options]
+    if name not in ("refuse", "ask_command"):
+        return []
+    named = _args_by_name(call, REFUSE_PARAMS if name == "refuse" else ASK_PARAMS)
+    if named is None or "rule" not in named or "reason" not in named:
         unattributed.append(where)
         return []
-    if name == "ask_command" and len(call.args) >= 2:
-        rule = call.args[0]
-        if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
-            return [(rule.value, call.args[1])]
-        unattributed.append(where)
+    rule, reason = named["rule"], named["reason"]
+    if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
+        return [(rule.value, reason)]
+    if name == "refuse" and isinstance(rule, ast.Name):
+        bound = locs.get(rule.id, [])
+        if any(isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == PENDING_ASK
+               for v, _ in bound):
+            return []  # the ask_command() call sites carry these ids
+        for value, slot in bound:
+            options = _tuple_options(value) if slot == 0 else None
+            if options and all(len(t.elts) == 2 and isinstance(t.elts[0], ast.Constant) for t in options):
+                return [(t.elts[0].value, t.elts[1]) for t in options]
+    unattributed.append(where)
     return []
 
 
@@ -1198,6 +1212,10 @@ def status_of(src, rid, extra=None, homes=HOMES):
     sources = dict(extra or {}, guard=src)
     statuses, _ = refusal_status(sources, homes, SCOPE)
     return [s for _, s in statuses.get(rid, [])]
+
+
+def unattributed_of(src):
+    return refusal_status({"guard": src}, HOMES, SCOPE)[1]
 
 
 class RefusalCiteFixtureTests(unittest.TestCase):
@@ -1329,6 +1347,32 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         uncited = 'def go(x):\n    refuse(t, "deny", "join-id", "no cite " + x, m)\n'
         self.assertEqual(status_of(cited, "join-id"), ["cited"])
         self.assertEqual(status_of(uncited, "join-id"), ["no cite"])
+
+    def test_a_keyword_rule_and_reason_are_read_as_a_site(self):
+        cited = 'refuse(t, "deny", rule="kw-id", reason="see decision alpha", matched=m)\n'
+        uncited = 'refuse(t, "deny", rule="kw-id", reason="no cite", matched=m)\n'
+        self.assertEqual(status_of(cited, "kw-id"), ["cited"])
+        self.assertEqual(status_of(uncited, "kw-id"), ["no cite"])
+
+    def test_a_keyword_ask_command_is_a_site(self):
+        src = 'ask_command(rule="kw-ask", reason="see decision alpha", matched=m, command="cmd")\n'
+        self.assertEqual(status_of(src, "kw-ask"), ["cited"])
+
+    def test_a_keyword_reason_that_is_a_parameter_is_not_resolved(self):
+        src = 'def go(reason):\n    refuse(t, "deny", rule="kw-param", reason=reason, matched=m)\n'
+        self.assertEqual(status_of(src, "kw-param"), ["not resolved"])
+
+    def test_a_keyword_rule_that_is_a_variable_is_unattributed(self):
+        src = 'def go(rule):\n    refuse(t, "deny", rule=rule, reason="see decision alpha", matched=m)\n'
+        self.assertEqual(unattributed_of(src), ["guard.py:2"])
+        src = 'def go(rule):\n    ask_command(rule=rule, reason="see decision alpha", matched=m, command="c")\n'
+        self.assertEqual(unattributed_of(src), ["guard.py:2"])
+
+    def test_a_call_that_hides_its_rule_or_reason_is_unattributed(self):
+        for call in ('refuse(*parts)', 'refuse(t, "deny", **kw)', 'ask_command(*parts)',
+                     'refuse(t, "deny", "two-args")', 'refuse(t, "deny", rule="no-reason", matched=m)'):
+            with self.subTest(call=call):
+                self.assertEqual(unattributed_of("def go():\n    %s\n" % call), ["guard.py:2"])
 
 
 class RefusalCiteRatchetTests(unittest.TestCase):
