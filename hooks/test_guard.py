@@ -6324,6 +6324,26 @@ sh("delete: del /s /q C:\\*, Bash", "del /s /q C:\\*", "deny", "destructive-dele
 sh("delete: del /s /q C:\\*, PowerShell", "del /s /q C:\\*", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
+# refusal-vs-rule (destructive-delete, heredoc text): a quoted heredoc writes its body to a file, so a
+# body that names a delete deletes nothing. The body is literal text for the three scanner shapes too: a
+# comment opener, a multi-line backtick span, and a lone apostrophe. The forms that run the body refuse:
+# a shell reads it. NOT PINNED HERE, and allowed on main: an unquoted heredoc's backticks and `$(...)`,
+# and a python heredoc's rmtree. They are looser gaps, reported, not stricter refusals.
+sh("delete: a quoted heredoc writes text that names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\nrm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a comment opener names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\n# clean up with rm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a multi-line backtick span names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\n`first\nrm -rf ./*\nlast`\nEOF", "allow", cwd=NOGIT)
+sh("delete: a quoted heredoc body with a lone apostrophe names the delete, deletes nothing",
+   "cat <<'EOF' > notes.md\nit's the note: rm -rf ./*\nEOF", "allow", cwd=NOGIT)
+sh("delete: a heredoc body piped to sh runs the delete", "cat <<EOF | sh\nrm -rf ./*\nEOF",
+   "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a heredoc body given to bash runs the delete", "bash <<EOF\nrm -rf ./*\nEOF",
+   "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a lone apostrophe in a quoted heredoc body does not hide a delete after it",
+   "cat <<'EOF' > notes.md\nit's the note\nEOF\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
+
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
 # Remove-Item, taking its `-Recurse`/`-Force` parameters rather than `rm`'s combined `-rf`.
