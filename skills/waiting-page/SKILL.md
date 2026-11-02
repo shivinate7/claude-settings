@@ -137,8 +137,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
-  guard. An ask with `reply` is answered. The page lists asks newest first by `at` and shows each waiting one
-  and the newest 3 answered; no session deletes an ask.
+  guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
+  An ask with `reply` is answered. The page lists asks newest first by `at`. It shows each waiting ask, each new answer
+  (whatever its age) and the newest 3 answers already seen; no session deletes or replaces an ask.
+  An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
@@ -323,7 +325,6 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
 - The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
-  An ask is never a grant: an act that needs one becomes an item.
 
 ## Route and close
 
@@ -369,7 +370,7 @@ An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`
 undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
 holds its subject:
 
-1. Write `owner` (itself, or that session) and `read` set to now.
+1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
 3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
    (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.

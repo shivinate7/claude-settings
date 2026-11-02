@@ -704,11 +704,13 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askrow .slot { grid-column: 1; justify-self: end; }
   .askrow .btn.askgo { grid-column: 2; }
 }
+#askList { display: grid; gap: 8px; }
 .asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .askc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
 .ahead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 44px; font-size: 14px; color: var(--muted); }
 .ahead .aby { min-width: 0; }
 .ahead .morebtn { margin-inline-start: auto; min-height: 44px; padding-inline: 4px; }
+@media (pointer: coarse) { .ahead .morebtn { min-width: 44px; } }
 .atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
 .astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
 .astate .t { color: var(--muted); font-weight: 400; }
@@ -720,7 +722,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded { padding: 0; }
 .frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
 .frow:hover { background: var(--acc-soft); }
-.frow .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .frow .fwhen { font-size: 14px; color: var(--muted); white-space: nowrap; }
 .frow .fgo { color: var(--acc); font-weight: 600; font-size: 14.5px; white-space: nowrap; }
 @media (max-width: 520px) {
@@ -1855,7 +1857,7 @@ const markAsksSeen = () => { try { localStorage.setItem("waiting.askSeen", new D
 document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
 window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
-try { $("askText").value = (localStorage.getItem("waiting.askDraft") || "").slice(0, ASK_MAX); } catch (e) {}
+try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 
 function askRailRow() {
   const n = askWaiting();
@@ -1868,10 +1870,13 @@ function renderAskForm() {
   const left = a ? undoLeft(a) : 0;
   if (state.db === false) { cls += " bad"; kids = ["This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat."]; }
   else if (s.failed) { cls += " bad"; live = "assertive"; kids = ["Not saved (" + s.failed + "). Your ask is still in the box: copy it and paste it in chat."]; }
+  else if (typed.length > ASK_MAX) { cls += " bad"; kids = ["Your ask is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
   else if (s.note) kids = [s.note];
   else if (a) { cls += " ok"; kids = [glyph("done"), h("span", {}, h("b", {}, "Sent " + fmt(a.at, false) + "."), " " + a.told)]; }
   else kids = [h("span", {}, typed ? "" : "Send ask turns on once you type. ", "It goes to " + askWriter() + ", which answers here or passes it on.", h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
-  hint.className = cls; hint.setAttribute("aria-live", live); hint.replaceChildren(...kids);
+  // The hint is rewritten only when its words change, so the live region announces once and not at each tick of the Undo count.
+  const sig = cls + "|" + live + "|" + kids.map((k) => (k && k.nodeType ? k.textContent : k)).join("");
+  if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.setAttribute("aria-live", live); hint.replaceChildren(...kids); }
   if (a && !s.failed && left > 0) slotKids = [$("askUndo") || h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "")];
   else if (state.db === false || s.failed || s.note) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: copyAsk }, "Copy ask")];
   if (slotKids[0] && slotKids[0].id === "askUndo") slotKids[0].textContent = "Undo send (" + left + ")";
@@ -1887,11 +1892,11 @@ function renderAskList() {
     const all = askAll();
     if (!all.length) root.replaceChildren(h("p", { class: "empty" }, "Nothing asked yet. Type above, and a session answers here."));
     else {
-      // Each waiting ask shows, and the newest ASK_SHOWN answered ones. The rest wait behind one button. A reply never moves a row.
+      // Each waiting ask and each new answer shows, whatever its age. Of the answers already seen, the newest ASK_SHOWN show. The rest wait behind one button. A reply never moves a row.
       let seen = 0;
-      const shown = all.filter((a) => !askReply(a) || s.older || ++seen <= ASK_SHOWN), hidden = all.length - shown.length;
-      root.replaceChildren(h("ol", { class: "asklist", "aria-label": "Your asks, newest first" }, shown.map(askItem)),
-        hidden ? h("button", { class: "unfold older", type: "button", id: "askOlder", "aria-expanded": "false", onclick: () => { s.older = true; renderAskList(); const n = $("askList").querySelector("li:last-child [data-ask]"); if (n) n.focus({ preventScroll: true }); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + hidden + " older " + (hidden === 1 ? "ask" : "asks")))) : null);
+      const shown = all.filter((a) => !askReply(a) || s.older || askFresh(a) || ++seen <= ASK_SHOWN), hidden = all.length - shown.length;
+      root.replaceChildren(...[h("ol", { class: "asklist", "aria-label": "Your asks, newest first" }, shown.map(askItem)),
+        hidden ? h("button", { class: "unfold older", type: "button", id: "askOlder", "aria-expanded": "false", onclick: () => { s.older = true; renderAskList(); const n = $("askList").querySelector("li:last-child [data-ask]"); if (n) n.focus({ preventScroll: true }); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + hidden + " older " + (hidden === 1 ? "ask" : "asks")))) : null].filter(Boolean));
     }
   }
   const n = askWaiting(), ct = $("askCount");
@@ -1923,8 +1928,9 @@ function askItem(a) {
 function renderAsks() { renderAskForm(); renderAskList(); renderRail(); }
 
 async function sendAsk() {
-  const s = askState, box = $("askText"), text = box.value.trim().slice(0, ASK_MAX);
+  const s = askState, box = $("askText"), text = box.value.trim();
   if (!state.db || s.busy || !text) return;
+  if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
   s.busy = true; s.failed = ""; s.note = ""; renderAskForm();
   const can = await canTell();
   const id = askId(), at = new Date().toISOString();
@@ -1933,7 +1939,7 @@ async function sendAsk() {
   (askState.map = askState.map || {})[id] = { id, text, at };
   clearInterval(askTimer);
   s.sent = { id, text, at, told: "Telling Claude…" }; s.busy = false;
-  if (box.value.trim().slice(0, ASK_MAX) === text) box.value = "";
+  if (box.value.trim() === text) box.value = "";
   saveAskDraft(); renderAsks();
   askTimer = setInterval(() => { if (!s.sent || undoLeft(s.sent) <= 0) clearInterval(askTimer); renderAskForm(); }, 1000);
   const sent = s.sent;

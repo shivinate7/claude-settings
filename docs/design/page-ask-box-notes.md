@@ -34,7 +34,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 - Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key, as for `items/`.
 - The page writes `id`, `text` (the owner's words, line breaks kept, 4000 characters or fewer) and `at` (ISO).
-  It writes them once, at Send.
+  It writes them once, at Send. A text over 4000 characters is never cut: Send ask writes nothing, the words stay in the box,
+  and the hint says the length and the limit. An Undo that brings the box over 4000 does the same.
 - The writer and the owning session write only these fields:
   - `owner`: the session that has the ask. The writer sets itself, or the session it routes the ask to.
   - `read`: ISO time when `owner` read it.
@@ -113,7 +114,7 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 ## 9. Older asks (hide control: "Hide older asks")
 
-- The list shows each waiting ask and the newest 3 answered asks. "Show N older asks" shows the rest.
+- The list shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen. "Show N older asks" shows the rest.
 - No step in the note removes an ask, so without a cap the page grows with no end.
 - Owner grant: yes. Does the writer ever delete an answered ask, and after how long? Pick: never.
   The page caps what it shows.
