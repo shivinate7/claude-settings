@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 1: claude-settings 66bf9963, banchi 2e8940f, q_max 304d82d0, home-app 8e5feb5 (home merged in)",
+    "asOf": "Measured Nov 2: claude-settings 36d85ed0, banchi 471dc268, q_max 5bbf10e1, home-app ec5f68b (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -17,9 +17,9 @@
       },
       {
         "label": "Repos with one DESIGN.md",
-        "rule": "banchi has docs/DESIGN.md; q_max has docs/design.md plus specs; home-app has none; claude-settings has none. home merged into home-app",
+        "rule": "banchi has docs/DESIGN.md; q_max has docs/design/DESIGN.md as its one home of the look (docs/design.md stays as the code reference); home-app has none; claude-settings has none. home merged into home-app",
         "target": "4 of 4",
-        "value": "1 of 4"
+        "value": "2 of 4"
       },
       {
         "label": "banchi Playwright design checks",
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 1 at claude-settings 66bf9963",
+    "asOf": "Measured Nov 2 at claude-settings 36d85ed0",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -45,7 +45,7 @@
       {
         "label": "Plugins and mods enabled",
         "rule": "enabledPlugins in settings.json; 5 are your own mods",
-        "value": 7
+        "value": 6
       },
       {
         "label": "Guard refusals per session",
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 1: claude-settings 66bf9963, banchi 2e8940f, q_max 304d82d0, home-app 8e5feb5 (home merged in)",
+    "asOf": "Measured Nov 2: claude-settings 36d85ed0, banchi 471dc268, q_max 5bbf10e1, home-app ec5f68b (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
-        "value": 410
+        "value": 408
       },
       {
         "label": "Remote branches, claude-settings",
@@ -83,9 +83,10 @@
           77,
           124,
           107,
-          130
+          130,
+          243
         ],
-        "value": 130
+        "value": 243
       },
       {
         "label": "Repos with a living roadmap page",
@@ -96,7 +97,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 1: q_max 304d82d0, home-app 8e5feb5",
+    "asOf": "Measured Nov 2: q_max 5bbf10e1, home-app ec5f68b",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -115,13 +116,13 @@
         "label": "home-app padding or spacing literals",
         "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 176
+        "value": 181
       },
       {
         "label": "home-app web border radii",
         "rule": "Distinct border-radius values in web CSS, HTML and JS. The Oct 17 audit counted 12, likely CSS only (r3)",
         "target": "a few tokens",
-        "value": 38
+        "value": 48
       }
     ]
   }
