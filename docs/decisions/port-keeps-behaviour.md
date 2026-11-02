@@ -12,7 +12,7 @@ Owner, 2026-10-27 15:32 CDT: when a session ports or redesigns an existing app, 
 - Guard rule `port-question` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set or update to `items`. It reads each set in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`). A repo with no page is not judged.
   - It judges an item of kind `decision` or `task`. An item with no kind passes.
-  - It refuses a port item that has no line starting "Departs from:" or that has `holds`.
+  - It refuses a port item that has no line starting "Departs from:" or that has `holds`. Each such line must read "<file>:<symbol> — <what changes>", or "main — adds <X>" for a new thing. "none", a main side with no file:symbol, and "main — nothing" are refused, as is a second line that breaks the form.
   - A port item has field `port` true. With no `port` field, it is an item whose title, context or holds says ported, porting, "port of", "port to", "ports the", redesign, redesigns, redesigned, redesigning, "rewrite of" or "rebuild of". Bare "port" is not a signal.
   - `port: false` is the writer's word that the item is not a port.
   - An update is judged on the fields it carries. An unreadable data file passes.
