@@ -2793,11 +2793,11 @@ def data_tool_hit(tool_input, cwd=""):
 # code is not main's skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py
 # `matches`, the one home of "current" (the designData, roadmap block and title text are ignored, so a
 # page the writer's --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
-# Known limit: a republish when the live page truly holds no data is refused too; the guard cannot read the live page.
+# Known limit: a live page that is itself untouched (placeholder title, empty blocks) is refused too; the guard cannot read the live page.
 # A read, a list, an asset upload, a publish of another page, an unreadable file or an unreadable main
-# is not judged: unknown allows and logs one line. A republish of a current page whose designData and
-# roadmap blocks both equal main's own empty ones (stale_pages.carries_data) is refused too: it would drop
-# the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
+# is not judged: unknown allows and logs one line. A republish of main's untouched template, with its title
+# and its designData and roadmap blocks all equal to main's own (stale_pages.carries_data), is refused too:
+# it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
