@@ -129,6 +129,13 @@ def report_marker_path(session_id):
     return None if base is None else base + ".report-block"
 
 
+def pick_state_path(session_id):
+    """The JSON file lint/report_guard.py keeps for an owner-facing session's open picks, or None.
+    Same folder as the inbox files."""
+    base = _session_base(session_id)
+    return None if base is None else base + ".picks"
+
+
 def repo_marker_path(session_id):
     """The sidecar that binds a session's inbox to the repo it worked in, or None. Beside the inbox:
     feedback_guard.py reads it to find other sessions' inboxes of the same repo."""

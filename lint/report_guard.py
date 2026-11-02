@@ -42,8 +42,9 @@ import json
 import os
 import re
 import sys
+import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE =os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 import layout  # noqa: E402
@@ -534,6 +535,160 @@ def pick_has_a_control(records, text, cwd):
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
+# questions-go-to-owner, "Chat first, then the page": a pick asked in chat must reach the owner's
+# waiting page, or the parent session for a lane, and not stay a promise. The send and items-write
+# tests are feedback_guard's, imported at the Stop that needs them and never copied.
+FIVE_MIN = 300  # seconds: the chat-first wait
+PICK_TEXT_CHARS = 120
+LANE_PICK_REASON = (
+    "Lane pick guard: a lane's chat is not a route to the owner. Send this pick to your parent "
+    "session%s in this turn.")
+PICK_SEND_REASON = (
+    "Pick-send guard: a pick has waited more than 5 minutes in chat with no answer and no send: %s. "
+    "Send it to the page writer now (send_message to the `writer` in the page's `meta/page` "
+    "document; read it with ArtifactData get meta/page on %s), or write the item to the page "
+    "(ArtifactData set on its items collection).")
+PICK_STAND_DOWN = (
+    "The pick-send check stood down: this repo has no waiting page, so the pick is not recorded or sent.")
+
+
+def _hooks_on_path():
+    hooks = os.path.join(HERE, "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)
+
+
+def _sends(rec, feedback_guard, items_write):
+    """True when a main-session record holds a send, or, with `items_write`, an items write to the page."""
+    if rec.get("isSidechain"):
+        return False
+    for block in tool_uses(rec):
+        if block.get("name") in feedback_guard.SEND_TOOLS:
+            return True
+        call = block.get("input")
+        if items_write and str(block.get("name")).startswith(feedback_guard.ARTIFACT_DATA) and isinstance(call, dict):
+            batch = call.get("batch")
+            calls = [call] + [c for c in batch if isinstance(c, dict)] if isinstance(batch, list) else [call]
+            if any(feedback_guard._in_items(c) and feedback_guard._is_write(c) for c in calls):
+                return True
+    return False
+
+
+def _turn_start(records):
+    """Index of the last user record that is not a tool result: a lane's prompts arrive as peer
+    messages, so is_last_human would miss them. -1 when there is none."""
+    for i in range(len(records) - 1, -1, -1):
+        rec = records[i]
+        content = (rec.get("message") or {}).get("content")
+        has_result = isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+        if rec.get("type") == "user" and not rec.get("isSidechain") and not has_result:
+            return i
+    return -1
+
+
+def _own_lane(hook):
+    """(is_lane, parent id) from the session's own get_session record in its transcript. A session
+    with no such record is owner-facing."""
+    _hooks_on_path()
+    import override
+    import own_session
+    own_id = override.remote_session_id()
+    path = hook.get("transcript_path")
+    if not own_id or not path:
+        return False, ""
+    tags, _tagged_after, parent = own_session.read(path, own_id)
+    return tags is not None and own_session.is_lane(tags, parent), parent
+
+
+def _pick_key(section):
+    import hashlib
+    flat = " ".join(section.split())
+    return hashlib.sha1(flat.lower().encode("utf-8")).hexdigest()[:12], flat[:PICK_TEXT_CHARS]
+
+
+def _load_picks(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("asked"), (int, float))}
+
+
+def pick_send(hook, records, after, text):
+    """(reason, note, is_lane): the pick-send check at one Stop. Fails open: ("", "", False) on any error.
+
+    A lane (own record tagged cs-build:lane or naming a parent) offering a pick blocks unless this
+    turn sent it. An owner-facing session records a pick its reply offers outside the question box,
+    clears each pick an owner message, a send or an items write follows, and blocks on one still
+    open after FIVE_MIN. Cost: one stat per Stop with no pick offered and no state file; otherwise
+    one JSON file per session (local_time.pick_state_path), written only when a pick is recorded or
+    cleared and deleted when empty. No process, timer or log."""
+    try:
+        _hooks_on_path()
+        import local_time
+        state = local_time.pick_state_path(hook.get("session_id"))
+        offers = offers_a_pick(text)
+        if not offers and not (state and os.path.exists(state)):
+            return "", "", False
+        import feedback_guard
+        if offers:
+            lane, parent = _own_lane(hook)
+            if lane:
+                if any(_sends(rec, feedback_guard, False) for rec in records[_turn_start(records) + 1:]):
+                    return "", "", True
+                return LANE_PICK_REASON % (" (send_message to %s)" % parent if parent else ""), "", True
+        if state is None:
+            return "", "", False
+        root = repo_root(hook.get("cwd"))
+        page = layout.waiting_page(root) if root else "unknown"
+        boxed = any(not rec.get("isSidechain") and any(b.get("name") == ASK_TOOL for b in tool_uses(rec))
+                    for rec in after)
+        if page == "unknown":
+            return "", (PICK_STAND_DOWN if offers and not boxed else ""), False
+        import _transcript
+        import shared_names
+        picks = _load_picks(state) if os.path.exists(state) else {}
+        before = json.dumps(picks, sort_keys=True)
+        events = []  # (epoch, was_send), in transcript order
+        for rec in records:
+            when = _transcript.parse_utc_timestamp(rec.get("timestamp"))
+            if when is None:
+                continue
+            if _transcript.owner_text(rec, shared_names.MACHINE_TAGS) is not None:
+                events.append((when, False))
+            elif _sends(rec, feedback_guard, True):
+                events.append((when, True))
+        sent = set()
+        for key, pick in list(picks.items()):
+            hit = next((was_send for when, was_send in events if when >= pick["asked"]), None)
+            if hit is not None:
+                del picks[key]
+                if hit:
+                    sent.add(key)  # a send settled it, so a reply repeating it is no new ask
+        now = time.time()
+        if offers and not boxed:
+            key, snippet = _pick_key(input_needed_section(text))
+            if key not in picks and key not in sent:
+                picks[key] = {"asked": now, "text": snippet}
+        if json.dumps(picks, sort_keys=True) != before:
+            if picks:
+                os.makedirs(os.path.dirname(state), exist_ok=True)
+                with open(state, "w", encoding="utf-8") as f:
+                    json.dump(picks, f)
+            elif os.path.exists(state):
+                os.remove(state)
+        stale = sorted((p for p in picks.values() if now - p["asked"] > FIVE_MIN), key=lambda p: p["asked"])
+        if stale:
+            return PICK_SEND_REASON % (repr(stale[0].get("text", "")), page), "", False
+        return "", "", False
+    except Exception:
+        return "", "", False
+
+
 def names_tool(section, tool):
     """True when the Input Needed text names `tool`. A built-in tool (Edit, Bash) is an English word,
     so only its backticked name counts. An MCP tool counts by its full name, in backticks or not;
@@ -670,9 +825,18 @@ def main():
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     refusal = refusal_reason(pending_refusals(hook, last_reply(hook)))
 
+    pick_out = ["", "", False]  # the pick-send reason, its systemMessage, and whether this is a lane; set once the transcript is read
+
+    def emit(reason):
+        """Print the block for `reason` and the pick-send note, whichever there is."""
+        out = {"decision": "block", "reason": reason} if reason else {}
+        if pick_out[1]:
+            out["systemMessage"] = pick_out[1]
+        if out:
+            print(json.dumps(out))
+
     def stop_for_refusal():
-        if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal}))
+        emit(" ".join(r for r in (pick_out[0], refusal) if r))
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
@@ -698,17 +862,20 @@ def main():
     for i, rec in enumerate(records):
         if is_last_human(rec):
             last_human_idx = i
+    after = records[last_human_idx + 1:] if last_human_idx is not None else records
+    text = last_reply(hook)
+    # A lane's turn starts at a peer message, so this runs before the no-human-record exit.
+    pick_out[:] = pick_send(hook, records, after, text)
     if last_human_idx is None:
         return stop_for_refusal()
 
-    after = records[last_human_idx + 1:]
-    text = last_reply(hook)
+    # A lane's pick gets the lane reason alone: the question box and the waiting page are no route for it.
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
-        pick = []
+        pick = [pick_out[0]]
         try:
-            if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+            if offers_a_pick(text) and not pick_out[2] and not pick_has_a_control(after, text, hook.get("cwd")):
                 pick.append(PICK_REFUSAL)
         except Exception:
             pass
@@ -719,9 +886,7 @@ def main():
         try:
             pick.append(refusal)
             pick = [r for r in pick if r]
-            if pick:
-                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
-                print(json.dumps({"decision": "block", "reason": reason}))
+            emit(" ".join(pick) + (CORRECTION_TAIL if pick and report_shape_ok(text) else ""))
         except Exception:
             pass
         return
@@ -739,8 +904,10 @@ def main():
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
+    if pick_out[0]:
+        reasons.append(pick_out[0])
     try:
-        if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+        if offers_a_pick(text) and not pick_out[2] and not pick_has_a_control(after, text, hook.get("cwd")):
             reasons.append(PICK_REFUSAL)
     except Exception:
         pass
@@ -763,7 +930,9 @@ def main():
             reason += CORRECTION_TAIL
         else:
             write_marker(hook, last_human_idx)
-        print(json.dumps({"decision": "block", "reason": reason}))
+        emit(reason)
+    else:
+        emit("")
 
 
 if __name__ == "__main__":

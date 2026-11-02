@@ -12,6 +12,7 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     inline_script, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import own_session  # the one home of the own-record reader
 from guard_pointer import (
     pointer_checkout,
 )
@@ -518,42 +519,10 @@ def role_call_of(segment: str):
     return None
 
 
-def _own_session_read(transcript: str, own_id: str):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
-    uses, newest, tagged_after = set(), None, False
-    with open(transcript, encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                content = json.loads(line)["message"]["content"]
-            except (ValueError, KeyError, TypeError):
-                continue
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
-                    uses.add(block.get("id"))
-                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    tagged_after = True
-                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
-                    body = block.get("content")
-                    if isinstance(body, list):
-                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
-                    try:
-                        ccr = json.loads(body)["ccr"]
-                        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
-                    except (ValueError, KeyError, TypeError):
-                        continue
-    return newest, tagged_after
-
-
 def _own_get_session_tags(transcript: str, session_id: str):
     """The tags of the newest get_session result in this session's own transcript whose ccr.id is
     session_id (the session's own id, or a target's id for lane-closes-after-records), else None."""
-    return _own_session_read(transcript, session_id)[0]
+    return own_session.read(transcript, session_id)[0]
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -596,7 +565,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
+            tags, tagged_after, _parent = own_session.read(transcript, own_id)
             if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
                 return ""
     except Exception:
