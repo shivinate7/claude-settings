@@ -102,6 +102,7 @@ FAMILIES = {
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
+    "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, and an allowed publish of main's page writes the stamp",
@@ -10861,7 +10862,8 @@ add("swift-test: Edit of non-test native/abTests/x.swift is allowed", "allow", t
 # "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
 # (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
 # allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
-# logs, and the diff case is `xctestplan_logs_case` below.
+# refuses the builder's skip at commit and push (the builder-refuse section), and logs the author's
+# plan edit (`xctestplan_logs_case`).
 XCTESTPLAN = "native/Degen.xctestplan"
 add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny", rule=BT,
     tool="Edit", file_path=XCTESTPLAN, new_string='"skippedTests" : [ "LaunchTests" ]', **B)
@@ -10983,20 +10985,23 @@ BUILDER_GREEN = [
                                   "[tool.pytest.ini_options]\nminversion = '7'\n")),
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
+# A builder's test change is REFUSED at commit and push, and BLOCKED at the first stop (the
+# builder-refuse section below pins the planned fix). The rule id is the one the refusal prints.
+BDIFF = "builder-diff"
 for _name, _change in BUILDER_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
     _repo = diff_repo("b-" + _name, _change)
-    sh("builder-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
+    sh("builder-diff: commit with a %s change is denied" % _name, COMMIT, "deny", rule=BDIFF,
        cwd=_repo, agent_id="bld1", agent_type="builder")
-    sh("builder-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
+    sh("builder-diff: push with a %s change is denied" % _name, PUSH, "deny", rule=BDIFF,
        cwd=_repo, agent_id="bld1", agent_type="builder")
-    add("builder-diff: stop with a %s change is allowed and logged" % _name, "allow",
+    add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BDIFF,
         event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
-add("builder-diff: stop after COMMITTING a test change is allowed and logged", "allow",
+add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: push after COMMITTING a test change is allowed and logged", PUSH, "allow",
+sh("builder-diff: push after COMMITTING a test change is denied", PUSH, "deny", rule=BDIFF,
    cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
@@ -11044,7 +11049,7 @@ add("builder-diff: test changes merged in from main are not the builder's", "all
 sh("builder-diff: commit after merging main in is allowed", COMMIT, "allow", cwd=_repo,
    agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-merged-main-own", _merge_main_in(True))
-add("builder-diff: its OWN new test after merging main in is allowed and logged", "allow",
+add("builder-diff: its OWN new test after merging main in is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 
 
@@ -11056,18 +11061,18 @@ def _own_test_then_new_branch(w):
 
 
 _repo = diff_repo("b-new-branch-name", _own_test_then_new_branch)
-add("builder-diff: a new branch name does not reset the base", "allow",
-    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
-sh("builder-diff: a new branch name does not reset the base at push", PUSH, "allow",
-   cwd=_repo, agent_id="bld1", agent_type="builder")
+add("builder-diff: a new branch name does not reset the base: the stop is blocked", "deny",
+    rule=BDIFF, event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: a new branch name does not reset the base: the push is denied", PUSH, "deny",
+   rule=BDIFF, cwd=_repo, agent_id="bld1", agent_type="builder")
 
-# The stop is never blocked (guard.py judge_stop). A builder stop with a test change and a dirty
-# main tree is an offence that logs, and the stop still goes through. This pins the first stop.
+# The first stop with a test change is blocked (guard.py judge_stop). A dirty main tree is no
+# builder change, so it does not change the verdict. The second stop is pinned in role_log_case.
 _repo = diff_repo("b-giveup", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                          # the MAIN tree is dirty too
                                          write(os.path.join(w + "-main", "tests", "test_x.py"), "pass\n")))
-add("builder-diff: a stop with a test change is never blocked",
-    "allow", event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+add("builder-diff: a stop with a test change is blocked", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 add("builder-diff: an unread diff logs role-diff-unread and the first stop is allowed", "allow",
     event="SubagentStop", cwd=NOGIT, agent_id="bld1", agent_type="builder")
 add("builder-diff: a stop with no cwd is allowed (and logged)", "allow", event="SubagentStop",
@@ -11131,13 +11136,12 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
 
 
 def diff_logs_case():
-    """The diff check LOGS for the reviewer and never blocks: commit, push and stop each print
-    nothing and write one `noted` line named `builder-diff` or `author-diff`."""
+    """A test-author's diff LOGS for the reviewer and never blocks: commit, push and stop each print
+    nothing and write one `noted` line named `author-diff`. A builder's test change is refused, not
+    logged (builder-refuse section). The label keeps its text: hooks/mutate_guard.py selects it by it."""
     problems = []
     for label, agent_type, agent_id, rule in (
-            ("b-rewritten", "builder", "bld1", "builder-diff"),
-            ("b-new-untracked", "builder", "bld1", "builder-diff"),
-            ("a-product-edit", "test-author", "auth1", "author-diff")):
+            ("a-product-edit", "test-author", "auth1", "author-diff"),):
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
                                   os.path.join(DIFFROOT, label), agent_type, agent_id)
         if out:
@@ -11561,18 +11565,11 @@ def _plan_repo(name, text):
 
 
 def xctestplan_logs_case():
-    """A builder's added skippedTests line logs once each at commit, push and stop, and never
-    blocks. A builder's added codeCoverage line logs nothing. A test-author's plan edit logs
-    no author-diff line."""
+    """A builder's added codeCoverage line logs nothing. A test-author's plan edit logs no
+    author-diff line. A builder's added skippedTests line is refused, not logged: see the
+    builder-refuse section, which builds the same plan repo (`xctestplan-skip`) once."""
     problems = []
-    skip = _plan_repo("xctestplan-skip", XCTESTPLAN_SKIP)
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-skip"), skip, "builder",
-                              "bld1")
-    if out:
-        problems.append("skip: expected silent allows, got %r" % out[:60])
-    hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "builder-diff"]  # six
-    if len(hits) != 3:
-        problems.append("skip: expected 3 noted/builder-diff lines, found %d" % len(hits))
+    skip = os.path.join(DIFFROOT, "xctestplan-skip")
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
                               _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE), "builder",
                               "bld1")
@@ -11584,11 +11581,221 @@ def xctestplan_logs_case():
     if out or rows:
         problems.append("author: a plan edit was judged: %r %r" % (out[:60], rows))
     return (not problems), ("; ".join(problems) or
-                            "a skippedTests line is logged; codeCoverage and a test-author's plan are not")
+                            "codeCoverage logs nothing; a test-author's plan edit logs no author-diff line")
 
 
-LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's skippedTests line is logged at commit, push "
-                         "and stop", xctestplan_logs_case))
+LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs nothing, and a "
+                         "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
+
+
+# =========================================================================== builder refusal
+#
+# A builder's test change is REFUSED at `git commit` and `git push`, and BLOCKED at its first
+# SubagentStop (decision builders-cannot-edit-tests; debt refusal-route-around-guard). These cases
+# pin the planned base fix in guard.py diff_bases: each commit HEAD moved to by a reset, checkout,
+# merge or pull is a base, unless one of the agent's own commits is its ancestor. A path offends
+# only if it differs from EVERY base. Until that fix lands, each case here is red: the guard logs
+# and allows. The rows that pin a stop, the write tool and a clean builder sit beside these.
+FAMILY = "builder-refuse"
+TEST_A = "tests/test_a.py"
+# The test-author's five cases, added to main's test file on the lane branch.
+LANE_FUNCS = ["def test_lane_%d():\n    assert %d\n\n" % (n, n) for n in range(1, 6)]
+LANE_TEXT = BASE_FILES[TEST_A] + "".join(LANE_FUNCS)
+# What a builder leaves after it removes four of the five: it differs from main AND from the lane tip.
+TRIMMED = BASE_FILES[TEST_A] + LANE_FUNCS[0]
+
+
+def _must(where, *args):
+    """One git call a fixture needs. A call that fails stops the run: a broken build proves nothing."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git %s in %r: %s" % (" ".join(args), where, done.stderr.strip()))
+
+
+def _product_commit(w):
+    write(os.path.join(w, "src/app.py"), "x = 3\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product work")
+
+
+def _test_author_lane(w):
+    """The test-author's commit on branch `lane`, cut from main. Main's checkout ends on main."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, TEST_A), LANE_TEXT)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, "checkout", "-q", "main")
+
+
+def _incident(w):
+    """Cut at main. `reset --hard` to the lane tip, then the builder removes lines from the test file."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, TEST_A), TRIMMED)
+
+
+def _merge_commit(w):
+    """Cut at main. The builder commits product work, merges the lane tip (a merge commit), then
+    removes lines from the test file."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, TEST_A), TRIMMED)
+
+
+def _clean_merge(w):
+    """Cut at main. The builder merges the lane tip and changes product files only (Oct 2 false alarm)."""
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _clean_reset(w):
+    """Cut at main. The builder resets to the lane tip and changes product files only (Oct 2 false alarm)."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _own_then_clean_merge(w):
+    """Cut at main. The builder commits product work, merges the lane tip, then changes product files only."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-ff", "--no-edit", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _launder(w):
+    """Cut at main. The builder commits a test edit, makes a product commit on a side branch from it,
+    returns to its own branch and resets to the side commit, which contains its own test edit."""
+    write(os.path.join(w, TEST_A), "pass\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, "switch", "-q", "-c", "side")
+    write(os.path.join(w, "src/app.py"), "x = 5\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "product on side")
+    _must(w, "switch", "-q", "work")
+    _must(w, "reset", "-q", "--hard", "side")
+
+
+def _shell_write(w):
+    """Cut at main. The test file is written by a Python process, as a Bash `python3 -c` call writes
+    it. No write tool runs, so no path check sees the write. Only the diff shows it."""
+    code = "open(%r, 'w').write(%r)" % (os.path.join(w, TEST_A), TRIMMED)
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: python write in %r: %s" % (w, done.stderr.strip()))
+
+
+_bd_inc = diff_repo("bd-incident", _incident)
+# Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
+sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder")
+# Case 7: the same refused commit names no path, and gives an undo route and the orchestrator.
+sh("builder-refuse: the refused commit names no test path and gives an undo route",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_a"), carries=(("restore", "Restore", "put back"), "orchestrator"))
+
+# Case 2: a merge commit of the lane tip, then a removed line, is refused.
+_bd_merge = diff_repo("bd-merge-commit", _merge_commit)
+sh("builder-refuse: a merge commit of the lane tip, then a removed test line, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_merge, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a merge commit of the lane tip, then a removed test line, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_merge, agent_id="bld1", agent_type="builder")
+
+# Case 4: a commit that contains the builder's own test edit is no base, so the edit is still refused.
+_bd_launder = diff_repo("bd-launder", _launder)
+sh("builder-refuse: a reset to a commit that holds the builder's own test edit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_launder, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_launder, agent_id="bld1", agent_type="builder")
+
+# Case 5: the shell route. A test file written by `python3 -c` (no write tool) is refused by the diff.
+_bd_shell = diff_repo("bd-shell", _shell_write)
+sh("builder-refuse: a test file written by a Python process is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a test file written by a Python process is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_shell, agent_id="bld1", agent_type="builder")
+
+# Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
+# diff_logs_case (the a-product-edit row: author-diff at commit, push and stop).
+sh("builder-refuse: a test-author's commit with a product file is allowed",
+   COMMIT, "allow", cwd=os.path.join(DIFFROOT, "a-product-edit"), agent_id="auth1",
+   agent_type="test-author")
+
+# The xctestplan skip is a test change too (builder-refuse, not logged). Its repo is built once, here.
+_bd_plan = _plan_repo("xctestplan-skip", XCTESTPLAN_SKIP)
+sh("builder-refuse: a builder's skippedTests line is denied at commit", COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's skippedTests line is denied at push", PUSH, "deny", rule=BDIFF,
+   cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder's skippedTests line is blocked at the first stop", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=_bd_plan, agent_id="bld1", agent_type="builder")
+
+
+def clean_builder_case(label):
+    """Case 3, the Oct 2 false alarm. A builder that joined the lane tip and changed product files
+    only is allowed at commit, push and stop, and writes no builder-diff line."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
+                                  os.path.join(DIFFROOT, label), "builder", "bld1")
+        hits = [r for r in rows if len(r) > 3 and r[3] == BDIFF]
+        if out or hits:
+            return False, "expected silent allows and no builder-diff line, got %r and %d line(s)" % (
+                out[:60], len(hits))
+        return True, "allowed at commit, push and stop; no builder-diff line"
+    return case
+
+
+diff_repo("bd-clean-merge", _clean_merge)
+diff_repo("bd-clean-reset", _clean_reset)
+diff_repo("bd-own-clean-merge", _own_then_clean_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that merges the lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-merge")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that resets to the lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-reset")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder with its own product commit that then merges the lane "
+                         "tip is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-own-clean-merge")))
+
+
+def stop_pair_case():
+    """Case 6. A builder's first stop with a test change is blocked. Its second stop, with
+    stop_hook_active, is allowed silently and logs role-diff-unresolved."""
+    repo = os.path.join(DIFFROOT, "b-rewritten")
+    materialize(repo)
+    folder = os.path.join(ROOT, "stoppair")
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    body = {"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": "bld1", "agent_type": "builder"}
+    problems = []
+    first = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                           text=True, env=env, timeout=120)
+    if read_decision(first.stdout)[0] != "deny":
+        problems.append("first stop: expected a block, got %r" % first.stdout.strip()[:80])
+    second = subprocess.run([sys.executable, GUARD], input=json.dumps(dict(body, stop_hook_active=True)),
+                            capture_output=True, text=True, env=env, timeout=120)
+    if second.stdout.strip():
+        problems.append("second stop: expected a silent allow, got %r" % second.stdout.strip()[:80])
+    text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    if "role-diff-unresolved" not in text:
+        problems.append("no role-diff-unresolved line after the second stop")
+    return (not problems), ("; ".join(problems) or
+                            "first stop blocked; second stop allowed, logs role-diff-unresolved")
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
+                         "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
 
 
 # =========================================================================== failing open
