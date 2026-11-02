@@ -19,7 +19,6 @@ change commits on top. The check runs as the copy at lint/check_red_run.py in th
 module path, which a stub run uses.
 """
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -235,7 +234,7 @@ class CheckCase(Fixture):
         self.base()
         rel = self.new_test_path()
         bad = self.commit("add widget tests", {rel: TEST_TEXT})
-        good = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT})
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT})
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertGap(out, bad, "add widget tests", rel)
