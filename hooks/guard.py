@@ -2893,7 +2893,8 @@ def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
     sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
     import shutil
-    import subprocess
+    import subprocess  # TimeoutExpired only; the child starts through _nowindow
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
     import tempfile
     node = shutil.which("node")
     folder = _waiting_page_folder(CHECK_DESIGNS)
@@ -2907,8 +2908,8 @@ def _run_check_designs(page_file, item):
         with open(item_file, "w", encoding="utf-8") as handle:
             json.dump(item, handle)
         try:
-            run = subprocess.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                 capture_output=True, text=True, timeout=cap)
+            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
+                                capture_output=True, text=True, timeout=cap)
         except subprocess.TimeoutExpired:
             return 3, "no answer in %d s" % cap
         except OSError as err:
