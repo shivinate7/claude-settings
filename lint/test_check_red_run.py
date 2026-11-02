@@ -71,7 +71,7 @@ class Fixture(unittest.TestCase):
     def setUp(self):
         self.tree = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="crr_")
         self.addCleanup(tracked_tree.rm_tree, self.tree)
-        tracked_tree.copy_tracked(self.tree, "hooks")  # the check imports hooks/guard.py
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, such as hooks/guard.py
         self.serial = 0
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
@@ -228,7 +228,7 @@ class CheckCase(Fixture):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertGap(out, bad, "add widget tests", rel)
-        self.assertNotIn(good[:7], out, out)  # the whole range is read, not HEAD alone
+        self.assertNotIn("change widget product", out, out)  # only a gap prints a subject; the range is read
 
     def test_merge_of_a_tested_side_passes(self):
         self.base()
@@ -247,12 +247,11 @@ class CheckCase(Fixture):
         side = self.commit("add widget tests", {rel: TEST_TEXT})
         self.git("checkout", "-q", "main")
         self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT})
-        merge = self.merge("side")
+        self.merge("side")
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertGap(out, side, "add widget tests", rel)
-        self.assertNotIn(merge[:7], out, out)
-        self.assertNotIn("Merge side", out, out)
+        self.assertNotIn("Merge side", out, out)  # only a gap prints a subject, so the merge stays unnamed
 
     def test_commit_before_the_check_landed_is_not_judged(self):
         self.base(check=False)
