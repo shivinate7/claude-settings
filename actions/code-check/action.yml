@@ -7,9 +7,12 @@ description: >
   needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref and origin's default branch) and setup-python.
   Pinned tools run through pipx or npx (tsc, and astro-check for .astro), so the runner needs Node.
   Formatter layers wait for o2 and do not run.
+  It also runs the comment check on lines the change adds (Python only), against base.
 inputs:
   base:
-    description: Base commit for the mypy list shrink check. Empty skips that check and says so.
+    description: >
+      Base commit for the mypy list shrink check, and the ref the comment check diffs against.
+      Empty skips both checks and says so.
     required: false
     default: ""
 runs:
