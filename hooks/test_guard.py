@@ -20035,7 +20035,7 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
     add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
 
 
-def role_opus_deny(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
+def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
     """An Opus spawn above its row is refused under agent-model-cap, not this rule (owner ruling, item 127 pick a,
     Nov 1 17:25 CST). An owner override lifts it, so the case is not never-lifted."""
     add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
@@ -20107,7 +20107,7 @@ role_model_allow("role-model: Explore on sonnet with prose ahead of Audit: on li
 role_model_allow("role-model: Explore on haiku is allowed, with no marker", "Explore", "haiku",
            "Find where X is defined.")
 # An Explore on Opus is refused with no Audit: marker; the marker is its standing grant (item 137 pick a).
-role_opus_deny("role-model: Explore on opus with no marker is denied under agent-model-cap (item 137)", "Explore", "opus",
+role_opus_refuse("role-model: Explore on opus with no marker is denied under agent-model-cap (item 137)", "Explore", "opus",
                "Find where X is defined.")
 role_model_allow("role-model: Explore on opus with Audit: on line one is allowed (item 137)", "Explore", "opus",
            "Audit: check the glossary for meaning drift.")
@@ -20132,16 +20132,16 @@ role_model_allow("role-model: general-purpose on sonnet is allowed", "general-pu
 role_model_allow("role-model: claude on sonnet is allowed", "claude", "sonnet", "Find the file.")
 role_model_allow("role-model: claude-code-guide on haiku is allowed", "claude-code-guide", "haiku",
            "How do the hooks load?")
-role_opus_deny("role-model: builder on opus with no round line is denied under agent-model-cap, not this rule",
+role_opus_refuse("role-model: builder on opus with no round line is denied under agent-model-cap, not this rule",
                "builder", "opus", "Fix the failing case.")
-role_opus_deny("role-model: general-purpose on opus is denied under agent-model-cap, not this rule",
+role_opus_refuse("role-model: general-purpose on opus is denied under agent-model-cap, not this rule",
                "general-purpose", "opus", "Find the file.")
-role_opus_deny("role-model: test-author on opus is denied under agent-model-cap, not this rule",
+role_opus_refuse("role-model: test-author on opus is denied under agent-model-cap, not this rule",
                "test-author", "opus", "Write the failing cases.")
 # A role with no row has no grant, so the Opus ceiling refuses it, and says so rather than asking (item 127 pick a).
-role_opus_deny("role-model: a role with no row on opus is denied under agent-model-cap, not asked (item 127)",
+role_opus_refuse("role-model: a role with no row on opus is denied under agent-model-cap, not asked (item 127)",
                "scout", "opus", "Look around.")
-role_opus_deny("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
+role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
 # Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
