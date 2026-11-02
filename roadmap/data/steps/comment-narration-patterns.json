@@ -1,0 +1,9 @@
+{
+ "title": "The comment check catches history phrases and lets dated or rounding why-comments pass",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21009,
+ "why": "lint/check_comment_narration.py now runs in every repo that pins claude-settings (PR #998). Its patterns miss history phrases and flag real why-comments, so sessions in other repos will hit false alarms.",
+ "note": "Misses: \"Previously this returned None\", \"Changed from the old behaviour\", \"Added after review by billing\". False alarms: \"round 2 decimals so the total matches the invoice\", \"Tax rule effective 2024-07-01\". Recorded as comment-narration-limits in docs/debts/notes.md (lane comment-lint-every-repo). No owner question: the rule building-comments-say-why already says what to flag, and a pattern change can be undone. Red first: each phrase above as a fixture, misses red and false alarms green. Port: yes, the check is shared. Ready after PR #998 merges.",
+ "updatedAt": "2026-11-02T01:12:00Z"
+}
