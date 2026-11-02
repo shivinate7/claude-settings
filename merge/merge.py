@@ -119,6 +119,12 @@ def sh(args, cwd=None, input=None, env=None, timeout=None):
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
+def ancestor(cwd, tip, base):
+    """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
+    that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    return git_reads.branch_is_ancestor(cwd, base, tip)
+
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
@@ -1637,10 +1643,10 @@ def holds_base(wt, base_ref, sha, before_run=None):
     """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
     (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
     the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
-    c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
-    if c == 0:
+    held = ancestor(wt, base_ref, sha)
+    if held:
         return None, None
-    if c == 1:
+    if held is False:
         ok, why = small_base_move(wt, base_ref, sha, before_run)
         if ok:
             return None, why
@@ -1648,7 +1654,8 @@ def holds_base(wt, base_ref, sha, before_run=None):
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
                 f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}."), None
-    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}", None
+    return (f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
+            f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`)."), None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -1688,7 +1695,11 @@ def ff_main(root, base, commit):
     c, out = git(root, "fetch", "-q", "origin")
     if c:
         raise Stop("git fetch origin failed, so the local main cannot be moved: " + out)
-    if git(root, "merge-base", "--is-ancestor", commit, f"refs/remotes/origin/{base}")[0]:
+    on_origin = ancestor(root, commit, f"refs/remotes/origin/{base}")
+    if on_origin is None:
+        raise Stop(f"cannot read whether {commit[:9]} is on origin/{base}: this clone is shallow or git could not tell. "
+                   "Nothing was moved. Run `git fetch --unshallow` and run again.")
+    if not on_origin:
         raise Stop(f"{commit[:9]} is not on origin/{base}. Nothing was moved.")
     tree = holder(root, base)
     if tree:
@@ -1774,7 +1785,11 @@ def cut_local(root, branch, merged):
     held = holder(root, branch)
     if held and not remove_held_tree(root, branch, held, merged):
         return
-    if git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", merged)[0]:
+    inside = ancestor(root, f"refs/heads/{branch}", merged)
+    if inside is None:
+        say(f"merge: {branch} kept here: git could not tell whether its tip is in the merged head {merged[:9]} "
+            "(a shallow clone cuts the history: run `git fetch --unshallow`).")
+    elif not inside:
         say(f"merge: {branch} kept here: its tip is not in the merged head {merged[:9]}, so it holds local-only commits.")
     else:
         c, out = git(root, "branch", "-D", branch)
@@ -1806,10 +1821,11 @@ def read_lanes(wt, base_ref, sha):
         return n % 2 == 1
     tips = []
     for t in took:
-        c, out = git(wt, "merge-base", "--is-ancestor", t, base_ref)
-        if c not in (0, 1):  # 1 is "not an ancestor"; any other code is a failed read
-            raise ValueError(f"git merge-base failed on {t[:9]}: " + (out.splitlines() or ["?"])[-1])
-        if c:
+        c = ancestor(wt, t, base_ref)
+        if c is None:  # a failed read, or a shallow clone that cut the history: never "not an ancestor"
+            raise ValueError(f"git merge-base failed on {t[:9]}: git could not tell (a shallow clone needs "
+                             "`git fetch --unshallow`)")
+        if not c:
             tips.append(t)
     return tips, {t for t in tips if all(reverted(h) for h in took[t])}
 
@@ -1897,12 +1913,12 @@ def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropp
         proofs = {}
         def proof(b):  # why the tip is not in the merge commit, or None; one run per lane
             if b not in proofs:
-                a = git(root, "merge-base", "--is-ancestor", heads[b], commit)[0]
+                a = ancestor(root, heads[b], commit)  # None in a shallow clone: the proof could not run, the branch stays
                 why = None
-                if a == 1:
+                if a is False:
                     proven = guard_core.branch_cherry_empty(root, commit, heads[b])
                     why = None if proven else "its tip is not in the merge commit." if proven is not None else "the proof could not run."
-                elif a:
+                elif a is None:
                     why = "the proof could not run."
                 proofs[b] = why
             return proofs[b]

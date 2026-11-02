@@ -242,17 +242,32 @@ def resolve_default_base(where: str, remote: str = "origin"):
     return read_default_base(where, remote)[0]
 
 
+def is_shallow(where: str):
+    """True in a shallow clone, False in a full one, None when git could not tell. The one home of the
+    shallow probe: a shallow clone cuts history, so an ancestry exit 1 there proves nothing."""
+    answer = _git(where, "rev-parse", "--is-shallow-repository")
+    if answer is None or answer.returncode != 0:
+        return None
+    text = answer.stdout.strip()
+    return True if text == "true" else False if text == "false" else None
+
+
 def branch_is_ancestor(where: str, base: str, branch: str):
     """True when `branch`'s tip is already reachable from `base`, False when it plainly is not,
     None when the question could not be answered (an unresolvable revision, a git that would not
-    run)."""
+    run, or a shallow clone).
+
+    `--is-ancestor` exits 1 both for "not an ancestor" and for a shallow clone that cut the history
+    between the two, so a shallow clone's exit 1 is unknown, never False. The shallow probe runs only
+    on that exit, so an ancestor answer costs no extra process. A probe that fails is unknown too.
+    The helper never fetches: guards call it, and a read must not change the clone."""
     answer = _git(where, "merge-base", "--is-ancestor", branch, base)
     if answer is None:
         return None
     if answer.returncode == 0:
         return True
     if answer.returncode == 1:
-        return False
+        return False if is_shallow(where) is False else None
     return None
 
 
@@ -285,7 +300,11 @@ def branch_proof(where: str, base: str, branch: str, ancestor=None):
     if ancestor is None:
         ancestor = branch_is_ancestor(where, base, branch)
     if ancestor is None:
-        return None
+        # A shallow clone's cut ancestry proves nothing: it is "not proven", as a full clone's exit 1 is, so the
+        # cherry and on-remote tests still decide. Any other unknown (a failed read) stays unknown.
+        if is_shallow(where) is not True:
+            return None
+        ancestor = False
     if ancestor:
         return "ancestor"
     cherry_empty = branch_cherry_empty(where, base, branch)

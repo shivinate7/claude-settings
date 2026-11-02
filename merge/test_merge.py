@@ -17,6 +17,8 @@ import merge  # noqa: E402
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
@@ -537,6 +539,47 @@ class Flow(Env):
         self.assertEqual(methods, ["merge"])  # the default method
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
+
+
+class ShallowMain(unittest.TestCase):
+    """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
+    between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(dir=self.run_dir)
+        build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
+        bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
+        put(os.path.join(other, "old.txt"), "old\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
+        self.old = sh(other, "git", "rev-parse", "HEAD")
+        put(os.path.join(other, "new.txt"), "new\n")
+        sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "new"); sh(other, "git", "push", "-q", "origin", "main")
+        # A shallow clone of origin, then the older commit fetched at depth 1: its object is present, and the history
+        # between it and main is cut. A plain --depth 1 clone lacks the object, and then ff_main stops for another reason.
+        self.shallow = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(bare, self.shallow, self.old)
+        if error:
+            raise RuntimeError("shallow fixture could not be built: " + error)
+
+    def test_the_shallow_clone_holds_the_commit_but_cuts_its_path_to_main(self):
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(subprocess.run(["git", "cat-file", "-e", self.old + "^{commit}"], cwd=self.shallow).returncode, 0)
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", self.old, "refs/remotes/origin/main"],
+                                        cwd=self.shallow, capture_output=True).returncode, 1)
+
+    def test_ff_main_in_a_shallow_clone_does_not_say_the_commit_is_off_main(self):
+        main_before = sh(self.shallow, "git", "rev-parse", "refs/heads/main")
+        with self.assertRaises(merge.Stop) as cm:  # no Stop is a failure: ff_main must refuse to move main here
+            merge.ff_main(self.shallow, "main", self.old)
+        self.assertNotIn("is not on origin/main", str(cm.exception))  # the Stop may name the shallow clone, not a false claim
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "refs/heads/main"), main_before, "main moved")
+
 
 class ClaudeMdFlag(Env):
     """A CLAUDE.md change is flagged and only reported (decision claude-md-change-is-flagged).
@@ -1735,12 +1778,13 @@ class CutLanes(Env):
     def proof_fails_for(self, tip):
         """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
         c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
-        real = merge.sh
-        def broken(args, *a, **k):
+        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
+        real = git_reads._git
+        def broken(where, *args, **k):
             if "merge-base" in args and tip in args and "origin/main" not in args:
-                return 128, "fatal: simulated: the ancestry proof cannot run"
-            return real(args, *a, **k)
-        return unittest.mock.patch.object(merge, "sh", broken)
+                return subprocess.CompletedProcess(args, 128, "", "fatal: simulated: the ancestry proof cannot run")
+            return real(where, *args, **k)
+        return unittest.mock.patch.object(git_reads, "_git", broken)
 
     def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
         # Fixpoint: lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
@@ -1961,12 +2005,13 @@ class CutLanes(Env):
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
         tips = lane_batch(self, "lane1", "lane2")
-        real = merge.sh
-        def broken(args, *a, **k):
+        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
+        real = git_reads._git
+        def broken(where, *args, **k):
             if "merge-base" in args and tips["lane1"] in args and "origin/main" in args:
-                return 128, "fatal: simulated"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", broken):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
+            return real(where, *args, **k)
+        with unittest.mock.patch.object(git_reads, "_git", broken):
             rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("git merge-base failed", out)
