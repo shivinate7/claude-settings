@@ -39,9 +39,14 @@ def hook_tier_line():
     return found[0]
 
 
-def merge_role_sentence(line):
-    """The sentence of the tier line that holds `merge --role`: from the ". " before it to the ". " after it, or to the line's ends."""
-    at = line.index("merge --role")
+def normal_tier_line():
+    """The tier line with its whitespace folded and its letters lower-cased, so a test reads a phrase's words, not their casing."""
+    return " ".join(hook_tier_line().split()).lower()
+
+
+def merge_role_sentence(line, anchor="merge --role"):
+    """The sentence of the tier line that holds `anchor`: from the ". " before it to the ". " after it, or to the line's ends."""
+    at = line.index(anchor)
     start = line.rfind(". ", 0, at)
     end = line.find(". ", at)
     return line[0 if start < 0 else start + 2:len(line) if end < 0 else end + 1]
@@ -314,6 +319,24 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     def test_the_tier_line_does_not_say_once(self):
         self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
+
+    def test_the_tier_line_says_only_the_batch_runner_merges(self):
+        # Owner ruling (waiting-page item 111 a, 2026-11-01 11:53 CST): in a coordinator build only the batch runner merges.
+        line = normal_tier_line()
+        anchor = "only the batch runner merges"
+        self.assertIn(anchor, line, "the tier line does not say that only the batch runner merges")
+        self.assertIn("coordinator build", merge_role_sentence(line, anchor),
+                      "the sentence that says only the batch runner merges is not scoped to a coordinator build")
+
+    def test_the_handoff_sentence_is_scoped_to_a_coordinator_build(self):
+        # The hand-off to the batch runner binds a session in a coordinator build only: every other session in that build,
+        # the coordinator too. A solo or one-lane session keeps merging its own work, so the line must not bind it.
+        line = normal_tier_line()
+        anchor = "hands the branch, head and pr to the batch runner"
+        self.assertIn(anchor, line, "the tier line does not say who hands the branch, head and PR to the batch runner")
+        sentence = merge_role_sentence(line, anchor)
+        self.assertIn("coordinator build", sentence, "the hand-off is not scoped to a coordinator build: %r" % sentence)
+        self.assertIn("the coordinator too", sentence, "the hand-off does not bind the coordinator: %r" % sentence)
 
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.

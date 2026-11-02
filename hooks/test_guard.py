@@ -19470,6 +19470,85 @@ cs_shell("chained_add_commit_allowed, a comment hides the commit", "allow",
 cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
 cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
 
+# ---- coordinator acts (rule coordinator-scope; owner ruling, waiting-page item 111 a, 2026-11-01 11:53 CST). In a coordinator
+# build only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only when its type is
+# Plan, Explore or claude-code-guide. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
+# merge`, or the merge tool's --confirm) is refused before any read. create_session and start_session stay allowed.
+# The rows name no model: the test run's env sets the subagent default, so the floor, cap and role-model rules stay quiet.
+# A refusal must not echo the brief, so every refused row carries a sentinel brief in `lacks`.
+CS_SPAWN_PROMPT = "Zebra quartz brief"
+CS_SPAWN_INPUT = {"subagent_type": "builder", "prompt": CS_SPAWN_PROMPT}
+CS_SPAWN = {"prompt": CS_SPAWN_PROMPT, "cwd": NOGIT, "lacks": (CS_SPAWN_PROMPT,)}
+CS_WORKFLOW = {"cwd": NOGIT, "lacks": (CS_SPAWN_PROMPT,)}
+CS_CREATE_SESSION = "mcp__claude-code-remote__create_session"
+CS_START_SESSION = "mcp__ccd_session__start_session"
+
+for _type in ("builder", "reviewer", "test-author", "record-writer", "designer", "design-reviewer"):
+    cs("coordinator_%s_spawn_denied" % _type.replace("-", "_"), "deny", tool="Agent", subagent_type=_type, **CS_SPAWN)
+cs("coordinator_untyped_spawn_denied", "deny", tool="Agent", **CS_SPAWN)
+cs("coordinator_empty_type_spawn_denied", "deny", tool="Agent", subagent_type="", **CS_SPAWN)
+cs("coordinator_task_tool_denied", "deny", tool="Task", subagent_type="builder", **CS_SPAWN)
+cs("coordinator_workflow_builder_denied", "deny", tool="Workflow",
+   script='await agent("%s", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_unread_type_denied", "deny", tool="Workflow",
+   script='await agent("%s", {agentType: role})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_untyped_denied", "deny", tool="Workflow",
+   script='await agent("%s", {model: "sonnet"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+# The scanner reads a Workflow script as code: comment openers inside a string, a lone quote in a comment ahead of the
+# call, and a multi-line template literal each hide no builder call.
+cs("coordinator_workflow_comment_opener_denied", "deny", tool="Workflow",
+   script='await agent("%s /* // # x", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_lone_quote_denied", "deny", tool="Workflow",
+   script='// don\'t stop\nawait agent("%s", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_template_denied", "deny", tool="Workflow",
+   script='await agent(`%s\n${task}\nbuild it`, {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_explore_allowed", "allow", tool="Workflow",
+   script='await agent("Read the repo.", {agentType: "Explore", model: "haiku"})', cwd=NOGIT)
+cs("coordinator_workflow_commented_builder_allowed", "allow", tool="Workflow",
+   script='// await agent("%s", {agentType: "builder"})\nawait agent("Read the repo.", {agentType: "Explore", model: "haiku"})'
+   % CS_SPAWN_PROMPT, cwd=NOGIT)
+
+cs("coordinator_plan_spawn_allowed", "allow", tool="Agent", subagent_type="Plan", prompt="Design the plan.", cwd=NOGIT)
+cs("coordinator_explore_spawn_allowed", "allow", tool="Agent", subagent_type="Explore", prompt="Read the repo.", cwd=NOGIT)
+cs("coordinator_guide_spawn_allowed", "allow", tool="Agent", subagent_type="claude-code-guide",
+   prompt="How do hooks work?", cwd=NOGIT)
+cs("coordinator_explore_casing_spawn_allowed", "allow", tool="Agent", subagent_type="explore", prompt="Read the repo.",
+   cwd=NOGIT)
+cs("coordinator_create_session_allowed", "allow", tool=CS_CREATE_SESSION, prompt="do the task", cwd=NOGIT)
+cs("coordinator_start_session_allowed", "allow", tool=CS_START_SESSION, prompt="do the task", cwd=NOGIT)
+cs("batch_runner_builder_spawn_allowed", "allow", role="batch-runner", tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+cs("no_role_file_spawn_allowed", "allow", role="none", tool="Agent", subagent_type="builder", prompt="Build the change.",
+   cwd=NOGIT)
+cs("local_spawn_allowed", "allow", env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None), tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+cs("other_session_role_spawn_allowed", "allow", role="other-session", tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+cs("agent_spawn_from_agent_allowed", "allow", tool="Agent", subagent_type="builder", prompt="Build the change.",
+   cwd=NOGIT, agent_id="bld1", agent_type="builder")
+
+# A merge is refused before any read, so each row runs with a fake gh that would answer green, and with no repo. The
+# merge tool's --confirm is named by its spellings: merge_call_of reads only `gh pr merge`.
+cs("coordinator_gh_pr_merge_denied", "deny", tool="Bash", command="gh pr merge 4321 --squash", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_pr_merge_quoted_body_denied", "deny", tool="Bash",
+   command='gh pr merge 4321 --body "don\'t // x"', cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_denied", "deny", tool="Bash", command="merge 4321 --confirm", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+for _name, _command in (("coordinator_merge_confirm_bin_denied", "python3 bin/merge 4321 --confirm"),
+                        ("coordinator_merge_confirm_script_denied", "python3 merge/merge.py 4321 --confirm"),
+                        ("coordinator_merge_confirm_shim_denied", "~/.claude/bin/merge 4321 --confirm")):
+    cs(_name, "deny", tool="Bash", command=_command, cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_echo_gh_pr_merge_allowed", "allow", tool="Bash", command='echo "gh pr merge 4321 --squash"', cwd=NOGIT,
+   env_path=GREEN_ON, silent=True)
+cs("batch_runner_merge_confirm_unchanged", "allow", role="batch-runner", tool="Bash",
+   command="python3 bin/merge 4321 --confirm", cwd=NOGIT, env_path=GREEN_ON, silent=True)
+# Unchanged: a session with no role file keeps the bare-merge ask that main gives (rule bare-merge, section 5c).
+add("coordinator-scope: solo_gh_pr_merge_still_asks, a session with no role file asks for a bare merge in a repo with a merge block",
+    "ask", BARE_MERGE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["none"], carries=BARE_SAYS, env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE)
+
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
 CS_REFUSED = (
@@ -19576,10 +19655,13 @@ def cs_constants_check():
     return not problems, "; ".join(problems) or "nine kinds, all in the layout, and the mode is deny"
 
 
-def cs_override_call(config, session, seconds):
-    """The refused Edit, made by a coordinator whose role file sits in this story's config folder."""
+def cs_override_call(config, session, seconds, tool="Edit", tool_input=None, cwd=GITMAIN):
+    """The refused call (an Edit of product code by default), made by a coordinator whose role file sits in this story's
+    config folder."""
     cs_put_role(config, "coordinator")
-    return ov_call("Edit", {"file_path": CS_CODE, "new_string": "x"}, GITMAIN, config, session, seconds, env=CS_REMOTE)
+    if tool_input is None:
+        tool_input = {"file_path": CS_CODE, "new_string": "x"}
+    return ov_call(tool, tool_input, cwd, config, session, seconds, env=CS_REMOTE)
 
 
 # 6. Cost (rule outcomes-mechanize-rules). The rule opens the role file, at most once, and nothing else on a call that is
@@ -19593,14 +19675,15 @@ def cs_override_call(config, session, seconds):
 CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
 
 
-def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None):
+def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None, env_path=None):
     """(decision, reason, the probe's report) of one guard call, made as `cs` makes one. The report holds `opens` (each
     path the call opens), `open_modes` (each open as [path, mode]), `children` (each subprocess the call starts) and
-    `log_children` (per guard.log write, the subprocesses that write starts). The report is {} when the probe wrote none."""
+    `log_children` (per guard.log write, the subprocesses that write starts). The report is {} when the probe wrote none.
+    `env_path` is the PATH the guard run gets, so a fake `gh` can answer a merge check."""
     os.makedirs(CS_OPENS_DIR, exist_ok=True)
     handle, side = tempfile.mkstemp(dir=CS_OPENS_DIR, suffix=".json")
     os.close(handle)
-    got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": None,
+    got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": env_path,
                           "config": config, "agent_id": agent_id, "agent_type": "builder" if agent_id else None,
                           "env": dict(CS_REMOTE if env is None else env), "tool_input": tool_input,
                           "probe_side": side,
@@ -19708,12 +19791,13 @@ def cs_log_rows(config):
     return [line.split("\t") for line in gs_log_lines(config)]
 
 
-def cs_log_refusal_check():
+def cs_log_refusal_check(tool="Edit", tool_input=None, name="cs-log-refusal", matched=os.path.basename(CS_CODE)):
     """One denied coordinator write appends one guard.log line: six fields, decision deny, rule coordinator-scope, the
     refused path in the matched field, and the payload's session last. The remedy is printed, not logged, so the line
-    holds none of its words."""
-    config = cs_config("cs-log-refusal", "coordinator")
-    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    holds none of its words. `matched` is the fragment the matched field must hold, or None to leave that field unpinned."""
+    config = cs_config(name, "coordinator")
+    got, reason = ov_call(tool, dict(CS_LOG_EDIT if tool_input is None else tool_input), GITMAIN, config, CS_PAYLOAD_SID, 0,
+                          env=CS_REMOTE)
     problem = ov_want(got, reason, "deny", CS_RULE)
     if problem:
         return False, problem
@@ -19723,7 +19807,7 @@ def cs_log_refusal_check():
     fields = rows[0]
     if len(fields) != 6 or fields[2:4] != ["deny", CS_RULE]:
         return False, "the line is %r, want six fields with decision deny and rule coordinator-scope" % (fields,)
-    if os.path.basename(CS_CODE) not in fields[4]:
+    if matched is not None and matched not in fields[4]:
         return False, "the matched field is %r, want the refused path" % fields[4]
     if fields[5] != CS_PAYLOAD_SID:
         return False, "the session field is %r, want the payload's session" % fields[5]
@@ -19847,6 +19931,90 @@ CS_CHECKS.append(("coordinator-scope allowed_write_logs_nothing: a record write 
                   "append no guard.log line", cs_log_allowed_check))
 CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and the override "
                   "folder once, and start no process; an allowed write opens neither", cs_log_cost_check))
+# ---- coordinator acts: the checks that need a spy, an override, a log line or a cost read.
+CS_MCP_MERGE_TOOL = "mcp__github__merge_pull_request"
+CS_MCP_MERGE_INPUT = {"owner": "acme", "repo": "widgets", "pullNumber": 4321}
+
+
+def cs_mcp_merge_spy_check():
+    """A coordinator's host merge is refused before any read: the probe starts no child process, so no `gh` runs. The
+    control is the same call from a session with no role file, which the merge guard judges against a pending head. That
+    run starts a child, so the spy does see a read."""
+    fake_gh = GHPEND + os.pathsep + PY_PATH
+    got, reason, report = cs_probe_report(CS_CONFIG["coordinator"], CS_MCP_MERGE_TOOL, dict(CS_MCP_MERGE_INPUT), NOGIT,
+                                          env=CS_REMOTE, env_path=fake_gh)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return False, problem
+    if "children" not in report:
+        return False, "the probe wrote no child list"
+    if report["children"]:
+        return False, "the refusal started %d child process(es): %s" % (len(report["children"]), report["children"][:3])
+    got, reason, control = cs_probe_report(CS_CONFIG["none"], CS_MCP_MERGE_TOOL, dict(CS_MCP_MERGE_INPUT), NOGIT,
+                                           env=CS_REMOTE, env_path=fake_gh)
+    problem = ov_want(got, reason, "deny", "merge-checks")
+    if problem:
+        return False, "the control, a session with no role file: " + problem
+    if not control.get("children"):
+        return False, "the control started no child process, so the spy is blind"
+    return True, "a coordinator's host merge is refused and starts no process; the same call from a session with no role file starts one"
+
+
+CS_SPAWN_ACT = ("coordinator-spawn", "a coordinator's spawn of a builder",
+                lambda config, session, seconds: cs_override_call(config, session, seconds, "Agent", CS_SPAWN_INPUT, NOGIT),
+                NOGIT, "deny", CS_RULE, None)
+
+
+def cs_spawn_log_check():
+    """A refused coordinator spawn appends one guard.log line, as a refused write does. The matched field is not pinned."""
+    return cs_log_refusal_check("Agent", dict(CS_SPAWN_INPUT), "cs-log-spawn", None)
+
+
+def cs_spawn_cost_check(want, tool_input, tool="Agent"):
+    """A coordinator's spawn opens the role file once, opens no layout and no config CLAUDE.md, and starts no child process.
+    The same call with CLAUDE_CODE_REMOTE "false" is the control, as in cs_rule_opens. A refusal writes its own guard.log
+    line and reads its own override file: those are the refusal's reads, not the rule's, so they are set aside."""
+    def check():
+        config = CS_CONFIG["coordinator"]
+        got, reason, report = cs_probe_report(config, tool, dict(tool_input), NOGIT, env=CS_REMOTE)
+        if "opens" not in report:
+            return False, "the probe wrote no opens: %s" % reason[:90]
+        _, _, off = cs_probe_report(config, tool, dict(tool_input), NOGIT, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE="false"))
+        opened = report["opens"]
+        rule_opens = [path for path in dict.fromkeys(opened) if path not in off.get("opens", [])]
+        role = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
+        log = os.path.abspath(os.path.join(config, "guard.log"))
+        override = os.path.abspath(os.path.join(config, "state", "override")) + os.sep
+        problems = []
+        if got != want:
+            problems.append("the call was %s, want %s: %s" % (got, want, reason[:90]))
+        if opened.count(role) != 1:
+            problems.append("it opened the role file %d times, want once" % opened.count(role))
+        if [path for path in opened if slash(path).endswith("lint/layout.json")]:
+            problems.append("it opened lint/layout.json")
+        # The config folder's CLAUDE.md is the pointer every spawn's role-model rule reads, so it is judged on the rule's own
+        # opens only; the layout is read by no spawn, so it is judged on the whole call.
+        if os.path.abspath(os.path.join(config, "CLAUDE.md")) in rule_opens:
+            problems.append("the rule opened the config folder's CLAUDE.md")
+        named = [os.path.basename(path) for path in rule_opens if path not in (role, log) and not path.startswith(override)]
+        if named:
+            problems.append("the rule opened %s besides the role file" % named)
+        if report.get("children"):
+            problems.append("it started %d child process(es): %s" % (len(report["children"]), report["children"][:3]))
+        return not problems, "; ".join(problems) or "one role-file open, no layout, no config CLAUDE.md, no child process"
+    return check
+
+
+CS_CHECKS.append(("coordinator-scope coordinator_mcp_merge_denied: a coordinator's host merge is refused before any read, "
+                  "and the same call from a session with no role file starts a child process", cs_mcp_merge_spy_check))
+CS_CHECKS.append(("coordinator-scope spawn_override_lifts_once: a one-act override lets through one coordinator spawn of a "
+                  "builder, then it is refused again", ov_act_check(CS_SPAWN_ACT, False)))
+CS_CHECKS.append(("coordinator-scope spawn_refusal_logs_one_line: one refused coordinator spawn appends one guard.log line "
+                  "that names the rule and holds no remedy text", cs_spawn_log_check))
+CS_CHECKS.append(("coordinator-scope spawn_log_cost: a refused coordinator spawn opens the role file once, no layout, "
+                  "no child process", cs_spawn_cost_check("deny", CS_SPAWN_INPUT)))
+CS_CHECKS.append(("coordinator-scope spawn_log_cost: a coordinator's Plan spawn opens the role file once, no layout, "
+                  "no child process", cs_spawn_cost_check("allow", {"subagent_type": "Plan", "prompt": "Design the plan."})))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
