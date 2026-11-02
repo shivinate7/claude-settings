@@ -11141,7 +11141,9 @@ def diff_logs_case():
     logged (builder-refuse section). The label keeps its text: hooks/mutate_guard.py selects it by it."""
     problems = []
     for label, agent_type, agent_id, rule in (
-            ("a-product-edit", "test-author", "auth1", "author-diff"),):
+            ("a-product-edit", "test-author", "auth1", "author-diff"),
+            # An untracked file: the mutant that reads tracked files only is caught by this row alone.
+            ("a-product-new", "test-author", "auth1", "author-diff")):
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label),
                                   os.path.join(DIFFROOT, label), agent_type, agent_id)
         if out:
