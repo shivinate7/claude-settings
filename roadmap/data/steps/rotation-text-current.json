@@ -1,0 +1,9 @@
+{
+ "title": "Standing sessions run until autocompact, in every template and skill",
+ "phase": "now",
+ "status": "doing",
+ "order": 484.100006,
+ "why": "Owner asked at 12:29 CST Nov 2 why standing sessions (triage, batch runners) still wind down and restart. His ruling (page item 109, pick b, Nov 1 17:56 CST, decision session-tiers) says run through autocompact with no rotation limit, but skill project-ops and its operating-model template still say rotate at a limit or a phase change.",
+ "note": "Lane rotation-text-current (session_013NEJL29orzrmWAKpvEAjyn), started by the coordinator 12:30 CST: fixes the template text and writes hand-off briefs for child repos (for the roadmap outbox). Related step compaction-carry-watch. Port: yes, every repo using project-ops.",
+ "updatedAt": "2026-11-02T18:31:00Z"
+}
