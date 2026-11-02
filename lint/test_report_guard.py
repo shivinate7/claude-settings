@@ -3015,6 +3015,32 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Catches: the word inside a hyphen-joined name (answered-needs-source) is read as the word.
         self.assert_allowed("The rule answered-needs-source holds.")
 
+    def test_an_green_no_and_nothing_forms_pass(self):
+        # Catches: "No question", "None", "Nothing", and "Cannot tell whether" with "answered" are read as a claim.
+        rows = [
+            "No question was answered.",
+            "None were answered.",
+            "Nothing was answered.",
+            "Cannot tell whether it was answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_tilde_fence_passes(self):
+        # Catches: a line inside a ~~~ fence is read as text, since only ``` fences are skipped.
+        rows = [
+            "~~~\nThe owner answered it.\n~~~",
+            "~~~text\nanswered\n~~~",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_question_line_passes(self):
+        # Catches: a question that asks whether the word happened is read as a claim.
+        self.assert_allowed("Has the owner answered?")
+
     def test_an_green_word_forms_that_are_not_the_word_pass(self):
         # Catches: answers, answering, or answer is read as answered.
         self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
