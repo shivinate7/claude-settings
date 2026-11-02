@@ -8,7 +8,6 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 """
 import errno
 import importlib.util
-import itertools
 import json
 import os
 import shutil
@@ -1893,6 +1892,7 @@ class PickGuardTests(unittest.TestCase):
                     self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
 
 
+import itertools
 _CALL_IDS = itertools.count(1)
 
 
