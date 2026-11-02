@@ -52,6 +52,10 @@ from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of t
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+# The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
+# and the code rules question_form.chat_hit names) is the question reviewer's.
+SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
+QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
@@ -193,17 +197,18 @@ def refuse(payload, tool, args, rule, reason):
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
         guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
         guard_core.set_override_veto(lambda: vetoed)
-        guard_core.refuse(tool, "deny", rule, reason, "")
+        guard_core.refuse(tool, "deny", rule, text, "")
     except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
-                                             "permissionDecisionReason": rule + ": " + reason}}))
+                                             "permissionDecisionReason": rule + ": " + text}}))
     return 0
 
 

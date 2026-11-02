@@ -1647,10 +1647,10 @@ class CutLanes(Env):
     def assert_refused_drop(self, rc, out, feat):
         """c110: a batch that drops a lane by a revert of its merge is refused before anything is claimed, pushed or merged."""
         self.assertEqual(rc, 1, out)
-        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertIn("rebuild the integration branch from main without the lane", out)
         self.assertNotIn("merged as", out)
         self.assertEqual(self.claims("feat"), 0, "the refusal claimed record numbers")
-        self.assertEqual(self.head("feat"), feat, "the refusal pushed to the batch branch")
+        self.assertEqual(self.head("feat"), feat, "the refusal pushed to the integration branch")
         for b in self.tips:
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
         self.assertFalse(self.lock_ref())
@@ -2059,7 +2059,7 @@ class CutLanes(Env):
         self.revert_on_batch(self.merge_of("lane1"))
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertIn("rebuild the integration branch from main without the lane", out)
         self.assertIn("No override lifts this refusal", out)
 
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
