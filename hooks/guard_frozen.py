@@ -3,12 +3,14 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import ast
 import os
 import re
+import warnings
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, dir_before_segment, norm, split_segments,
+    REDIRECT, _expanded, _resolved, dir_before_segment, inline_script, norm, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -218,7 +220,17 @@ MUTATING_COMMAND = (
 )
 
 
-def writes_to(path: str, cmd: str) -> bool:
+# `precise` is the opt-in of a rule that judges what Claude writes by mistake (builder-test-edit): a
+# mutating word counts only in command position (its segment's start, or after `git`, `xargs`,
+# `sudo`, `-exec` and the like), so `pip install -r tests/requirements.txt` and `pytest -k copy
+# tests/x.py` write nothing; and `perl -pi` rewrites a file in place.
+_COMMAND_POSITION = (
+    r"(?:^\s*(?:\w+=\S*\s+)*|\b(?:git|xargs|sudo|command|exec|time|env|nohup|do|then|else"
+    r"|-exec|-execdir)\s+)"
+)
+
+
+def writes_to(path: str, cmd: str, precise: bool = False) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -232,9 +244,11 @@ def writes_to(path: str, cmd: str) -> bool:
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
-    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    if re.search((_COMMAND_POSITION if precise else "") + MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+        return True
+    if precise and re.search(r"\bperl\b[^\n;|&]*\s-[pnlasw]*i\b[^\n;|&]*" + target, cmd):
         return True
     return False
 
@@ -563,11 +577,11 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, precise=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told."""
+    when that folder cannot be told. `precise` is the opt-in read of `writes_to`."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -612,8 +626,210 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, at) and writes_to(word, text):
+            if predicate(word, at) and writes_to(word, text, precise):
                 return word
+    return ""
+
+
+# INTERPRETER WRITES. An opt-in read (`interpreter_write_hit`; no frozen, config or settings rule calls
+# it): the script a command hands to `python` or `node` is read as that language's own text, never
+# split as shell words (`#` and a lone quote are not shell syntax in a script). Python is parsed with
+# `ast`: `open(P, mode)` with `w`, `a`, `x` or `+` in the mode, `Path(P).open(mode)`, `.write_text`,
+# `.write_bytes`, the destination of `shutil.copy*`/`shutil.move`/`os.replace`/`os.rename`. A name is
+# read through a plain `name = "lit"` or `name = Path("lit")` assignment. Node is a string- and
+# comment-aware scan for `writeFileSync`, `writeFile`, `appendFileSync` or `appendFile` with a literal
+# first argument. A script that does not parse, or a path that is not a literal, is allowed.
+# RESIDUAL GAPS (a mistake does not make these): `python3 script.py` and `node script.js`, where the
+# program's own code writes; a path built by an f-string, a call, an argument or an environment
+# variable; a Node path held in a variable; `ruby`, `perl -e` and `perl` heredocs; a script an
+# interpreter reads from a pipe that no heredoc feeds (`echo "..." | python3`).
+_PY_WRITE_MODE = frozenset("wax+")
+_PY_PATH_CLASSES = ("Path", "PurePath", "PosixPath", "PurePosixPath", "WindowsPath", "PureWindowsPath")
+_JS_WRITERS = frozenset(("writeFileSync", "writeFile", "appendFileSync", "appendFile"))
+_SCRIPT_RUNNER = re.compile(r"python[\d.]*w?|nodejs|node")
+_PY_FLAG_C = re.compile(r"-[BEIOPRSsuvVWXxq]*c")
+_NODE_FLAG_E = re.compile(r"--eval|--print|-[a-zA-Z]*[ep]")
+_INTERPRETER_WORD = re.compile(
+    r"(?<![\w./-])(?:[^\s|;&<>()]*[/\\])?(python[\d.]*w?|nodejs|node)(?:\.exe)?(?![\w.-])")
+_SCRIPT_FILE = re.compile(r"[^\s]*\.(?:py|pyw|js|mjs|cjs)$")
+
+
+def _py_str(node, env, depth=0):
+    """The literal text an expression stands for (a string, a name read through `env`, a `Path(...)`
+    or `a / "b"` or `.joinpath` or `os.path.join` of literals), else None."""
+    if depth > 8:
+        return None
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = _py_str(node.left, env, depth + 1), _py_str(node.right, env, depth + 1)
+        return None if left is None or right is None else left.rstrip("/") + "/" + right
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    parts = [_py_str(arg, env, depth + 1) for arg in node.args]
+    if name in _PY_PATH_CLASSES or (name == "join" and isinstance(func, ast.Attribute)
+                                    and isinstance(func.value, (ast.Attribute, ast.Name))
+                                    and getattr(func.value, "attr", getattr(func.value, "id", "")) in ("path", "posixpath")):
+        return "/".join(parts) if parts and None not in parts else None
+    if isinstance(func, ast.Attribute) and name in ("resolve", "absolute", "expanduser", "joinpath"):
+        base = _py_str(func.value, env, depth + 1)
+        return None if base is None or None in parts else "/".join([base] + parts)
+    return None
+
+
+def _py_write_paths(script: str):
+    """The literal paths a Python script writes, in the forms listed above. [] when it does not parse."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(script)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    env = {}
+    for node in sorted((n for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))),
+                       key=lambda n: (n.lineno, n.col_offset)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        value = _py_str(node.value, env) if node.value is not None else None
+        for target in targets:
+            if isinstance(target, ast.Name):
+                if value is None:
+                    env.pop(target.id, None)
+                else:
+                    env[target.id] = value
+    found = []
+
+    def write_mode(node):
+        mode = _py_str(node, env) if node is not None else None
+        return isinstance(mode, str) and bool(_PY_WRITE_MODE & set(mode))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func, args = node.func, node.args
+        kw = {k.arg: k.value for k in node.keywords if k.arg}
+        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+        owner = func.value.id if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) else ""
+        path = None
+        if name == "open" and (isinstance(func, ast.Name) or owner in ("io", "codecs")):
+            if write_mode(args[1] if len(args) > 1 else kw.get("mode")):
+                path = _py_str(args[0] if args else kw.get("file"), env)
+        elif name == "open" and isinstance(func, ast.Attribute):
+            if write_mode(args[0] if args else kw.get("mode")):
+                path = _py_str(func.value, env)
+        elif name in ("write_text", "write_bytes") and isinstance(func, ast.Attribute):
+            path = _py_str(func.value, env)
+        elif owner == "shutil" and name in ("copy", "copy2", "copyfile", "copytree", "move") or (
+                owner == "os" and name in ("replace", "rename")):
+            path = _py_str(args[1] if len(args) > 1 else kw.get("dst"), env)
+        if path:
+            found.append(path)
+    return found
+
+
+def _js_write_paths(text: str):
+    """The literal first arguments of `writeFileSync`, `writeFile`, `appendFileSync` and `appendFile`
+    calls in code. A string, a template literal (any line count) and a comment are skipped whole, so
+    a `//` or a `/*` inside a string opens no comment and a quote inside a template ends nothing."""
+    found, at, size = [], 0, len(text)
+
+    def string_end(start):
+        quote, at = text[start], start + 1
+        while at < size and text[at] != quote:
+            at += 2 if text[at] == "\\" else 1
+        return min(at, size)
+
+    while at < size:
+        char = text[at]
+        if text.startswith("//", at):
+            at = text.find("\n", at)
+            at = size if at < 0 else at
+        elif text.startswith("/*", at):
+            at = text.find("*/", at + 2)
+            at = size if at < 0 else at + 2
+        elif char in "'\"`":
+            at = string_end(at) + 1
+        elif char.isalpha() or char in "_$":
+            end = at
+            while end < size and (text[end].isalnum() or text[end] in "_$"):
+                end += 1
+            word, at = text[at:end], end
+            if word in _JS_WRITERS:
+                rest = re.compile(r"\s*\(\s*(['\"`])").match(text, at)
+                if rest:
+                    start = rest.end() - 1
+                    found.append(text[start + 1:string_end(start)])
+        else:
+            at += 1
+    return found
+
+
+def _script_write_paths(language: str, script: str):
+    return _py_write_paths(script) if language == "python" else _js_write_paths(script)
+
+
+def _inline_scripts(tokens):
+    """[(language, script)] a segment's `python -c`, `node -e` and `node -p` hand over."""
+    found = []
+    for index, token in enumerate(tokens[:6]):
+        name = token.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+        if not _SCRIPT_RUNNER.fullmatch(name):
+            continue
+        python = name.startswith("python")
+        flag = _PY_FLAG_C if python else _NODE_FLAG_E
+        for at in range(index + 1, len(tokens) - 1):
+            if flag.fullmatch(tokens[at]):
+                found.append(("python" if python else "node", tokens[at + 1]))
+                break
+            if not tokens[at].startswith("-"):
+                break   # a script file or a module: the program's own code writes (residual gap)
+        break
+    return found
+
+
+def interpreter_write_hit(cmd: str, cwd: str, predicate, follow_cd=True, depth=0) -> str:
+    """The path a `python`/`node` script in the command writes that `predicate(path, cwd)` accepts,
+    else ''. Reads `-c`, `-e` and `-p` scripts, scripts of `sh -c`, and the body of each heredoc fed
+    to the interpreter (`python3 - <<'EOF'`, `cat <<'EOF' | python3 -`). `follow_cd` hands `predicate`
+    the folder a leading `cd` moved to."""
+    bare = guard_core._strip_heredoc_bodies_unconditionally(cmd)
+    ends = []
+    segments = split_segments(bare, ends)
+    heads = []   # the segment number of each heredoc header, in order
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        for language, script in _inline_scripts(tokens):
+            for path in _script_write_paths(language, script):
+                if predicate(path, at):
+                    return path
+        nested = inline_script(tokens)
+        if nested and depth < 3:
+            hit = interpreter_write_hit(nested, at, predicate, False, depth + 1)
+            if hit:
+                return hit
+        heads.extend([number] * sum(1 for t in tokens if t.startswith("<<") and not t.startswith("<<<")))
+    if "<<" not in cmd:
+        return ""
+    bodies = guard_core._walk_heredocs(cmd)[1]
+    for index, (_quote, body, header) in enumerate(bodies):
+        found = _INTERPRETER_WORD.search(header)
+        if not found:
+            continue
+        rest = re.split(r"<<|[|;&]", header[found.end():], 1)[0].split()
+        if any(_SCRIPT_FILE.fullmatch(word) for word in rest if not word.startswith("-")):
+            continue   # `python3 run.py <<EOF`: the body is the script's input
+        language = "python" if found.group(1).startswith("python") else "node"
+        number = heads[index] if index < len(heads) and len(heads) == len(bodies) else None
+        at = cwd if number is None or not follow_cd else (dir_before_segment(segments, number, cwd, ends) or cwd)
+        for path in _script_write_paths(language, body):
+            if predicate(path, at):
+                return path
     return ""
 
 

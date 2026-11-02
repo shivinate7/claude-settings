@@ -153,7 +153,9 @@ Other tools, in `judge` order:
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
-                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       deny. A role's write outside its scope. A builder's shell write to a test path
+                       (redirect, tee, cp, sed -i, perl -pi, a python or node script) is judged too.
+                       (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -251,7 +253,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -289,8 +291,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
-            project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -1552,12 +1554,35 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
+    return builder_test_target(target, cwd, tool_input)
+
+
+def builder_test_target(target: str, cwd: str, tool_input=None) -> str:
+    """The target when a builder may not write it: a test path, or test config whose new text turns
+    tests off. `tool_input` is the write tool's own input; a shell command has no text to read, so a
+    shell write to test config is allowed (the diff check at commit judges it). The one home of the
+    builder's test-path verdict: the write tools and the shell scan both call it."""
+    rel = repo_rel(target, cwd)
+    if rel is None:
+        return ""
     if is_test_rel(rel):
         return target
-    if is_test_config_rel(rel) and any(
+    if tool_input is not None and is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
         return target
     return ""
+
+
+def builder_shell_hit(raw: str, cwd: str) -> str:
+    """The test path a builder's shell command writes, else ''. A shell form (redirect, `tee`, `cp`
+    onto it, `sed -i`, `perl -pi`, a `cd` first) or a `python`/`node` script (heredoc, `-c`, `-e`).
+    A heredoc body is read as the interpreter's text, never as shell words.
+    RESIDUAL GAP: `python3 script.py`, where the program's own code writes (guard_frozen has the list)."""
+    def predicate(path, where):
+        return bool(builder_test_target(path, where))
+    return (_shell_write_hit(guard_core._strip_heredoc_bodies_unconditionally(raw), cwd, predicate,
+                             holds=predicate, follow_cd=True, precise=True)
+            or interpreter_write_hit(raw, cwd, predicate))
 
 
 def diff_bases(root: str):
@@ -2482,6 +2507,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             for subcommand, _ in git_calls(segment):
                 if subcommand in ("commit", "push"):
                     diff_refusal(tool, role, command_root(stripped, cwd))
+
+    # 0b2. A builder's shell write to a test path (builders-cannot-edit-tests): the early warning of the
+    # write tools, for a shell form. A read, a print or a write to a non-test path passes.
+    if role == BUILDER_ROLE:
+        matched = builder_shell_hit(raw, cwd)
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
