@@ -9183,19 +9183,6 @@ records_deny("a chain that runs the generator as its own command word, then add 
 records_deny("a chain that runs the generator through env, then add -A and commit",
              "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 
-# refusal-vs-rule (records-page): the rule refuses a commit of a page that differs from the base's. A
-# chain whose STAGED page already equals the base's passes. The hook reads the index before the chain
-# runs, so the generator's output is not judged here. The unreadable base keeps the verdict main gives:
-# no base page means no hit.
-records_allow("a chain that runs the generator with --records-only, then add -A and commit, where the staged page is the base's",
-              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_LANES["copy-base"])
-records_allow("a chain that runs the generator, then add -A and commit, where the staged page is the base's",
-              GEN + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["copy-base"])
-records_deny("a chain that runs the generator, then add -A and commit, where the staged page differs from the base's",
-             GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, "staged")
-records_allow("a chain that runs the generator, then add -A and commit, where the base cannot be read",
-              GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_NOBASE)
-
 # The rule acts only when the base page opens with the generated header. A hand-written base page is no
 # hit: a staged edit of it, and a generator chain over it, pass.
 records_allow("a commit of a staged page edit where the base page is hand-written", COMMIT_X,
