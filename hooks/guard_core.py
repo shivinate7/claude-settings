@@ -29,6 +29,12 @@ from git_reads import (  # noqa: F401
 )
 
 
+def is_cloud() -> bool:
+    """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
+    cloud check; the load brake and its report stand down here, because the brake is local-only."""
+    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+
+
 # ------------------------------------------------------------------ the stream encoding
 #
 # MEASURED 2026-09-09 in a Claude Code session on Windows: `sys.stderr.encoding` was `cp1252`, so
@@ -1003,6 +1009,14 @@ def _segment_cd_move(tokens):
         return CD_UNKNOWN
     if not (word in CD_WORDS or (word == "sl" and POWERSHELL_CALL[0])):
         return None
+    if word == "pushd":
+        operands = [t for t in tokens[index + 1:] if not (t[:1] in "<>" or REDIRECTION.match(t))]
+        # `pushd -n` only adds to the stack: the shell stays. `pushd` alone swaps the top two
+        # folders, and `pushd +N` / `-N` rotates the stack: neither names a folder.
+        if "-n" in operands:
+            return None
+        if not operands or re.fullmatch(r"[+-]\d+", operands[0]):
+            return CD_UNKNOWN
     for token in tokens[index + 1:]:
         if token == "-":
             return "-"
@@ -1012,15 +1026,15 @@ def _segment_cd_move(tokens):
     return ""
 
 
-def _segment_cd_target(tokens):
+def _segment_cd_target(tokens, words=("cd", "set-location")):
     """Return the path a tokenized segment's `cd` or PowerShell `Set-Location` would take, or None
     when it names none, or when the segment's command word is neither. The aliases `sl`, `chdir`
     and `Push-Location` are not read (owner ruling 2026-10-15 names only `Set-Location`). The push
     and delete rules and `_run_dir` read this; `_segment_cd_move` (the silent-write rule) reads the
-    rest."""
+    rest. WORDS widens the command words read: rule other-checkout adds `pushd`."""
     move = _segment_cd_move(tokens)
     index = resolve_command(tokens)
-    if index is None or basename(tokens[index]) not in ("cd", "set-location"):
+    if index is None or basename(tokens[index]) not in words:
         return None
     return move if isinstance(move, str) and move not in ("", "-") else None
 
