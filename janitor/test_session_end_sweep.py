@@ -423,7 +423,7 @@ class HookBudgetFitsUnderItsHostCeiling(unittest.TestCase):
 # Candidate basenames for the permission deny list, for Read and for Edit. Each one is checked at the
 # root and in a folder. The expected verdict is the guard's own predicate, so a name is denied exactly
 # when the guard holds it. The candidates are samples: the predicate decides, not this list.
-ENV_DENY_CANDIDATES = (
+ENV_REFUSE_CANDIDATES = (
     ".env", ".env.local", ".envrc", ".environment", ".envrc.example", ".env.example",
     ".env.example.bak", ".gitignore", "env", "config.env",
 )
@@ -478,7 +478,7 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
         held = [e for e in deny if e.startswith(("Bash(pkill", "Bash(killall"))]
         self.assertEqual(held, [], "an owner override cannot lift a deny entry")
 
-    def test_the_deny_reader_reads_the_forms_the_repo_writes(self):
+    def test_the_refuse_reader_reads_the_forms_the_repo_writes(self):
         """The reader under the env cases below must read the entry forms settings.json uses, or
         those cases prove nothing."""
         self.assertTrue(_denied_by(["Read(.env)"], "Read", ".env"))
@@ -489,13 +489,13 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
         self.assertTrue(_denied_by(["Read(!.env.example)", "Read(.env.*)"], "Read", ".env.example"))
         self.assertFalse(_denied_by(["Edit(.env)"], "Read", ".env"))
 
-    def test_read_and_edit_deny_match_the_guard_predicate_at_any_depth(self):
+    def test_read_and_edit_refuse_match_the_guard_predicate_at_any_depth(self):
         """For each candidate basename, the deny list denies Read and Edit exactly when the guard's own
         predicate holds it, at the root and in a folder. A name the guard does not hold stays open."""
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
             deny = json.load(handle)["permissions"]["deny"]
         for tool in ("Read", "Edit"):
-            for name in ENV_DENY_CANDIDATES:
+            for name in ENV_REFUSE_CANDIDATES:
                 held = names_env_file(name)
                 for path in (name, "config/" + name):
                     with self.subTest(tool=tool, path=path):

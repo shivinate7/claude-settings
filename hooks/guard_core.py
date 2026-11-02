@@ -1527,7 +1527,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
-    spawn_role is set only on the Opus spawn ask, the one refusal an Opus override may lift."""
+    spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
