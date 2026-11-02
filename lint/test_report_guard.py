@@ -10,6 +10,7 @@ import errno
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -34,10 +37,14 @@ GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # appends to the user's guard.log. tearDownModule restores the value it found. A test that sets its
 # own folder (the config report) still wins.
 _ISOLATION = {}
+# The run folder (test-temp-standard) holds every temp file this module makes; it is removed at teardown.
+RUN_FOLDER = None
 
 
 def setUpModule():
-    _ISOLATION["dir"] = tempfile.TemporaryDirectory()
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+    _ISOLATION["dir"] = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
     stub = tempfile.TemporaryDirectory()
@@ -64,6 +71,7 @@ def tearDownModule():
             os.environ[key] = value
     _ISOLATION.pop("stub").cleanup()
     _ISOLATION.pop("dir").cleanup()
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 def human(text):
@@ -1919,6 +1927,238 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
         self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
         self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
+
+
+# reports-rewrite-stamp (report_guard.py, Stop, landed turns): a reply that says decision D was
+# rewritten for a ruling blocks when D's record was last committed before that ruling, on the default
+# branch AND on HEAD. Each case builds its own git repo. Every commit takes its date from
+# GIT_COMMITTER_DATE, so the check reads real history. The cases are red-first: the check is not built
+# yet, so the red cases fail and the green cases pass on the current code.
+RULING = "2026-11-01 18:44 CST"
+RULING_SENTENCE = "RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling of %s (PR #1001)" % RULING
+D_LAST_COMMIT = "2026-10-28T22:30:00-05:00"  # late in the Central evening, so the UTC day is the next one
+NOW = "2026-11-01T14:00:00-06:00"  # LOCAL_TIME_NOW: the hook's clock, on the ruling's own date
+
+
+def done_reply(done):
+    return "> **Done** %s\n> **Next** none" % done
+
+
+def write_file(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+class DecisionRepo:
+    """A git repo whose default branch is `main`. Records sit where the layout puts the decisions kind:
+    docs/decisions in a rolled-out repo (its extras file says so), else the legacy decisions/ folder."""
+
+    def __init__(self, folder, rolled_out=True):
+        self.path = folder
+        self.records = "docs/decisions" if rolled_out else "decisions"
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "t")
+        if rolled_out:
+            write_file(os.path.join(folder, ".claude", "layout-extras.json"),
+                       json.dumps({"kinds": {}, "rolled-out": True}))
+        self.touch("2026-10-01T10:00:00Z")
+
+    def _git(self, *args, when=None):
+        env = dict(os.environ)
+        if when:
+            env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = when
+        subprocess.run(["git", "-C", self.path, *args], check=True, capture_output=True, text=True, env=env)
+
+    def commit(self, when, *records):
+        """One commit, dated `when`, that writes one file for each record id in `records`."""
+        for rec in records:
+            write_file(os.path.join(self.path, self.records, rec + ".md"),
+                       "# %s\n\nRevision of %s.\n" % (rec, when))
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def touch(self, when):
+        """One commit, dated `when`, that moves the tip and touches no record."""
+        write_file(os.path.join(self.path, "README.md"), "Revision of %s.\n" % when)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def branch(self, name):
+        self._git("branch", name)
+
+    def switch(self, name):
+        self._git("switch", "-q", name)
+
+
+class RewriteStampTests(unittest.TestCase):
+    """reports-rewrite-stamp, in report_guard.py's Stop hook. The case numbers are the brief's."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def repo(self, rolled_out=True):
+        return DecisionRepo(tempfile.mkdtemp(dir=self.tmp), rolled_out)
+
+    def red_repo(self):
+        """D's last commit is late in the Central evening, before the ruling. A commit after the ruling
+        moves the tip, so the tip is never D's last commit."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        return repo
+
+    def run_stop(self, repo, reply, landed=True, human_at=None, env_extra=None):
+        first = human("do the task")
+        if human_at:
+            first["timestamp"] = human_at
+        records = [first]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=self.tmp))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                "cwd": repo.path}
+        env = dict(os.environ, LOCAL_TIME_NOW=NOW, **(env_extra or {}))
+        return run_guard(REPORT_GUARD, hook, env=env)
+
+    def assertBlocks(self, run, *parts):
+        """The guard blocks, and the block's reason names each of `parts`. Stdout is checked before
+        it is parsed, so a missing block fails here and never as a JSON error."""
+        self.assertTrue(run.stdout.strip(), "no rewrite-stamp block. stderr: " + run.stderr[-300:])
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block", out)
+        for part in parts:
+            self.assertIn(part, out.get("reason", ""))
+
+    def assertPasses(self, run):
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_f119_replay_reconstructed_blocks(self):
+        """Case 1. The reply uses the wording the PR body holds. The incident's own chat text is lost, so
+        this is a reconstruction. The variants change only the rewrite wording and the text around the stamp."""
+        repo = self.red_repo()
+        variants = {
+            "reconstructed": RULING_SENTENCE,
+            "rewritten": "RECORDED: decision `ci-job-caps` rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrites": "RECORDED: rewrites decision `ci-job-caps` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrite of": "RECORDED: a rewrite of decision `ci-job-caps`, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            # Catches: a lone quote, a `//` and a `#` in one sentence hide the rewrite or the id.
+            "lone quote and URL": "RECORDED: rewrote decision `ci-job-caps` in place, for the owner's ruling of 2026-11-01 18:44 CST (PR #1001, https://github.com/shivinate7/claude-settings/pull/1001#issuecomment-2)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                run = self.run_stop(repo, done_reply(done))
+                self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+                self.assertNotIn("2026-10-29", run.stdout)  # the date is Central, not UTC
+
+    def test_ruling_stamp_zone_is_read_as_central(self):
+        """Case 1, zone. D's last commit is 14:00 CST on the ruling's own date, so it predates the 18:44 CST
+        ruling. Read as UTC, the ruling falls before D and the check stays quiet."""
+        repo = self.repo()
+        repo.commit("2026-11-01T14:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-11-01", "18:44")
+
+    def test_decisions_folder_comes_from_layout(self):
+        """Case 1, folder. The record sits where layout.path() puts the decisions kind: docs/decisions in a
+        rolled-out repo, the legacy decisions/ folder in one that has not rolled out."""
+        for rolled_out in (True, False):
+            with self.subTest(rolled_out=rolled_out):
+                repo = self.repo(rolled_out)
+                repo.commit(D_LAST_COMMIT, "ci-job-caps")
+                repo.touch("2026-11-02T09:00:00Z")
+                self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
+                                  "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_under_or_by_R_without_a_stamp_blocks_when_R_is_later(self):
+        """Case 3, red. No stamp, so the ruling time is R's last main commit. R is committed after D."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.commit("2026-10-30T16:00:00Z", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        variants = {
+            "under R": "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)",
+            "under decision R": "RECORDED: decision `ci-job-caps` rewritten under decision `test-strategy-reset` (PR #1002)",
+            "by R": "RECORDED: decision `ci-job-caps` rewritten by test-strategy-reset (PR #1002)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                self.assertBlocks(self.run_stop(repo, done_reply(done)), "ci-job-caps", "2026-10-28", "2026-10-30")
+
+    def test_r_and_d_in_one_commit_passes(self):
+        """Case 3, green. D's last commit is R's own commit, so D does not predate the ruling."""
+        repo = self.repo()
+        repo.commit("2026-10-30T16:00:00Z", "ci-job-caps", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)")))
+
+    def test_bare_clock_stamp_reads_on_the_turn_date(self):
+        """The `HH:MM <zone>` form, read on the turn's local date. The turn's human record and LOCAL_TIME_NOW
+        name the same Central day, the ruling's own, so either source of that date gives the same answer."""
+        repo = self.red_repo()
+        reply = done_reply("RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling at 18:44 CST (PR #1001)")
+        self.assertBlocks(self.run_stop(repo, reply, human_at="2026-11-01T20:00:00Z"),
+                          "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_lane_commit_after_ruling_passes(self):
+        """Case 2, green. HEAD is a lane whose own commit to D is after the ruling. Main's last commit
+        to D predates the ruling, and the lane's commit is the reason the check stays quiet."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.switch("lane")
+        repo.commit("2026-11-02T12:00:00Z", "ci-job-caps")
+        self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_record_committed_after_ruling_on_main_passes_when_head_predates_it(self):
+        """Case 4, green. Main's last commit to D is after the ruling. HEAD is a lane forked before that
+        commit. A block needs both to predate the ruling, so the check stays quiet on either HEAD."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.branch("lane")
+        repo.commit("2026-11-01T18:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        for head in ("main", "lane"):
+            with self.subTest(head=head):
+                repo.switch(head)
+                self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_sentence_without_a_rewrite_word_passes(self):
+        """Case 4, green. The same record and ruling, with no rewrite word in the sentence."""
+        repo = self.red_repo()
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` recorded for the owner ruling of 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_unknown_ids_and_no_time_pass(self):
+        """Case 4, green. An unknown D, an unknown R, and a rewrite that gives no time at all."""
+        repo = self.red_repo()
+        replies = {
+            "unknown D": "RECORDED: rewrote decision `no-such-decision` in place, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown R": "RECORDED: decision `ci-job-caps` rewritten under no-such-decision (PR #1002)",
+            "no time found": "RECORDED: rewrote decision `ci-job-caps` (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_git_missing_passes(self):
+        """Case 4, green. The red fixture, with no git on PATH. test_f119 runs the same fixture with git
+        and blocks."""
+        empty = tempfile.mkdtemp(dir=self.tmp)
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"PATH": empty}))
+
+    def test_git_failing_passes(self):
+        """Case 4, green. Git runs and fails: GIT_DIR names no repository."""
+        no_repo = os.path.join(self.tmp, "no-such-git-dir")
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"GIT_DIR": no_repo}))
+
+    def test_unlanded_turn_passes(self):
+        """Case 5, green. The red fixture and the same reply, on a turn with no git write."""
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), landed=False))
 
 
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
