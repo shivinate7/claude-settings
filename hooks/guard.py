@@ -74,7 +74,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
-                       the working folder or a folder above it, in either shell.
+                       the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
@@ -123,7 +123,8 @@ Other tools, in `judge` order:
                        files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
                        call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
-                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       `.git`, a target outside the clone, reads and non-writing shell pass. A git
+                       `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -149,8 +150,16 @@ Other tools, in `judge` order:
                        `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-bypass
+                       deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
+                       Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
+                       path that ends in Simulator.app, `open -b com.apple.iphonesimulator`).
+                       Judged by the command word on the text alone, before any `simctl list`,
+                       and before the two rules below. The remedy is `sim-test`. An override
+                       lifts it. (sim-test-is-the-one-boot-path)
   simulator-boot-cap, simulator-boot-twin
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -254,8 +263,8 @@ while True:
             AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            nested_script, norm,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            inner_commands, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
@@ -268,7 +277,7 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
@@ -1866,7 +1875,7 @@ def floor_hit(tool: str, tool_input) -> str:
         model = tool_input.get("model")
         if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
             return str(model)
-    elif tool == SESSION_TOOL:
+    elif tool in (SESSION_TOOL, CREATE_SESSION_TOOL):
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -1893,14 +1902,12 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
-STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
-# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
-# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
-FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
+# The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
+from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
+_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
 
 
 def brief_first_line(brief) -> str:
@@ -1910,16 +1917,36 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
-def brief_markers(brief) -> list:
-    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
-    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
-    home of the marker scan."""
+def marker_scan(brief) -> list:
+    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
+    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
+    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
     if not isinstance(brief, str):
         return []
-    found = STEP_UP_MARKER.findall(brief)
     first = brief_first_line(brief)
-    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
-    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+    starts, leads = [], []
+    for kind, rx, position in _MARKER_ROWS:
+        if position == "line-start":
+            found = list(rx.finditer(brief))
+            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
+        else:
+            hit = rx.search(first)
+            found = [hit] if hit else []
+            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return [(kind, n) for _, kind, n in sorted(starts)] + leads
+
+
+def marker_hits(brief) -> set:
+    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
+    return set(marker_scan(brief))
+
+
+def brief_markers(brief) -> list:
+    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
+    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
+    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
 
 
 def builder_third_round(brief) -> bool:
@@ -1978,7 +2005,7 @@ ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
-# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -2134,8 +2161,7 @@ def role_model_check(tool: str, tool_input):
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
             return "", "", False
-        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
-                                                              brief_first_line(tool_input.get("prompt"))):
+        if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
@@ -3091,16 +3117,28 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# Decision sweep-shuts-down-idle-simulators, rulings 3 and 4. A boot is an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+# A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
+# `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
+def _simctl_boot_args(word: str, rest: list):
+    """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
+    command is no `simctl boot`. The list is empty when xargs feeds the device."""
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"]:
+            return after[1:]
+    return None
+
+
 def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -3116,11 +3154,46 @@ def _sim_boot_names(segment: str) -> list:
                 os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
                 found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
-    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
-        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"] and len(after) > 1:
-            return [after[1]]
     return []
+
+
+def _simulator_app_open(rest: list) -> bool:
+    """True when the arguments of an `open` name Simulator.app: `-a Simulator[.app]`, a path that ends in
+    Simulator.app, or `-b com.apple.iphonesimulator`. macOS reads these names without case."""
+    for i, arg in enumerate(rest):
+        low = arg.lower().rstrip("/")
+        if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg) and i + 1 < len(rest):  # a cluster (`-ga`, `-an`) with a or b takes the next word
+            value = basename(rest[i + 1].rstrip("/"))
+            if ("a" in arg and re.sub(r"\.app$", "", value) == "simulator") or (
+                    "b" in arg and value == "com.apple.iphonesimulator"):
+                return True
+        elif low.endswith("/simulator.app") or low == "simulator.app":
+            return True
+    return False
+
+
+def sim_bypass_hit(segment: str) -> str:
+    """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
+    command word, at each command of the segment and in each command a wrapper hands on
+    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for start in command_indexes(tokens):
+        word, rest = basename(tokens[start]), tokens[start + 1:]
+        if word == "open" and _simulator_app_open(rest):
+            return ("open " + " ".join(rest))[:100]
+        if _simctl_boot_args(word, rest) is not None:
+            return " ".join([tokens[start]] + rest)[:100]
+    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
+                 if (hit := sim_bypass_hit(part))), "")
+
+
+SIM_BYPASS_REASON = (
+    "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
+    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "(decision sim-test-is-the-one-boot-path)"
+)
 
 
 def sim_boot_refusal(tool: str, names: list) -> None:
@@ -3168,7 +3241,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -3214,7 +3287,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
     unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
     that can write. Liftable by an owner override, unlike `worktree_home_hit`
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
     elif tool in SHELL_TOOLS:
@@ -3262,9 +3335,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
-# is left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -3316,7 +3389,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
-        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
+        # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
@@ -3374,6 +3447,8 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
             continue
         for verb, args in verbs:
             if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if verb == "clean" and not clean_deletes_files(args):
                 continue
             if in_primary(folder, folder):
                 return verb
@@ -3620,8 +3695,11 @@ def judge(payload) -> None:
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
                         tool_input.get("description") or "")
-            names = [n for seg in split_segments(strip_heredoc_bodies(command))
-                     for n in _sim_boot_names(seg)]
+            segments = split_segments(strip_heredoc_bodies(command))
+            matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
+            if matched:
+                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
+            names = [n for seg in segments for n in _sim_boot_names(seg)]
             if names:
                 sim_boot_refusal(tool, names)
         return
