@@ -3172,7 +3172,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
-        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
+        # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
