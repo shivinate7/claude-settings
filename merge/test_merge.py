@@ -150,7 +150,7 @@ class FakeHost:
     def required_names(self):
         return ["checks"]
 
-    def batch_running(self, n, base):  # the other ready pull requests on base with a pending required check; a case sets batch
+    def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
         if self.batch_error:
             raise self.batch_error
@@ -1040,6 +1040,66 @@ class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
     no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repos below are made in this run's folder
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def batch_repo(self):
+        """A plain repo: main at a base commit, and branch n with one commit, the batch head. -> (repo, the batch head's sha)."""
+        repo = tempfile.mkdtemp(dir=self.run_dir)
+        sh(repo, "git", "init", "-q")
+        sh(repo, "git", "checkout", "-q", "-B", "main")
+        put(os.path.join(repo, "base.txt"), "base\n"); sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "base")
+        sh(repo, "git", "checkout", "-q", "-b", "n"); put(os.path.join(repo, "n.txt"), "N\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "N head")
+        return repo, sh(repo, "git", "rev-parse", "HEAD")
+
+    def next_push(self, repo, n_head):
+        """A commit on the batch head, pushed after main moved. -> its sha."""
+        sh(repo, "git", "checkout", "-q", "-B", "n1", n_head); put(os.path.join(repo, "n1.txt"), "N+1\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "N+1")
+        return sh(repo, "git", "rev-parse", "HEAD")
+
+    def holds_base_without_ci(self, repo, base_ref, sha):
+        """-> holds_base's (refusal, why), and asserts that no lint and no suite ran: the green run stands on the merge's tree alone."""
+        calls = []
+        real = merge.sh
+        def spy(args, *a, **k):
+            calls.append(" ".join(args))
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", spy):
+            refusal, why = merge.holds_base(repo, base_ref, sha)
+        self.assertFalse([c for c in calls if merge.CI_JOB in c or merge.CI_SCOPE in c], calls)
+        return refusal, why
+
+    def test_main_merged_from_the_batch_head_keeps_the_green_run_for_the_next_push(self):
+        repo, n_head = self.batch_repo()
+        sh(repo, "git", "checkout", "-q", "main"); sh(repo, "git", "merge", "-q", "--no-ff", "-m", "Merge n", "n")  # main has N head's tree
+        n1 = self.next_push(repo, n_head)
+        refusal, why = self.holds_base_without_ci(repo, "main", n1)
+        self.assertIsNone(refusal, refusal)
+        self.assertTrue(why)
+
+    def test_main_with_an_empty_commit_keeps_the_green_run_for_the_next_push(self):
+        repo, n_head = self.batch_repo()
+        sh(repo, "git", "checkout", "-q", "main"); sh(repo, "git", "commit", "-q", "--allow-empty", "-m", "empty main commit")
+        n1 = self.next_push(repo, n_head)
+        refusal, why = self.holds_base_without_ci(repo, "main", n1)
+        self.assertIsNone(refusal, refusal)
+        self.assertTrue(why)
+
+    def test_main_that_moved_and_came_back_does_not_keep_the_green_run_for_the_lane(self):
+        # The lane is cut at M0. Main adds c.txt (M1), then reverts it (M2, tree M0). CI on the lane tested merge(lane, M1), which holds c.txt.
+        repo, n_head = self.batch_repo()
+        sh(repo, "git", "checkout", "-q", "main")
+        put(os.path.join(repo, "c.txt"), "c\n"); sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "M1 adds c")
+        sh(repo, "git", "rm", "-q", "c.txt"); sh(repo, "git", "commit", "-qm", "M2 reverts c")
+        refusal, _ = merge.holds_base(repo, "main", n_head)
+        self.assertIsNotNone(refusal)
+        self.assertIn("does not hold main", refusal)
 
     def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
@@ -2650,7 +2710,7 @@ class BaseAware(Env):
                 h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
             def required_names(h): return ["checks"]
-            def batch_running(h, n, base): return []  # no other pull request here: its gh reads are not this case's subject
+            def batch_running(h, n, base, head=None): return []  # no other pull request here: its gh reads are not this case's subject
             def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
             def runs(h, sha): return []
             def base_state(h, base, flows): return "green", ""
@@ -3125,6 +3185,9 @@ try:
         if m_run:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+
+    elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
+        finish(one({"status": "diverged"}, jq), 0, include)
 
     elif method == "GET" and rel == "actions/runs":
         if "head_sha" in params:  # a head's runs, the REST twin of `gh run list --commit`: the next runs_seq entry, in REST shape
@@ -6738,7 +6801,7 @@ class ClockedHost(merge.Host):
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
 
-    def batch_running(self, n, base):  # no gh here, and no other pull request in these cases
+    def batch_running(self, n, base, head=None):  # no gh here, and no other pull request in these cases
         return []
 
     def checks(self, n, *a, **k):
@@ -9960,6 +10023,10 @@ class SignalReleasesLock(Env):
 BATCH_LINK = "https://github.com/o/r/actions/runs/88"
 BATCH_BLOCKER = "#2 (feat2) required check `checks` is pending: " + BATCH_LINK  # the shape FakeHost.batch reports
 OWN_SHA, OTHER_SHA = "a" * 40, "b" * 40
+# Containment: a busy ready pull request whose head holds this one's head (compare status ahead or identical) does not block it.
+N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
+P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
+Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
 def batch_pull(number, sha, base="main", draft=False):
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads."""
@@ -9970,16 +10037,37 @@ def batch_run(name, status="in_progress", conclusion=None):
     return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
 
 class PullsHost(merge.Host):
-    """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, and the check runs and statuses of each head."""
-    def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None):
+    """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, and the check runs and statuses of each head.
+    `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
+    GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
+    `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
+    `base_compare_error` answers only the base branch's read."""
+    def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
+                 base_compare_error=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
+        self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.reads = []
+        self.compare_reads = []  # (first operand, second operand) of each compare read
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
+        route = args[1] if args[:1] == ["api"] else ""
+        m = re.search(r"/pulls/(\d+)$", route)
+        if m:
+            found = [d for d in self.pulls if d["number"] == int(m.group(1))]
+            if not found:
+                return 1, "gh: Not Found (HTTP 404)"
+            return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
+        m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
+        if m:
+            self.compare_reads.append(m.groups())
+            is_base = re.fullmatch(r"[0-9a-f]{40}", m.group(1)) is None  # compare/<base branch>...<head>: the base read
+            if self.compare_error or (is_base and self.base_compare_error):
+                return self.compare_error or self.base_compare_error
+            return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
     def pages(self, rel, key=None, fields=None):
@@ -10036,7 +10124,7 @@ class BatchRunningReads(unittest.TestCase):
 
     def test_a_running_workflow_blocks_before_its_required_check_reports(self):
         # scope runs first and checks needs it: the workflow is in progress, no required row exists yet, only the non-required scope row is pending
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
                          workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "in_progress", "conclusion": None}]})
         blockers = host.batch_running(1, "main")
         self.assertEqual(len(blockers), 1, blockers)
@@ -10044,7 +10132,7 @@ class BatchRunningReads(unittest.TestCase):
         self.assertIn("ci-checks", blockers[0])
 
     def test_a_queued_workflow_with_no_check_rows_blocks(self):
-        host = PullsHost([batch_pull(2, OTHER_SHA)], {},
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {},
                          workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "queued", "conclusion": None}]})
         blockers = host.batch_running(1, "main")
         self.assertEqual(len(blockers), 1, blockers)
@@ -10061,6 +10149,70 @@ class BatchRunningReads(unittest.TestCase):
                          workflow_runs={OTHER_SHA: [{"name": "sync", "status": "in_progress", "conclusion": None}]},
                          ignore={"sync": "the sync job is advisory"})
         self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_a_busy_pr_whose_head_holds_this_head_does_not_block(self):
+        # The replay: #63 merges while #65, which holds #63's head, runs CI. The head of #63 is read through pr(63).
+        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
+                         compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): "ahead"})
+        self.assertEqual(host.batch_running(63, "main"), [])
+        self.assertEqual(host.batch_running(63, "main", head=N63_SHA), [])
+        self.assertIn((N63_SHA, P65_SHA), host.compare_reads)
+
+    def test_a_busy_pr_on_this_very_head_does_not_block(self):
+        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, N63_SHA)], {N63_SHA: [batch_run("checks")]},
+                         compares={(N63_SHA, N63_SHA): "identical", ("main", N63_SHA): "ahead"})
+        self.assertEqual(host.batch_running(63, "main"), [])
+
+    def test_a_busy_pr_whose_head_does_not_hold_this_head_still_blocks(self):
+        for status in ("diverged", "behind"):
+            with self.subTest(status=status):
+                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
+                                 compares={(N63_SHA, P65_SHA): status})
+                blockers = host.batch_running(63, "main")
+                self.assertEqual(len(blockers), 1, blockers)
+                self.assertIn("#65", blockers[0])
+                self.assertIn("checks", blockers[0])
+                self.assertIn(BATCH_LINK, blockers[0])
+
+    def test_a_containing_busy_pr_is_passed_and_a_non_containing_one_is_named(self):
+        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA), batch_pull(66, Q66_SHA)],
+                         {P65_SHA: [batch_run("checks")], Q66_SHA: [batch_run("checks")]},
+                         compares={(N63_SHA, P65_SHA): "ahead", (N63_SHA, Q66_SHA): "diverged", ("main", N63_SHA): "ahead"})
+        blockers = host.batch_running(63, "main")
+        self.assertEqual(len(blockers), 1, blockers)
+        self.assertIn("#66", blockers[0])
+        self.assertNotIn("#65", blockers[0])
+
+    def test_a_failed_compare_read_stops(self):  # unknown is red: the pull request is not skipped
+        for code_and_text in ((1, "gh: Not Found (HTTP 404)"), (1, "gh: Server Error (HTTP 500)")):
+            with self.subTest(read=code_and_text[1]):
+                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
+                                 compare_error=code_and_text)
+                with self.assertRaises(merge.Stop):
+                    host.batch_running(63, "main")
+
+    def test_a_busy_pr_on_a_head_behind_the_base_blocks_and_is_named(self):
+        # The busy PR holds this head, but this head is behind main: a run on it did not test main's tip
+        for status in ("behind", "diverged"):
+            with self.subTest(status=status):
+                host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
+                                 compares={(N63_SHA, P65_SHA): "ahead", ("main", N63_SHA): status})
+                blockers = host.batch_running(63, "main")
+                self.assertEqual(len(blockers), 1, blockers)
+                self.assertIn("#65", blockers[0])
+                self.assertIn(BATCH_LINK, blockers[0])
+
+    def test_a_failed_base_compare_read_stops(self):  # the base read is its own read: a failure stops, and never skips the pull request
+        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks")]},
+                         compares={(N63_SHA, P65_SHA): "ahead"}, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
+        with self.assertRaises(merge.Stop):
+            host.batch_running(63, "main")
+
+    def test_the_containment_read_is_made_only_for_a_busy_pr(self):
+        host = PullsHost([batch_pull(63, N63_SHA), batch_pull(65, P65_SHA)], {P65_SHA: [batch_run("checks", "completed", "success")]},
+                         compares={(N63_SHA, P65_SHA): "ahead"})
+        self.assertEqual(host.batch_running(63, "main"), [])
+        self.assertEqual(host.compare_reads, [])
 
 class BatchBrake(Env):
     """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""

@@ -17,7 +17,7 @@ Both engines take a `lines` filter. `changed_lines` lists the lines that a commi
 
 `hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N] [--suite-timeout S] [--jobs N]` is the replay mode of the same home. It asks of past work what the report asks of a file. Would the suites a merged pull request changed have caught a wrong line in the product code it added? `merged_prs` lists the newest pull request merges on the clone's first-parent line. It sees merge commits only: a squash or rebase merge has no row, so a repository that squashes is not replayable. `replay_pr` reads the files the pull request changed, makes mutants only of the product lines it added (`changed_lines`, then `ast_mutants` or `js_mutants`), and runs only the suites it changed, never one it deleted. It prints a row per pull request as that row ends, then the table (`format_replay`), and exits 0 whatever the scores.
 
-A `REPLAY_PROFILES` entry in `hooks/mutate_guard.py` says how one repository is read. It holds the regex of product files and of suites, and the command that runs one suite. It names the classifier that reads the output (`fail_line`, `node_tap` or `playwright`), the install, and the top folders left out of each checkout. The two counts above hold in a replay. A suite red on the clean source (a crash, a timeout, a missing dependency) is listed unusable, and a row with no usable suite reads UNKNOWN with its reason. A pull request that changed no product file reads NO_PRODUCT. One that changed product code and no suite reads NO_TESTS. UNKNOWN never reads as a rate or as green. A file that does not parse is listed skipped. A pull request is never dropped from the table.
+A `REPLAY_PROFILES` entry in `hooks/mutate_guard.py` says how one repository is read. It holds the regex of product files and of suites, and the command that runs one suite. It names the classifier that reads the output (`fail_line`, `node_tap` or `playwright`), the install, and the top folders left out of each checkout. A test file is not product code, where a profile can name one: q_max's `code_not` leaves out `harness/tests/` and every `*.test.*` or `*.spec.*` file. Banchi's Python part leaves out `harness/tests/` (through its `code` regex) and self-test scripts under `scripts/` (through `code_not`). Banchi's TypeScript part has no `code_not`. The two counts above hold in a replay. A suite red on the clean source (a crash, a timeout, a missing dependency) is listed unusable, and a row with no usable suite reads UNKNOWN with its reason. A pull request that changed no product file reads NO_PRODUCT. One that changed product code and no suite reads NO_TESTS. UNKNOWN never reads as a rate or as green. A file that does not parse is listed skipped. A pull request is never dropped from the table.
 
 A batch pull request can change dozens of suites, and a mutant that survives runs all of them. A profile may carry `select`, a command with `{path}` that prints the suites testing one product file (q_max: `harness/tests-for.mjs`). It runs in the checkout at the pull request's commit. A changed suite then runs on the mutants of a file only when `select` lists it. A `select` that fails or is missing runs every changed suite, and a row note says so. `--pr-budget SECONDS` stops the pull request from starting more mutants once its time has passed.
 
@@ -50,6 +50,36 @@ Suites that killed none of the 10 mutants of their file. None is un-run or unrea
 How to read it. A review probe broke each file wholly. Every silent suite except `hooks/test_reply_judge.py` stayed green, so those suites do not test the file's logic at all: they name it in a list (a hook registered, a platform exit, a wrapper shape). `hooks/test_reply_judge.py` went red, so it loads `lint/report_guard.py` and only missed the sample. The mode itself does not prove a silent suite loaded the mutant. A mutant that throws in a child process that the suite reports as a FAIL line counts as killed, so each rate is an upper bound. The verdict logic of each file is pinned by its own suite. So the measure does not show a worthless suite. It shows that nothing except the file's own suite guards the verdict. A survivor may be an equivalent mutant (no change in behaviour), which the mode cannot tell from a gap. A sample of 10 gives a coarse rate: read 60% as "a gap exists", not as an exact figure. A suite silent on 10 mutants may still catch one outside the sample.
 
 Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/test_ci_scope.py` against these files. The first two take minutes for each mutant. The third only passes a file path to the scope detector.
+
+## Replay results
+
+Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five mutants per PR, on added lines. A 900 s budget per PR. Kill rate is killed over ran. A crash is not a kill. Gold is the target for each row: the hand-written guard rate.
+
+| Replay | PRs scored | Ran | Killed | Survived | Crashed | Kill rate | Gold | Gap |
+|---|---|---|---|---|---|---|---|---|
+| q_max, all mutants | 36 | 175 | 113 | 51 | 11 | 65% | 100% | 35 points |
+| q_max, product lines only | 36 | 155 | 113 | 31 | 11 | 73% | 100% | 27 points |
+| banchi TypeScript | 2 | 10 | 0 | 7 | 3 | 0% | 100% | 100 points |
+| banchi Python (T7 group runner) | 14 | 59 | 26 | 23 | 10 | 44% | 100% | 56 points |
+| banchi Python, product lines only | 14 | 52 | 26 | 16 | 10 | 50% | 100% | 50 points |
+
+- Not scored. q_max: PRs 971 and 759 read UNKNOWN. No mutant ran, because the 900 s budget ran out first (inferred: the log holds no skip note and no all-unusable reason). PRs 979 and 752 read NO_TESTS. 10 PRs read NO_PRODUCT. banchi TypeScript: 13 NO_TESTS, 35 NO_PRODUCT. banchi Python: 11 NO_TESTS, 25 NO_PRODUCT.
+- Not run. q_max: 3 in PRs 885 and 993, and 10 in the UNKNOWN PRs. banchi Python: 6 in PRs 981 and 926. A mutant not run is not a survivor.
+- Skipped. Seven q_max PRs skipped one file, `harness/browser/verify.test.mjs`: "Invalid string length" (4) or heap exhaustion (3). Six of the seven rows still show a rate.
+- T6 reads UNKNOWN. Its clean run needs `demo-assets/`, which a checkout leaves out. No PR of the 50 touched it.
+- Survivors. Per-mutant lists are too long for this record, so these are per-file counts.
+  - q_max (51): `harness/browser/verify.test.mjs` 20, a test file. `src/components/RfpSafetyPanel.tsx`, `src/components/Chat.tsx` and `harness/model-calls-map.mjs` 4 each. `harness/decision-refs.mjs` 3. Three more files with 2 each. 10 files with 1 each.
+  - banchi TypeScript (7): `app/src/Slabs.tsx` 5. `app/src/SendCard.tsx` 2.
+  - banchi Python (23): `server/pipeline_routes.py` 3. `server/send_routes.py`, `pipeline/join.py` and `cli/cmd_identify.py` 2 each. Seven files with 1 each. The other seven sit in self-test scripts (`scripts/pricearchive-selftest.py` 3, `scripts/slabs-store-selftest.py` 2, `scripts/slabs-routes-selftest.py` 2), so 16 are product survivors. The log does not split not-run mutants by file, so the product row leaves them out.
+- banchi has no per-file `select`. A survivor may sit in code that no changed suite reaches.
+- banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
+
+Open items, each a debt:
+
+- `banchi-replay-no-select`: banchi rows do not say that every changed suite ran.
+- `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
+
+On 2026-11-02 no CI check reads the replay. The owner rules on one.
 
 ## Cost
 
