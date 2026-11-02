@@ -68,9 +68,10 @@ P11. A check enforces its rule's outcome, not a stricter or looser reading of it
 - joyous PR 63 — the merge tool refused it while a ready batch that contained it ran CI. The owner ruled the refusal stricter than its rule, which only keeps main still under a running batch (2026-11-01 20:57 CST, relayed by the coordinator).
 Applies to: guards and checks.
 
+P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits).
+
 ### Checks that could hold these (not built)
 
-- P2 and P3 (red run, named cause): a commit lint. A commit that adds a test case carries a `Red-run:` line that names the old commit and the failing assert.
 - P5 (no sleep or clock): a lint for wall-clock reads and fixed sleeps in test asserts (time.time, performance.now, Date.now, sleep).
 - P7 (scope first): a lint for an assert inside a conditional on the subject's presence, such as `if (await x.count())`.
 - P3 (named cause): the mutation report already counts a crash as no kill (hooks/mutate_shared.py).
