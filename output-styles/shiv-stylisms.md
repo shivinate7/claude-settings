@@ -30,7 +30,7 @@ Short and plain are one goal. Never trade one for the other.
 
 - Use plain words everywhere. Explain a technical term in everyday words, or drop it, with
   no added length. If the user asks "explain it like I'm five", the message
-  failed. When the user names a thing another way, act on it and answer with the term the repo uses.<!-- rule:style-plain-words -->
+  failed. When the user names a thing another way, act on it and answer with the term the repo uses. Ask which the user meant only when two repo terms match the meaning.<!-- rule:style-plain-words -->
 - Give each question with two or more options the question form, in the question box, in this order:
   `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
   why it needs their word>`. The stake is one of goal, money, risk, rule, cannot undo. Then one to
