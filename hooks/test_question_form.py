@@ -766,6 +766,8 @@ MALFORMED = [
 # Valid lines: both sides non-empty, the change side a change. The word match is whole words only.
 VALID_LINES = [
     DEPARTS,
+    # A new thing writes "main — adds <X>" (decision port-keeps-behaviour, question-departs section).
+    "Departs from: main — adds a retry button",
     "Departs from: lint/stamp.py:run_stamp - the stamp check moves to the lint job",
     "Departs from: agent-model-cap — Opus above the row needs an owner grant",
     "Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves to the lint job",
@@ -953,6 +955,16 @@ def case_departs_str_replace_forms():
                     "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
 
 
+# ------------------------------------------------------------------ a port's main side
+
+def case_port_main_side():
+    # A port item whose line says no change is refused by question-departs, which runs on every question.
+    # The port rule is not the one that refuses it, so the case takes either id.
+    page("a port item whose line says main — nothing is refused", "set",
+         entry_of(page_item(port=True, departs="Departs from: main — nothing")),
+         (("port-question", DEPARTS_RULE), "Departs"))
+
+
 # ------------------------------------------------------------------ call_judge
 
 def case_call_judge():
@@ -1035,7 +1047,7 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_port_main_side, case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()
