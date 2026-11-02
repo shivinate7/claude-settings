@@ -380,6 +380,8 @@ def js_mutants(path: str, limit=None, seed: int = 0, lines=None):
     as UNKNOWN, as it reads a SyntaxError from `ast_mutants`.
     """
     import _nowindow  # lazy: this module defines names only at import (see the docstring)
+    if lines is not None and not set(lines):
+        return []  # no line wanted: the engine would reject an empty list, and nothing could match
     node = shutil.which("node")
     if not node:
         raise ValueError("node is not on PATH")
@@ -428,13 +430,13 @@ def classify_run(code, output: str, timed_out: bool) -> str:
 
 
 _TAP_ENTRY = re.compile(r"^\s*(?:not ok|ok)\b|^\s*1\.\.\d|^\s*# Subtest:", re.M)
-_ASSERT_MARK = re.compile(r"ERR_ASSERTION|AssertionError")
+_ASSERT_MARK = re.compile(r"^\s*(?:code: 'ERR_ASSERTION'|name: 'AssertionError')", re.M)
 
 
 def classify_node_tap(code, output: str, timed_out: bool) -> str:
     """One `node --test --test-reporter=tap` run: "pass", "assert" (an assertion went red: a `not ok`
-    block names ERR_ASSERTION or AssertionError), "crash" (any other red: an import error, a throw)
-    or "timeout". Only "assert" is evidence a mutant was caught. A block runs from a test line to the
+    block has the keyed line `code: 'ERR_ASSERTION'` or `name: 'AssertionError'`), "crash" (any other
+    red: an import error, a throw, an error text that only names AssertionError) or "timeout". Only "assert" is evidence a mutant was caught. A block runs from a test line to the
     next one, so an `ok` block that names an assertion (a test that expects one) does not count."""
     if timed_out:
         return "timeout"

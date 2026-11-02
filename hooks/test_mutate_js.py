@@ -191,7 +191,7 @@ def is_big(n, limit):
 """
 AST_DEFAULT_DIGEST = "c66ccfd6e7ae370015036baf0098884c3a904f2f05bd365629b0a1c716443531"
 
-# Four node test files, one per class the classifier must tell apart.
+# Node test files: one per class the classifier must tell apart, plus a crash that names an assertion.
 PASS_TEST = """\
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -211,6 +211,11 @@ THROW_TEST = """\
 import test from 'node:test';
 test('throws', () => { throw new Error('boom'); });
 """
+# AssertionError is not imported, so the test throws a ReferenceError that names it.
+UNIMPORTED_ERROR_TEST = """\
+import test from 'node:test';
+test('throws an assertion it never imported', () => { throw new AssertionError({ message: 'boom' }); });
+"""
 
 
 class EngineTests(unittest.TestCase):
@@ -228,8 +233,12 @@ class EngineTests(unittest.TestCase):
         os.makedirs(os.path.dirname(os.path.join(root, LOADER)))
         shutil.copy(ENGINE, os.path.join(root, "hooks", "mutate_js.mjs"))
         shutil.copy(os.path.join(REPO, LOADER), os.path.join(root, LOADER))
+        # NODE_PATH removed: a machine that sets it to a global typescript would load the package by that
+        # route, and the case would then prove nothing about the one loader.
+        env = dict(os.environ)
+        env.pop("NODE_PATH", None)
         done = subprocess.run([NODE, os.path.join(root, "hooks", "mutate_js.mjs"), write("gate.ts", TS_SOURCE)],
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=120, env=env)
         self.assertNotEqual(done.returncode, 0, "the engine parsed without the loader's package")
         self.assertIn("cannot load the typescript package", done.stderr)
 
@@ -306,6 +315,19 @@ class EngineTests(unittest.TestCase):
     def test_lines_on_a_line_with_no_site_gives_nothing(self):
         self.assertEqual(engine_mutants(write("gate.ts", TS_SOURCE), lines="1"), [])
 
+    def test_a_line_separator_inside_a_string_is_not_a_line_break(self):
+        # U+2028 and U+2029 end a line for TypeScript's line map. Inside a string literal a reader sees no
+        # line break, so the comparison on line 3 must keep its number.
+        for separator in ("\u2028", "\u2029"):
+            with self.subTest(separator=hex(ord(separator))):
+                source = 'const sep = "a%sb";\nconst other = 1;\nif (p.a === p.b) {}\n' % separator
+                path = write("separator.ts", source)
+                self.assertEqual({m["line"] for m in engine_mutants(path)}, {3})
+                line = unique_line(source, "if (p.a === p.b) {}")
+                only = engine_mutants(path, lines=str(line))
+                self.assertIn("L3 compare === -> !==", [m["label"] for m in only])
+                self.assertTrue(all(m["line"] == line for m in only))
+
     def test_a_tsx_file_parses_its_jsx_and_mutates_its_sites(self):
         line = unique_line(TSX_SOURCE, "  if (props.ok === true) {")
         found = engine_mutants(write("card.tsx", TSX_SOURCE))
@@ -375,6 +397,12 @@ class JsMutantsTests(unittest.TestCase):
     def test_a_parse_error_raises_value_error(self):
         with self.assertRaises(ValueError):
             mutate_shared.js_mutants(write("broken.mjs", "function (\n"))
+
+    def test_an_empty_lines_set_gives_no_mutant(self):
+        path = write("gate.ts", TS_SOURCE)
+        self.assertTrue(mutate_shared.js_mutants(path), "the fixture has no site to filter")
+        self.assertEqual(mutate_shared.ast_mutants(AST_SOURCE, lines=set()), [])
+        self.assertEqual(mutate_shared.js_mutants(path, lines=set()), [])
 
 
 class AstSideTests(unittest.TestCase):
@@ -468,6 +496,13 @@ class NodeTapTests(unittest.TestCase):
     def test_a_throw_inside_a_test_is_a_crash_not_a_kill(self):
         code, output = self.node_test("throw.test.mjs", THROW_TEST)
         self.assertIn("boom", output)
+        self.assertEqual(mutate_shared.classify_node_tap(code, output, False), "crash")
+
+    def test_an_unimported_assertion_error_is_a_crash_not_a_kill(self):
+        code, output = self.node_test("unimported.test.mjs", UNIMPORTED_ERROR_TEST)
+        self.assertIn("AssertionError is not defined", output, "the fixture did not fail on the missing name")
+        self.assertIn("name: 'ReferenceError'", output)
+        self.assertNotIn("ERR_ASSERTION", output)
         self.assertEqual(mutate_shared.classify_node_tap(code, output, False), "crash")
 
     def test_a_timeout_is_a_timeout_whatever_the_output(self):

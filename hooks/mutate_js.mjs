@@ -56,7 +56,9 @@ const parse = (file, text) => {
 // the replacement. `line` is the line the site's node starts on, like `lineno` in the ast engine.
 const findSites = (source, text) => {
   const sites = [];
-  const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  // Count "\n" in the text, not the TypeScript line map: that map also breaks at U+2028 and U+2029, which sit
+  // inside a string as plain characters, so a later site would get the wrong line.
+  const lineOf = (node) => text.slice(0, node.getStart(source)).split('\n').length;
   const add = (node, what, start, end, replacement) => sites.push({ line: lineOf(node), what, start, end, replacement });
   const K = ts.SyntaxKind;
 
