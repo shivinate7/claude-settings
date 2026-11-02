@@ -15,8 +15,8 @@
   commit added on the branch alone is the branch's, except to the lane undo read.
 - **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
   and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
-  flags two shapes: a whole file put back to its text before E, when E changed 6 or more non-blank lines
-  in it (`BLOCK_LINES`), on any path; and a net loss or a delete of E's lines on a test path
+  flags two shapes. One is a whole file put back to its text before E, when E changed 6 or more non-blank
+  lines in it (`BLOCK_LINES`), on any path. The other is a net loss or a delete of E's lines on a test path
   (`is_test_rel` in `hooks/guard.py`). A line is E's work only when no earlier state of the branch held
   it, so a restore is never an undo. A merge of main that drops the branch's own lines counts too: a
   conflict fix keeps both sides. A branch of one commit has nothing to read. Reason for two shapes: on
