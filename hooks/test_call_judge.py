@@ -1275,8 +1275,8 @@ def case_unshown_id_takes_the_unvetted_path():
 
 
 def case_marker_does_not_skip_the_check():
-    # Owner rulings, Nov 1 19:30 CST: the Unvetted line never skips the check. A marker written ahead of time, with a
-    # working model, still runs the check, which refuses a ruled question.
+    # The Unvetted line never skips the check. A marker written ahead of time, with a working model, still runs the
+    # check, which refuses a ruled question.
     box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     box["questions"][0]["question"] += "\n" + UNVETTED_LINE
     refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
