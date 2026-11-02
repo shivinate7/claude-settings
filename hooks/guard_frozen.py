@@ -230,6 +230,46 @@ _COMMAND_POSITION = (
 )
 
 
+_SED_WRAPPERS = frozenset((
+    "git", "xargs", "sudo", "command", "exec", "time", "env", "nohup", "do", "then", "else", "-exec", "-execdir"))
+
+
+def _sed_flags_edit_in_place(tokens) -> bool:
+    """True when the words after `sed` hold the in-place flag, read as flags: `-i`, `-i.bak`, a short
+    cluster that holds `i` (`-Ei`, `-ni`) or `--in-place[=SUFFIX]`. The argument of `-e`, `-f` and `-l`
+    is not a flag, and a script such as `/-i/p` is not one."""
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            break
+        if token.startswith("--"):
+            if token == "--in-place" or token.startswith("--in-place="):
+                return True
+        elif len(token) > 1 and token[0] == "-" and token[1].isalpha():
+            for place, letter in enumerate(token[1:]):
+                if letter == "i":
+                    return True
+                if letter in "efl":
+                    index += place == len(token) - 2   # the argument is the next word
+                    break
+        index += 1
+    return False
+
+
+def _sed_in_place_on(path: str, cmd: str) -> bool:
+    """True when `cmd` runs `sed` in command position with the in-place flag on `path` (`precise`)."""
+    words = cmd.split()
+    for index, word in enumerate(words):
+        if word.rsplit("/", 1)[-1] != "sed":
+            continue
+        start = index == 0 or all(re.fullmatch(r"\w+=\S*", w) for w in words[:index]) \
+            or words[index - 1] in _SED_WRAPPERS
+        if start and path in words[index + 1:] and _sed_flags_edit_in_place(words[index + 1:]):
+            return True
+    return False
+
+
 def writes_to(path: str, cmd: str, precise: bool = False) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -246,7 +286,10 @@ def writes_to(path: str, cmd: str, precise: bool = False) -> bool:
         return True
     if re.search((_COMMAND_POSITION if precise else "") + MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if precise:
+        if _sed_in_place_on(path, cmd):
+            return True
+    elif re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
     if precise and re.search(r"\bperl\b[^\n;|&]*\s-[pnlasw]*i\b[^\n;|&]*" + target, cmd):
         return True

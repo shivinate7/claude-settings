@@ -1557,14 +1557,17 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     return builder_test_target(target, cwd, tool_input)
 
 
+BUILD_CACHE_DIRS = frozenset(("__pycache__", ".pytest_cache"))
+
+
 def builder_test_target(target: str, cwd: str, tool_input=None) -> str:
     """The target when a builder may not write it: a test path, or test config whose new text turns
     tests off. `tool_input` is the write tool's own input; a shell command has no text to read, so a
     shell write to test config is allowed (the diff check at commit judges it). The one home of the
     builder's test-path verdict: the write tools and the shell scan both call it."""
     rel = repo_rel(target, cwd)
-    if rel is None:
-        return ""
+    if rel is None or BUILD_CACHE_DIRS & set(norm(rel).split("/")):
+        return ""   # a build cache is rebuilt by the next run: no test is changed
     if is_test_rel(rel):
         return target
     if tool_input is not None and is_test_config_rel(rel) and any(
@@ -2511,7 +2514,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 0b2. A builder's shell write to a test path (builders-cannot-edit-tests): the early warning of the
     # write tools, for a shell form. A read, a print or a write to a non-test path passes.
     if role == BUILDER_ROLE:
-        matched = builder_shell_hit(raw, cwd)
+        try:
+            matched = builder_shell_hit(raw, cwd)
+        except Exception as exc:
+            # A defect in this scan hides this rule only: log it as main() does and judge on.
+            record(tool, "crash", "guard-crash", cap_safe(type(exc).__name__ + ": " + str(exc), 200))
+            matched = ""
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
