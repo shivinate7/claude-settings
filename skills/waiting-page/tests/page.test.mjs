@@ -2158,7 +2158,7 @@ test("a waiting ask says who has not read it, or who read it and is working on i
   assert.equal(await page.getByText("Waiting for triage to read it.", { exact: true }).count(), 1, "the read ask also says it waits to be read");
 });
 
-// Red cases for the round-1 review findings on the Ask box (no product change in these cases).
+// Red cases for the Ask box: no stray null, the cap on new answers, the 4000-character limit, Ctrl+Enter, paste and Copy ask.
 test("the Ask section never shows the text null, in the waiting, answered and sent states", async (t) => {
   const asks = {
     "ask-n-wait": { id: "ask-n-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" },
@@ -2237,6 +2237,69 @@ test("Undo after more typing in the 8-second window never restores a box over 40
   const hint = (await page.textContent("#askHint")).trim();
   const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
   assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+});
+
+test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await card(page, DECISION).locator(".title").click();
+  await page.keyboard.press("b");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  assert.equal(await page.locator("#send").isDisabled(), false, "no answer is staged, so the case proves nothing");
+  await page.focus("#askSend");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "answers"), null, { timeout: 1500 }).catch(() => {});
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "answers").length);
+  assert.equal(writes, 0, "Ctrl+Enter on Send ask wrote " + writes + " answers record(s)");
+});
+
+test("pasting 4200 characters into the ask box keeps all of them and shows the over-limit notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  const short = (await page.textContent("#askHint")).trim();
+  const long = "0123456789".repeat(420); // 4200 characters
+  // insertText takes the same route as a paste, so the box's maxlength applies to it as it does to a paste.
+  await page.fill("#askText", "");
+  await page.click("#askText");
+  await page.keyboard.insertText(long);
+  const value = await page.inputValue("#askText");
+  assert.equal(value.length, long.length, `the box holds ${value.length} of ${long.length} pasted characters`);
+  const hint = (await page.textContent("#askHint")).trim();
+  const shown = await page.locator("#askHint").isVisible();
+  assert.ok(shown && hint !== short && /4000|limit/i.test(hint), "no over-limit notice in the hint: " + JSON.stringify(hint));
+});
+
+test("over the limit, Send ask is disabled, or a press changes the hint to the notice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await mustHave(page, "#askSend", "Send ask button");
+  const over = "0123456789".repeat(420); // 4200 characters, set as a draft or an Undo can leave it
+  await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, over);
+  if (!(await page.locator("#askSend").isDisabled())) {
+    const before = (await page.textContent("#askHint")).trim();
+    await page.click("#askSend");
+    await page.waitForFunction((b) => document.getElementById("askHint").textContent.trim() !== b || window.__log.some((l) => l[0] === "set" && l[1] === "asks"), before, { timeout: 1500 }).catch(() => {});
+    const after = (await page.textContent("#askHint")).trim();
+    assert.notEqual(after, before, "Send ask is enabled over the limit, and a press leaves the hint as it was");
+  }
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+  assert.equal(writes, 0, "Send ask wrote an ask over the limit");
+});
+
+test("Copy ask after a failed write changes the hint to the copy result", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", ASK_TEXT);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await mustHave(page, "#askCopy", "Copy ask button");
+  await page.click("#askCopy");
+  await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
+  const hint = (await page.textContent("#askHint")).trim();
+  assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
 });
 
 async function openCap(t, labels, width, design) {
