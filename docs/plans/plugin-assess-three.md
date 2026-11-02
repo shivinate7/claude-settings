@@ -86,7 +86,7 @@ for each doc over 500 words.
   with no ask, and an untracked folder in each repo.
 - Note: two of its rules could become lookup rules in `lint/ste_lint.py`: Rule 7 (condition
   before instruction) and Rule 14 (a number instead of "fast" or "large"). That is a separate
-  lane, on the owner's word.
+  lane, on the owner's grant.
 
 ## Ambition Lenses
 
@@ -113,25 +113,67 @@ for each doc over 500 words.
 | Fix the cause | `building-fix-cause-not-symptom` |
 | Never weaken a test | `roles-review-cap-three`, `outcomes-tests-are-statements` |
 
-**Rules it fights.**
+**Where it differs from our rules.**
 
 - `building-one-home-per-capability`: a second set of working rules, loaded beside the root
   `CLAUDE.md`.
-- `outcomes-grant-covers-named-act` (a grant covers only the act it names): its Altitude step
-  asks for "a version that also solves the next three requests" and for redesign of the process.
-  That widens the act past the grant.
 - `roles-one-role-per-agent`: its Range step has one agent do the work of a red team, a skeptic
   and other roles.
-- Output style `shiv-stylisms` (short): it sets a demanding target for each task, which pushes
-  length.
+- Scope. Its Altitude step asks for "a version that also solves the next three requests". But
+  its Execute section (`SKILL.md` lines 90 to 93) says: "Do the task that was asked", "Offer
+  what's expensive ... Don't build the bigger thing unasked", and "Fold in what's cheap ...
+  without changing scope". So it offers the bigger version and does not build it. The real
+  difference from rule `outcomes-grant-covers-named-act` (a grant covers only the act it names)
+  is small extra acts it folds in with no ask: "handle the edge case, add the test".
 
-**Verdict: skip.**
+### Outcomes compared on real cases
 
-- Gain if added: one page of AI failure modes and their countermeasures.
-- Loss if added: about 2,000 words of context per task, and a push to widen scope past the
-  owner's grant.
-- Note: no row in its table names a failure mode that our rules lack. A check row by row is
-  unknown past the seven rows above.
+The owner asked (2026-11-01 22:27 CST) which gives the better outcome: our rule and guard, or the
+plugin's prose. These are the cases the evidence holds.
+
+What the evidence lacks:
+
+- Rule `outcomes-grant-covers-named-act` has no guard. It is a judgment rule:
+  `lint/rule_mechanisms.json` line 28 says "No hook parses an instruction and an action for a
+  match". So no guard refusal of it exists to count.
+- `~/.claude/guard.log` in this cloud container holds 8 rows, all from this session. None cites
+  that rule.
+- `~/.claude/handoffs` is absent here. Session transcripts are on the owner's computer. Both are
+  unknown.
+- So the cases come from the incident records in `docs/decisions/`. Each is one owner
+  correction. The rework each caused is unknown. The plugin's column is a reading of its text,
+  not a run.
+
+| Case (source) | Our outcome | Plugin outcome, read from its text | Better | Gold standard |
+| --- | --- | --- | --- | --- |
+| Duo port invented an "end of mail day" and asked a question the web app answers (`port-keeps-behaviour` line 37, 2026-10-27) | Owner corrected it. Then a rule and a check, landed 2026-10-28 | Its "plausibility over truth" row says verify against the source. Its Altitude step invites a redesign | Tie. Both read the source; ours is a guard, theirs is prose | The port copies the app's behaviour; no question the code answers |
+| Orchestrator asked to merge under a standing merge grant (`port-keeps-behaviour` line 38, 2026-10-27) | Owner corrected it. Rule: read CLAUDE.md for grants first | No text on grants | Ours | No ask that a grant answers |
+| A question on CI internals the owner could not judge (`owner-judge-test` line 24, 2026-10-28) | Owner saved an answer with "i really can't figure out how to decide". Then a rule | "Fold in what's cheap ... just do it": the session takes the pick | Plugin, before our rule; tie after it | No question the owner cannot judge |
+| A waiting item proposed loosening a shared tool for one repo (`uniform-over-variants` line 20, 2026-10-27) | Owner ruled: the repo changes, never the tool | "A durable workflow" could argue either way | Unknown | One format, no per-repo exception |
+| An orchestrator started four sessions, and the owner had to accept each (`lanes-start-as-agents` line 25, 2026-10-26) | Then a check | "Parallelize what's independent" pushes the same act | Ours | No owner click for work he asked to run |
+| A lane's question restated main (`port-keeps-behaviour` line 39, 2026-10-30) | Then a check on the question form | No text on it | Ours | No question that restates main |
+
+Score on these six: ours better 3, plugin better 1 (before our rule), tie 1, unknown 1. No case
+shows the plugin building an unasked act. No case shows our rule causing work the owner later had
+to ask for. Six records is too few to rank either side with confidence.
+
+**Cost against gain.**
+
+- The plugin loads 1,978 words into each substantive task, plus 30 words from its hook.
+- Its failure-mode table is 408 words. The ten rules of ours it repeats total 297 words. They
+  load already in the root `CLAUDE.md` (3,973 words).
+- So about 1,570 words per task are new: its creed, its four roles, its scaling notes and its
+  loop. No case above turns on those words.
+
+**Verdict: skip the install.**
+
+- Gain if added: one case in six, a question the owner could not judge, goes better. Our rule
+  `questions-go-to-owner` now covers that case.
+- Loss if added: about 1,570 new words per task. A push to parallelize that one case shows as
+  harm. It also sets a second home for working rules.
+- What would change the verdict: a trial. Run the same briefs with and without the skill and
+  count owner corrections and unasked acts. That needs the owner's grant and transcripts from his
+  computer.
 
 ## Hypotize
 
