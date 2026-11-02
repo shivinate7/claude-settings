@@ -944,3 +944,4 @@
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
 - interrupt-session-refused: the auto-mode classifier refused `mcp__claude-code-remote__interrupt_session` from a record-writer agent in lane roles-follow-ruling (2026-11-01 22:25 CST). The call was stray: the brief asked for no interrupt, so nothing was lost. Owner to say whether to allow the tool.
+- cloud-disk-full: with the brake off in a cloud session (`CLAUDE_CODE_REMOTE=true`), a cloud lane can use up its disk allowance. Writes then fail with "no space left on device". Decision: machine-load-brake (the machine-load brake).

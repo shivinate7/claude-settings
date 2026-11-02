@@ -131,7 +131,7 @@ FAMILIES = {
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -20353,7 +20353,7 @@ for _label, _check in (
 
 # =========================================================================== the machine-load brake
 # The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
-# suite drops it here, and a cloud case sets it for its own run (lb_add's `remote`). No other case reads the variable.
+# suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
 os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
@@ -20557,7 +20557,14 @@ try:
         elif spec.get("patch_floor") == "read":
             g.floor_hit = lambda tool, tool_input: g.read_load() and ""
         try:
-            g.main()
+            if spec["mode"] == "hit":
+                # The brake's two functions, called direct on the call's own payload (the probe's stdin), so a
+                # case reads each pair they return, not only the decision.
+                body = json.loads(sys.stdin.read())
+                out["hit"] = list(g.load_hit(body.get("tool_name"), body.get("tool_input")))
+                out["running"] = list(g.running_lane_hit(body, body.get("tool_name")))
+            else:
+                g.main()
         except SystemExit:
             pass
     out["files"] = [p for p in listing() if p not in before]
@@ -20624,10 +20631,12 @@ def lb_spawn_input(tool, value):
     return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
-def lb_run(tool, spec, tool_input=None, event=None, agent=None):
+def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
     and what the probe saw (reads, children, files, had_reader, reading...). `agent` is the payload's
-    agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call)."""
+    agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call). `remote` is the
+    value of CLAUDE_CODE_REMOTE; None leaves it unset. The runner's own value never reaches a case, so
+    every case judges a local machine unless it names `remote`."""
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -20652,6 +20661,9 @@ def lb_run(tool, spec, tool_input=None, event=None, agent=None):
             env[name] = dirs["tmp"]
         env["CLAUDE_CONFIG_DIR"] = dirs["cfg"]
         env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        if remote is not None:
+            env["CLAUDE_CODE_REMOTE"] = remote
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
         done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
                               input=json.dumps(body), capture_output=True, text=True, env=env,
@@ -20678,14 +20690,14 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None, agent=None):
+                      fake=None, agent=None, remote=None):
     """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
-    None to leave it out. `tool_input` replaces the whole input."""
+    None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run)."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
         spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
-        got, reason, side = lb_run(tool, spec, given, agent=agent)
+        got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote)
         if got == "error":
             return False, reason
         called = side.get("reads")
@@ -20709,10 +20721,12 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
     return check
 
 
-def lb_no_read_check(tool, tool_input=None, event=None, agent=None):
-    """A call that is not a lane start, under the worst reading."""
+def lb_no_read_check(tool, tool_input=None, event=None, agent=None, remote=None):
+    """A call that reads no load under the worst reading: one that is not a lane start, or a lane start in a
+    cloud session (`remote` "true"), where the brake is skipped and the reader is never called."""
     def check():
-        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event, agent)
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event, agent,
+                                   remote=remote)
         if got == "error":
             return False, reason
         if got != "allow":
@@ -20905,18 +20919,11 @@ def lb_neutral_default_check():
 LB_CHECKS = []   # the checks that reach the real reader: the Windows slice runs these too
 
 
-def lb_add(label, check, real=False, remote=None):
-    """Register one load-brake check. `remote` runs it with CLAUDE_CODE_REMOTE set to that value (a cloud case);
-    None leaves the suite's local default in place."""
-    run = check
-    if remote is not None:
-        def run():
-            with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": remote}):
-                return check()
-    LOG_CHECKS_EXTRA.append(("load-brake: " + label, run))
-    FIXTURELESS_CHECKS.add(run)
+def lb_add(label, check, real=False):
+    LOG_CHECKS_EXTRA.append(("load-brake: " + label, check))
+    FIXTURELESS_CHECKS.add(check)
     if real:
-        LB_CHECKS.append(run)
+        LB_CHECKS.append(check)
 
 
 lb_add("probe control: a child process the probe starts is counted", lb_probe_child_check)
@@ -21142,35 +21149,43 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true no reading refuses
-# a lane-start call, busy or full, and an agent's own shell or file write is allowed at full too. The verdict is the
-# proof: the reader may run or not (reads=None), and an allowed call writes no file, so nothing reaches guard.log.
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a lane-start call is
+# allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
+# guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
+# so those are not repeated here.
 LB_CLOUD = "true"
 CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
                 ("false", False), (" true", False))
-for _short, _tool in LB_TOOLS:
-    for _bg, _say in (LB_BG if _tool in dict(LB_SPAWNS).values() else ((None, "no run_in_background"),)):
-        lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_short, _say),
-               lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None), remote=LB_CLOUD)
-for _short, _tool in LB_SPAWNS:
-    lb_add("cloud: %s, memory 91.7%%, run_in_background true: busy, allowed" % _short,
-           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=True, reads=None), remote=LB_CLOUD)
-for _tool, _given in LB_WRITES:
-    lb_add("cloud: an agent's %s, memory 99%%, disk 1.0 GB free of 926 GB: allowed, nothing written" % _tool,
-           lb_decision_check(_tool, LB_ALL_HIGH, "allow", tool_input=_given, agent=LB_AGENT, reads=None), remote=LB_CLOUD)
+for _tool, _bg, _say in (("Agent", False, "run_in_background false"),
+                         ("Agent", None, "run_in_background left out"),
+                         ("Task", True, "run_in_background true"),
+                         ("Task", False, "run_in_background false"),
+                         ("Task", None, "run_in_background left out")):
+    lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
+           lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None, remote=LB_CLOUD))
+lb_add("cloud: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
+       lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=None, remote=LB_CLOUD))
+for _tool in ("Agent", "Task"):
+    lb_add("cloud: %s, memory 91.7%%, run_in_background true: busy, allowed" % _tool,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=True, reads=None,
+                             remote=LB_CLOUD))
+lb_add("cloud: an agent's Bash, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
+       lb_decision_check("Bash", LB_ALL_HIGH, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT,
+                         reads=None, remote=LB_CLOUD))
 lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
-       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None), remote=LB_CLOUD)
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None,
+                         remote=LB_CLOUD))
 lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None),
-       remote=LB_CLOUD)
+       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
+                         remote=LB_CLOUD))
 lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None),
-       remote=LB_CLOUD)
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None,
+                         remote=LB_CLOUD))
 # Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
 for _remote in ("1", "TRUE", ""):
     lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
-           lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=False),
-           remote=_remote)
+           lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=False,
+                             remote=_remote))
 
 
 def cloud_name_check():
@@ -21210,6 +21225,85 @@ def cloud_one_home_check():
 
 lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
 lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
+
+
+# A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
+# start and every running-lane call, and reads no load, so the reader is never called. Only the exact value
+# "true" is a cloud session. Unset and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE,
+# so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
+LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95%
+
+
+def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads=1, agent=None):
+    """A direct call of load_hit (which "load_hit") or running_lane_hit (which "running_lane_hit") on the call's
+    own payload, under a forced reading and `remote`. `deny` is None for the empty pair ("", ""), or the patterns
+    the refusal's reason must name. `reads` is how many times the reader ran across the probe's two calls."""
+    key = "hit" if which == "load_hit" else "running"
+
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "hit", "reading": reading}, tool_input, agent=agent,
+                                   remote=remote)
+        if got == "error":
+            return False, reason
+        called, pair = side.get("reads"), side.get(key)
+        if not isinstance(pair, list) or len(pair) != 2:
+            return False, "%s returned %r, want a pair" % (which, pair)
+        if deny is None:
+            if pair != ["", ""]:
+                return False, "%s returned %r, want the empty pair: %s" % (which, pair, pair[0][:90])
+        else:
+            if not pair[0]:
+                return False, "%s returned the empty pair, want a refusal" % which
+            for pattern in deny:
+                if not pattern.search(pair[0]):
+                    return False, "the reason does not name the reading (%s): %s" % (
+                        pattern.pattern[:30], pair[0][:100])
+        if called != reads:
+            return False, "%s as wanted, but the reader ran %s time(s), want %d" % (which, called, reads)
+        return True, "%s as wanted, the reader ran %d time(s)" % (which, called)
+    return check
+
+
+# Cloud: the direct pairs are empty and the reader never runs.
+lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit returns the empty pair, "
+       "the reader never runs",
+       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
+       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
+lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_lane_hit returns the empty pair, "
+       "the reader never runs",
+       lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
+                    agent=LB_AGENT))
+lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
+       lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, full reading: allowed, the reader never runs",
+       lb_no_read_check("Workflow", lb_lane_input("Workflow"), remote="true"))
+for _tool, _given in LB_WRITES:   # the agent's Bash is the first of these
+    lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, full reading: allowed, the reader never runs" % _tool,
+           lb_no_read_check(_tool, _given, agent=LB_AGENT, remote="true"))
+
+# Local: unset and "false" keep the brake, so each full reading is still refused, and the reader runs once.
+for _remote, _say in ((None, "unset"), ("false", "false")):
+    lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: load_hit refuses, names the memory"
+           % _say,
+           lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote=_remote,
+                        deny=LB_MEM_FULL))
+    lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: load_hit refuses, names the memory" % _say,
+           lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote=_remote,
+                        deny=LB_MEM_FULL))
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_lane_hit refuses, names the memory, "
+           "tells the lane to stop" % _say,
+           lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
+                        deny=LB_MEM_FULL + (LB_STOP_LANE,), agent=LB_AGENT))
+    lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: refused, names the memory, "
+           "one read" % _say,
+           lb_decision_check("Agent", LB_FULL_READING, "deny", LB_MEM_FULL, background=True, remote=_remote))
+    lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: refused, names the memory" % _say,
+           lb_decision_check("Workflow", LB_FULL_READING, "deny", LB_MEM_FULL, remote=_remote))
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the lane to stop"
+           % _say,
+           lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+                             tool_input={"command": "echo hi"}, agent=LB_AGENT, remote=_remote))
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
