@@ -13865,6 +13865,18 @@ ol("key d labelled A/B split is allowed, since A/ is not a tag", "allow",
                                "A/B split")))
 ol("a closed item with the incident labels is allowed, since a closed item is not judged", "allow",
    ol_item(status="closed", options=ol_labelled(*INCIDENT_LABELS)))
+# A markdown wrapper around the tag still names the letter, so each wrapper is judged as the tag.
+ol("key a labelled **B:** a bottom strip is denied, since bold wraps the tag", "deny",
+   ol_item(options=ol_opt(0, label="**B:** a bottom strip")))
+ol("key a labelled **B**: a bottom strip is denied, since bold wraps the letter", "deny",
+   ol_item(options=ol_opt(0, label="**B**: a bottom strip")))
+ol("key a labelled _B:_ a strip is denied, since italics wrap the tag", "deny",
+   ol_item(options=ol_opt(0, label="_B:_ a strip")))
+# Option then a lowercase article is prose, not a tag: the tag is a capital letter after Option.
+ol("key b labelled Option a different path is allowed, since a lowercase article after Option is prose", "allow",
+   ol_item(options=ol_opt(1, label="Option a different path")))
+ol("key b labelled Option a rail is allowed, since a lowercase article after Option is prose", "allow",
+   ol_item(options=ol_opt(1, label="Option a rail")))
 
 # Item text: an option named by a letter-and-digit key, after option, options, pick or key.
 ol("a context that says option e2 is safer, keys a, b and c, is denied", "deny", ol_item(context="option e2 is safer"))
