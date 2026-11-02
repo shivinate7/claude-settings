@@ -7510,15 +7510,10 @@ sh("env heredoc: an unclosed body that runs bash <<X and names the file, denies"
    "cat > briefs/brief.md <<'EOF'\nbash <<X\ncat " + ENV, "deny", "env-file", cwd=NOGIT)
 # Regression: prose that names an env folder is text, in a python body and in a data body with no
 # interpreter line.
-for _name in (ENV + "s/", ENV + "/x"):
+for _name in (ENV + "s/", ENV + "/x", "`" + ENV + "s/`", "`" + ENV + "/x`"):
     sh("env heredoc: incident 1 roadmap note, python3 - <<'EOF', prose names %s, allowed" % _name,
        "python3 - <<'EOF'\nimport json\nprint(json.dumps({\"note\": \"keep secrets out of %s\"}))\nEOF"
        % _name, "allow", cwd=NOGIT)
-# A backticked file name in a python body is text too. Outside single quotes the env rule reads the
-# backticks as a substitution, because the python body stays under inspection. Red at base.
-sh("env heredoc: incident 1 roadmap note, python3 - <<'EOF', prose names the backticked file, allowed",
-   "python3 - <<'EOF'\nimport json\nprint(json.dumps({\"note\": \"keep secrets out of `" + ENV + "`\"}))\nEOF",
-   "allow", cwd=NOGIT)
 sh("env heredoc: incident 2 brief that names the %s folder in prose, no interpreter line, allowed" % (ENV + "s/"),
    "cat > briefs/brief.md <<'EOF'\nKeep secrets out of " + ENV + "s/ and the example file.\nEOF",
    "allow", cwd=NOGIT)
