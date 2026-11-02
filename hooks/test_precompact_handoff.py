@@ -15,6 +15,7 @@ extension-less-plus-`.cmd`-shim trick `put_shim` uses in merge/test_merge.py, ne
 Windows `shutil.which` never matches an extension-less script). The fake only records that
 it ran -- this spec never calls it, so any record at all is the defect.
 """
+import datetime
 import importlib.util
 import json
 import os
@@ -149,7 +150,12 @@ class Case(object):
 
     def env(self):
         env = dict(os.environ)
-        env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)  # each case sets its own window
+        # Each case sets its own window and flags. This run's shell may set the remote knobs (a
+        # cloud session sets CLAUDE_CODE_REMOTE and CLAUDE_AUTOCOMPACT_PCT_OVERRIDE), and
+        # CLAUDE_CODE_ENTRYPOINT picks the flag table's column, so none of them leaks in.
+        for name in ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_REMOTE",
+                     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_ENTRYPOINT"):
+            env.pop(name, None)
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
         env.update(self.extra_env)
@@ -175,11 +181,19 @@ class Case(object):
     def state_path(self):
         return os.path.join(self.cfg, "state", "handoff", "%s.json" % self.session_id)
 
+    def nudge_path(self):
+        return os.path.join(self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+
     def prompt_path(self):
         return os.path.join(self.cfg, "hooks", "precompact_handoff_prompt.md")
 
     def handoff_path(self):
         return os.path.join(self.cfg, "handoffs", "%s.md" % self.session_id)
+
+    def set_flags(self, features):
+        """Write <config dir>/.claude.json with the cached feature flags summary_fraction reads."""
+        put(os.path.join(self.cfg, ".claude.json"),
+            json.dumps({"cachedGrowthBookFeatures": features}))
 
     def read_state(self):
         path = self.state_path()
@@ -380,7 +394,7 @@ def case_settings_json():
 
 
 # --------------------------------------------------------------------------- Stop --nudge
-# On Stop, `--nudge` blocks once per 150k bucket from 200k up.
+# On Stop, `--nudge` blocks once per checkpoint: 200k, then the top, compact_threshold - 50k.
 
 
 def usage_line(inp, cc=0, cr=0, model=None):
@@ -446,18 +460,19 @@ def case_nudge():
               p.returncode == 0 and is_block(c, p), "rc=%r out=%r" % (p.returncode, p.stdout))
         check("nudge: 210k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
-        p = nudge(c, 340000)
-        check("nudge: 340k after 210k is silent", p.returncode == 0 and not p.stdout.strip(),
-              "out=%r" % p.stdout)
-        check("nudge: 340k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+        p = nudge(c, 330000)
+        check("nudge: 330k after 210k is silent (below the top checkpoint)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 330k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
         p = nudge(c, 360000)
-        check("nudge: 360k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 360k blocks at the top checkpoint", is_block(c, p), "out=%r" % p.stdout)
         check("nudge: 360k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 455000)
-        check("nudge: 455k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("nudge: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+        check("nudge: 455k after the top is silent (no checkpoint above it)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 455k keeps bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 120000)
         check("nudge: 120k after 455k (compaction) is silent",
@@ -532,24 +547,24 @@ def set_limit(c, limit):
 def case_nudge_limit_checkpoints():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # default limit 500k (no settings.json): checkpoints 200,350,450
+    # default limit 500k (no settings.json): checkpoints 200k, then the top at 334k total
     c = Case("nlim5")
     try:
-        nudge(c, 410000)
-        p = nudge(c, 455000)
-        check("limit: 455k blocks after 410k fired (limit-50k checkpoint, 500k limit)",
+        nudge(c, 210000)
+        p = nudge(c, 340000)
+        check("limit: 340k blocks at the top checkpoint after 210k fired (500k limit)",
               is_block(c, p), "out=%r" % p.stdout)
-        check("limit: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+        check("limit: 340k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
         p = nudge(c, 460000)
-        check("limit: 460k after 455k is silent", p.returncode == 0 and not p.stdout.strip(),
+        check("limit: 460k after the top is silent", p.returncode == 0 and not p.stdout.strip(),
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
     c = Case("nlimexp")
     try:
         set_limit(c, 500000)
-        nudge(c, 410000)
-        p = nudge(c, 455000)
+        nudge(c, 210000)
+        p = nudge(c, 340000)
         check("limit: explicit 500k setting behaves like the default", is_block(c, p),
               "out=%r" % p.stdout)
     finally:
@@ -558,26 +573,27 @@ def case_nudge_limit_checkpoints():
     c = Case("nlimbad")
     try:
         put(os.path.join(c.cfg, "settings.json"), "{not json")
-        nudge(c, 410000)
-        p = nudge(c, 455000)
+        nudge(c, 210000)
+        p = nudge(c, 340000)
         check("limit: unreadable settings falls back to 500k", is_block(c, p),
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
-    # limit 800k: 200, 350, 500, 650, then 750
+    # limit 800k: threshold 624k, so checkpoints 200k, 350k, then the top at 574k total
     c = Case("nlim8")
     try:
         set_limit(c, 800000)
         nudge(c, 410000)
         p = nudge(c, 455000)
-        check("limit 800k: 455k silent after 410k fired (next is 500k)",
+        check("limit 800k: 455k silent after 410k fired (next is the top, 574k)",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
         p = nudge(c, 755000)
         check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("limit 800k: 755k stores bucket 4", stored_bucket(c) == 4, "got %r" % stored_bucket(c))
+        check("limit 800k: 755k stores bucket 2", stored_bucket(c) == 2,
+              "got %r" % stored_bucket(c))
     finally:
         c.cleanup()
-    # limit 200k: limit-50k = 150k <= 200k, only checkpoint is 150k
+    # limit 200k: threshold 144k, top 94k total, the only checkpoint
     c = Case("nlim2")
     try:
         set_limit(c, 200000)
@@ -591,7 +607,7 @@ def case_nudge_limit_checkpoints():
 def case_nudge_reads_messages_not_total():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # limit 200k, overhead 160k: room 40k, checkpoints(40000) = [-10000] (degenerate)
+    # room <= 0 keeps margin 50k: room -16k puts the top below zero, so any message count blocks.
     c = Case("nmsg1")
     try:
         set_limit(c, 200000)
@@ -614,23 +630,25 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(284999)])
         check("messages: total 284,999 (messages 199,999) is silent at 85k overhead",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        # item 2 (75k drop): checkpoints(299000) = [249k]; the 200k floor is 49k under it, dropped.
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
-        check("messages: total 285,000 (messages 200,000) blocks at 85k overhead",
-              is_block(c, p), "out=%r" % p.stdout)
-        # checkpoints(415000) = 200k, 365k (350k is within 75k of the top, dropped): total 450k
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(449999)])
-        check("messages: total 449,999 stays at bucket 0 (last checkpoint is total 450k)",
-              stored_bucket(c) == 0, "got %r" % stored_bucket(c))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(450000)])
-        check("messages: total 450,000 blocks at the last checkpoint (bucket 1)",
-              is_block(c, p) and stored_bucket(c) == 1,
+        check("messages: total 285,000 (messages 200,000) is silent: the 200k floor is dropped",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
+        check("messages: total 333,999 is silent at bucket -1 (the one checkpoint is total 334k)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
+        check("messages: total 334,000 blocks at the one checkpoint (bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
             reason = json.loads(p.stdout).get("reason", "")
         except Exception:
             reason = ""
         check("messages: the text names the total and the messages",
-              "Context is about 450k tokens, messages about 365k." in reason,
+              "Context is about 334k tokens, messages about 249k." in reason,
               "reason: %r" % reason)
     finally:
         c.cleanup()
@@ -639,16 +657,18 @@ def case_nudge_reads_messages_not_total():
 def case_nudge_close_checkpoint_dropped_and_bogus_first_entry():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # 500k, overhead 90k: room 410k, top 360k. A 350k checkpoint would sit 10k below it.
+    # 700k, overhead 90k: threshold 544k, room 454k, top 404k. A 350k checkpoint would sit 54k
+    # below it, so it is dropped. At 500k no 350k step fits under the top, so the drop needs 700k.
     c = Case("nmsg3")
     try:
+        set_limit(c, 700000)
         first = usage_line(90000)
         blocks = []
-        for total in (290000, 430000, 440000, 450000):
+        for total in (290000, 430000, 440000, 494000):
             p = nudge(c, 0, overhead=None, lines=[first, usage_line(total)])
             blocks.append((total, is_block(c, p)))
-        check("close checkpoint: one nudge between total 430k and 450k, none at 440k",
-              blocks == [(290000, True), (430000, False), (440000, False), (450000, True)],
+        check("close checkpoint: one nudge between total 430k and 494k, none at 440k",
+              blocks == [(290000, True), (430000, False), (440000, False), (494000, True)],
               "got %r" % blocks)
     finally:
         c.cleanup()
@@ -704,6 +724,107 @@ def case_nudge_settings():
           any("precompact_handoff.py" in x and "--nudge" in x for x in cmds), "Stop: %r" % cmds)
 
 
+# --------------------------------------------------------------------------- compact threshold
+# Claude Code compacts at compact_threshold(limit) = min(E - round(E * f), E - 13k), with
+# E = limit - 20k and f = summary_fraction(limit), read from the flag file (default 0.2). The
+# nudge's top checkpoint sits 50k below it, so the nudge comes before compaction. Under test: the
+# module's compact_threshold. Loaded by path, so a missing name fails its checks instead of the run.
+
+
+def under_test():
+    spec = importlib.util.spec_from_file_location("precompact_handoff_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def case_compact_threshold():
+    """The flag file holds the fraction 0.2, so these are the values from before the flag."""
+    c = Case("cthr")
+    try:
+        c.set_flags(fraction_flags(0.2))
+        for limit, want in ((500000, 384000), (200000, 144000)):
+            got, err = threshold_at(c, limit)
+            expect_value("threshold: compact_threshold(%d) is %d" % (limit, want), got, err, want)
+    finally:
+        c.cleanup()
+
+
+def case_nudge_top_checkpoint_at_threshold():
+    """500k window: the top checkpoint is threshold - 50k = 334k total. With a 30k overhead
+    that is 304k messages, so the 340k case below blocks at the top bucket and nothing above
+    it fires."""
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    first = usage_line(30000)
+    c = Case("ntop1")
+    try:
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
+        check("top: a 340k transcript (30k overhead) blocks at the top bucket",
+              is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(445000)])
+        check("top: 445k after 340k is not a new block (top bucket already reached)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+    c = Case("ntop2")
+    try:
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(240000)])
+        check("top: 240k blocks at bucket 0 before the top",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
+        check("top: 333,999 is below the top checkpoint (silent, bucket 0)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
+        check("top: 334,000 (threshold - 50k) reaches the top bucket",
+              is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_checkpoint_ladder():
+    """checkpoints(room) on its own. The 200k floor goes when a step sits under 75k below the top
+    (item 2 of precompact-handoff), and the top sits margin = min(50k, room/2) under the room."""
+    for room, want in (
+            (299000, [249000]),  # item 2 (75k drop): the 200k floor is 49k under the top
+            (384000, [200000, 334000]),  # item 2: the floor is 134k under the top, so it stays
+            (44000, [22000]),  # margin = min(50k, room/2): room 44k, top 22k
+            (100000, [50000])):  # margin = min(50k, room/2): room 100k, the 50k cap
+        try:
+            got = under_test().checkpoints(room)
+        except Exception as e:
+            got = "%s: %s" % (type(e).__name__, e)
+        check("ladder: checkpoints(%d) is %r" % (room, want), got == want, "got %r" % (got,))
+
+
+def case_nudge_small_room_margin():
+    """100k window, 20k overhead: room 44k, so the one checkpoint is margin = min(50k, room/2) =
+    22k. The sizes are the last entry's total, so messages are 23k and 10k. size is unused when
+    lines is given."""
+    c = Case("nsmall43")
+    try:
+        set_limit(c, 100000)
+        p = nudge(c, 0, overhead=20000, lines=[usage_line(43000)])
+        check("small room: total 43k (messages 23k) blocks at the 22k top",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+    c = Case("nsmall30")
+    try:
+        set_limit(c, 100000)
+        p = nudge(c, 0, overhead=20000, lines=[usage_line(30000)])
+        check("small room: total 30k (messages 10k) is silent below the 22k top",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- window tiers
 # The nudge's window, highest first: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
 # modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow, then 500k. A bad
@@ -755,6 +876,12 @@ WINDOW_ROWS = [
     ("bad top-level falls to default 500k", {"autoCompactWindow": 0}, None, A_MODEL, False),
     ("settings not an object falls to default", "[1]", None, A_MODEL, False),
     ("no model in transcript uses top-level", ms(B_MODEL, 900000, top=200000), None, None, True),
+    # F2: the env var takes a k/m suffix.
+    ("F2: env '200k' is a 200k window", {"autoCompactWindow": 500000}, {WINDOW_ENV: "200k"},
+     A_MODEL, True),
+    # W: a settings.json string is ignored, so the 500k default applies and 160k does not block.
+    ("W: top-level '200K' string is ignored, 500k applies", {"autoCompactWindow": "200K"}, None,
+     A_MODEL, False),
 ]
 
 
@@ -785,6 +912,80 @@ def case_window_tier_follows_transcript_model():
         p = nudge(c, 0, overhead=None, lines=lines)
         check("window e2e: the last counted entry's model picks the 200k window, so it blocks",
               is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
+# F2, W: the env var takes the CLI's suffix forms (200k, 1m, 1.5m, any case). W: the env value is
+# clamped to 100,000..1,000,000, so 1.5m is 1,000,000.
+WINDOW_FORMS = (("200k", 200000), ("1m", 1000000), ("1.5m", 1000000),
+                ("200K", 200000), ("1M", 1000000), ("1.5M", 1000000))
+
+
+def window_at(c, env_value=None, settings=None, model=None):
+    """window_limit(model) with the case's config dir. settings.json holds `settings` when it is
+    not None, else is absent. As (value, error)."""
+    path = os.path.join(c.cfg, "settings.json")
+    if os.path.isfile(path):
+        os.remove(path)
+    if settings is not None:
+        put(path, json.dumps(settings))
+    with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_AUTO_COMPACT_WINDOW=env_value):
+        return call_under_test("window_limit", model)
+
+
+def case_window_limit_suffix_forms():
+    """F2, W: each suffix form gives its token count in the env var, clamped at 1,000,000. A
+    settings.json string is ignored, so it falls to the 500k default. A value that is not a
+    number and not a suffix form ('abc') still falls to the next tier."""
+    c = Case("wsuffix")
+    try:
+        for text, want in WINDOW_FORMS:
+            got, err = window_at(c, env_value=text)
+            expect_value("window: env %r is %d" % (text, want), got, err, want)
+        # W: settings strings do not count, so each suffix form falls to the default.
+        for text, _ in WINDOW_FORMS:
+            got, err = window_at(c, settings={"autoCompactWindow": text})
+            expect_value("window: top-level autoCompactWindow %r is ignored, 500,000" % text,
+                         got, err, 500000)
+        # W: a modelSettings string is ignored too.
+        got, err = window_at(c, model=A_MODEL,
+                             settings={"modelSettings": {A_MODEL: {"autoCompactWindow": "1.5m"}}})
+        expect_value("window: modelSettings autoCompactWindow '1.5m' is ignored, 500,000",
+                     got, err, 500000)
+        # W: the top-level fallback is an int now, since a settings string is ignored.
+        got, err = window_at(c, env_value="abc", settings={"autoCompactWindow": 200000})
+        expect_value("window: env 'abc' falls to top-level 200,000", got, err, 200000)
+        got, err = window_at(c, settings={"autoCompactWindow": "abc"})
+        expect_value("window: top-level 'abc' falls to the 500k default", got, err, 500000)
+    finally:
+        c.cleanup()
+
+
+# W (round-2 finding, Claude Code 2.1.316): only the env var takes a k/m suffix, and its value is
+# clamped to 100,000..1,000,000. settings.json counts only ints in that range. A string, or an int
+# outside it, falls to the next tier.
+WINDOW_VALUE_ROWS = (
+    # (name, env value, settings.json object, want)
+    ("env '1.5m' clamps to 1,000,000", "1.5m", None, 1000000),
+    ("env '2m' clamps to 1,000,000", "2m", None, 1000000),
+    ("env '200' clamps to 100,000", "200", None, 100000),
+    ("env '200k' is 200,000", "200k", None, 200000),
+    ("env '500K' is 500,000", "500K", None, 500000),
+    ("settings '1m' is ignored, 500,000", None, {"autoCompactWindow": "1m"}, 500000),
+    ("settings 2,000,000 is ignored, 500,000", None, {"autoCompactWindow": 2000000}, 500000),
+    ("settings 50,000 is ignored, 500,000", None, {"autoCompactWindow": 50000}, 500000),
+    ("settings 300,000 is 300,000", None, {"autoCompactWindow": 300000}, 300000),
+)
+
+
+def case_window_value_rows():
+    """W: window_limit's value for each row, with the env var and settings.json as given."""
+    c = Case("wvalue")
+    try:
+        for name, env_value, settings, want in WINDOW_VALUE_ROWS:
+            got, err = window_at(c, env_value=env_value, settings=settings)
+            expect_value("W: window " + name, got, err, want)
     finally:
         c.cleanup()
 
@@ -1265,6 +1466,522 @@ def case_premise_strength_comes_from_kinds():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- summary fraction
+# summary_fraction(limit) reads Claude Code's cached flags from <config dir>/.claude.json, or from
+# ~/.claude.json when CLAUDE_CONFIG_DIR is unset (key cachedGrowthBookFeatures). Order: the
+# tengu_amber_moleskin table (the entry for str(limit), else "default"; "sdk" when the entrypoint
+# starts with "sdk", else "repl"; any out-of-range or non-dict entry makes the table malformed),
+# then the scalar tengu_amber_rokovoko, then 0.2. Case.set_flags writes the file.
+
+
+def fraction_flags(f):
+    """A flag table that gives every window and entrypoint the same fraction f."""
+    return {"tengu_amber_moleskin": {"default": {"repl": f, "sdk": f}}}
+
+
+class Env(object):
+    """Set os.environ names for one block, then put each back. None unsets a name."""
+
+    def __init__(self, **values):
+        self.values = values
+        self.saved = {}
+
+    def __enter__(self):
+        for name, value in self.values.items():
+            self.saved[name] = os.environ.get(name)
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = str(value)
+        return self
+
+    def __exit__(self, *exc):
+        for name, old in self.saved.items():
+            if old is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old
+        return False
+
+
+def call_under_test(name, *args, **kwargs):
+    """(value, None), or (None, "Type: message") when the module's function raises or is missing.
+    A missing name fails its checks and never stops the rest of the run."""
+    try:
+        return getattr(under_test(), name)(*args, **kwargs), None
+    except Exception as e:
+        return None, "%s: %s" % (type(e).__name__, e)
+
+
+def expect_value(name, got, err, want):
+    check(name, err is None and got == want, err or "got %r, want %r" % (got, want))
+
+
+def fraction_at(c, limit, entrypoint=None):
+    """summary_fraction(limit) with the case's config dir, as (value, error)."""
+    with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_ENTRYPOINT=entrypoint):
+        return call_under_test("summary_fraction", limit)
+
+
+def case_summary_fraction_table():
+    c = Case("sftab")
+    try:
+        c.set_flags(fraction_flags(0.15))
+        got, err = fraction_at(c, 500000)
+        expect_value("summary: table default 0.15 applies to 500k", got, err, 0.15)
+        got, err = fraction_at(c, 200000)
+        expect_value("summary: table default 0.15 applies to 200k", got, err, 0.15)
+    finally:
+        c.cleanup()
+
+
+def case_summary_fraction_exact_key_beats_default():
+    c = Case("sfkey")
+    try:
+        c.set_flags({"tengu_amber_moleskin": {
+            "500000": {"repl": 0.08, "sdk": 0.08}, "default": {"repl": 0.15, "sdk": 0.15}}})
+        got, err = fraction_at(c, 500000)
+        expect_value("summary: exact key \"500000\" (0.08) beats default (0.15)", got, err, 0.08)
+        got, err = fraction_at(c, 200000)
+        expect_value("summary: 200k has no key, so default 0.15 applies", got, err, 0.15)
+    finally:
+        c.cleanup()
+
+
+def case_summary_fraction_sdk_or_repl():
+    c = Case("sfsdk")
+    try:
+        c.set_flags({"tengu_amber_moleskin": {"default": {"repl": 0.15, "sdk": 0.05}}})
+        for tag, entry, want in (("unset", None, 0.15), ("cli", "cli", 0.15),
+                                 ("remote", "remote", 0.15), ("sdk-ts", "sdk-ts", 0.05)):
+            got, err = fraction_at(c, 500000, entrypoint=entry)
+            expect_value("summary: entrypoint %s picks %s" % (tag, want), got, err, want)
+    finally:
+        c.cleanup()
+
+
+def case_summary_fraction_falls_to_scalar():
+    """A malformed table, or one with no entry for this window, falls to the scalar 0.1."""
+    c = Case("sfbad")
+    try:
+        rows = (
+            ("the table has an out-of-range fraction (1.2)",
+             {"tengu_amber_moleskin": {"default": {"repl": 1.2, "sdk": 0.15}},
+              "tengu_amber_rokovoko": 0.1}),
+            ("the table has a non-dict entry",
+             {"tengu_amber_moleskin": {"500000": 0.08,
+                                       "default": {"repl": 0.15, "sdk": 0.15}},
+              "tengu_amber_rokovoko": 0.1}),
+            ("an entry under another window is out of range (the whole table is malformed)",
+             {"tengu_amber_moleskin": {"200000": {"repl": -0.1, "sdk": 0.1},
+                                       "default": {"repl": 0.15, "sdk": 0.15}},
+              "tengu_amber_rokovoko": 0.1}),
+            ("the table has no entry for 500k and no default",
+             {"tengu_amber_moleskin": {"200000": {"repl": 0.08, "sdk": 0.08}},
+              "tengu_amber_rokovoko": 0.1}),
+        )
+        for tag, features in rows:
+            c.set_flags(features)
+            got, err = fraction_at(c, 500000)
+            expect_value("summary: %s, so the scalar 0.1 applies" % tag, got, err, 0.1)
+    finally:
+        c.cleanup()
+
+
+def case_summary_fraction_defaults():
+    """The scalar must be in 0 <= f < 1; anything else, a missing file or a bad file gives 0.2."""
+    c = Case("sfdef")
+    try:
+        rows = (
+            ("scalar 0.0 is in range", {"tengu_amber_rokovoko": 0.0}, 0.0),
+            ("scalar 1.5 is out of range", {"tengu_amber_rokovoko": 1.5}, 0.2),
+            ("scalar 1.0 is out of range", {"tengu_amber_rokovoko": 1.0}, 0.2),
+            ("no flag named", {"other_flag": 1}, 0.2),
+        )
+        for tag, features, want in rows:
+            c.set_flags(features)
+            got, err = fraction_at(c, 500000)
+            expect_value("summary: %s" % tag, got, err, want)
+        put(os.path.join(c.cfg, ".claude.json"), "{not json")
+        got, err = fraction_at(c, 500000)
+        expect_value("summary: an unreadable file gives 0.2", got, err, 0.2)
+        os.remove(os.path.join(c.cfg, ".claude.json"))
+        got, err = fraction_at(c, 500000)
+        expect_value("summary: a missing file gives 0.2", got, err, 0.2)
+    finally:
+        c.cleanup()
+
+
+def case_summary_fraction_reads_config_dir_file():
+    c = Case("sfloc")
+    try:
+        home = os.path.join(c.root, "home")
+        put(os.path.join(home, ".claude.json"),
+            json.dumps({"cachedGrowthBookFeatures": {"tengu_amber_rokovoko": 0.07}}))
+        c.set_flags({"tengu_amber_rokovoko": 0.09})
+        with Env(CLAUDE_CONFIG_DIR=c.cfg, HOME=home, USERPROFILE=home):
+            got, err = call_under_test("summary_fraction", 500000)
+        expect_value("summary: CLAUDE_CONFIG_DIR's .claude.json is read, not the home one",
+                     got, err, 0.09)
+        with Env(CLAUDE_CONFIG_DIR=None, HOME=home, USERPROFILE=home):
+            got, err = call_under_test("summary_fraction", 500000)
+        expect_value("summary: with no CLAUDE_CONFIG_DIR, ~/.claude.json is read",
+                     got, err, 0.07)
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- compact threshold
+# compact_threshold(500k) with the flag fraction: 0.2 gives 384,000, 0.08 gives 441,600.
+# F1: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = p applies to every window, remote or not, so the second
+# term is min(floor(E * p / 100), E - 13k), where E = limit - 20k, for 0 < p <= 100.
+
+
+def threshold_at(c, limit, remote=None, pct=None):
+    """compact_threshold(limit) with the case's config dir and remote knobs, as (value, error)."""
+    with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_ENTRYPOINT=None,
+             CLAUDE_CODE_REMOTE=remote, CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=pct):
+        return call_under_test("compact_threshold", limit)
+
+
+def case_compact_threshold_reads_flag_and_remote():
+    c = Case("cthf")
+    try:
+        for f, want in ((0.2, 384000), (0.08, 441600), (0.15, 408000), (0.0, 467000)):
+            c.set_flags(fraction_flags(f))
+            got, err = threshold_at(c, 500000)
+            expect_value("threshold: 500k with fraction %s is %d" % (f, want), got, err, want)
+
+        c.set_flags(fraction_flags(0.2))
+        got, err = threshold_at(c, 200000, remote="1", pct="80")
+        expect_value("threshold: 200k remote pct 80, fraction 0.2 is 144,000", got, err, 144000)
+        # F1: the percent override has no remote gate and no 200k gate, so PCT 80 applies at 500k.
+        c.set_flags(fraction_flags(0.08))
+        got, err = threshold_at(c, 500000, pct="80")
+        expect_value("threshold: 500k PCT 80, fraction 0.08 is 384,000 (no remote gate)",
+                     got, err, 384000)
+
+        c.set_flags(fraction_flags(0.01))
+        got, err = threshold_at(c, 200000)
+        expect_value("threshold: 200k no remote pct 80, fraction 0.01 is 167,000", got, err, 167000)
+        # F1: PCT 80 without CLAUDE_CODE_REMOTE is applied, so 200k is 144,000, not 167,000.
+        got, err = threshold_at(c, 200000, pct="80")
+        expect_value("threshold: 200k pct 80 without CLAUDE_CODE_REMOTE is applied",
+                     got, err, 144000)
+        got, err = threshold_at(c, 200000, remote="1", pct="80")
+        expect_value("threshold: 200k remote pct 80, fraction 0.01 is 144,000 (override lower)",
+                     got, err, 144000)
+        for pct in ("0", "-5", "abc"):
+            got, err = threshold_at(c, 200000, remote="1", pct=pct)
+            expect_value("threshold: 200k remote, pct %s is not 0 < p <= 100, so ignored" % pct,
+                         got, err, 167000)
+    finally:
+        c.cleanup()
+
+
+def case_compact_threshold_pct_override_every_window():
+    """F1: the percent override applies in every session and window, with no remote gate. An
+    unset, unparsable or out-of-range value (0, 150, abc) is ignored."""
+    c = Case("cthpct")
+    try:
+        c.set_flags(fraction_flags(0.2))
+        got, err = threshold_at(c, 500000, pct="50")
+        expect_value("threshold: PCT 50, no remote, 500k, fraction 0.2 is 240,000",
+                     got, err, 240000)
+        c.set_flags(fraction_flags(0.08))
+        got, err = threshold_at(c, 500000)
+        expect_value("threshold: PCT unset, 500k, fraction 0.08 is 441,600", got, err, 441600)
+        for pct in ("abc", "0", "150"):
+            got, err = threshold_at(c, 500000, pct=pct)
+            expect_value("threshold: 500k, PCT %s is not 0 < p <= 100, so ignored" % pct,
+                         got, err, 441600)
+        # P (round-2 finding): the value parses like JS parseFloat, so the leading 80 counts.
+        got, err = threshold_at(c, 500000, pct="80%")
+        expect_value("threshold: 500k, PCT '80%' parses as 80, so 384,000", got, err, 384000)
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- nudge with the flag
+# The nudge reads the same threshold. Flag fraction 0.08 on 500k, overhead 30k: threshold
+# 441,600, room 411,600, top at messages 361,600 = total 391,600.
+
+
+def case_nudge_reads_summary_flag():
+    c = Case("nflag")
+    try:
+        c.set_flags(fraction_flags(0.08))
+        first = usage_line(30000)
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(230000)])
+        check("flag nudge: total 230k (200k messages) blocks at the first checkpoint",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
+        check("flag nudge: total 340k is silent (the 0.2 top of 334k no longer applies)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(391599)])
+        check("flag nudge: total 391,599 is silent (one under the top, 391,600)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(392000)])
+        check("flag nudge: total 392,000 blocks at the top bucket",
+              is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(455000)])
+        check("flag nudge: 455k after the top is silent", p.returncode == 0
+              and not p.stdout.strip() and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- digest since handoff
+# PreCompact's digest runs from the last handoff rewrite (the handoff file's mtime, in epoch
+# seconds) when that file exists, capped at DIGEST_SINCE_CAP characters. A "## Refused acts"
+# section then lists the refused tool results after that point. Without a handoff, the digest is
+# the last DIGEST_CAP (60,000) characters, as before.
+
+SINCE_ISO = "2026-10-03T10:00:00Z"  # the handoff's mtime in these cases
+BEFORE_ISO = "2026-10-03T09:00:00Z"
+AFTER_ISO = "2026-10-03T11:00:00Z"
+
+
+def epoch(iso):
+    """Epoch seconds of a UTC time written like 2026-10-03T10:00:00Z."""
+    when = datetime.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ")
+    return when.replace(tzinfo=datetime.timezone.utc).timestamp()
+
+
+def text_entry(text, ts):
+    return transcript_line("user", [{"type": "text", "text": text}], timestamp=ts)
+
+
+def tool_result(content, ts, is_error=True):
+    """A user entry holding one tool_result. is_error None leaves the key out."""
+    block = {"type": "tool_result", "tool_use_id": "tu-1", "content": content}
+    if is_error is not None:
+        block["is_error"] = is_error
+    return transcript_line("user", [block], timestamp=ts)
+
+
+def filler(marker, n):
+    """A string of exactly n characters that starts with marker."""
+    return (marker + " " + "x" * n)[:n]
+
+
+def digest_at(c, lines, since=None):
+    """build_digest over these transcript lines, as (digest, error)."""
+    tp = os.path.join(c.root, "digest-transcript.jsonl")
+    write_transcript(tp, lines)
+    if since is None:
+        return call_under_test("build_digest", tp)
+    return call_under_test("build_digest", tp, since=since)
+
+
+def refused_lines(digest):
+    """The lines under "## Refused acts", blank lines dropped. [] when there is no such section."""
+    if digest is None or "## Refused acts" not in digest:
+        return []
+    return [ln for ln in digest.split("## Refused acts", 1)[1].splitlines() if ln.strip()]
+
+
+def case_digest_since_keeps_text_after_handoff():
+    c = Case("dgsince")
+    try:
+        since = epoch(SINCE_ISO)
+        lines = [text_entry("BEFOREMARK earlier work", BEFORE_ISO),
+                 text_entry("AFTERMARK later work", AFTER_ISO)]
+        d, err = digest_at(c, lines, since)
+        check("digest since: text before the handoff is dropped",
+              d is not None and "BEFOREMARK" not in d, err or "digest: %r" % (d,))
+        check("digest since: text after the handoff is kept",
+              d is not None and "AFTERMARK" in d, err or "digest: %r" % (d,))
+
+        # 90,000 characters after the handoff: past the 60,000 cap, so all of it stays.
+        lines = [text_entry(filler("FIRSTNEW", 30000), AFTER_ISO),
+                 text_entry(filler("MIDNEW", 30000), AFTER_ISO),
+                 text_entry(filler("LASTNEW", 30000), AFTER_ISO)]
+        d, err = digest_at(c, lines, since)
+        check("digest since: 90k after the handoff is kept whole, past the 60k cap",
+              d is not None and all(m in d for m in ("FIRSTNEW", "MIDNEW", "LASTNEW"))
+              and len(d) >= 90000, err or "len=%r" % (len(d) if d is not None else None))
+        d, err = digest_at(c, lines)
+        check("digest without a handoff: only the last 60,000 characters",
+              d is not None and len(d) <= 60000 and "FIRSTNEW" not in d and "LASTNEW" in d,
+              err or "len=%r" % (len(d) if d is not None else None))
+
+        # 250,000 characters after the handoff: the 200,000 cap keeps the newest.
+        lines = [text_entry(filler("OLDEST200", 50000), AFTER_ISO)]
+        lines += [text_entry(filler("MID%d" % i, 50000), AFTER_ISO) for i in range(3)]
+        lines += [text_entry(filler("NEWEST200", 50000), AFTER_ISO)]
+        d, err = digest_at(c, lines, since)
+        check("digest since: capped at 200,000 characters, the newest kept",
+              d is not None and len(d) <= 200000 and "NEWEST200" in d and "OLDEST200" not in d,
+              err or "len=%r" % (len(d) if d is not None else None))
+        try:
+            cap = under_test().DIGEST_SINCE_CAP
+        except Exception as e:
+            cap = "%s: %s" % (type(e).__name__, e)
+        check("digest since: DIGEST_SINCE_CAP is 200000", cap == 200000, "got %r" % (cap,))
+
+        # Millisecond timestamps, as Claude Code writes them, compare as times.
+        lines = [text_entry("EARLYMILLI before the handoff", "2026-10-03T09:59:59.900Z"),
+                 text_entry("LATEMILLI after the handoff", "2026-10-03T10:00:00.500Z")]
+        d, err = digest_at(c, lines, since)
+        check("digest since: millisecond timestamps compare as times",
+              d is not None and "LATEMILLI" in d and "EARLYMILLI" not in d,
+              err or "digest: %r" % (d,))
+    finally:
+        c.cleanup()
+
+
+def case_digest_lists_refused_acts_after_handoff():
+    c = Case("dgref")
+    try:
+        since = epoch(SINCE_ISO)
+        lines = [tool_result("PreToolUse:Bash hook error: [guard] denied: REFUSEDMARK1 blocked "
+                             "by the merge guard", AFTER_ISO),
+                 tool_result([{"type": "text", "text": "Refused: REFUSEDMARK2 push to main"}],
+                             AFTER_ISO),
+                 tool_result("REFUSEDSTALE, before the handoff: denied", BEFORE_ISO)]
+        d, err = digest_at(c, lines, since)
+        listed = refused_lines(d)
+        check("refused: a PreToolUse hook error after the handoff is listed",
+              any("REFUSEDMARK1" in ln for ln in listed), err or "section: %r" % (listed,))
+        check("refused: a list-form tool_result with 'Refused' is listed",
+              any("REFUSEDMARK2" in ln for ln in listed), err or "section: %r" % (listed,))
+        check("refused: a refusal before the handoff is not listed",
+              d is not None and "REFUSEDSTALE" not in d, err or "digest: %r" % (d,))
+        check("refused: the newest refusal is listed last",
+              bool(listed) and "REFUSEDMARK2" in listed[-1], "section: %r" % (listed,))
+
+        d, err = digest_at(c, lines[:1])
+        check("refused: with no handoff, a refusal in the transcript is still listed",
+              any("REFUSEDMARK1" in ln for ln in refused_lines(d)), err or "digest: %r" % (d,))
+    finally:
+        c.cleanup()
+
+
+def case_digest_plain_errors_are_not_refusals():
+    c = Case("dgplain")
+    try:
+        since = epoch(SINCE_ISO)
+        lines = [tool_result("Exit code 1\nPLAINERRMARK tests failed", AFTER_ISO),
+                 tool_result("permission denied: PLAINDENIEDMARK", AFTER_ISO, is_error=None),
+                 text_entry("some text after the handoff", AFTER_ISO)]
+        d, err = digest_at(c, lines, since)
+        check("refused: a plain is_error 'Exit code 1' is not listed, and no section is written",
+              d is not None and "## Refused acts" not in d, err or "digest: %r" % (d,))
+    finally:
+        c.cleanup()
+
+
+# F5, R: only the listed refusal shapes make a failed tool result a refusal; the rest are not.
+# R (round-2 finding): the four rows after the first three are refusal shapes too.
+REFUSAL_ROWS = (
+    ("PreToolUse:Bash hook error: [guard] blocked", True),
+    ("The user doesn't want to proceed with this tool use. The tool use was rejected", True),
+    ("Permission to use Bash has been denied", True),
+    ("Permission to use Read with .env has been denied.", True),
+    ("Permission for this action has been denied. Reason: x", True),
+    ("The tool call was denied by the Claude Code auto mode classifier.", True),
+    ("This agent is isolated in the worktree X, but the command runs elsewhere. "
+     "Refusing to run it", True),
+    ("Error: connect ECONNREFUSED 127.0.0.1", False),
+    ("bash: /x: Permission denied", False),
+    ("Nobody refused it", False),
+    ("Exit code 1", False),
+)
+
+
+def case_digest_refusal_shapes():
+    """F5: each row's text, alone in its own transcript, is the one listed line when the row says
+    so, and no refused-acts section at all when it does not."""
+    c = Case("dgshape")
+    try:
+        since = epoch(SINCE_ISO)
+        for text, want in REFUSAL_ROWS:
+            d, err = digest_at(c, [tool_result(text, AFTER_ISO)], since)
+            listed = refused_lines(d)
+            ok = listed == [text] if want else "## Refused acts" not in (d or "")
+            check("refused shape: %r is %s" % (text, "listed" if want else "not listed"),
+                  ok, err or "section: %r" % (listed,))
+    finally:
+        c.cleanup()
+
+
+def case_digest_refused_line_limits():
+    c = Case("dgline")
+    try:
+        since = epoch(SINCE_ISO)
+        long_first = "denied: REFUSEDLONG " + "y" * 300
+        d, err = digest_at(c, [tool_result(long_first + "\nSECONDLINEMARK", AFTER_ISO)], since)
+        longs = [ln for ln in refused_lines(d) if "REFUSEDLONG" in ln]
+        check("refused: only the first line of a refusal is listed",
+              d is not None and "SECONDLINEMARK" not in d and len(longs) == 1,
+              err or "section: %r" % (refused_lines(d),))
+        check("refused: the listed line is at most 200 characters",
+              len(longs) == 1 and len(longs[0]) <= 200,
+              "lengths: %r" % ([len(ln) for ln in longs],))
+
+        many = [tool_result("denied: REFUSEDNUM%02d" % i, AFTER_ISO) for i in range(60)]
+        d, err = digest_at(c, many, since)
+        listed = refused_lines(d)
+        check("refused: at most 50 lines are listed", 0 < len(listed) <= 50,
+              err or "listed %d" % len(listed))
+        check("refused: the newest refusal is kept, last", bool(listed)
+              and "REFUSEDNUM59" in listed[-1], err or "last: %r" % (listed[-1:],))
+    finally:
+        c.cleanup()
+
+
+def case_precompact_digest_starts_at_handoff():
+    """PreCompact passes the handoff's mtime as `since`: text before it drops, after it stays."""
+    c = Case("pcsince")
+    try:
+        put(c.handoff_path(), "# handoff\n")
+        mtime = epoch(SINCE_ISO)
+        os.utime(c.handoff_path(), (mtime, mtime))
+        tpath = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tpath, [
+            text_entry("OLDPCMARK earlier work", BEFORE_ISO),
+            text_entry("NEWPCMARK later work", AFTER_ISO),
+            tool_result("PreToolUse:Bash hook error: [guard] denied: PCREFUSEDMARK force push",
+                        AFTER_ISO),
+        ])
+        proc = c.run_precompact(tpath)
+        digest = c.read_digest()
+        check("pre-handoff: PreCompact exits 0", proc.returncode == 0,
+              "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+        check("pre-handoff: the digest keeps text after the handoff mtime",
+              digest is not None and "NEWPCMARK" in digest, "digest: %r" % (digest,))
+        check("pre-handoff: the digest drops text before the handoff mtime",
+              digest is not None and "OLDPCMARK" not in digest, "digest: %r" % (digest,))
+        check("pre-handoff: the digest lists the refused act",
+              any("PCREFUSEDMARK" in ln for ln in refused_lines(digest)),
+              "section: %r" % (refused_lines(digest),))
+    finally:
+        c.cleanup()
+
+
+def case_precompact_digest_without_handoff():
+    c = Case("pcnone")
+    try:
+        tpath = os.path.join(c.root, "transcript.jsonl")
+        write_transcript(tpath, [text_entry("OLDPCMARK earlier work", BEFORE_ISO),
+                                 text_entry("NEWPCMARK later work", AFTER_ISO)])
+        proc = c.run_precompact(tpath)
+        digest = c.read_digest()
+        check("no handoff: PreCompact exits 0", proc.returncode == 0,
+              "returncode=%r" % proc.returncode)
+        check("no handoff: the digest keeps the earlier text too",
+              digest is not None and "OLDPCMARK" in digest and "NEWPCMARK" in digest,
+              "digest: %r" % (digest,))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -1285,8 +2002,14 @@ def main() -> int:
     case_nudge_close_checkpoint_dropped_and_bogus_first_entry()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
+    case_compact_threshold()
+    case_nudge_top_checkpoint_at_threshold()
+    case_checkpoint_ladder()
+    case_nudge_small_room_margin()
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
+    case_window_limit_suffix_forms()
+    case_window_value_rows()
     case_handoff_path_not_frozen()
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
@@ -1299,6 +2022,22 @@ def main() -> int:
     case_nudge_points_at_step4()
     case_premise_kinds_one_home()
     case_premise_strength_comes_from_kinds()
+    case_summary_fraction_table()
+    case_summary_fraction_exact_key_beats_default()
+    case_summary_fraction_sdk_or_repl()
+    case_summary_fraction_falls_to_scalar()
+    case_summary_fraction_defaults()
+    case_summary_fraction_reads_config_dir_file()
+    case_compact_threshold_reads_flag_and_remote()
+    case_compact_threshold_pct_override_every_window()
+    case_nudge_reads_summary_flag()
+    case_digest_since_keeps_text_after_handoff()
+    case_digest_lists_refused_acts_after_handoff()
+    case_digest_plain_errors_are_not_refusals()
+    case_digest_refusal_shapes()
+    case_digest_refused_line_limits()
+    case_precompact_digest_starts_at_handoff()
+    case_precompact_digest_without_handoff()
 
     if FAILED:
         print()

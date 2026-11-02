@@ -17,10 +17,14 @@ the owner rejected a `claude -p` child, since it needs its own command-line logi
 the desktop app has none.
 
   PreCompact (stdin: session_id, transcript_path, cwd) -- builds a digest of the
-  transcript's user/assistant text (last 60,000 characters), writes it to
-  ~/.claude/state/handoff/<session_id>.digest.md, and records the outcome in
-  ~/.claude/state/handoff/<session_id>.json (digest path, repo top level, ok or failed,
-  time).
+  transcript's user/assistant text, writes it to ~/.claude/state/handoff/<session_id>.digest.md,
+  and records the outcome in ~/.claude/state/handoff/<session_id>.json (digest path, repo top
+  level, ok or failed, time). With a handoff file, the digest runs from that file's last
+  rewrite (its mtime), capped at 200,000 characters; with none, it is the last 60,000
+  characters. A "## Refused acts" section ends it: the first line (200 characters at most) of
+  the newest 50 refused tool results in that span, oldest first. Cost: no extra file read, no
+  process start, no file written beyond the digest. The Claude config file (~/.claude.json) is
+  read at each Stop only.
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
   message: follow the installed prompt file, rewrite the session's own handoff at
@@ -32,14 +36,26 @@ the desktop app has none.
   cache_read tokens) as the context size. Overhead = the first such entry's size. Messages
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
-  messages is 0 (checkpoints(limit - overhead): 200k, +150k while below the top, then the
-  top = room - 50k; limit = window_limit(model of the last such entry): env
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
-  autoCompactWindow in <config dir>/settings.json, default 500,000). The last checkpoint is at size = limit - 50k. The bucket lives in
+  messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
+  the top, then the top = room - margin; limit = window_limit(model of the last such entry): env
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW (a count, or a k/m suffix such as 200k, 1.5m; a positive value
+  is clamped to 100,000..1,000,000), then modelSettings.<model>.autoCompactWindow, then
+  autoCompactWindow in <config dir>/settings.json (each an int in 100,000..1,000,000), default
+  500,000). compact_threshold follows
+  Claude Code's own compaction trigger: min(E - round(E * f), E - 13k), E = limit - 20k, and f =
+  summary_fraction(limit), the summary buffer fraction in the flags Claude Code caches in
+  $CLAUDE_CONFIG_DIR/.claude.json (else ~/.claude.json): the tengu_amber_moleskin table, then
+  tengu_amber_rokovoko, then 0.2 (408k on 500k with 0.15).
+  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (its leading number p, 0 < p <= 100) can lower it in every session and window.
+  Cloud sessions set it per session, read live at each Stop (92 gives 441,600 on 500k; 80 gives 384,000).
+  The hook cannot read the session's live state, so it reads the same cached flag. The last
+  checkpoint is at size = threshold - margin, margin = min(50k, room // 2), so it always sits
+  below the live threshold. The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
-  prints when stop_hook_active is true or on any error.
+  prints when stop_hook_active is true or on any error. Cost: one extra small JSON file read
+  (~/.claude.json) at each Stop; no process start, no file written.
 
   SessionEnd --session-end (stdin: session_id, reason, cwd) -- reason `clear` writes
   one pointer file, ~/.claude/state/handoff/pointers/<session_id>.json, holding the old
@@ -57,18 +73,30 @@ and the hook still exits 0 (case_precompact_error_is_ok_false).
 """
 import datetime
 import json
+import math
 import os
 import re
 import sys
 import time
 
 DIGEST_CAP = 60_000
+# With a handoff, the digest runs from its last rewrite, so it needs room for all of that span.
+DIGEST_SINCE_CAP = 200_000
+REFUSED_MAX_LINES = 50
+REFUSED_MAX_CHARS = 200
 # A .dir or .reread record this old has no live session: Claude Code deletes a transcript after
 # cleanupPeriodDays (default 30), so no session that old can resume. The record sets no value.
 STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
+# Claude Code's effective window is window minus 20,000 (the reserve for the summary's output).
+# Auto-compact fires at the effective window minus a summary buffer of fraction f of it, and never
+# above the effective window minus 13,000. summary_fraction reads f from the flags Claude Code
+# caches. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE can lower it in every session and window.
+OUTPUT_RESERVE = 20_000
+BUFFER_FLOOR = 13_000
+DEFAULT_SUMMARY_FRACTION = 0.2
 DEFAULT_WINDOW = 500_000
 # The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
@@ -115,12 +143,66 @@ def prompt_path():
     return os.path.join(config_dir(), "hooks", "precompact_handoff_prompt.md")
 
 
-def build_digest(transcript_path, cap=DIGEST_CAP):
-    """User and assistant text only, tool results and thinking dropped, last `cap`
-    characters kept (the tail: newest text matters most, see docs/decisions/precompact-
-    handoff.md's "Known limits"). Raises OSError when the transcript cannot be read, so
+def _entry_time(entry):
+    """The entry's timestamp as epoch seconds, or None when it has none or it is unreadable."""
+    ts = entry.get("timestamp")
+    if not isinstance(ts, str):
+        return None
+    try:
+        when = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        return when.timestamp()
+    except ValueError:
+        return None
+
+
+def _result_text(block):
+    """The text of a tool_result block, whether its content is a string or a list of blocks."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content
+                         if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
+# A refused act: a failed tool result whose first line says a hook or a permission turned it away:
+# "<Event>:<Tool> hook error", the user's "doesn't want to proceed" / "tool use was rejected",
+# "Permission to use <Tool> [with <x>] has been denied", "Permission for this action has been
+# denied", "was denied by the Claude Code auto mode classifier", "Refusing to run it", or a first
+# line that starts "denied:" or "refused:". A plain failure ("Exit code 1", ECONNREFUSED, an OS
+# "Permission denied") is not one.
+_REFUSAL = re.compile(
+    r"hook error|(?:doesn['\u2019]t|does not) want to proceed|tool use was rejected"
+    r"|permission to use \S+(?: with .*?)? has been denied"
+    r"|permission for this action has been denied"
+    r"|was denied by the claude code auto mode classifier|refusing to run it"
+    r"|^(?:denied|refused):", re.I)
+
+
+def _refusal_line(block):
+    """The first line of a refused tool result, cut to REFUSED_MAX_CHARS, else None."""
+    if block.get("type") != "tool_result" or block.get("is_error") is not True:
+        return None
+    lines = _result_text(block).strip().splitlines()
+    first = lines[0].strip() if lines else ""
+    return first[:REFUSED_MAX_CHARS] if _REFUSAL.search(first) else None
+
+
+def build_digest(transcript_path, since=None, cap=DIGEST_CAP):
+    """User and assistant text, then a "## Refused acts" section. Tool results and thinking are
+    dropped except refusals. With `since` (epoch seconds, the handoff's last rewrite), only entries
+    from then on count and the text cap is DIGEST_SINCE_CAP; an entry with no readable time stays.
+    Without it, the last `cap` characters (the tail: newest text matters most, see docs/decisions/
+    precompact-handoff.md's "Known limits"). The section lists the first line of the newest
+    REFUSED_MAX_LINES refusals, oldest first. Raises OSError when the transcript cannot be read, so
     the caller can tell "nothing to digest" from "an empty session"."""
+    if since is not None and cap == DIGEST_CAP:
+        cap = DIGEST_SINCE_CAP
     parts = []
+    refused = []
     with open(transcript_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -130,8 +212,12 @@ def build_digest(transcript_path, cap=DIGEST_CAP):
                 entry = json.loads(line)
             except ValueError:
                 continue
-            if entry.get("type") not in ("user", "assistant"):
+            if not isinstance(entry, dict) or entry.get("type") not in ("user", "assistant"):
                 continue
+            if since is not None:
+                when = _entry_time(entry)
+                if when is not None and when < since:
+                    continue
             content = (entry.get("message") or {}).get("content")
             if isinstance(content, str):
                 parts.append(content)
@@ -139,13 +225,21 @@ def build_digest(transcript_path, cap=DIGEST_CAP):
             if not isinstance(content, list):
                 continue
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
                     text = block.get("text")
                     if isinstance(text, str):
                         parts.append(text)
+                else:
+                    first = _refusal_line(block)
+                    if first:
+                        refused.append(first)
     digest = "\n".join(parts)
     if len(digest) > cap:
         digest = digest[-cap:]
+    if refused:
+        digest += "\n\n## Refused acts\n" + "\n".join(refused[-REFUSED_MAX_LINES:]) + "\n"
     return digest
 
 
@@ -184,7 +278,11 @@ def run_precompact(payload):
     digest_path_ = None
     failure = None
     try:
-        digest = build_digest(transcript_path)
+        try:
+            since = os.path.getmtime(handoff_path(session_id))
+        except OSError:
+            since = None
+        digest = build_digest(transcript_path, since=since)
         digest_path_ = digest_path(session_id)
         os.makedirs(os.path.dirname(digest_path_), exist_ok=True)
         tmp = digest_path_ + ".tmp"
@@ -482,17 +580,21 @@ def _run_reorient(payload):
     return 0
 
 
-def checkpoints(limit):
-    """Nudge sizes: 200k, then +150k while below limit-50k, then limit-50k itself
-    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k. A step within
-    NUDGE_STEP // 2 of limit-50k is dropped: two rewrites that close are one too many."""
-    top = limit - NUDGE_MARGIN
+def checkpoints(room):
+    """Nudge message sizes for `room` tokens of messages before compaction. The top is
+    room - margin, with margin = min(NUDGE_MARGIN, room // 2), so a small room keeps a
+    positive top. Below the top: 200k, then +150k while below the top. A step under
+    NUDGE_STEP // 2 below the top is dropped, the 200k floor included: two rewrites that
+    close are one too many (room 384k: 200k, 334k; room 299k: 249k). When top <= 200k, only
+    the top. For room <= 0, only room - NUDGE_MARGIN, whatever its sign."""
+    margin = min(NUDGE_MARGIN, room // 2) if room > 0 else NUDGE_MARGIN
+    top = room - margin
     if top <= NUDGE_FLOOR:
         return [top]
     cps = [NUDGE_FLOOR]
     while cps[-1] + NUDGE_STEP < top:
         cps.append(cps[-1] + NUDGE_STEP)
-    while len(cps) > 1 and top - cps[-1] < NUDGE_STEP // 2:
+    while cps and top - cps[-1] < NUDGE_STEP // 2:
         cps.pop()
     return cps + [top]
 
@@ -502,20 +604,107 @@ def _model_key(name):
     return re.sub(r"-\d{8}$", "", re.sub(r"\[[^\]]*\]$", "", name))
 
 
+def _fraction_ok(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1
+
+
+def _flag_table_fraction(table, limit):
+    """The fraction from the tengu_amber_moleskin table, or None when the table is malformed or
+    has no entry for this window and entrypoint. Every entry must be a dict whose repl and sdk
+    values, where present, are valid; one bad entry makes the whole table malformed."""
+    if not isinstance(table, dict):
+        return None
+    for entry in table.values():
+        if not isinstance(entry, dict):
+            return None
+        if any(k in entry and not _fraction_ok(entry[k]) for k in ("repl", "sdk")):
+            return None
+    entry = table.get(str(limit), table.get("default"))
+    column = "sdk" if os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk") else "repl"
+    return entry.get(column) if entry else None
+
+
+def summary_fraction(limit):
+    """The summary buffer fraction Claude Code compacts with, from its cached flags in
+    $CLAUDE_CONFIG_DIR/.claude.json (else ~/.claude.json), key cachedGrowthBookFeatures: the
+    tengu_amber_moleskin table, then the scalar tengu_amber_rokovoko, then
+    DEFAULT_SUMMARY_FRACTION. A missing or bad file gives the default. The hook cannot read the
+    session's live state, so it reads the same cached flag."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~")
+    try:
+        with open(os.path.join(base, ".claude.json"), "r", encoding="utf-8") as f:
+            features = json.load(f)["cachedGrowthBookFeatures"]
+        if not isinstance(features, dict):
+            return DEFAULT_SUMMARY_FRACTION
+    except Exception:
+        return DEFAULT_SUMMARY_FRACTION
+    f = _flag_table_fraction(features.get("tengu_amber_moleskin"), limit)
+    if _fraction_ok(f):
+        return f
+    f = features.get("tengu_amber_rokovoko")
+    return f if _fraction_ok(f) else DEFAULT_SUMMARY_FRACTION
+
+
+# JS parseFloat's leading number: "80%" is 80. Infinity is out of range anyway, so it is not read.
+_LEADING_FLOAT = re.compile(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
+
+
+def _pct_override():
+    """CLAUDE_AUTOCOMPACT_PCT_OVERRIDE as a number in (0, 100], else None. Claude Code 2.1.316
+    applies it in every session and window, and parses it with parseFloat."""
+    m = _LEADING_FLOAT.match(os.environ.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", ""))
+    if not m:
+        return None
+    p = float(m.group(1))
+    return p if 0 < p <= 100 else None
+
+
+def compact_threshold(limit):
+    """The context size at which Claude Code compacts a window of `limit` tokens. Mirrors Claude
+    Code 2.1.316: effective window E = limit - OUTPUT_RESERVE, summary buffer fraction f, and the
+    percent override. The hook cannot read the session's live state, so it reads the same cached
+    flag (summary_fraction).
+
+    Claude Code compacts at the second term, min(floor(E * p / 100), E - 13k), when the percent
+    override is set. The first term, min(E - round(E * f), E - 13k), is its early-summary
+    (precompute) point. The hook takes the lower of the two, since what a precomputed summary
+    keeps is not read."""
+    eff = limit - OUTPUT_RESERVE
+    cap = eff - BUFFER_FLOOR
+    threshold = min(eff - math.floor(eff * summary_fraction(limit) + 0.5), cap)  # JS Math.round
+    pct = _pct_override()
+    if pct is not None:
+        threshold = min(threshold, min(math.floor(eff * pct / 100), cap))
+    return int(threshold)
+
+
+_WINDOW_SUFFIX = re.compile(r"(\d+(?:\.\d+)?)([km])", re.I)
+WINDOW_MIN = 100_000
+WINDOW_MAX = 1_000_000
+
+
 def window_limit(model=None):
     """The session's auto-compact window: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
     modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in
-    <config dir>/settings.json, then DEFAULT_WINDOW. A bad value falls to the next tier."""
+    <config dir>/settings.json, then DEFAULT_WINDOW. As in Claude Code 2.1.316, only the env var
+    takes a k/m suffix, and a positive env value is clamped to WINDOW_MIN..WINDOW_MAX. A settings
+    value counts only as an int in that range. A bad value falls to the next tier."""
     # shortcut: the model's own window is not read, so a model window smaller than every
     # tier makes nudges late and can skip the first one. Upgrade when hook input carries it.
-    def ok(v):
-        return isinstance(v, int) and not isinstance(v, bool) and v > 0
-    try:
-        v = int(os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", ""))
-        if v > 0:
+    def parse(v):
+        """A settings value: an int in WINDOW_MIN..WINDOW_MAX, else None."""
+        if isinstance(v, int) and not isinstance(v, bool) and WINDOW_MIN <= v <= WINDOW_MAX:
             return v
-    except ValueError:
-        pass
+        return None
+    env = os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip()
+    if re.fullmatch(r"[+-]?\d+", env):  # Python's int() also takes "1_000"
+        v = int(env)
+    else:
+        m = _WINDOW_SUFFIX.fullmatch(env)
+        v = int(round(float(m.group(1)) * (1000 if m.group(2).lower() == "k" else 1_000_000))) \
+            if m else 0
+    if v > 0:
+        return max(WINDOW_MIN, min(v, WINDOW_MAX))
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
             settings = json.load(f)
@@ -528,11 +717,11 @@ def window_limit(model=None):
         want = _model_key(model)
         for key in sorted(per_model, key=lambda k: k != model):  # an exact key first
             entry = per_model[key]
-            if _model_key(key) == want and isinstance(entry, dict) and ok(
-                    entry.get("autoCompactWindow")):
-                return entry["autoCompactWindow"]
-    v = settings.get("autoCompactWindow")
-    return v if ok(v) else DEFAULT_WINDOW
+            if _model_key(key) == want and isinstance(entry, dict):
+                v = parse(entry.get("autoCompactWindow"))
+                if v:
+                    return v
+    return parse(settings.get("autoCompactWindow")) or DEFAULT_WINDOW
 
 
 def run_nudge(payload):
@@ -571,7 +760,7 @@ def run_nudge(payload):
         if messages == 0:
             bucket = -1  # nothing to hand off, even when the room left is zero or negative
         else:
-            bucket = sum(1 for c in checkpoints(window_limit(model) - overhead)
+            bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
                          if messages >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
