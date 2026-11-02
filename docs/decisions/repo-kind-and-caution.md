@@ -35,8 +35,8 @@ and done in the next. A written level removes the guess.
 Limits: no device size is written in this repo, so the layout holds none, and no tool draws a size from
 it. A size enters only with a written source.
 
-A repo prints its true level only once its extras file names `visibility`. degen, joyous and q_max do
-not yet.
+A repo prints its true level only once its extras file names `visibility` or `caution`.
+degen, joyous and q_max do not yet.
 
 Risk kind: incident, per `building-guard-needs-incident`. Incidents: the 1 in 5 refused logins above,
 2026-10-27; and 2026-11-01 19:30-19:52 CST, when degen, joyous and q_max were private (`gh api` `.private`
@@ -47,7 +47,7 @@ unknown, never clear or broken). Roadmap step `start-hook-reads-visibility` (ses
 Cost: one python start at session start and one at a designer spawn that carries a `cwd`. No network
 call. No file is written.
 
-Protected by `lint/test_layout.py` and `hooks/test_blind_brief.py`.
+Protected by `lint/test_layout.py` and `hooks/test_session_start.py`.
 
 Kind: process
 Home: lint/layout.json
