@@ -1285,30 +1285,49 @@ def _raw_refuse_reason(node):
     return None
 
 
+def _base_name(base):
+    """The class name a base expression names: `Stop`, or `stops.Stop` as `Stop`. None for any other base."""
+    if isinstance(base, ast.Name):
+        return base.id
+    return base.attr if isinstance(base, ast.Attribute) else None
+
+
 def _stop_classes(mod):
     """The names of the exception classes of a module that stops its run: `Stop` and each class that
-    derives from one. Empty when the module defines no `Stop`."""
+    derives from one, by a plain or an attribute base. Empty when the module defines no `Stop`."""
     classes = [n for n in mod.tree.body if isinstance(n, ast.ClassDef)]
     names = {"Stop"} if any(c.name == "Stop" for c in classes) else set()
     grown = True
     while grown:
         grown = False
         for c in classes:
-            if c.name not in names and any(isinstance(b, ast.Name) and b.id in names for b in c.bases):
+            if c.name not in names and any(_base_name(b) in names for b in c.bases):
                 names.add(c.name)
                 grown = True
     return names
 
 
-def _stop_reason(node, stops):
+def _kind_params(fdef, stops):
+    """The parameters of `fdef` whose default is a Stop class, as `kind` in `def fail(why, kind=Stop)`: a
+    `raise kind(...)` in that def raises a Stop. Empty when there is no def."""
+    if fdef is None:
+        return frozenset()
+    args = fdef.args
+    positional = args.posonlyargs + args.args
+    pairs = list(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+    pairs += list(zip(args.kwonlyargs, args.kw_defaults))
+    return frozenset(a.arg for a, d in pairs if isinstance(d, ast.Name) and d.id in stops)
+
+
+def _stop_reason(node, stops, kinds=frozenset()):
     """The message expression of `raise Stop(...)` or `return Stop(...)`, also as `raise (A if c else B)(...)`,
-    else None."""
+    and as `raise kind(...)` for a name in `kinds` (see _kind_params). Else None."""
     call = node.exc if isinstance(node, ast.Raise) else node.value if isinstance(node, ast.Return) else None
     if not (isinstance(call, ast.Call) and call.args):
         return None
     func = call.func
     named = [n.id for n in ast.walk(func) if isinstance(n, ast.Name)] if isinstance(func, (ast.Name, ast.IfExp)) else []
-    return call.args[0] if named and all(n in stops for n in named) else None
+    return call.args[0] if named and all(n in stops or n in kinds for n in named) else None
 
 
 def _refusal_name(call, mod):
@@ -1448,7 +1467,8 @@ class _Helpers:
 
     def messages(self, d):
         """The message expressions of the Stop classes that `d` raises or returns in its own scope."""
-        return [m for node in _own(d) for m in (_stop_reason(node, self.mod.stops),) if m is not None]
+        kinds = _kind_params(d, self.mod.stops)
+        return [m for node in _own(d) for m in (_stop_reason(node, self.mod.stops, kinds),) if m is not None]
 
     def _reaches(self, d):
         params, locs = set(_param_names(d)), self.reasons.locals_of(d, self.mod)
@@ -1498,7 +1518,7 @@ class _Helpers:
         """A helper's own Stop message that reaches its parameters: each call of the helper is read instead."""
         if fdef is None or id(fdef) not in self.helpers:
             return False
-        msg = _stop_reason(site, self.mod.stops)
+        msg = _stop_reason(site, self.mod.stops, _kind_params(fdef, self.mod.stops))
         return msg is not None and bool(_params_reaching(msg, set(_param_names(fdef)), locs))
 
     def site(self, expr, locs, homes):
@@ -1544,7 +1564,8 @@ def refusal_status(sources, homes, scope, guards=None):
     expression) that an exempt key's prefix must start. `sources` maps each module name to its text; `scope`
     names the modules whose refusals count, and `guards` the guard modules among them (all of `scope` when
     None). A guard module's refuse() and ask_command() calls name their id. Any module in scope also counts a
-    raw refusal dict, a `raise Stop(...)` or `return Stop(...)` of its own, and each call of a helper; their id is
+    raw refusal dict, a `raise Stop(...)`, `return Stop(...)` or `raise kind(...)` (see _kind_params) of its own,
+    and each call of a helper; their id is
     `module:function`, the function that makes the refusal. A helper's own message is no site, and a hook that
     is no guard module (a judge hook) prints its refusal in its own refuse(), so only that print counts there.
     unattributed: the calls whose id the scan cannot read."""
@@ -1571,7 +1592,7 @@ def refusal_status(sources, homes, scope, guards=None):
                         for status, spellings in helpers.instance_rows(h, site, locs, homes):
                             _add(statuses, rid, where, status, spellings)
                     continue
-                expr = _raw_refuse_reason(site) or _stop_reason(site, mod.stops)
+                expr = _raw_refuse_reason(site) or _stop_reason(site, mod.stops, _kind_params(fdef, mod.stops))
                 if expr is not None and not helpers.transparent(site, fdef, locs):
                     _add(statuses, rid, where, *helpers.site(expr, locs, homes))
     for rows in statuses.values():
@@ -2138,6 +2159,13 @@ class RefusalKindParameterTests(unittest.TestCase):
     def test_a_liftable_default_kind_is_read_through_its_derived_class(self):
         src = body_src('    lift("no cite")\n', LIFT + 'def lift(why, kind=Liftable):\n    raise kind(why)\n')
         self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"])
+
+    def test_a_kind_parameter_that_is_not_a_stop_class_is_no_site(self):
+        # The boundary: a non-Stop default, or no default, makes the raise no Stop, so its helper is no site.
+        other = 'def fail(why, kind=ValueError):\n    raise kind(why)\n'
+        self.assertEqual(status_of(body_src('    fail("no cite")\n', other), "merge:go", module="merge"), [])
+        bare = 'def fail(why, kind):\n    raise kind(why)\n'
+        self.assertEqual(status_of(body_src('    fail("no cite", Liftable)\n', LIFT + bare), "merge:go", module="merge"), [])
 
     def test_a_stop_subclass_with_an_attribute_base_is_a_stop(self):
         src = body_src('    raise Lift("no cite")\n', 'class Lift(stops.Stop):\n    """A refusal."""\n')
