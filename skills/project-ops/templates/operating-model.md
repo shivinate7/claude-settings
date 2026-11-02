@@ -31,7 +31,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   the PR ready, so the branch is final at ready (claude-settings
   record `records-index-at-merge`). Then it runs `--confirm` again to merge.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  batches each PR whose record is done, as `merge --reviewed` finds it at its wake, and merges the
+  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
@@ -89,9 +89,11 @@ parent, or miss a message while busy.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review record on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. A lane never rebases onto main and never merges.
-- Nobody pushes to a PR's head once a done record is posted for that head, until the merge result
-  is back. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
-  not asked.
+- Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
+  result is back. This does not let a lane push a round-1 fix on a `delete-only` change with Guard or
+  check `no`, because a round-1 FAIL on that change reads done (claude-settings record
+  `pr-review-record`). When the repo holds a standing merge grant, the batch runner merges under it.
+  The owner is not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.

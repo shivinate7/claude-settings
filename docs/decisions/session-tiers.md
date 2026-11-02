@@ -48,7 +48,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
 - **Batch runner.** A third standing role (owner, 15:11): "B for sure actually". The batch runner owns:
   - the integration batch,
   - the CI waits,
-  - the merge tool runs: at each wake it runs `merge --reviewed` to find the PRs whose record is done (record `pr-review-record`), batches each one, and merges the integration PR on green,
+  - the merge tool runs: at each wake it runs `merge --reviewed` to find the PRs whose review record is done (record `pr-review-record`), batches each one, and merges the integration PR on green,
   - archiving finished lanes.
   The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
   - Ruling (owner, 2026-11-01 21:34 CST): "cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again". The coordinator never merges. A batch runner runs every merge, in claude-settings and in other repos, under the coordinator's standing merge grant, which stays the coordinator's (record `standing-merge-grant` holds the words, the repos and the limits). Several batch runners may each own a set of repos.
