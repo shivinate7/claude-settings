@@ -49,7 +49,8 @@ MODEL_TIMEOUT = 25
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
 WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/agent-model-cap.md)
 RULE = "parallelism-no-mid-task-talk"
-RULE_CITE = "(rule parallelism-no-mid-task-talk, a message to a peer holds only what changes its work)"
+# The cite names the record, not the rule: the deny prefix already carries the rule id once.
+RULE_CITE = "(decision haiku-prompt-hooks, the SendMessage wording judge holds a peer message to what changes its work)"
 WORDING_PROMPT = (
     "Judge this SendMessage call: %s\nAnswer {\"ok\": true} at once for a resume, a status message, "
     "or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only "
