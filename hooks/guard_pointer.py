@@ -37,6 +37,9 @@ from guard_core import (
 #   passes  a move whose one target is `main`. That call RESTORES the invariant this rule
 #           protects, and it is how a checkout left on a branch gets repaired. A deny there would
 #           wall off the only repair, which is the "fix the cause" failure in miniature.
+#   passes  `switch -C main origin/main` and `checkout -B main origin/main`, from any branch: the reset
+#           leaves HEAD on `main`. It passes only when local `main` is an ancestor of `origin/main`
+#           (one `git merge-base --is-ancestor` read), so it drops no local commit.
 #   passes  a path operation: `--`, `--ours`, `--theirs`, `--patch`, `--pathspec-from-file`, or one
 #           plain argument shaped like a file. HEAD does not move, and rule 1 governs those calls
 #           unchanged.
@@ -219,6 +222,26 @@ def head_move_target(subcommand: str, args) -> str:
 
 
 PROTECTED_BASE = "main"
+PROTECTED_REMOTE = "origin/main"
+
+
+def resets_main_to_remote(subcommand: str, args) -> bool:
+    """True for exactly `switch -C main origin/main` and `checkout -B main origin/main`: a reset of
+    local `main` onto its remote branch, which leaves HEAD on `main`. Any other name, start
+    point or option is not this form."""
+    flag = "-C" if subcommand == "switch" else "-B"
+    return list(args) == [flag, PROTECTED_BASE, PROTECTED_REMOTE]
+
+
+def reset_loses_commit(root: str) -> bool:
+    """True only when local `main` holds a commit that `origin/main` lacks, so a reset drops it.
+
+    One read: `git merge-base --is-ancestor main origin/main` answers 0 (an ancestor, nothing lost)
+    or 1 (a local-only commit). Any other answer (128: no local `main` yet, or no `origin/main`,
+    where git refuses the reset itself) loses nothing here and is not a verdict.
+    """
+    answer = guard_core._git(root, "merge-base", "--is-ancestor", PROTECTED_BASE, PROTECTED_REMOTE)
+    return answer is not None and answer.returncode == 1
 
 
 def pointer_head_hit(segment: str, root: str) -> str:
@@ -232,6 +255,10 @@ def pointer_head_hit(segment: str, root: str) -> str:
         if not target:
             continue
         if in_pointer_checkout(root):
+            # A reset of `main` onto `origin/main` is a move to main (the recovery act), unless it
+            # would drop a local-only commit: then today's verdict stands.
+            if resets_main_to_remote(subcommand, args) and not reset_loses_commit(root):
+                continue
             return ("git " + subcommand + " " + target).strip()
     return ""
 

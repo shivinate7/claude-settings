@@ -7,7 +7,10 @@ the guard refuses it exactly when it is needed. CLAUDE.md states the rule. Two b
 already follow it:
 
 - **Rule 1b, pointer-head.** The rule refuses a command that moves HEAD off `main` in the pointer
-  checkout. A move TO `main` is the recovery act, so it passes.
+  checkout. A move TO `main` is the recovery act, so it passes. That includes `git switch -C main origin/main`
+  and `git checkout -B main origin/main`, from a checkout on or off `main`, when local `main` is an ancestor of
+  `origin/main` (one `git merge-base --is-ancestor` read), so the reset drops no local commit. When local `main`
+  holds a commit that `origin/main` lacks, the reset is refused as before. Any other `-C` or `-B` name stays refused.
 - **The clone is not frozen.** Rule 7 freezes `hooks`, `lint`, `agents` and `state` under the config
   directory, and the live pinned checkout `<clone>-live` and the stamped worktree
   `<clone>-live-<12 hex>` that the pin link points at now. An older stamped worktree stays writable, so
