@@ -36,19 +36,30 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   in-flight notes, so they are never the home of a ruling or a task (owner, 2026-10-26, "re-point it").
   The homes come from `lint/layout.json` and the repo's extras file: layout keys `decisions`, `rules`,
   `claude-md`, `agents-md` for a ruling, and `todo` (a repo's extras key), `debts`, `debt-notes` for a
-  task. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`.
-  `standing` (a session-only process): the handoff's process-only section, re-read after compaction.
-  Promote it to a ruling to keep it.
-- **The guard.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
+  task. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
+  `not-a-grant` when the message holds a grant word that is no grant. `standing` (a session-only process):
+  the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
+  A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,
+  authorised, go ahead, go-ahead, "permission to", "permissions to"; whole words, any case) and an act
+  or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
+  all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of three homes: a
+  `ruling` item whose home passes, an open `page` item with its send, or a `note` item `-> not-a-grant`.
+  A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
+  branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
+  incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the
+  owner-feedback audit (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`). Landed
+  2026-11-02. Cost: two regexes on text in memory.
+- **The guard.** A Stop check refuses to end a turn in four base cases, and in the Pages, grant and
+  closed-note cases below. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
   kind's layout paths that some branch's tree holds. An open standing item id is missing from the
   handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. A message
   with no items is reported with the inbox file's path, its heading line and line number, and an
   example item, then each kind's home (`ruling -> <homes>; task -> <homes>; question -> answered; note -> noted;
-  standing -> handoff; page -> page:<n>`). Items added in any later turn count, so the session needs no new heading. A home outside
+  standing -> handoff; page -> page:<n>`, with the closed-note and grant homes in the note's text). Items added in any later turn count, so the session needs no new heading. A home outside
   its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
   nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
-  judges repeats (next bullet). When the session's
+  judges repeats (the Repeats bullet). When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
@@ -62,8 +73,19 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   with no owner record for its text passes alone, with a systemMessage. Cost: one whole transcript read
   per Stop, only while an open page item exists. It writes no file and starts no process. Risk kind:
   named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at 15:41 and never sent to
-  the page writer, who asked again at 16:07. Landed 2026-10-30. Known gap: a session that never writes the `[page]` item is not caught. The guard
-  cannot know which owner messages answer a page item.
+  the page writer, who asked again at 16:07. Landed 2026-10-30.
+  A chat answer to a page item needs the same proof. An owner block whose whole text is such answers
+  (`<n> <letter>`, letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`; an optional parenthetical;
+  answers separated by commas or lines, as in `137 a, 138 b (done)`), in a repo with a waiting page
+  (layout `waiting_page`), needs a send for each n. Only an n that an open `page` item of the block names
+  is left to that item. No other item line stands in for the send. Prose that holds a number is no
+  answer, and `1 y, 2 n` is none. Risk kind: named incident. F46 (the answer "143 b" never reached the
+  page writer) and F43 ("99 a (done)", the same shape), same audit. Landed 2026-11-02. Cost: for each
+  such block, one `git rev-parse` and one transcript read, inside the Stop process. The transcript is
+  read only for such a block in a repo with a waiting page, or for an open page item. No file written (a
+  case proves it). Known gap: an answer
+  to a page item inside a longer message, or in prose, is not caught: the guard cannot know which prose
+  answers a page item.
 - **Repeats.** A model matches each new item's owner message, by meaning, against older feedback and
   work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
   glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New
@@ -94,7 +116,16 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   inbox's blocks are candidates. A session whose cwd is a linked worktree has its own top level, so
   inboxes bind per worktree, not per repo. A session's cwd is usually the primary checkout.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
-  home holds it for good. The guard stops asking for a closed standing id in the handoff.
+  home holds it for good. An item is closed by `[closed]` as a whole token after the home, with trailing
+  text allowed, or by `[closed]` at the line end. The guard stops asking for a closed standing id in the
+  handoff. A closed note
+  needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on
+  some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` and
+  `process-only` are no home for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88
+  (a closed item with no step, record or answer behind it) is the related incident, not a measured one.
+  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, `git rev-parse`, `git for-each-ref` and
+  `git cat-file`, inside the Stop process. No file written. When the folder is in no repo, the check
+  passes and a systemMessage names the closed note homes.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand.
 - **Compaction.** The compact hook lists open item ids.
