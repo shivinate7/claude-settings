@@ -6755,6 +6755,28 @@ class RecordsEnv(Env):
         self.assertEqual(rc, 0, out)
         return out
 
+    def claim_head(self, files=None):
+        """Push a head that holds a Record-claim for D-002 under the default config, with files added. The ready confirm resumes
+        that claim, so a stale page on it is pushed as a page commit: the resumed path, which a refusal never reaches."""
+        files = dict(files or {})
+        files["docs/decisions/second.md"] = record("D-002", "second")
+        self.on("feat", files, "Claim record numbers\n\nRecord-claim: D-002")
+
+    def assert_remedy(self, text):
+        """The remedy in order: back to draft, `merge 7 --confirm` on the draft, then ready."""
+        self.assertRegex(text, r"draft[\s\S]*merge 7 --confirm[\s\S]*ready", text)
+
+    def assert_refused_on_ready(self, rc, out, refs_before):
+        """A ready pull request with a stale page and nothing to claim or resume: refused before any check wait, with nothing
+        pushed, claimed or merged, the lock freed and the worktree dropped."""
+        self.assertEqual(rc, 1, out)
+        self.assert_remedy(out)
+        self.assertEqual(self.refs(), refs_before, "pushed or claimed on a refusal")
+        self.assertEqual(self.host.waits, [], "waited on checks before refusing")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertFalse(self.lock_ref(), "the lock was not released")
+        self.assertEqual(self.worktrees(), 1, "the worktree was not dropped")
+
     def spy_merge(self):
         """Replace the host's merge with a recorder. -> the list of shas it was asked to merge."""
         asked = []
@@ -6782,20 +6804,23 @@ class RecordsRebuild(RecordsEnv):
     - Run `python3 <RECORDS> --root <worktree>`, nothing else, in the detached worktree that holds the head: the tree
       that merges, never the caller's checkout. A non-zero exit is one Stop line starting "merge: " that names the
       generator's reason once. Nothing is pushed, and the lock is freed.
-    - When: after the claim, only when the pull request's base is the default branch (the claim's own rule), and also
-      when the base config has `kinds: []` or no config at all (claude-settings itself has `kinds: []`). The rebuild
-      does not depend on the pull request touching a record: a stale page heals at the next merge.
+    - When: after the claim, only when the pull request's base is the default branch (the claim's own rule). The rebuild
+      runs with or without stamp kinds (claude-settings itself has `kinds: []`).
+    - A stale page on a ready pull request with no claim to make or resume is refused before any wait. Nothing is pushed
+      or claimed, the lock is freed, and the refusal names the remedy: back to draft, `merge <n> --confirm` on the draft,
+      then ready. The draft step is where a stale page heals.
     - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
-      the page in the same commit. Without: the subject "Rebuild the records page", and no Record-claim trailer.
-      The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red check on it
-      reverts that commit, as for a claim.
+      the page in the same commit. A resumed claim with a stale page: the subject "Rebuild the records page", and no
+      Record-claim trailer. The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red
+      check on it reverts that commit, as for a claim.
     - Nothing changed in the worktree: no commit, and one wait.
     - Proof before the merge call: after the last fetch of the base, merge origin/<base> into the worktree without a
       commit and run the generator. When it would change the page, the page on the head is stale for the merge result
       (the base moved with a record): refuse with a line that says "records page" and "stale", revert the rebuild
       commit, merge nothing. A base that moved with an unrelated change merges. The lock keeps other tool merges out,
       so only a push that did not use the tool can trip it.
-    - The preview prints one line `  records: rebuild ...` or `  records: current`, and presses nothing.
+    - The preview prints one line `  records: rebuild ...` or `  records: current`, and presses nothing. A ready pull request
+      refused as above: the same line says `--confirm refuses it` and gives the remedy.
     - A draft pull request: `--confirm` is the records step. It refuses a head that does not hold the base tip (the line
       says BEHIND), commits the page alone when it is stale and pushes it, then marks the pull request ready and stops.
       It never merges, takes no merge lock and claims no record number. A current page adds no commit. A refused push
@@ -6826,30 +6851,56 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("docs/decisions/second.md", changed)
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
-    def test_a_repo_with_no_stamp_kinds_still_gets_the_page(self):
+    def test_pr_1009_ready_with_empty_stamp_kinds_refuses_a_stale_page_before_any_push(self):
+        # PR #1009 (batch 60) was ready, its base config had kinds [], and its page was stale. Confirm pushed a page-only commit and
+        # CI restarted. Owner ruling: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST. A ready pull request with no claim is refused.
         mark = stamp_marker(self)
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_on_ready(rc, out, refs_before)
+        self.assertFalse(os.path.exists(mark), "stamp.mjs ran")
+        self.assertEqual(self.claims(), 0, "claimed a number on a refusal")
+        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
+
+    def test_a_ready_pr_with_stamp_kinds_and_nothing_to_claim_refuses_a_stale_page(self):
+        # The refusal turns on the claim, not on the config: with kinds on and no pending record, the page has no claim to ride.
+        self.drop("feat", "docs/decisions/second.md", "drop the pending decision")
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_on_ready(rc, out, refs_before)
+
+    def test_a_resumed_claim_with_a_stale_page_still_pushes_the_page(self):
+        # Pinned: a claim the head already holds is resumed, and its stale page rides one commit on top of it, as before the ruling.
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertFalse(os.path.exists(mark), "stamp.mjs ran")
-        self.assertEqual(self.show("main", "docs/records.md"), page("gap-one").strip())
-        self.assertEqual(self.log1("%s", "origin/main^2"), "Rebuild the records page")
-        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "")
-        self.assertEqual(sh(self.co, "git", "rev-list", "--count", f"{before}..origin/main^2"), "1")
-        (s1, p1), (s2, p2) = self.host.waits  # the claim's order: the head first, then the rebuild commit
-        self.assertIsNone(p1)
-        self.assertEqual(p2, s1)
-        self.assertNotEqual(s1, s2)
+        self.assertIn("already holds the claim D-002", out)
+        after = self.rev("origin/main^2")  # the head's own commit, merged: feat is deleted after the merge
+        self.assertNotEqual(after, before)
+        self.assertEqual(sh(self.co, "git", "rev-list", "--count", f"{before}..{after}"), "1")
+        self.assertEqual(self.log1("%s", after), "Rebuild the records page")
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", after).strip(), "")
+        self.assertIn(merge.RECORDS_PAGE, self.log1("%(trailers:key=Drops-lines,valueonly)", after))
+        self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
+        self.assertEqual(self.host.waits, [(before, None), (after, before)])  # the head first, then the page commit on top of it
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
-    def test_a_stale_page_heals_even_when_the_pr_touches_no_record(self):
+    def test_a_stale_page_on_a_draft_heals_even_when_the_pr_touches_no_record(self):
+        # The heal of a stale page is the draft step's now: a ready pull request refuses it (the cases above).
         self.kinds_off()
         self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
-        rc, out = self.run_merge("7", "--confirm")
+        main_before = self.head("main")
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.show("main", "docs/records.md"), page().strip())
-        self.assertEqual(self.log1("%s", "origin/main^2"), "Rebuild the records page")
+        self.assertEqual(self.log1("%s", "origin/feat"), "Rebuild the records page")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page().strip())
+        self.assertEqual(self.host.readies, [7])
+        self.assertEqual(self.head("main"), main_before, "the draft step moved main")
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_a_current_page_adds_no_commit_and_waits_once(self):
         self.kinds_off()
@@ -6904,6 +6955,31 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
 
+    def test_the_ready_preview_says_confirm_refuses_a_stale_page_with_no_claim(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.refs()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        line = self.preview_line(out, "records")
+        self.assertIn("rebuild", line)
+        self.assertIn("--confirm refuses it", line, out)
+        self.assert_remedy(line)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_the_ready_preview_does_not_refuse_a_claim_to_make_or_a_claim_held(self):
+        # The refusal is for a stale page with nothing to claim or resume. A claim to make, and a claim the head holds, do not refuse.
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # the default config: a record to claim
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("refuses", self.preview_line(out, "records"), out)
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # the same debt, and the claim now held: the resumed path
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("already claimed (D-002)", out)
+        self.assertNotIn("refuses", self.preview_line(out, "records"), out)
+
     def test_the_preview_says_when_the_page_is_current(self):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
@@ -6930,8 +7006,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.worktrees(), 1)
 
     def test_a_red_check_on_the_rebuild_commit_reverts_it(self):
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the page commit on top of the claim is the one pushed
         before = self.head()
         self.host.seq = [(True, ""), (False, "a check is red: checks: fail")]  # the head is green, the rebuild commit is red
         rc, out = self.run_merge("7", "--confirm")
@@ -6946,8 +7021,7 @@ class RecordsRebuild(RecordsEnv):
     def test_main_gaining_a_record_during_the_wait_refuses_and_reverts(self):
         # A push that did not use the tool: a debt lands on main and the page is not rebuilt. The merge result
         # would hold a stale page, so the merge must not happen.
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
         before = self.head()
         self.host.on_wait = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
@@ -6962,8 +7036,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_main_gaining_an_unrelated_change_during_the_wait_refuses_and_reverts(self):
         # The page is fresh, but no run tested the head with main's new commit (merge-needs-current-base).
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
         before = self.head()
         self.host.on_wait = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
@@ -6990,12 +7063,7 @@ class RecordsRebuild(RecordsEnv):
     def test_the_preview_and_confirm_agree_on_a_resumed_head_that_needs_the_page(self):
         # The preview says the page needs a rebuild. Confirm skips the rebuild on a resumed head,
         # so the stale page is refused at the end. Both must agree: rebuild when the page lands, not otherwise.
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put_lf(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
-        sh(o, "git", "push", "-q", "origin", "feat")
+        self.claim_head()
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, out)
         self.assertIn("already claimed (D-002)", out)  # precondition: the head is a resumed claim
@@ -7227,12 +7295,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_the_draft_preview_says_confirm_refuses_a_head_that_holds_a_claim(self):
         # The ready preview says a run resumes at the wait. On a draft, --confirm refuses that head, and the preview must agree.
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put_lf(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
-        sh(o, "git", "push", "-q", "origin", "feat")
+        self.claim_head()
         out = self.draft_preview()
         claim = self.preview_line(out, "claim")
         self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
@@ -7262,7 +7325,7 @@ class RecordsRebuildReal(RecordsEnv):
         self.assertTrue(os.path.samefile(merge.RECORDS, want), merge.RECORDS)
 
     def test_a_pr_that_adds_a_debt_gets_a_real_page_on_main(self):
-        self.kinds_off()
+        # The default config: a record to claim, so the real page rides the claim commit. A ready pull request with no claim is refused.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
@@ -7295,8 +7358,7 @@ class RecordsRebuildReal(RecordsEnv):
     def test_a_conflict_only_on_the_page_is_rebuilt_on_the_merged_tree(self):
         # Only the generated page conflicts (add/add on both sides), so the tool rebuilds it on the merged tree and goes on.
         # records_stale() must not read any conflict as "cannot be proved fresh" and revert the claim.
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the head's page commit is pushed, then the heal merges the base
         self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
                                      "a debt and a hand-written page on main"))
         rc, out = self.run_merge("7", "--confirm")
@@ -7310,8 +7372,7 @@ class RecordsRebuildReal(RecordsEnv):
     def test_a_conflict_on_another_file_still_refuses_and_reverts(self):
         # A conflict outside the generated page must still stop the merge. This blocks a blanket
         # -X ours or -X theirs that would silence every conflict.
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "notes.txt": "head side\n"}, "a debt and a note")
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT, "notes.txt": "head side\n"})
         before = self.head()
         self.in_wait(lambda: self.on("main", {"notes.txt": "main side\n"}, "a note on main"))
         rc, out = self.run_merge("7", "--confirm")
@@ -7429,8 +7490,7 @@ class RecordsScope(RecordsEnv):
 
     def test_a_root_with_hooks_and_no_settings_merges(self):
         # The generator must not stop on "hook_catalog: cannot read settings.json": the records page can be rebuilt.
-        self.kinds_off()
-        self.on("feat", {"hooks/guard.sh": "#!/bin/sh\necho hi\n", "debts/gap-one.md": DEBT_TEXT})
+        self.on("feat", {"hooks/guard.sh": "#!/bin/sh\necho hi\n", "debts/gap-one.md": DEBT_TEXT})  # the default config: the page rides the claim
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
@@ -7441,7 +7501,6 @@ class RecordsScope(RecordsEnv):
 
     def test_the_merge_commit_carries_no_catalog_page(self):
         # The root renders a catalog, so the generator would write docs/catalog.md and the merge would bring it in.
-        self.kinds_off()
         self.on("feat", {"settings.json": "{}\n", "hooks/.gitkeep": "", "skills/.gitkeep": "",
                          "decisions/agent-model-cap.md": "# Agent model cap\n\nOwner ruling. The table names each role model.\n",
                          "debts/gap-one.md": DEBT_TEXT})
@@ -7466,9 +7525,9 @@ class RecordsHeal(RecordsEnv):
             p.start(); self.addCleanup(p.stop)
 
     def heal_setup(self):
-        """The head adds a debt; a debt and a hand-written page land on main during the head's wait. The head's rebuild commits one page, and the heal merges both."""
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        """The head adds a debt and holds its claim, so a stale page on it is pushed as a page commit (the resumed path); a debt and a
+        hand-written page land on main during the head's wait. The head's rebuild commits one page, and the heal merges both."""
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})
         self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
                                      "a debt and a hand-written page on main"))
 
