@@ -41,6 +41,7 @@ sys.path.append(os.path.join(ROOT, "lint"))
 sys.path.append(os.path.join(ROOT, "testing"))
 import _test_temp  # noqa: E402
 import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
@@ -573,25 +574,6 @@ def run_ste_changed(cmd, work, home=None):
     return p.returncode, p.stdout + p.stderr
 
 
-def shallow_pin_clone(source, dest, sha):
-    """A shallow clone of `source`'s HEAD at `dest`, with the commit `sha` fetched at depth 1. A plain `--depth 1`
-    clone lacks that commit's object, so the fetch is what makes this the shape where ancestry is cut above a pin."""
-    subprocess.run(["git", "-C", source, "config", "uploadpack.allowAnySHA1InWant", "true"], check=True)
-    subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-local", source, dest], check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "-C", dest, "fetch", "-q", "--depth", "1", "origin", sha], check=True)
-
-
-def shallow_pin_facts(clone, sha):
-    """What a case reads before it claims the bug: the clone is shallow, `sha`'s object is present, and
-    `merge-base --is-ancestor <sha> HEAD` exits `ancestor_rc` (1 in the bug shape)."""
-    def git_rc(*a):
-        return subprocess.run(["git", "-C", clone, *a], capture_output=True, text=True)
-    return {"shallow": git_rc("rev-parse", "--is-shallow-repository").stdout.strip() == "true",
-            "pin_present": git_rc("cat-file", "-e", sha + "^{commit}").returncode == 0,
-            "ancestor_rc": git_rc("merge-base", "--is-ancestor", sha, "HEAD").returncode}
-
-
 def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None):
     """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
     commit label of the scratch clone. Returns (rc, output, {label: sha}). `shallow` runs the command from a
@@ -601,9 +583,11 @@ def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None
         if shallow:
             source = os.path.join(d, "source")
             shas = scratch_clone(source)
-            shallow_pin_clone(source, cs, shas[pin])
+            error = shallow_clone.make(source, cs, shas[pin])
+            if error:
+                raise RuntimeError("shallow fixture could not be built: " + error)
             if proof is not None:
-                proof.update(shallow_pin_facts(cs, shas[pin]))
+                proof.update(shallow_clone.facts(cs, shas[pin]))
         else:
             shas = scratch_clone(cs)
         rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"), pin_child(d, shas, pin, change, dead))
