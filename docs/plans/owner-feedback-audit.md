@@ -567,7 +567,7 @@ Unknown rows, with the read that could not run:
 | F160, tci-6 mutation engine | IN FLIGHT | Step tci-6 doing; #996 draft. |
 | F161, phone lane dropped | LANDED | Item 135 closed; phone lane dropped. |
 | F162, q_max CI question answered | LANDED | coord-03.txt line 656: the coordinator answered "Partly" with detail, so the question was answered. |
-| F163, q_max record ci-spend-gate | IN FLIGHT | Step tci-11 doing. The cited record exists: q_max docs/decisions/ci-spend-gate.md (D-718) on origin/main e8f990272, last touched in 71c355f07. |
+| F163, q_max record ci-spend-gate | IN FLIGHT | Step tci-11-qmax-shards doing. The cited record exists: q_max docs/decisions/ci-spend-gate.md (D-718) on origin/main e8f990272, last touched in 71c355f07. |
 | F164, sim-no-diagnose step | LANDED | Step sim-no-diagnose done. |
 | F165, comment narration patterns | IN FLIGHT | #998 draft; comment-narration-patterns todo. |
 | F166, PR 966 merge | LANDED | #966 merged. |
