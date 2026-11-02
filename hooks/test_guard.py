@@ -111,7 +111,7 @@ FAMILIES = {
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
-    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
+    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, no label opens with a letter tag other than its key, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",

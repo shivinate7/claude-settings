@@ -9,8 +9,10 @@ The waiting page shows an option by its position, as a letter: the first option 
   - repeats another option's key;
   - has the key `none` (the page's `NONE`, which it reads as "none of these"); or
   - has a key that is not the lowercase letter of its position.
+  - has a label that opens with a letter tag other than its key's letter. The tag forms are "B:", "B -", "B)", "(B)", "[B]", "Option B" and "Option B:", in any case, at the label's start only. A tag with the key's own letter passes, as do text that only starts with a letter, such as "A rail", "I think so", "A/B split", "AI-first", "B2B" and "E.g. a strip". A label that is not a string is not judged here. The page shows the letter for the key's position, so a label carries no letter of its own.
   - It also refuses an item whose text (title, context, why, an option's text or a step) names an option by a letter-and-digit key, such as "option e2". The words that start the match are option, pick and key, in any case. A colon, a bracket, a quote or markdown emphasis may stand between the word and the key, as in "Option: e2", "Option [e2]" and "Pick **e2**". The key also matches in any case, since the page shows its letter in capitals, so "Option E2" is refused. "Option A", "pick b" and "option 2" pass, and so do the decision id "D12" and the topic id "t18", each in that case only.
   - It judges a `str_replace` on the text it adds (`new_str`), in any field, by this text rule only. The stored item is unseen, so a `str_replace` that adds a key-named option is refused even on a task, a note or a closed item.
+  - Known limit: a `str_replace` on a label carries no key, so the label clause does not judge it.
   - It reads each write in a batch and data read from `file_path`. It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
   - It passes a set or update of a task, a note or a closed item. It passes an update that carries no `options` and no matching text, and a call to another artifact.
   - It reads last, after the form rules (`question-form`, `owner-judge`). Each older rule keeps naming its own refusals.
@@ -25,6 +27,7 @@ The waiting page shows an option by its position, as a letter: the first option 
 
 Incident:
 
+- 2026-11-01 16:12 CST: an item keyed its options a, b, c and d, but their labels read "B: a bottom strip", "D: drag sideways", "A: a rail" and "C: a grab line". The page shows its own letter, so the owner saw two letters per option and the answer letter was ambiguous.
 - 2026-10-30 15:09 CDT, waiting item 77: an option keyed `e2` sat in the first position, so the page showed it as A. The owner's answer "A" was read as the option keyed `a`, which sat second.
 - 2026-10-28 12:47 CDT, waiting item 44: an option keyed `none` hid the page's own "none of these" answer.
 

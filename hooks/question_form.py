@@ -850,7 +850,20 @@ KEY_NAMED = re.compile(
     r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
-                      "item's text by that letter (option A, pick b), never by any other key.")
+                      "item's text by that letter (option A, pick b), never by any other key. A label carries "
+                      "no letter of its own, or only its key's.")
+
+
+# A label's opening letter tag: "B:", "B -", "B)", "(B)", "[B]", "Option B" and "Option B:". The tag is one
+# letter that no word continues ("AI-first", "B2B", "A rail", "A/B" and "E.g." are not tags).
+LABEL_TAG = re.compile(
+    r"\s*(?:(?i:option)\s+([a-z])(?!\w)|\(([a-z])\)|\[([a-z])\]|([a-z])(?:\)|\s*:|\s+[-\u2013\u2014]))", re.I)
+
+
+def label_tag_letter(label) -> str:
+    """The lowercase letter a label opens with as a tag, else "". A label that is not a string has none."""
+    m = LABEL_TAG.match(label) if isinstance(label, str) else None
+    return next(g for g in m.groups() if g).lower() if m else ""
 
 
 def _letter_of(index: int) -> str:
@@ -879,8 +892,9 @@ def key_named_hit(texts) -> str:
 
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
-    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
-    closed item pass; an update that carries no `options` has no keys to judge."""
+    position's letter, opens its label with a letter tag other than its key, or names an option in its text by
+    a letter-and-digit key. A task, a note and a closed item pass; an update that carries no `options` has no
+    keys to judge."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     if data.get("status") == "closed":
@@ -899,6 +913,9 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
+            tag = label_tag_letter(o.get("label"))
+            if tag and tag != key:
+                return "option label opens with the letter " + tag.upper() + " but its key is " + key
     return key_named_hit(_item_text_fields(data))
 
 
