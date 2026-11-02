@@ -14411,10 +14411,12 @@ LANE_TOOL = "mcp__claude-code-remote__create_session"
 LANE_REPO = os.path.join(ROOT, "lanerepo")      # a checkout whose origin is claude-settings on GitHub
 LANE_PROXY = os.path.join(ROOT, "laneproxy")    # the same repo, its origin behind the agent proxy's host
 LANE_GIT = os.path.join(ROOT, "lanegit")        # the same repo, its origin with a `.git` suffix
+LANE_LOCAL = os.path.join(ROOT, "lanelocal")    # the same repo, its origin a local path with no scheme
 LANE_ORIGINS = {
     LANE_REPO: "https://github.com/shivinate7/claude-settings",
     LANE_PROXY: "http://local_proxy@127.0.0.1:1234/git/shivinate7/claude-settings",
     LANE_GIT: "https://github.com/shivinate7/claude-settings.git",
+    LANE_LOCAL: "/srv/repos/shivinate7/claude-settings.git",
 }
 OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
 
@@ -14521,6 +14523,29 @@ add("lane-repo-tag: a folder that is not a checkout, short repo form is denied",
     tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+
+# Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
+# without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
+add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+
+# A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
+add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.

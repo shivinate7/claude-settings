@@ -1799,6 +1799,14 @@ MUTATIONS = [
      '    repo = origin_repo(cwd)\n    # A tag is read as the roadmap reads it',
      '    repo = origin_repo(cwd)\n    if not repo:\n        return ""\n    # A tag is read as the roadmap reads it',
      "guard", "lane-repo-tag: a checkout with no origin, short repo form is denied"),
+    ("lane-repo-tag: the tag is stripped before the exact read, so a trailing space passes",
+     '        if repo and repo_tag_names(tag, repo):',
+     '        if repo and repo_tag_names(tag.strip(), repo):',
+     "guard", "lane-repo-tag: origin repo tag with a trailing space is denied"),
+    ("lane-repo-tag: a local path origin is not parsed, so it reads as no origin",
+     '    else:\n        path = url\n',
+     '    else:\n        path = url.partition(":")[2]\n',
+     "guard", "lane-repo-tag: a local-path origin, another repo's tag is denied"),
 ]
 
 

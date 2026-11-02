@@ -944,6 +944,19 @@ class SharedTagNames(unittest.TestCase):
                 self.assertTrue(hasattr(shared_names, name), "hooks/shared_names.py has no %s" % name)
                 self.assertIs(getattr(build, name), getattr(shared_names, name))
 
+    def test_repo_tag_names_is_the_shared_function(self):
+        self.assertTrue(hasattr(shared_names, "repo_tag_names"), "hooks/shared_names.py has no repo_tag_names")
+        self.assertIs(build.repo_tag_names, shared_names.repo_tag_names)
+
+    def test_repo_tag_names_reads_the_tag_strictly(self):
+        # The one reading of a repo tag: the exact `cs-repo:` prefix, no strip, owner/name without case.
+        slug = "shivinate7/claude-settings"
+        self.assertTrue(build.repo_tag_names("cs-repo:shivinate7/claude-settings", slug))
+        for tag in ("cs-repo:shivinate7/claude-settings ", " cs-repo:shivinate7/claude-settings",
+                    "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
+            with self.subTest(tag=tag):
+                self.assertFalse(build.repo_tag_names(tag, slug))
+
 
 if __name__ == "__main__":
     unittest.main()
