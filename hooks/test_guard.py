@@ -20206,6 +20206,50 @@ workflow_allow("role-model: a commented-out Workflow builder on opus is not a sp
                "// agent('Fix the failing case.', {agentType: 'builder', model: 'opus'})\n"
                "await agent('Fix the failing case.', {agentType: 'builder', model: 'sonnet'});")
 
+# ---- H2: a brief the scan cannot read grants nothing. A variable brief has no literal for the scan, and a spread
+# before the options' literal keys hides them, so the Opus ceiling judges the call with no marker and refuses it
+# (decision agent-model-cap, owner ruling item 127 pick a). The markers below sit in the variable on purpose: the
+# scan does not read them, so they are no grant. Failure class: a false allow (an above-row Opus spawn in a script
+# passes because its brief or its options are not literal).
+workflow_refuse("role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied",
+                "const brief = 'Round 3 of 3. Finish the fix.';\n"
+                + _step_flow("brief", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a template brief built from a variable is denied",
+                "const who = 'the failing case';\n"
+                + _step_flow("`Fix ${who}.`", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a spread before its literal keys is denied",
+                "const opts = {};\n"
+                + _step_flow("`Fix the failing case.`", "...opts, agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with a variable brief holding an Audit: marker is denied",
+                "const brief = 'Audit: check the glossary for meaning drift.';\n"
+                + _step_flow("brief", "agentType: 'Explore', model: 'opus'"))
+# The control: the same variable brief on the builder's own row is allowed.
+workflow_allow("role-model: Workflow builder on sonnet with a variable brief is allowed (at its row)",
+               "const brief = 'Fix the failing case.';\n"
+               + _step_flow("brief", "agentType: 'builder', model: 'sonnet'"))
+
+
+def workflow_opus_override_check():
+    """The owner's typed override lifts the Opus refusal of a Workflow builder whose brief is a variable: refused with
+    no override, allowed under it, and refused again once the one-act override is spent."""
+    config, session = role_config("ov-workflow-opus", REPO), "role-ov-workflow-opus"
+    script = "const brief = 'Fix the failing case.';\n" + _step_flow("brief", "agentType: 'builder', model: 'opus'")
+
+    def call(seconds):
+        return ov_call("Workflow", {"script": script}, NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("under the typed override", lambda: call(60), "allow", "agent-model-cap"),
+        ("the override spent", lambda: call(120), "deny", "agent-model-cap"),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "refused with no override, allowed under the typed override, refused again once spent"
+
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
@@ -20337,6 +20381,8 @@ ROLE_OVERRIDE_CHECKS = (
      role_override_no_model_check),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
+    ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
+     workflow_opus_override_check),
 )
 for _label, _check in ROLE_OVERRIDE_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
