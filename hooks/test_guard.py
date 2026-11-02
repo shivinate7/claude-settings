@@ -438,6 +438,7 @@ GHBATCHDONE = os.path.join(ROOT, "ghbatchdone")  # the same, with pull request 2
 GHBATCHRED = os.path.join(ROOT, "ghbatchred")    # the same, with pull request 2's required check failed
 GHBATCHCONTAIN = os.path.join(ROOT, "ghbatchcontain")  # the same as GHBATCH, but pull request 2's head holds pull request 1's head (compare "ahead")
 GHBATCHDIVERGED = os.path.join(ROOT, "ghbatchdiverged")  # the same as GHBATCH, and pull request 2's head does not hold pull request 1's (compare "diverged")
+GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAIN, but pull request 1's head is behind main (compare "main...<head>" "behind")
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -1149,8 +1150,12 @@ def build_fixtures():
     make_fake_gh(GHBATCH, "main", others=batch_other(("checks", "pending")))
     make_fake_gh(GHBATCHDONE, "main", others=batch_other(("checks", "pass")))
     make_fake_gh(GHBATCHRED, "main", others=batch_other(("checks", "fail")))
-    make_fake_gh(GHBATCHCONTAIN, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "ahead"})  # abc1234: pull request 1's head
+    # abc1234: pull request 1's head. "main...abc1234" is the base read: ahead when the head holds main's tip, behind when it does not.
+    make_fake_gh(GHBATCHCONTAIN, "main", others=batch_other(("checks", "pending")),
+                 compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "ahead"})
     make_fake_gh(GHBATCHDIVERGED, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "diverged"})
+    make_fake_gh(GHBATCHBEHIND, "main", others=batch_other(("checks", "pending")),
+                 compares={"abc1234...pr-two-head": "ahead", "main...abc1234": "behind"})
     # the guard's required names: a pinned list, or the branch protection (none, failed, or a list that is not pinned)
     make_fake_gh(GHPINNED, "main", others=batch_other(("checks", "pass"), ("gate", "pending")), required=["gate"])
     make_fake_gh(GHNOPROT, "main", others=batch_other(("sync", "pending")), protection="absent")
@@ -7847,6 +7852,8 @@ sh("merge-batch: gh pr merge is allowed while another ready pr that holds this h
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is refused while another ready pr that does not hold this head has a required check pending",
    "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr holds this head but this head is behind main",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
 # The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
 # With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
 # other way is unknown, and a merge with an unknown read is denied.
