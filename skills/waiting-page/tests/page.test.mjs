@@ -1868,7 +1868,7 @@ test("a withdraw pending on a seen card that was answered on the page keeps its 
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
   assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
   assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
-  await unfold.click();
+  await unfold.click({ force: true }); // a press on the locked control must not close it
   assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
 });
 
