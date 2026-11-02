@@ -70,9 +70,10 @@ def kill_hit(tokens) -> str:
     word = tokens[index]
     tool = basename(word)
     rest = tokens[index + 1:]
-    parents = parent_filter_pids(rest) if tool == "pkill" else None
-    if parents is not None and all(value in OWN_PID_VARIABLES or KILL_PID_RE.match(value)
-                                   for value in parents):
+    if tool == "pkill" and any(not (value in OWN_PID_VARIABLES or KILL_PID_RE.match(value))
+                               for value in parent_filter_pids(rest) or ()):
+        return word   # a parent the guard cannot read is no pid this session holds
+    if tool == "pkill" and parent_filter_pids(rest) is not None:
         return ""   # children of ONE parent: foreign_pid_kill judges a number, as it does for `kill`
     if tool in KILL_COMMAND_WORDS:
         return word
