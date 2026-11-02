@@ -10,7 +10,8 @@ the guard's HAIKU_ROLES.
 
 With no argument it checks agents/*.md and skills/*/SKILL.md. Exits 0 and prints nothing when
 clean. With no argument it also compares the guard's role lists with the role table (role_list_drift).
-Exits 1 and names each file that sets a Haiku model, and the model record
+Exits 1 and names each file that sets a Haiku model, each agent file whose `model:` pin names a different
+family than its role's row in the role table (pin_row_problem), and the model record
 docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
@@ -53,6 +54,30 @@ def haiku_model(text: str) -> str:
     return ""
 
 
+def scalar(raw: str) -> str:
+    """A frontmatter value without its quotes or a trailing ` # comment`."""
+    raw = raw.strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    return re.split(r"\s#", raw, maxsplit=1)[0].strip()
+
+
+def pin_row_problem(text: str, table) -> str:
+    """Why the file's `model:` pin differs from its role's row, or "" when it matches, has no pin, or its role has
+    no row. The role is the frontmatter `name`, matched as the guard matches a spawn's role (role_name)."""
+    keys = _guard.frontmatter_keys(frontmatter(text) or [])
+    pin, name = scalar(keys.get("model", "")), scalar(keys.get("name", ""))
+    row = table.get(_guard.role_name(table, name)) if table and name else None
+    if not pin or row is None:
+        return ""
+    rank = _guard.role_model_rank(pin)
+    if rank is not None and _guard.ROLE_MODEL_RANK[rank] == row:
+        return ""
+    return "model pin %r does not equal the role table's row %r for role %r (the pin must name the row's model)" % (
+        pin, row, name)
+
+
 def is_haiku_role(path: str) -> bool:
     return (os.path.basename(os.path.dirname(path)) == "agents"
             and os.path.splitext(os.path.basename(path))[0].lower() in HAIKU_ROLES)
@@ -93,6 +118,7 @@ def main(argv) -> int:
         + [os.path.join(ROOT, LANE_RECORD)]
     )
     bad = 0
+    table = _guard.role_model_table(ROOT)  # None when unread: role_list_problems reports that, this rule stands down
     for path in files:
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
@@ -107,6 +133,11 @@ def main(argv) -> int:
         elif haiku_model(text) and not is_haiku_role(path):
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
             bad = 1
+        elif os.path.basename(os.path.dirname(path)) == "agents":
+            problem = pin_row_problem(text, table)
+            if problem:
+                print("%s: %s." % (path, problem))
+                bad = 1
     if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
         for line in role_list_problems():
             print(line)

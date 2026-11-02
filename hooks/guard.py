@@ -2064,12 +2064,31 @@ def role_model_table(pointer_root):
     return table or None
 
 
+def role_model_rank(model):
+    """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
+    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+
+
+def frontmatter_keys(lines):
+    """The top-level keys of frontmatter lines (the text between the two `---` lines): {key: raw value}, the first of
+    a key wins. An indented line is a continuation of the key above it (a block scalar), never a key. Values stay raw:
+    the caller strips comments and quotes. The one parser of agent frontmatter keys."""
+    keys = {}
+    for line in lines:
+        if line[:1].isspace():
+            continue
+        key, _, value = line.partition(":")
+        keys.setdefault(key.strip(), value.strip())
+    return keys
+
+
 def role_agent_keys(pointer_root):
     """Yield the frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with
     frontmatter, in file order, one file read at a time. Raises OSError when the folder or a file cannot be read, so
     a caller that stops early never reads the files after its match. The reader of agent frontmatter for the role
-    rules. In lint/check_agent_models.py, main() reads the same files and frontmatter() parses their text for its
-    own model check."""
+    rules. In lint/check_agent_models.py, main() reads the same files and passes their frontmatter to frontmatter_keys
+    for its pin check."""
     folder = os.path.join(pointer_root, "agents")
     for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
         try:
@@ -2079,13 +2098,8 @@ def role_agent_keys(pointer_root):
             raise OSError("agent file is not text: %s" % name) from exc
         if not lines or lines[0].strip() != "---":
             continue
-        keys = {}
-        for line in lines[1:]:
-            if line.strip() == "---":
-                break
-            key, _, value = line.partition(":")
-            keys.setdefault(key.strip(), value.strip())
-        yield keys
+        end = next((n for n, line in enumerate(lines[1:], 1) if line.strip() == "---"), len(lines))
+        yield frontmatter_keys(lines[1:end])
 
 
 def role_has_model_pin(pointer_root, role):
@@ -2214,7 +2228,7 @@ def role_model_one(tool_input):
     model = str(tool_input.get("model") or "").strip()
     if model:
         top = len(ROLE_MODEL_RANK) - 1
-        named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
+        named = role_model_rank(model)
         row = table.get(role)
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
