@@ -20,13 +20,15 @@ is given only where no symbol exists.
 
 ## 1. The five forms
 
-"Form" here is not the `Kind:` line of a record, nor a layout kind.
+"Form" here is not the `Kind:` line of a record, nor a layout kind. Skill `fresh-prose` sorts the same
+prose on a different axis: what rots, and the rung that holds it current. Lane 1 lands this table as
+decision `prose-forms`, which cites that skill, so the table outlives this plan.
 
 | Form | What it holds | Its one home | Its check |
 |---|---|---|---|
 | Law | A rule that binds every session. | A `<!-- rule:ID -->` item in `CLAUDE.md` or `output-styles/shiv-stylisms.md`. A guard or check where one can judge it. | `lint/rule_audit.py`, `lint/rule_mechanisms.json` |
-| Argument | The ruling in force, plus a one-line reason, plus evidence of about 10 lines at most (decision `cull-rules`). | A record in `docs/decisions/`. | `lint/check_ruling_kind.py` (decision `rulings-declare-kind`) |
-| Vocabulary | One name per workflow thing, and the names to avoid. | `skills/shivpedia/vocabulary.md`, moved from `GLOSSARY.md`. | `lint/check_glossary.py` |
+| Ruling | The ruling in force, plus a one-line reason, plus evidence of about 10 lines at most (decision `cull-rules`). | A record in `docs/decisions/`. | `lint/check_ruling_kind.py` (decision `rulings-declare-kind`) |
+| Glossary | One name per workflow thing, and the names to avoid. | `skills/shivpedia/glossary.md`, moved from `GLOSSARY.md`. | `lint/check_glossary.py` |
 | Experience | A practice that worked, where it applied, and how sure we are. It informs judgment and binds nobody. | `skills/shivpedia/<topic>/<slug>.md` | new `lint/check_shivpedia.py` |
 | Procedure | How to do a task, step by step. | A skill. An agent file holds its own role's steps only. | the skill's tests |
 
@@ -41,7 +43,7 @@ The debt store (`docs/debts/`) holds known gaps. It is out of scope, except as a
 Law files (main):
 - `lint/rule_mechanisms.json`: 119 rules (97 in CLAUDE.md, 22 in the style file). 34 have a guard,
   check or CI step. 61 are unmechanized and 24 are judgment.
-- 4 CLAUDE.md rules hold argument: `roles-review-cap-three`, `verification-cry-wolf-guard-is-spent`,
+- 4 CLAUDE.md rules hold reasoning longer than one line: `roles-review-cap-three`, `verification-cry-wolf-guard-is-spent`,
   `speak-cite-id-plus-gloss`, `questions-go-to-owner` (at 55b27ac2). Decision `claude-md-shrink` keeps
   `speak-cite-id-plus-gloss` as it is, so M4 moves 3.
 - 6 CLAUDE.md rules hold procedure steps: `git-integration-branch-merge`, `roles-review-cap-three`,
@@ -67,10 +69,10 @@ Decision records (main: 152 records, 5083 lines):
   `mutation-report-scores-suites`, `feel-fix-waits-device-check`. One more record,
   `ios-mac-install-first`, holds history wording.
 - 11 records are cited nowhere outside `docs/decisions/` and the generated `docs/records.md` (at
-  55b27ac2, corrected in review; list in move M9).
+  55b27ac2, corrected in review). 2 of them hold law. The list is in move M9.
 
 Vocabulary (main: 49 rows in GLOSSARY.md):
-- 12 rows hold a law or argument clause: guard, grant, check, decision, builder, reviewer, design
+- 12 rows hold a law or reasoning clause: guard, grant, check, decision, builder, reviewer, design
   reviewer, CI step, safety hole, round, orchestrator, owner.
 - 5 terms are defined again in `skills/project-ops/templates/operating-model.md`: orchestrator,
   coordinator, triage, batch runner, lane session. 3 terms have a second sense: lane (skills
@@ -89,13 +91,13 @@ Skills, agents and hooks (proxy, at 55b27ac2: a shared run of 6 or more words):
 Experience today has no home. At 55b27ac2 it sits in 43 lines of `docs/debts/notes.md`, in 16 of 64
 debt records, in 7 lines of `docs/todo.md`, and in 2 hook messages (`GIT_ENV_REASON`,
 `PLAYWRIGHT_PATH_REASON` in `hooks/guard_kill.py`). Experience that already became law lives in skill
-`ci-hygiene` and in the CLAUDE.md rules from commit 27fea033. Shivpedia links these and copies none.
+`ci-hygiene` and in the CLAUDE.md rules from branch `archive/propose/lessons-from-mailaudit`. Shivpedia links these and copies none.
 
 ## 3. Invariants for every move
 
 - I1. Each `<!-- rule:ID -->` anchor stays, with its `lint/rule_mechanisms.json` row.
 - I2. Text that leaves a rule leaves an id cite in its place.
-- I3. A binding clause stays in its rule. Only steps, reasons and definitions move.
+- I3. A binding clause stays in its rule. Only steps, definitions and reasoning past one line move.
 - I4. No move deletes a guard, check, test or CI step.
 - I5. An edit to any text that a test pins (a hook message, a skill or agent line) names that test and
   re-points it red then green. Known pins: `skills/project-ops/tests/test_scaffold.py`
@@ -115,15 +117,15 @@ debt records, in 7 lines of `docs/todo.md`, and in 2 hook messages (`GIT_ENV_REA
 
 | Move | What | Touches |
 |---|---|---|
-| M1 | Cut the rule text that 8 records repeat. Each record keeps its ruling and one-line reason, and cites its rule. | the 8 records |
-| M2 | For the 34 pairs, keep each text in the home a check or code reads (`audit-rework-order`, step 1). The other home cites it. | 20 rules, 24 records |
+| M1 | M2 applied first to the 8 records whose `Home:` names their rule. Cut the rule text that the 8 records repeat. Each record keeps its ruling and one-line reason, and cites its rule. | the 8 records |
+| M2 | For the other 34 pairs (M1 first), keep each text in the home a check or code reads (`audit-rework-order`, step 1). The other home cites it. | 20 rules, 24 records |
 | M3 | For the 5 same-ruling pairs, keep the ruling in the narrower record. The other one cites it: `main-branch-protection` (cited by `same-check-kinds`), `standing-merge-grant`, `owner-judge-test` and `agent-model-cap` (each cited by `session-tiers`), `questions-go-to-owner` (cited by `port-keeps-behaviour`). No id is retired. | 8 records |
-| M4 | Move the argument out of 3 rules into their records: `roles-review-cap-three` to `hold-unsafe-after-round-3`, `verification-cry-wolf-guard-is-spent` to `guard-that-cries-wolf-is-spent`, `questions-go-to-owner` to its record. `speak-cite-id-plus-gloss` stays as it is (decision `claude-md-shrink`: keep). | CLAUDE.md, 3 records |
+| M4 | Move the reasoning past one line out of 3 rules into their records (each rule keeps a one-line reason, I8): `roles-review-cap-three` to `hold-unsafe-after-round-3`, `verification-cry-wolf-guard-is-spent` to `guard-that-cries-wolf-is-spent`, `questions-go-to-owner` to its record. `speak-cite-id-plus-gloss` stays as it is (decision `claude-md-shrink`: keep). | CLAUDE.md, 3 records |
 | M5 | Move the procedure steps out of the 6 rules into the skill that does the task. Each binding clause stays (I3), and the rule cites the skill by name (I2). Example: "a held change is parked" and "never fix inside the integration branch" stay in `git-integration-branch-merge`; the drop-and-rebuild steps go to skill `project-ops`. "Compact instructions" stays in CLAUDE.md, because Claude Code reads that block at compaction. | CLAUDE.md, skill `project-ops` |
-| M6 | 5 terms that rules define inline already have rows: safety hole, debt, note, coordinator, ruling. Delete only the definition text that the row already holds. A clause the row lacks stays in the rule, for example "turning a main refusal into an ask is also a safety hole". Reconcile the coordinator wording with its row. The other 5 terms (net-value test, one lane, cannot be undone, batch merge, advisor) have no row and stay in CLAUDE.md. | 5 rules, vocabulary |
-| M7 | In the 12 rows, cut each law clause that a rule or record holds word for word, for example "A lint or CI check never asks." (decision `guard-guards-mistakes-only`). Each clause with no copy stays in its row. The lane lists both sets. | vocabulary |
-| M8 | Delete the 5 redefinitions in `operating-model.md` and cite the rows. Give the 3 second senses their own terms in vocabulary. | skills `project-ops`, `waiting-page`, `roadmap`; `docs/plans/shared-merge-tool.md` |
-| M9 | Give each of the 9 hard-law records a home: a rule anchor, or `Kind: build` with a `Plan:` line in the form `<md path>#<heading slug> (<platform>)` (`lint/check_ruling_kind.py`, `plan_problem`). Review the 11 records that nothing cites (at 55b27ac2, re-measured by the lane): `adoptions-declined-2026-09-28`, `browser-prompts-are-the-apps`, `docs-only-prs-skip-review`, `hook-if-filters`, `install-sh-stays-off-windows`, `lanes-start-as-agents`, `mods-deferred-table`, `mods-no-cli-key-headless`, `reuse-needs-checkout-proof`, `source-prose-lint-ships-dark`, `worktree-setup-is-per-repo`. Cite each from its home, or delete it under `cull-rules`. | records, CLAUDE.md, `rule_mechanisms.json` |
+| M6 | 5 terms that rules define inline already have rows: safety hole, debt, note, coordinator, ruling. Delete only the definition text that the row already holds. A clause the row lacks stays in the rule, for example "turning a main refusal into an ask is also a safety hole". Reconcile the coordinator wording with its row. The other 5 terms (net-value test, one lane, cannot be undone, batch merge, advisor) have no row and stay in CLAUDE.md. | 5 rules, glossary |
+| M7 | In the 12 rows, cut each law clause that a rule or record holds word for word, for example "A lint or CI check never asks." (decision `guard-guards-mistakes-only`). Each clause with no copy stays in its row. The lane lists both sets. | glossary |
+| M8 | Delete the 5 redefinitions in `operating-model.md` and cite the rows. Give the 3 second senses their own terms in the glossary. | skills `project-ops`, `waiting-page`, `roadmap`; `docs/plans/shared-merge-tool.md` |
+| M9 | Give each of the 9 hard-law records a home: a rule anchor, or `Kind: build` with a `Plan:` line in the form `<md path>#<heading slug> (<platform>)` (`lint/check_ruling_kind.py`, `plan_problem`). Review the 9 other records that nothing cites (at 55b27ac2, re-measured by the lane): `adoptions-declined-2026-09-28`, `browser-prompts-are-the-apps`, `docs-only-prs-skip-review`, `hook-if-filters`, `install-sh-stays-off-windows`, `lanes-start-as-agents`, `mods-no-cli-key-headless`, `reuse-needs-checkout-proof`, `source-prose-lint-ships-dark`. Cite each from its home, or delete it under `cull-rules`. `mods-deferred-table` and `worktree-setup-is-per-repo` are also uncited, but they hold law, so they get a home and are never deleted. | records, CLAUDE.md, `rule_mechanisms.json` |
 | M10 | Replace the 41 restatements in skills and agents with an id cite. The report form lives in the `reports-*` rules, and each agent file cites them. | `agents/*.md`, 7 skills |
 | M11 | The 48 hook messages that restate law name their id and keep the remedy. The reason text goes to the record. `GIT_ENV_REASON` and `PLAYWRIGHT_PATH_REASON` move their measures into the records `git-env-set-refused` and `playwright-browsers-path`. | 11 hook files and their string tests |
 | M12 | Give the 5 rulings that live only in a skill or plan a record each. | 3 skills, 1 plan, 5 new records |
@@ -143,13 +145,13 @@ guard or check holds it.
 
 - `skills/shivpedia/`. `skills/` already lands under `~/.claude` (`landed-dirs.txt`), so a session in
   any repo can read it.
-- `SKILL.md`: a description with 300 characters or fewer. The steps to load, write back and cull. 60
+- `SKILL.md`: a description of 300 characters or fewer. The steps to load, write back and cull. 60
   lines or fewer.
 - One folder per topic: `testing`, `ci`, `merging`, `guards`, `ui`, `records`, `orchestration`. One
   file per experience (rule `git-record-own-file-per-kind`). A rewrite replaces one file.
 - Each topic folder has a `README.md` with `see:` links to that topic's law and procedure homes, for
   example skill `ci-hygiene`, decision `test-strategy-reset`, `docs/design/principles.md`.
-- `vocabulary.md` is the moved glossary.
+- `glossary.md` is the moved glossary.
 
 ### 5.2 One experience
 
@@ -172,12 +174,15 @@ Misses: <number>
 - A new lesson on an experience rewrites its file whole (rule `speak-rewrite-superseded-in-place`).
 - `lint/check_shivpedia.py` fails on:
   - a missing field, or a second link in Evidence
-  - a date or month name
+  - a date: a day number with a month name, a year, or an ISO date. A bare word such as "may" passes.
   - the words "always" or "never"
-  - history narration (it imports `PATTERNS` from `lint/check_comment_narration.py`). The scan skips
-    the Evidence field, because those patterns flag PR numbers and commit hashes.
+  - history narration: its own list `HISTORY_WORDS` ("used to", "previously", "before this", "no
+    longer"), plus a PR number or commit hash outside the Evidence field. The `PATTERNS` of
+    `lint/check_comment_narration.py` stay as they are: they target code comments and catch neither
+    "used to" nor a story.
   - a cap overrun, or a second experience with the same slug.
-  It skips `vocabulary.md` and the topic `README.md` files.
+  It skips `glossary.md` and the topic `README.md` files. `select.py` skips the same files, through one
+  shared constant `NOT_EXPERIENCE`.
 - STE lint covers `skills/**/*.md` already: the CI step runs `actions/ste-lint` on `**/*.md`, and
   `.ste-lint-exclude` drops only `skills/impeccable/**`.
 - Code term: `experience`. The word "entry" is in the "Not" cell of the `record` row, so it cannot name
@@ -202,8 +207,8 @@ Misses: <number>
   - S6: an experience with no front matter exits 2 and names the file.
   - C1: the description is 300 characters or fewer.
   - C2: no SessionStart command in `settings.json` names shivpedia.
-  - C3: `--paths` starts no git process. `--base` starts one (a probe as in
-    `hooks/test_feedback_inbox.py`).
+  - C3: `--paths` starts no git process. `--base` starts one, through `hooks/_nowindow.py`
+    (`lint/test_no_window_spawn.py` scans `skills/`). The test writes its own process probe.
 - Red-first tests in `lint/test_check_shivpedia.py`: a tombstone sample (a date, "we used to", an
   incident story, two links) is red, with each fault named. A padded sample (a 40-word field, 14 lines)
   is red. An "always" line, a missing Confidence field and a duplicate slug are each red. One clean
@@ -211,7 +216,7 @@ Misses: <number>
 
 ### 5.4 The glossary move (M15)
 
-`GLOSSARY.md` becomes `skills/shivpedia/vocabulary.md`. One change updates each reader on main:
+`GLOSSARY.md` becomes `skills/shivpedia/glossary.md`. One change updates each reader on main:
 - Rule `speak-one-name-per-thing` in CLAUDE.md: the path only.
 - `lint/check_glossary.py`: the path constant `GLOSSARY` and the skip list `SKIP_CODE`. The new path
   joins `SKIP_CODE`, or the retired-name scan reads its own "Not" cells.
@@ -226,8 +231,12 @@ Misses: <number>
   `docs/design/last-answer-notes.md`. The merge tool rebuilds `docs/records.md`.
 - Unchanged: the reads of a child repo's own `GLOSSARY.md` in `lint/compliance_probes.py` and its
   test. A child repo's glossary stays at its root.
-- The builder runs `git grep -n GLOSSARY` at its base and adds any reader not listed here.
-- New rows in the same change: shivpedia, experience, topic, form (this plan's sense).
+- The builder runs `git grep -n GLOSSARY` at its base and adds any reader not listed here. A Markdown
+  line that still names a child repo's own `GLOSSARY.md` (for example in `skills/compliance-check/probes.md`)
+  is reworded so `lint/stale_cites.py` (STALE001) does not read it as a cite of the moved file.
+- New rows in the same change: shivpedia, experience, topic, lesson (a candidate experience named on a
+  `Lessons:` line), form (home: decision `prose-forms`). The file keeps the name glossary, so one
+  thing keeps one name.
 - Readers in other repos: unknown, because no other repo is attached to this lane. Triage lists them.
 
 ### 5.5 The feed
@@ -251,7 +260,8 @@ Misses: <number>
 
 - Misses: when a new incident matches an experience's Applies field, triage adds 1 to Misses and
   rewrites Worked and Confidence. No list of stories is kept. The match uses the repeat judge from step
-  `feedback-repeat-detect` (commit 0afb9a9f). This plan adds no second matcher.
+  `feedback-repeat-detect`, which is still being built. This plan adds no second matcher. Until that
+  step ships, Misses stays 0 and the count is unknown (section 10).
 - The cull is one bullet added to decision `cull-rules`, the one home for culls. An experience with 0
   loads and 0 Misses since it landed is deleted. `lint/ruling_census.py` already reads transcripts on
   demand, and it gets a count of shivpedia loads. A count that cannot be read is unknown, for example
@@ -278,16 +288,9 @@ go stale, and shivpedia adds nothing to the rebuild at merge (steps `records-pag
 `records-stale-refuses-on-ready` show that rebuild's risk). Triage keeps its experiences current by the
 feed (5.5) and the cull (5.6). Nothing else needs a keeper.
 
-A registry of generated pages was weighed and is not in the build (question Q4). It would let a new
-generated page edit no consumer. Shivpedia gains nothing from it. If the owner picks it, readers:
-`merge/merge.py` (`RECORDS`, `rebuild_records`, `records_proof`, `draft_step`),
-`lint/hook_catalog.py` (`RECORDS_PAGE`, `--records-only`, PR-run waiver), `hooks/guard_merge.py`
-(`RECORDS_PAGE`), `hooks/guard.py` (rule `records-page`), `lint/check_silent_undo.py`
-(`generated_page`), `lint/stale_cites.py` (`RECORDS_PAGE`), `docs/records.md` skips in
-`lint/check_glossary.py` and `lint/test_retired_names.py`; tests `lint/test_hook_catalog.py`,
-`lint/test_layout.py`, `lint/test_check_silent_undo.py`, `hooks/test_guard.py`, `merge/test_merge.py`.
-A registry for claude-settings pages goes in `.claude/layout-extras.json`, not in the every-repo
-layout.
+A registry of generated pages was weighed and is not in the build (question Q4). Shivpedia gains nothing
+from it. Its 10 code readers and 5 test files were listed in review round 2, at head 108b2de0 of this
+record.
 
 One gap found on the way goes to `docs/debts/notes.md` as a note: the merge tool never rebuilds
 `docs/catalog.md`, so two lanes that each add a hook conflict on it.
@@ -298,7 +301,7 @@ One gap found on the way goes to `docs/debts/notes.md` as a note: the merge tool
 |---|---|---|---|
 | Session start | none | nothing | 0; about 75 tokens for the skill description |
 | Load | the skill, before a plan | nothing | 1 python; 1 git with `--base` |
-| Shape check | CI `checks` job, `bin/ste-changed` | nothing | 1 python per run |
+| Shape check | its CI step in the `checks` job | nothing | 1 python per run |
 | Lessons check | `lint/report_guard.py`, where it runs today | nothing | 0 new |
 | Fold | triage, at each batch merge | experience files, in a records PR | 0 new |
 | Cull count | `lint/ruling_census.py`, at each cull | nothing | 0 new |
@@ -308,21 +311,21 @@ and load counts.
 
 ## 7. Seed experiences
 
-Each seed is one experience file with one Evidence link:
-- the 6 patterns of the owner-feedback audit: 6 files, each linking draft PR #1008
-- step `overlapping-batches`: the merge tool was stricter than its rule (joyous PR #63)
-- step `records-page-before-ready`: the records page was rebuilt after green CI (PR #895)
-- step `records-stale-refuses-on-ready` (PR #1009)
-- step `runner-refuses-lint-red`: lint reds dropped whole batches (PR #979)
-- step `question-checks-past-rulings`: questions asked again after a ruling
+A seed lands only when its source has a practice that worked and that no guard or check already holds
+(shivpedia copies no law). Lane 2 judges each candidate at its base and lists the ones it skips:
+- the 6 patterns of the owner-feedback audit (draft PR #1008): up to 6 files
+- step `records-page-before-ready` (PR #895), if its practice is not held by the merge tool
+- steps `overlapping-batches`, `records-stale-refuses-on-ready`, `runner-refuses-lint-red` and
+  `question-checks-past-rulings`: each is still open and each may end as a guard. Each one seeds an
+  experience only if, once shipped, it leaves a practice no guard holds.
 
 The `ci` topic `README.md` links skill `ci-hygiene` and copies nothing from it. The `testing` topic
 `README.md` links decision `test-strategy-reset`. Draft PR #1028 (lane `test-practices-first-principles`)
 adds decision `test-practices`, 11 testing practices P1 to P11, each a do-this line with evidence.
 `test-strategy-reset` points to it. That record holds experience in a decision home. Each practice that a
 check or a role file enforces stays in `test-practices` as a ruling. Each other practice moves to
-`skills/shivpedia/testing/` as one experience, and `test-practices` keeps only the ruled ones. After sign-off, this lane sends that lane one message with the path and the list of
-practices to move.
+`skills/shivpedia/testing/` as one experience, and `test-practices` keeps only the ruled ones. After
+sign-off, this lane sends that lane one message with the path and the list of practices to move.
 
 ## 8. Build lanes after sign-off
 
@@ -330,9 +333,13 @@ Each lane runs test-author, then builder, then reviewer. Lanes never commit `doc
 `records-index-at-merge`). Each lane that adds a test or check adds its CI step to
 `.github/workflows/checks.yml`, and checks that `.github/scripts/ci-scope.sh` runs it for the new
 paths (a `.md`-only change counts as docs-only today).
-1. `glossary-to-shivpedia`: M15. It runs first, because later lanes cite the new path.
+1. `glossary-to-shivpedia`: M15, and decision `prose-forms` (the table in section 1). It runs first,
+   because later lanes cite the new path.
 2. `shivpedia-core`: SKILL.md, `select.py`, `check_shivpedia.py`, their CI steps, topics, seeds, the
-   skill row in decision `agent-model-cap`, `docs/catalog.md`.
+   skill row in decision `agent-model-cap`, `docs/catalog.md`. It also adds `shivpedia` to
+   `CONFIG_FROZEN_SKILLS` in `hooks/guard_frozen.py` (`lint/check_landed_dirs.py` requires it), with
+   the frozen cases in `hooks/test_guard.py`. That guard change runs the guard CI job and gets the
+   review the roles rules require for a guard change.
 3. `record-homes`: M3 (except the `agent-model-cap` pair), M9, M12, M13.
 4. `lessons-line`: section 5.5.
 5. `shivpedia-cull`: the cull bullet in decision `cull-rules` and the load count in
@@ -359,11 +366,11 @@ Each blocks only the lane it names.
   Unstarted check uses. B: every report that lands work. Blocks lane 4.
 - Q4. A registry of generated pages in `.claude/layout-extras.json` (section 5.7). A (recommended):
   not now. Shivpedia joins the CI check home and gains nothing from a registry. B: build it as its own
-  lane. Gain: a new generated page edits no consumer. Lose: one lane over about 14 files and their
-  tests. Blocks nothing in this plan.
+  lane. Gain: a new generated page edits no consumer. Lose: one lane over 10 code files and 5 test
+  files. Blocks nothing in this plan.
 
 ## 10. Unknowns
 
 - Readers of the glossary path in other repos.
 - Load counts for cloud sessions.
-- The proxy counts in section 2 are lower bounds.
+- Misses, until step `feedback-repeat-detect` ships.
