@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the cloud tier line. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -275,6 +275,27 @@ if [ -n "$wl_out" ]; then
     printf 'checkout %s: cannot list the worktrees; the agent worktree count is unknown\n' "$toplevel"
   fi
   rm -f "$wl_out" 2>/dev/null
+fi
+
+# Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
+# from a version other than main's page.html. The stamp an allowed publish wrote
+# (<git common dir>/waiting-page-built) holds main's blob sha at that publish; skills/waiting-page/stale_pages.py
+# --session-line compares it with origin/main of the claude-settings clone ($d) and prints the line, or nothing
+# (no stamp, or main unreadable, is silent). The grep is only a cheap filter on the extras file that
+# lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
+# python start and one read-only git process; in any other repo, one grep. No fetch, no file written, no timer.
+wp_extras="$toplevel/.claude/layout-extras.json"
+if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
+  wp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../skills/waiting-page/stale_pages.py"
+  [ -f "$wp_script" ] || wp_script="$config_dir/skills/waiting-page/stale_pages.py"
+  if [ -f "$wp_script" ]; then
+    if [ -n "$d" ]; then
+      wp_line=$(python3 "$wp_script" --session-line "$toplevel" --main-checkout "$d" 2>/dev/null)
+    else
+      wp_line=$(python3 "$wp_script" --session-line "$toplevel" 2>/dev/null)
+    fi
+    [ -n "$wp_line" ] && printf '%s\n' "$wp_line"
+  fi
 fi
 
 # The SessionEnd sweep is armed. The record is
