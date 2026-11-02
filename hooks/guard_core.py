@@ -803,11 +803,14 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
-        return cmd  # the body may be executed, so keep it under inspection
     if _walk_heredocs(cmd)[2]:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
-    return _drop_heredoc_bodies(cmd)
+    stripped = _drop_heredoc_bodies(cmd)
+    # Bash reads a header or a pipe in header lines only, so the run test sees the lines left once
+    # every body is dropped: a body line such as `python3 - <<X` or `cat <<X | bash` is data.
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(stripped)):
+        return cmd  # the body may be executed, so keep it under inspection
+    return stripped
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
