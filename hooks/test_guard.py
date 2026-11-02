@@ -11016,6 +11016,86 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
+# ---- a builder's SHELL write (Bash, PowerShell). The early warning above judges an Edit or a Write by
+# its path. A shell write names its target inside the command text, so the same refusal must hold on
+# the shell path. Incident (Nov 1): a builder changed lint/test_rule_audit.py through a python heredoc
+# in Bash. The DENY rows are that write and its likely shapes. The ALLOW rows are reads, prints,
+# comments, strings and non-test writes that name a test path, and the same write by a role that may
+# change tests. The scanner rows (a comment opener in a string, a multi-line template literal, a lone
+# quote in text) must not hide a test-file write that comes after them.
+PY_VAR_WRITE = (
+    "python3 - <<'EOF'\n"
+    "p = 'lint/test_rule_audit.py'\n"
+    "s = open(p).read()\n"
+    "s = s.replace('a', 'b')\n"
+    "open(p, 'w').write(s)\n"
+    "EOF"
+)
+SHELL_TEST_WRITES = (
+    ("python heredoc writes a test file through a variable", PY_VAR_WRITE),
+    ("python heredoc writes a test file with pathlib",
+     "python3 - <<'EOF'\nfrom pathlib import Path; Path('lint/test_rule_audit.py').write_text(x)\nEOF"),
+    ("python -c appends to a test file", "python3 -c \"open('hooks/test_guard.py','a').write('x')\""),
+    ("node -e writes a test file with fs", "node -e \"require('fs').writeFileSync('lint/test_x.py','x')\""),
+    ("node heredoc writes a test file with fs",
+     "node <<'EOF'\nrequire('fs').writeFileSync('lint/test_x.py','x')\nEOF"),
+    ("echo redirect writes a test file", "echo x > lint/test_x.py"),
+    ("tee writes a test file", "echo x | tee lint/test_x.py"),
+    ("sed -i edits a test file", "sed -i 's/a/b/' lint/test_x.py"),
+    ("cat heredoc writes a test file", "cat > lint/test_x.py <<'EOF'\nx = 1\nEOF"),
+    ("sed -i edits a test file after cd into its folder", "cd lint && sed -i 's/a/b/' test_x.py"),
+    ("a # inside a string before a test-file redirect", "echo \"# note\" > lint/test_x.py"),
+    ("a /* inside a string before a test-file write",
+     "node -e \"const s = '/* x'; require('fs').writeFileSync('lint/test_x.py', s)\""),
+    ("a multi-line template literal before a test-file write",
+     "node <<'EOF'\nconst note = `line one\n// not a comment\nline two`;\n"
+     "require('fs').writeFileSync('lint/test_x.py', note)\nEOF"),
+    ("a lone quote in a heredoc body before a test-file redirect",
+     "python3 - <<'EOF'\nprint(\"don't\")\nEOF\necho x > lint/test_x.py"),
+)
+for _what, _command in SHELL_TEST_WRITES:
+    sh("builder-test: Bash %s is refused" % _what, _command, "deny", rule=BT,
+       carries=("test-author", "Report"), **B)
+POWERSHELL_TEST_WRITES = (
+    ("Set-Content writes a test file", "Set-Content -Path lint/test_x.py -Value 'x'"),
+    ("a pipeline into Out-File writes a test file", "'x' | Out-File -FilePath lint/test_x.py"),
+    ("WriteAllText writes a test file", "[System.IO.File]::WriteAllText('lint/test_x.py', 'x')"),
+)
+for _what, _command in POWERSHELL_TEST_WRITES:
+    sh("builder-test: PowerShell %s is refused" % _what, _command, "deny", rule=BT,
+       tool="PowerShell", carries=("test-author", "Report"), **B)
+BUILDER_SHELL_READS = (
+    ("cat of a test file", "cat lint/test_x.py"),
+    ("grep of a test file", "grep -n foo hooks/test_guard.py"),
+    ("python heredoc that only reads and prints a test file",
+     "python3 - <<'EOF'\np = 'lint/test_x.py'\nprint(open(p).read())\nEOF"),
+    ("python heredoc that reads a test file and writes out.txt",
+     "python3 - <<'EOF'\ns = open('lint/test_x.py').read()\nopen('out.txt', 'w').write(s)\nEOF"),
+    ("python -c that prints a test path", "python3 -c 'print(\"lint/test_x.py\")'"),
+    ("echo of a test path", "echo lint/test_x.py"),
+    ("python heredoc with a test write in a comment",
+     "python3 - <<'EOF'\n# open('lint/test_x.py','w')\nprint('ok')\nEOF"),
+    ("python heredoc that prints a test write as a string",
+     "python3 - <<'EOF'\nprint(\"open('lint/test_x.py','w')\")\nEOF"),
+    ("heredoc body with a lone quote and a # before a harmless segment",
+     "python3 - <<'EOF'\n# don't open lint/test_x.py for writing\nprint('ok')\nEOF\necho done"),
+    ("echo redirect to a non-test file", "echo x > hooks/guard_new.py"),
+    ("node heredoc with a multi-line template literal that names a test path and writes out.txt",
+     "node <<'EOF'\nconst s = `line one\n// lint/test_x.py\nline two`;\n"
+     "require('fs').writeFileSync('out.txt', s)\nEOF"),
+    ("echo of a # comment opener and a test path in a string", "echo \"# lint/test_x.py\" > out.txt"),
+)
+for _what, _command in BUILDER_SHELL_READS:
+    sh("builder-test: Bash %s is allowed" % _what, _command, "allow", **B)
+sh("builder-test: PowerShell Get-Content of a test file is allowed", "Get-Content lint/test_x.py",
+   "allow", tool="PowerShell", **B)
+sh("builder-test: Bash sed -i on a test file is allowed for the test-author",
+   "sed -i 's/a/b/' lint/test_x.py", "allow", **A)
+sh("builder-test: Bash python heredoc write to a test file is allowed for the test-author",
+   PY_VAR_WRITE, "allow", **A)
+sh("builder-test: Bash python heredoc write to a test file is allowed in the main session",
+   PY_VAR_WRITE, "allow", cwd=NOGIT)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
