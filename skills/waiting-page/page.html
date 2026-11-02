@@ -312,8 +312,36 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .nchip.sent.filed { background: var(--good); color: var(--surface); }
 
 .checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
-.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
-.parked ul { margin: 6px 0 0; padding-left: 20px; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; display: grid; gap: 8px; container-type: inline-size; color: var(--ink); }
+.parked > h2 { font: 700 15px/1.4 var(--body); margin: 0; }
+.pk-hint { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
+.parked .pk-list { list-style: none; margin: 0; padding: 0; display: grid; }
+/* One line: the text, then its acts. Narrow: the acts wrap under the text. Wide: they sit at the right. */
+.pk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 10px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
+@container (min-width: 600px) { .pk { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; } .pk-acts { justify-content: flex-end; } }
+.pk-txt { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pk-txt .ref { font-weight: 600; }
+.pk-txt .nt { color: var(--muted); }
+/* A staged or sent Drop strikes the line: a shape, so the act does not rest on colour. */
+.pk.drop .pk-txt { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* The acts row is one 44px cluster in every state, so a press, a Send or a badge moves nothing. */
+.pk-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; }
+.pk-acts .ans { min-height: 32px; }
+.pk .status { grid-column: 1 / -1; }
+/* A toggle keeps the box of its widest label: both labels share one grid cell. */
+.btn.pkb { display: inline-grid; justify-items: center; position: relative; }
+.pkb > span { grid-area: 1 / 1; white-space: nowrap; }
+.pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
+.pkb[aria-pressed="true"] .on { visibility: visible; }
+.btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
+/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
+.btn.dash.pkb { border-color: var(--faint); }
+.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
+/* Off: dashed and still focusable, and the reason shows on hover and focus. */
+.btn.pkb[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; }
+.btn.pkb[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; width: max-content; max-width: min(320px, 80vw); white-space: normal; text-align: start; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* The Sent panel names a parked act by its act, where an item shows "No. n". */
+.sent-list .pkref { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -705,7 +733,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -893,12 +921,14 @@ const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 const stoodNow = (it) => standsOk(it) && !savedOf(it);
 const eff = (it) => {
   const d = state.draft[it.id];
+  if (it.park) return d;
   // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
   if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
   if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
   return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
+  if (it.park) return ACTS.includes((state.draft[it.id] || {}).act);
   const d = eff(it); if (!d || blocked(it)) return false;
   if (isRuling(it)) return d.choice === OVERTURN;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
@@ -949,10 +979,35 @@ function problem(it) {
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
-const staged = () => answerable().filter((it) => !isSaved(it) && draftReady(it));
+const staged = () => [...answerable(), ...parkItems()].filter((it) => !isSaved(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
 const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
-const withdrawn = () => answerable().filter(withdrawing);
+const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
+
+/* ---------- Parked lines: a press stages an act, and Send writes answers/park-<id> as it writes an answer ---------- */
+// A parked line is a meta/page.parked entry. It is live only with a unique id of the slug form; any other line has both acts off.
+// Each live line is modelled as a pseudo item, so staged, Send, Undo, Withdraw and the draft store take it with no second path.
+// Its key starts with "park-", so it can never meet an item's key, and no card or count reads it.
+const ACTS = ["unpark", "drop"], PARK_ID = /^[a-z0-9-]{1,32}$/;
+function parkItems() {
+  const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = {};
+  list.forEach((p) => { count[p.id] = (count[p.id] || 0) + 1; });
+  const owner = plain(m && m.writer) || "the page's writer";
+  return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count[p.id] === 1).map((p) => ({ id: "park-" + p.id, park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
+}
+function pressPark(it, act) {
+  edited();
+  if ((state.draft[it.id] || {}).act === act) delete state.draft[it.id]; else state.draft[it.id] = { act };
+  saveDraft(); render();
+}
+function changePark(it, sv) { state.changing[it.id] = true; edited(); state.draft[it.id] = { act: sv.act }; saveDraft(); render(); }
+// When the writer routes a line it removes the entry. A sent line then stays, filled, until it is off screen.
+function keepRouted(was, now) {
+  const ids = (m) => ((m && Array.isArray(m.parked) ? m.parked : []).map((p) => p && p.id));
+  const had = ids(was), has = new Set(ids(now));
+  had.forEach((id, i) => { const a = state.answers["park-" + id]; if (id && !has.has(id) && a && ACTS.includes(a.act)) state.routed[id] = { p: was.parked[i], act: a.act, i }; });
+  Object.keys(state.routed).forEach((id) => { if (has.has(id)) delete state.routed[id]; });
+}
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
   if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
@@ -986,6 +1041,7 @@ function move(it, key, dir) {
   edited(); setDraft(it, { choice: cur, auto: false }); repaint(it);
 }
 function answerBody(it, d, at) {
+  if (it.park) return { parked: true, id: it.park.id, act: d.act, ref: String(it.park.ref == null ? "" : it.park.ref), note: String(it.park.note == null ? "" : it.park.note), at };
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
@@ -1309,7 +1365,7 @@ async function withdrawAll() {
       await ref.delete();
     } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
     delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
-    done.push({ it, prior, draft: null, changing: false, withdrawn: true });
+    done.push({ it, prior, draft: null, changing: false, withdrawn: true, act: prior.act });
   }
   saveDraft();
   return done;
@@ -1461,11 +1517,50 @@ function renderList() {
   Object.keys(cards).forEach((id) => { if (!open.has(id)) delete cards[id]; });
   if (state.meta) {
     want.push(h("p", { class: "checked" }, "Checked against " + (state.meta.checked || "")));
-    const pk = state.meta.parked || [];
-    if (pk.length) want.push(h("div", { class: "parked" }, h("b", {}, "Parked by you"), h("ul", {}, pk.map((p) => h("li", {}, p.ref + ": " + p.note)))));
+    const pk = parkedEl(); if (pk) want.push(pk);
   }
+  const a0 = document.activeElement, focusId = a0 && a0.closest && a0.closest("#parked") ? a0.id : "";
   reconcile(list, want);
+  // The block is rebuilt on each render, so a press keeps its focus here. Change leaves the line for its toggles.
+  if (focusId) { const f = $(focusId) || $(focusId.replace(/^pk-change-/, "pk-unpark-")); if (f) f.focus({ preventScroll: true }); }
 }
+const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
+const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.", WHY_NODB = "This view cannot reach the page's store. Reply in the thread instead.";
+function pkToggle(p, it, act, why) {
+  const label = ACT_NAME[act], a = { type: "button", class: "btn pkb " + (act === "unpark" ? "alt" : "dash"), id: "pk-" + act + "-" + (it ? p.id : "noid"), "aria-label": label + " " + p.ref };
+  if (why) { a["aria-disabled"] = "true"; a["data-why"] = why; } else { a["aria-pressed"] = String((state.draft[it.id] || {}).act === act); a.onclick = () => pressPark(it, act); }
+  return h("button", a, h("span", { class: "off" }, label), h("span", { class: "on", "aria-hidden": "true" }, "✓ " + label));
+}
+// One line: the text, then its acts in one row. Off (no id, no store), staged, sent with Change, or routed with a filled badge.
+function pkLine(p, it, routed) {
+  const sv = it && isSaved(it) ? savedOf(it) : null, act = routed ? routed.act : sv ? sv.act : it ? (state.draft[it.id] || {}).act : null;
+  let acts;
+  if (routed) acts = [h("span", { class: "ans filed" }, ACT_DONE[routed.act])];
+  else if (sv) acts = [h("span", { class: "ans", title: "Sent " + fmt(sv.at) + ". Goes to " + it.owner + "." }, ACT_SENT[sv.act] || "Sent", " ", h("span", { class: "t" }, fmt(sv.at, false))),
+    h("button", { class: "btn quiet changebtn", type: "button", id: "pk-change-" + p.id, "aria-label": "Change " + p.ref, onclick: () => changePark(it, sv) }, "Change")];
+  else { const why = !it ? WHY_NOID : !state.db ? WHY_NODB : ""; acts = ACTS.map((a) => pkToggle(p, it, a, why)); }
+  const id = p.id || "noid";
+  return h("li", { class: "pk" + (act === "drop" ? " drop" : "") + (routed ? " routed" : ""), id: "pk-" + id },
+    h("p", { class: "pk-txt" }, h("span", { class: "ref" }, p.ref + ":"), " ", h("span", { class: "nt" }, p.note)),
+    h("div", { class: "pk-acts", id: "pk-acts-" + id }, acts),
+    it && state.notice[it.id] ? h("p", { class: "status", role: "status" }, state.notice[it.id]) : null);
+}
+function parkedEl() {
+  const live = parkItems(), rows = ((state.meta && state.meta.parked) || []).filter((p) => p && typeof p === "object").map((p) => pkLine(p, live.find((x) => x.park === p)));
+  Object.values(state.routed).sort((a, b) => a.i - b.i).forEach((r) => { const el = pkLine(r.p, null, r); rows.splice(Math.min(r.i, rows.length), 0, el); routedWatch.observe(el); });
+  if (!rows.length) return null;
+  return h("section", { class: "parked", id: "parked", "aria-labelledby": "pk-h" }, h("h2", { id: "pk-h" }, "Parked by you"),
+    h("p", { class: "pk-hint" }, "Unpark puts a line back in the work. Drop ends it. Each waits for Send, as an answer does."), h("ul", { class: "pk-list" }, rows));
+}
+// A routed line keeps its height while it is in view, so the Ask box below does not jump. Off screen it goes; above the view, the scroll follows.
+const routedWatch = new IntersectionObserver((es) => es.forEach((e) => {
+  const el = e.target; if (e.isIntersecting) return;
+  if (!el.isConnected) { routedWatch.unobserve(el); return; }
+  if (performance.now() - lastScroll < 150) { setTimeout(() => { if (el.isConnected) { routedWatch.unobserve(el); routedWatch.observe(el); } }, 160); return; }
+  const above = el.getBoundingClientRect().bottom <= 0, before = document.documentElement.scrollHeight;
+  routedWatch.unobserve(el); delete state.routed[el.id.replace(/^pk-/, "")]; render();
+  if (above) window.scrollBy(0, document.documentElement.scrollHeight - before);
+}));
 
 /* ---------- Overview ---------- */
 function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
@@ -1473,7 +1568,7 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
-  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().filter((i) => !isRuling(i)).length;
+  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().filter((i) => !isRuling(i) && !i.park).length;
   rail.hidden = !total && !state.rulings.length;
   const kids = !total ? [] : [h("div", { class: "ov-prog" },
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
@@ -1500,11 +1595,11 @@ function renderRail() {
 /* ---------- Bar and Send ---------- */
 function renderBar() {
   const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
-  const over = st.filter(isRuling).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over);
+  const over = st.filter(isRuling).length, pks = st.filter((i) => i.park).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over - pks);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", over && over + " overturn"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -1521,7 +1616,7 @@ const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
 // "No. 1", "No. 1 and No. 2", "No. 1, No. 2 and No. 3".
-const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => "No. " + n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
+const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => typeof n === "number" ? "No. " + n : n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
@@ -1574,9 +1669,9 @@ async function sendAll() {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
-      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id] });
+      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
-      entries.push({ n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
+      entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
@@ -1611,7 +1706,7 @@ function renderSent() {
   const what = h("div", { class: "sent-what" },
     h("p", { class: "sent-line" }, h("b", {}, said), h("span", { id: "sentStatus" }, p.status),
       blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null),
-    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = rcOf(w.it); return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })));
+    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = rcOf(w.it); if (w.it.park) return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, ACT_NAME[w.act] || "Parked"), h("span", { class: "pkref" }, w.it.park.ref)); return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })));
   const row = h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, (n ? "Undo send (" : "Undo withdraw (") + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close"));
   const old = $("sentIn").querySelector(".sent-head"), key = p.at + "|" + n;
   if (old && old.dataset.k === key) { old.lastElementChild.replaceWith(what); $("sentIn").lastElementChild.replaceWith(row); return; } // the stamp is not rebuilt, so it does not settle again each second
@@ -1646,7 +1741,8 @@ async function undoSend() {
     // An undone overturn leaves the ruling in force, so it is told apart from items that are open again.
     const tell = (ws, tail) => ws.length ? notifyClaude(noticeText(ws.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", tail), can) : null;
     const rul = told.filter((w) => isRuling(w.it)), rest = told.filter((w) => !isRuling(w.it));
-    await tell(rest, " are open again.");
+    await tell(rest.filter((w) => !w.it.park), " are open again.");
+    await tell(rest.filter((w) => w.it.park), " taken back.");
     await tell(rul, rul.length === 1 ? " ruling stands again." : " rulings stand again.");
   }
 }
@@ -1881,7 +1977,7 @@ render();
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; applyIdentity(); render(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); }, () => {});
 })();
 </script>
 

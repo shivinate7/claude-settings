@@ -120,6 +120,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
   has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
+- `answers/park-<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
+  `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
+  counts toward none, so never give an item an id that starts with `park-`. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
@@ -127,7 +130,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   also says "Read by <owner>" and the time.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
-  `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
+  `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
@@ -311,7 +314,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 ## Route and close
 
-Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An answer with `parked: true` goes to the page's writer, not to an item's owner, and takes the
+parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
@@ -346,6 +350,12 @@ item and leaves it open until the lane takes the answer. Then it closes the item
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+
+A parked answer (`answers/park-<id>`): the writer finds the entry in `meta/page.parked` by `id`.
+- `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
+- `drop`: file the abandon in the line's home (rule `building-land-design-or-abandon`).
+- Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
+  With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
 ## Make a repo's page
 

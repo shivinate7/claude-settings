@@ -229,6 +229,8 @@ def page_note(raw):
     notes = []
     for doc_id, data in _documents(hook.get("tool_response")):
         note = data.get("note")
+        if data.get("parked") is True:
+            continue  # a parked act's note is the entry's own text, not the owner's word
         if isinstance(note, str) and note.strip() and note.strip() != "accepted pick":
             notes.append((doc_id, data))
     if paths is None or not notes:
