@@ -25,8 +25,8 @@ When the report is there, each of these blocks asks for only the corrected lines
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
-holds a qualifying act (`questions-reach-page`, owner ruling 2026-11-01 23:31 CST: every question goes
-to the page writer in the same turn it is asked, no clock). The turn is every record after the last
+holds a qualifying act (`questions-reach-page`: every question goes to the page writer in the same
+turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included. Owner-facing session: the question box (main session), a send to
 the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
 collection items to this repo's page. Lane (own get_session record tagged cs-build:lane, or with a
