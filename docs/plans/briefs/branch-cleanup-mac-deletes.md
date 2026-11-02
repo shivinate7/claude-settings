@@ -7,7 +7,7 @@ The cloud proxy refuses a ref delete, so a session on the owner's Mac runs this 
 ## What is on the list
 
 - **On main by patch** (113): the tip is an ancestor of main, or `git cherry` prints no `+`, or one synthetic commit of the branch's net change is on main (decision `a-branch-is-redundant-by-patch-not-by-ancestry`, a branch is redundant by patch).
-- **Archived first** (23): batch branches whose PR closed without a merge, and lane branches with no open PR and no commit since 2026-10-30. Each tip is on origin under the `archive/` name in its row, checked by sha (rule `shared-trees-archive-then-delete`).
+- **Archived first** (23): integration branches whose PR closed without a merge, and lane branches with no open PR and no commit since 2026-10-30. Each tip is on origin under the `archive/` name in its row, checked by sha (rule `shared-trees-archive-then-delete`).
 
 Kept: `main`; branches with open PRs; branches a live lane names (`other-checkout-cd-gap` and its five related branches); `merge-lock/main`, the merge tool's lock; `roadmap`, `c138-roadmap-precommit` and `worktree-agent-a14b2fddf62c05643`, which share no history with main.
 
@@ -178,8 +178,8 @@ git ls-remote --heads origin | wc -l
 | batch-22 | patch | `66071ed3` |
 | batch-22b | patch | `b6936417` |
 | batch-37 | patch | `68807aec` |
-| batch-38 | archived:archive/batch-38-v2 | `41b963a0` |
-| batch-39 | archived:archive/batch-39-v2 | `49b7034d` |
+| batch-38 | archived:archive/batch-38 | `41b963a0` |
+| batch-39 | archived:archive/batch-39 | `49b7034d` |
 | batch-40 | archived:archive/batch-40 | `92141e75` |
 | batch-40-r2 | patch | `5aea7cc5` |
 | batch-40-r3 | patch | `73ab3f1b` |
@@ -271,7 +271,7 @@ git ls-remote --heads origin | wc -l
 | sweep-fast | archived:archive/sweep-fast | `9475d0fb` |
 | test-builder-shell-write | ancestor | `aada878f` |
 | test/widens-card-plain-words-red | patch | `5b375c33` |
-| worktree-agent-a159a691f176f3cbc | archived:archive/worktree-agent-a159a691f176f3cbc-v2 | `ac692a61` |
+| worktree-agent-a159a691f176f3cbc | archived:archive/worktree-agent-a159a691f176f3cbc | `ac692a61` |
 | worktree-agent-a1761859b79cf0ecc | ancestor | `58d5ee76` |
 | worktree-agent-a1d9445139018c3d6 | patch | `629710cb` |
 | worktree-agent-a1e0ff304689d17f2 | ancestor | `5f06f58e` |
