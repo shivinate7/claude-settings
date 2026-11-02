@@ -15179,13 +15179,13 @@ add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-fl
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# The floor's remedy names Sonnet only. Opus is refused above a builder's row (owner item 127 pick a,
-# Nov 1 17:25 CST), so a remedy that names it sends the owner into the Opus refusal.
+# The floor's remedy names Sonnet only. Opus is refused above a builder's row, so a remedy that names it
+# would send the owner into the Opus refusal (decision agent-model-cap).
 add("floor: Agent builder with model haiku names sonnet, and not opus", "deny", "agent-model-floor",
     carries=("model sonnet",), lacks=("opus", "Opus"),
     tool="Agent", prompt="do it", model="haiku", subagent_type="builder")
-# An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker. Without it
-# the Opus ceiling refuses the spawn, and an owner override lifts the refusal.
+# An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker. Without it the
+# Opus ceiling refuses it, and an owner override lifts it (decision agent-model-cap).
 add("floor: Agent Explore with model opus and no Audit: marker is denied (item 137)", "deny",
     "agent-model-cap", tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
 add("floor: Agent Explore with model opus and Audit: on line one is allowed (item 137)", "allow",
@@ -15286,8 +15286,6 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer'")),
         ("reviewer Round 2 on sonnet", "allow",
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
-        ("reviewer Round 3 on opus", "allow",
-         _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'")),
         ("reviewer Round 3 on haiku", "deny",
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
         ("builder Try 3 on sonnet", "deny",
@@ -15355,13 +15353,18 @@ for _name, _verdict, _script in (
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
+# A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
+# Agent spawn (decision agent-model-cap).
+add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
+    "agent-model-cap", tool="Workflow",
+    script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
 
-# ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
-# Task spawn that sets model opus is refused under `agent-model-cap`, unless a standing grant covers it: Plan, the
-# designer, the design reviewer, a builder's third-round marker line, and an Explore whose brief carries the Audit:
-# marker. An owner override lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too.
-# The floor and the step-up deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the
-# floor and step-up blocks, and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them.
+# ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
+# refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
+# builder's third-round marker line, and an Explore whose brief carries the Audit: marker. An owner override
+# lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
+# deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
+# and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
 # the role does not own earns the grant), a false refusal (a standing grant, a Sonnet spawn, or text that
 # only names opus is refused).
@@ -22424,8 +22427,8 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
 
 
 def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
-    """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts that
-    refusal, so the case is not never-lifted."""
+    """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts it,
+    so the case is not never-lifted."""
     add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
         **role_input(role, model, prompt))
 
@@ -22542,6 +22545,118 @@ role_model_allow("role-model: design-reviewer on opus is allowed (standing grant
                  "Review the mockup.")
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
+
+# ---- H: a Workflow agent() call faces the role row and the Opus ceiling, as an Agent spawn does (decision agent-model-cap).
+# The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
+# Opus ceiling (agent-model-cap) and the role row (agent-role-model). The Audit: marker counts on the brief's first line
+# only. Failure classes: a false allow (an above-row agent() call in a script passes); a false deny (a comment, a string
+# or a template literal hides the brief or the model, or the marker is read past line 1).
+def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=()):
+    """A Workflow script whose agent() call is above its role's row: denied under `rule`."""
+    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, script=script)
+
+
+def workflow_allow(name, script):
+    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, script=script)
+
+
+workflow_refuse("role-model: Workflow builder on opus with no round line is denied under agent-model-cap",
+                _step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with no marker is denied under agent-model-cap",
+                _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on sonnet with no marker is denied under agent-role-model",
+                _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'sonnet'"),
+                rule=ROLE_RULE, carries=(ROLE_REMEDY, EXPLORE_MARKER), lacks=ROLE_LACKS)
+workflow_refuse("role-model: Workflow builder on opus as a prompt key is denied under agent-model-cap",
+                "await agent({prompt: 'Fix the failing case.', agentType: 'builder', model: 'opus'});")
+workflow_refuse("role-model: Workflow builder on opus with a lone quote in its brief is denied",
+                _step_flow("\"Don't touch the tests. Fix the case.\"", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a comment opener inside its brief is denied",
+                _step_flow("'See https://example.test/a and /* keep going. Fix the case.'",
+                           "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus in a multi-line template brief is denied",
+                _step_flow("`Fix the failing case.\n// keep the old API\nDon't stop.`",
+                           "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with Audit: on line two of a template is denied (line one only counts)",
+                _step_flow("`Find where X is defined.\nAudit: check the glossary.`", "agentType: 'Explore', model: 'opus'"))
+# At its row: a builder on sonnet is allowed.
+workflow_allow("role-model: Workflow builder on sonnet is allowed (at its row)",
+               _step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'sonnet'"))
+# Controls: the Audit: marker on line one is the Explore grant (item 137 pick a), and a commented-out call is not a spawn.
+workflow_allow("role-model: Workflow Explore on opus with Audit: on line one is allowed (item 137)",
+               _step_flow("'Audit: check the glossary for meaning drift.'", "agentType: 'Explore', model: 'opus'"))
+workflow_allow("role-model: a commented-out Workflow builder on opus is not a spawn and is allowed",
+               "// agent('Fix the failing case.', {agentType: 'builder', model: 'opus'})\n"
+               "await agent('Fix the failing case.', {agentType: 'builder', model: 'sonnet'});")
+
+# ---- H2: a brief the scan cannot read grants nothing. A variable brief has no literal for the scan, and a spread
+# before the options' literal keys hides them, so the Opus ceiling judges the call with no marker and refuses it
+# (decision agent-model-cap). The markers below sit in the variable on purpose: the
+# scan does not read them, so they are no grant. Failure class: a false allow (an above-row Opus spawn in a script
+# passes because its brief or its options are not literal).
+workflow_refuse("role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied",
+                "const brief = 'Round 3 of 3. Finish the fix.';\n"
+                + _step_flow("brief", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a template brief built from a variable is denied",
+                "const who = 'the failing case';\n"
+                + _step_flow("`Fix ${who}.`", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a spread before its literal keys is denied",
+                "const opts = {};\n"
+                + _step_flow("`Fix the failing case.`", "...opts, agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with a variable brief holding an Audit: marker is denied",
+                "const brief = 'Audit: check the glossary for meaning drift.';\n"
+                + _step_flow("brief", "agentType: 'Explore', model: 'opus'"))
+# The control: the same variable brief on the builder's own row is allowed.
+workflow_allow("role-model: Workflow builder on sonnet with a variable brief is allowed (at its row)",
+               "const brief = 'Fix the failing case.';\n"
+               + _step_flow("brief", "agentType: 'builder', model: 'sonnet'"))
+
+# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
+# constant holds the words, so each refusal of a variable brief carries the same remedy.
+BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
+workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names the literal-brief remedy",
+                "const brief = 'Fix the failing case.';\n"
+                + _step_flow("brief", "agentType: 'builder', model: 'opus'"),
+                carries=BRIEF_LITERAL_REMEDY)
+workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is denied under agent-role-model and names the literal-brief remedy",
+                "const brief = 'Audit: check the glossary for meaning drift.';\n"
+                + _step_flow("brief", "agentType: 'Explore', model: 'sonnet'"),
+                rule=ROLE_RULE, carries=BRIEF_LITERAL_REMEDY, lacks=ROLE_LACKS)
+
+# H4: a call whose agentType the scan cannot read is skipped, not judged as general-purpose (guard.py spawn_inputs).
+# A shorthand agentType is unread, so the designer and design-reviewer rows pass on opus.
+workflow_allow("role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed",
+               "for (const agentType of ['designer', 'design-reviewer']) agent(`Review the screen.`, {agentType, model: 'opus'});")
+# A spread of an object the scan cannot read hides the agentType, so the call is skipped and not judged as general-purpose.
+workflow_allow("role-model: Workflow opus agent() with a spread and no literal agentType is skipped, and allowed",
+               "const base = {};\n"
+               "await agent(`Fix the failing case.`, {...base, model: 'opus'});")
+# The boundary pair: a literal agentType after the same spread is read, and the Opus ceiling refuses it.
+workflow_refuse("role-model: Workflow builder on opus after a spread of base with a literal agentType is denied",
+                "const base = {};\n"
+                "await agent(`Fix the failing case.`, {...base, agentType: 'builder', model: 'opus'});")
+
+
+def workflow_opus_override_check():
+    """The owner's typed override lifts the Opus refusal of a Workflow builder whose brief is a variable: refused with
+    no override, allowed under it, and refused again once the one-act override is spent."""
+    config, session = role_config("ov-workflow-opus", REPO), "role-ov-workflow-opus"
+    script = "const brief = 'Fix the failing case.';\n" + _step_flow("brief", "agentType: 'builder', model: 'opus'")
+
+    def call(seconds):
+        return ov_call("Workflow", {"script": script}, NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("under the typed override", lambda: call(60), "allow", "agent-model-cap"),
+        ("the override spent", lambda: call(120), "deny", "agent-model-cap"),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "refused with no override, allowed under the typed override, refused again once spent"
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
@@ -22674,6 +22789,8 @@ ROLE_OVERRIDE_CHECKS = (
      role_override_no_model_check),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
+    ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
+     workflow_opus_override_check),
 )
 for _label, _check in ROLE_OVERRIDE_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
