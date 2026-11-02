@@ -1,0 +1,9 @@
+{
+ "title": "The feedback inbox accepts a roadmap step as a task home",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21008,
+ "why": "Triage files the owner's tasks as roadmap steps, but hook feedback_guard accepts only docs/todo.md or docs/debts as a task home. Triage then marks the item as a note, which hides that it is a task (Nov 1 19:05 CST, items fb-1902-1 and fb-1902-2).",
+ "note": "Fix: feedback_guard accepts roadmap:<slug> as a task home when that step file exists on the repo's record branch (read with git show origin/roadmap:roadmap/data/steps/<slug>.json, no new process). Red first: roadmap:<slug> for an existing step passes; for a missing slug it is refused. Basis: measured, two refusals this turn. Port: yes, every repo with a roadmap. Ready.",
+ "updatedAt": "2026-11-02T01:06:00Z"
+}
