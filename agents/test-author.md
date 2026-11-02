@@ -14,9 +14,10 @@ Never write a refused path another way, such as with a shell command or a script
 needs a product change, report that change. The orchestrator assigns it to a builder.
 
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
-Run the tests you write, and show each one fails for the right reason before the build, or
-passes after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+Run the tests you write. Show each one red for its named cause before the build, or passing after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
+
+Follow the practices in decision `test-strategy-reset`, section "How to write a test that earns its keep". At write time: show each new case red on a named old commit, with a green control beside it. The red must be an assert that fails for the named cause, never a crash, an import error or "not built". Each failure message names one cause. Use no real clock and no machine load. Assert the scope before the subject. Fixtures reach the empty and full-size states.
 
 Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
 
