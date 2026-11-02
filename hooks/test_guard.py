@@ -11690,6 +11690,22 @@ add("impeccable: audit then polish in one args string is denied", "deny", "impec
     tool="Skill", skill=IMP, args="audit; polish")
 add("impeccable: bare name with polish is denied", "deny", "impeccable-review-only", tool="Skill",
     skill="impeccable", args="polish")
+# refusal-vs-rule (impeccable-review-only, design-skills): the skill reads the FIRST word as its command
+# and the rest as target text. A `;` inside that target starts no second command, so a review with a
+# focus after the `;` loads. A non-review first word stays refused. A non-review verb after the `;` also
+# stays refused: the skill asks once when two commands fit, and the gate cannot tell that ask from a run.
+add("impeccable: audit with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="audit the page; focus on a11y")
+add("impeccable: critique with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
+    args="critique the page; focus on contrast")
+add("impeccable: audit then polish after the semicolon is denied", "deny", "impeccable-review-only",
+    tool="Skill", skill=IMP, args="audit the page; then polish")
+add("impeccable: audit then polish with no then after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="audit the page; polish")
+add("impeccable: a focus first word with an audit after the semicolon is denied", "deny",
+    "impeccable-review-only", tool="Skill", skill=IMP, args="focus the page on a11y; audit")
+add("impeccable: shape with a review target is denied", "deny", "impeccable-review-only", tool="Skill",
+    skill=IMP, args="shape the page; audit")
 
 add("skill: frontend-design with args is allowed", "allow", tool="Skill", skill="frontend-design",
     args="polish")
