@@ -944,3 +944,5 @@
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
 - ci-alarm-stale-schedule-red: the CI alarm keeps reporting a stale schedule red that a newer same-job run of another group cleared for the merge tool, until the next scheduled run (lane red-main-stale-schedule). Decision: no-merge-onto-red-main.
+- base-clear-ref-path-untested: no test covers the `@ref` path compare in the cross-group clear (merge/merge.py `base_state`); every fixture path is plain, so a revert to a raw compare stays green and brings the false block back. Fails closed. Decision: no-merge-onto-red-main.
+- base-clear-job-level-only: the cross-group clear matches jobs leg for leg, not steps; a step gated on the event inside a same-named job can still pass the newer run. Main's same-group clear has the same limit. Decision: no-merge-onto-red-main.
