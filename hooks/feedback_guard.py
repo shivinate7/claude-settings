@@ -44,9 +44,13 @@ a turn end in these cases:
     origin/<record branch> (layout.record_branch, then the copy folder of layout.artifacts' waiting-page
     export, else layout.path "waiting-data") holds an item under `items/` whose field n equals the number
     (Homes.filed_numbers). Only in a repo that names a waiting page. A number not in the copy blocks, and the
-    remedy says to export the page copy. A copy that cannot be read (no record branch ref, no items folder,
-    the read fails) blocks nothing: a systemMessage "Feedback guard: page filing not checked" says so, and the
-    send check decides alone. Risk kind: likely risk, a send the page writer never filed.
+    remedy says to export the waiting copy and to fetch the record branch, and says the copy is read as of
+    the last fetch: the hook fetches nothing. A copy that cannot be read (no record branch ref, no items
+    folder, an item file that is not a JSON object, the read fails) blocks nothing: a systemMessage "Feedback
+    guard: page filing not checked" says so, and the send check decides alone. The check runs only after a
+    proved send: a send the check stood down on skips it. Risk kind: named incident. Rulings fb-1312-1 and
+    fb-1313-1 (owner, one grant at 13:12 and 13:13 CST), where a send reached the page writer and
+    the item was never filed.
     Cost: one rev-parse and one `grep` of the copy's items, in the git of the Stop
     process, once per Stop that holds an open page item with a proved send. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
@@ -425,8 +429,11 @@ class Homes:
             try:
                 found = json.loads("\n".join(lines))
             except ValueError:
-                continue
-            v = found.get("n") if isinstance(found, dict) else None
+                found = None
+            if not isinstance(found, dict):
+                self.skip_filing = "an item file in the waiting copy at origin/%s is not a JSON object" % branch
+                return self._filed
+            v = found.get("n")
             if isinstance(v, int) and not isinstance(v, bool):
                 numbers.add(str(v))
             elif isinstance(v, str) and v.isdigit():
@@ -494,19 +501,23 @@ class Pages:
         if why not in self.skip[label]:
             self.skip[label].append(why)
 
-    def sent(self, text, k, proof, stamp, label="page"):
+    def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
-        k-th block with this text. True too when the check stands down: no transcript, or no such
-        owner record."""
+        k-th block with this text, False when none does, None when the check stands down: no
+        transcript, or no such owner record."""
         if not self._load():
             self.stand_down(label, self.unread)
-            return True
+            return None
         anchors = [i for i, said in self.owners if said == text]
         if len(anchors) < k:
             self.stand_down(label, "the transcript has no owner record %d for the message at %s" % (k, stamp))
-            return True
+            return None
         return any(proof(use) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
                    for use in _transcript.tool_uses(r))
+
+    def sent(self, text, k, proof, stamp, label="page"):
+        """True when the proof is found, and true too when the check stands down (see proof_state)."""
+        return self.proof_state(text, k, proof, stamp, label) is not False
 
 
 def norm(text):
@@ -565,13 +576,17 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
     n = m.group(1)
-    if pages is None or pages.sent(text, k, lambda use: _proves(use, n), stamp):
+    state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n), stamp)
+    if state is None:
+        return None
+    if state:
         numbers, branch, folder = homes.filed_numbers() if homes is not None else (None, None, None)
         if numbers is None or str(int(n)) in numbers:
             return None
-        return ("%s [page] page:%s: the waiting copy at origin/%s holds no item with n %s; export the page copy"
-                " (the waiting page's export into %s on that branch), push it, then close this item"
-                % (item_id, n, branch, n, folder))
+        return ("%s [page] page:%s: the waiting copy at origin/%s, as of the last fetch, holds no item with n %s;"
+                " export the waiting copy from the page into %s on that branch and push it, then run"
+                " `git fetch origin %s` (this hook fetches nothing) and end the turn again"
+                % (item_id, n, branch, n, folder, branch))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
