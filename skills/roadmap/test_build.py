@@ -15,6 +15,7 @@ import sys
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 HERE = pathlib.Path(__file__).resolve().parent
@@ -1583,6 +1584,140 @@ class ForkRecord(Fixture):
         self.broken_extras("{not json")
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
+
+
+class MockupFiles(UpkeepFixture):
+    """The mockup check of the build. A step's note, why or ask that cites an item by its mockup id (item<N>-<letter>,
+    a whole token) needs a `mockups` entry, {"<id>": "<path>"}. A miss prints `mockup with no file: <step> <id>` for
+    each id, writes the page, and the build exits 1. A step with no mockup passes. HOME is this case's own folder, so
+    no case reads or writes the real home. The repo is "fixture" (UpkeepFixture's origin), so its machine home is
+    <HOME>/Developer/fixture-imports."""
+
+    MISS = "mockup with no file"
+    MACHINE = "fixture-imports"
+    MACHINE_ITEM = "~/Developer/fixture-imports/item48/a.html"
+    APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+    SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+    DESIGN_ITEM = "docs/design/item48/a.html"
+
+    def setUp(self):
+        super().setUp()
+        self.home = pathlib.Path(self.tmp.name) / "home"
+        self.home.mkdir()
+        patch = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def machine_item(self):
+        """Make the machine home's item file: the folder and the file, on this run's home."""
+        path = self.home / "Developer" / self.MACHINE / "item48" / "a.html"
+        path.parent.mkdir(parents=True)
+        path.write_text("<p>mockup</p>\n", encoding="utf-8")
+
+    def commit_design(self, rel):
+        """Commit one file under the checkout's design folder on main, where the build reads the checkout."""
+        self.on_main()
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("<p>mockup</p>\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "design " + rel)
+
+    def misses(self, out):
+        return re.findall(r"^%s: (.*)$" % re.escape(self.MISS), out, re.M)
+
+    def steps_line(self, out, count):
+        """Scope first: the build read `count` steps, so an empty miss list is not a build that read nothing."""
+        self.assertIn("%s: %d steps" % (self.out.name, count), out, "the build did not read the steps")
+
+    def test_an_item_cited_in_the_note_with_no_mockup_is_a_miss_and_the_page_is_written(self):
+        self.commit_step("c1", title="Item forty eight picker", note="Shape the item48-a picker.")
+        page, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertIn("Item forty eight picker", page, "the red build did not write the page")
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_an_item_cited_in_why_with_no_mockup_is_a_miss(self):
+        self.commit_step("c1", why="The item49-b option has no picture.")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item49-b"])
+
+    def test_an_item_cited_in_ask_with_no_mockup_is_a_miss(self):
+        self.commit_step("c1", ask="Which of item48-a or item48-b?")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a", "c1 item48-b"])
+
+    def test_a_cite_inside_a_longer_token_is_not_a_mockup_id(self):
+        self.commit_step("c1", title="Lookalike ids", note="Compare item480-a, xitem48-a and item48-ab.")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Lookalike ids", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_a_step_with_no_mockup_passes(self):
+        self.commit_step("c1", title="Plain step", note="No picture is cited here.")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Plain step", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_an_entry_outside_the_mockup_homes_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.APP_SUPPORT})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_an_image_hosted_as_an_artifact_asset_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.SHOT_URL})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_design_entry_whose_file_is_not_in_the_checkout_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_design_entry_whose_file_is_in_the_checkout_passes(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_a_machine_home_entry_with_no_file_while_its_folder_exists_is_a_miss(self):
+        (self.home / "Developer" / self.MACHINE).mkdir(parents=True)
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.MACHINE_ITEM})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_machine_home_entry_whose_file_is_there_passes(self):
+        self.machine_item()
+        self.commit_step("c1", title="Machine held", note="Shape the item48-a picker.", mockups={"item48-a": self.MACHINE_ITEM})
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Machine held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_cloud_with_no_developer_folder_reads_the_entry_unknown_and_is_no_miss(self):
+        self.commit_step("c1", title="Cloud step", note="Shape the item48-a picker.", mockups={"item48-a": self.MACHINE_ITEM})
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Cloud step", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_only_the_item_with_no_file_is_named_when_a_step_cites_two(self):
+        self.machine_item()
+        self.commit_step("c1", note="Shape item48-a and item48-b.", mockups={"item48-a": self.MACHINE_ITEM})
+        self.commit_step("c2", order=2, title="Plain", note="No picture is cited here.")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 2)
+        self.assertEqual(self.misses(out), ["c1 item48-b"])
 
 
 if __name__ == "__main__":
