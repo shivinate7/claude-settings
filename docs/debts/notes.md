@@ -1096,3 +1096,4 @@
 - mutate-js-linecount-per-site: `lineOf` in hooks/mutate_js.mjs splits the source from its start for each site, so the cost is O(n) per site. Decision: mutation-report-scores-suites.
 - mutate-js-multiline-site-first-line: a multi-line site is keyed by its first line (`lineOf(node)`, hooks/mutate_js.mjs). Decision: mutation-report-scores-suites.
 - renamed-file-all-lines-changed: `changed_lines` runs with `--no-renames`, so a renamed file reads as all lines added (hooks/mutate_shared.py). Decision: mutation-report-scores-suites.
+- lane-force-push-refused: the auto-mode classifier refused a lane's `git push --force-with-lease` to its own draft branch, to add Red-run trailers, twice on 2026-11-02: lane worktree-base-copies-remove at 00:30 CST (replacement PR #1064) and lane tci-6 at 06:05 CST (replacement PR #1087). Refusing stays as on main (lint/report_guard.py forced an allow ask). Decision: owner-override.
