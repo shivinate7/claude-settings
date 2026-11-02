@@ -21,7 +21,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 | checks-guard (new) | ubuntu | 30 | 9.8 | 10.6 | none | 22 | 50 (10.9 projected) | 0 | yes |
 | checks-windows-rest | windows | 30 | 17.0 | 43.0 | 38 | 28 | 48 (13.3 projected) | 1, against the cap in force (38) | yes after the split |
 | checks-windows-sweep (new) | windows | 30 | 7.3 | 19.1 | none | 40 | 49 (19.6 projected) | 0 | yes |
-| shell-macos | macos | 30 | 7.2 | 9.1 | 10 | 18 | 51 | 0 | yes |
+| shell-macos | macos | 17 | 12.1 | 18.1 | 18 | 25 | 72 | 1, against the cap in force (18) | yes |
 | checks-macos | macos | 30 | 26.5 | 32.7 | 50 | 50 | 65 | 0 | yes |
 | checks-windows-guard | windows | 30 | 5.6 | 12.8 | 20 | 20 | 64 | 0 | yes |
 | checks-windows-guard-2 | windows | 30 | 11.5 | 13.2 | 20 | 20 | 66 | 0 | yes |
@@ -36,6 +36,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 - Every after-figure for a new or re-capped job (checks, checks-guard, checks-windows-rest, checks-windows-sweep) is projected. The projection subtracts the measured step times of the moved suites from the measured job times. Cap ends count against the cap in force before this change.
 - One full run on the branch (workflow dispatch, run 40559535659, 2026-10-27) measured each job under its new cap: checks 16.9 of 36, checks-guard 7.4 of 22, checks-windows-rest 6.2 of 28, checks-windows-sweep 12.4 of 40, shell-macos 7.6 of 18. The highest was checks-windows-guard-2 at 13.0 of 20 (65%). One run is n=1, so the next 30 runs on main replace the projections.
 - `checks-windows-rest`: run 40542065223 (push to main) ended at the 38 min cap that was in force. The job started 16:33:37 UTC, so the cap fired at 17:11:37. GitHub's cancel grace then ran 5 more minutes, to 17:16:37, which is the 43.0 min figure. The step "Record stamp engine fixture suite" (normal slowest 1.5 min, n 28) started at 16:53:15 and never finished. That step now has its own 5 min cap, so a hang reads red at the step.
+- `shell-macos`: its row uses a later window than the table. It is 17 runs of `checks.yml` from run 41355883918 (2026-11-01 22:11 UTC) to run 41407916830 (2026-11-02 07:41 UTC): 16 green runs and 1 cap end, range 8.77 to 18.07 min. Run 41407916830 (PR batch-63e) ran 07:41:40Z to 07:59:44Z with every step green, then was cancelled at the 18 min cap. Runs 41406600962 (batch-63c) and 41375543494 (batch-60), at 11.55 and 13.90 min, were cancelled by other acts, not by the cap, and are left out. The step "install.sh checkout-detection suite" grew (slowest 10.87 min, 10.80 in the cap-end run; mean 6.18 to 7.79 min, oldest against newest six green runs), so it has its own 15 min cap.
 - `checks-windows-sweep`: the fixture suite takes 8.2 min slowest and the mutation test 10.9 min slowest (push only).
 - `checks` is not re-capped. Its projected slowest is 19.8 of 36 (55%).
 - `checks` slowest is still above half its cap, so debt `checks-job-near-timeout` stays open.
