@@ -156,7 +156,7 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:base-red-or-unknown` | no-merge-onto-red-main | "Unknown refuses, as the silent-undo check does." | exact | exact | the newest base run is red, or cancelled with no red job (947-980) | - |
 | `merge:head-read-verdict` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | red, pending, no check yet, or unknown is not green (1025-1057) | - |
 | `merge:ready-never-sent` | records-index-at-merge | "so the batch runner marks the PR ready" | exact | exact | the tool never marks a PR ready (1073) | - |
-| `merge:blocked-or-behind` | none | - | uncited | exact | a PR GitHub reads BLOCKED (e.g. by a missing review) or BEHIND gets no merge call (1085) | rule rewrite: add to standing-merge-grant that a BLOCKED PR never merges |
+| `merge:blocked-or-behind` | none | - | uncited | exact | a PR GitHub reads BLOCKED (for example, by a missing review) or BEHIND gets no merge call (1085) | rule rewrite: add to standing-merge-grant that a BLOCKED PR never merges |
 | `merge:merged-other-head` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | the PR merged at another head (1103); no revert | - |
 | `merge:outcome-unproven` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | state unread (1098), network loss (1105), or exit 0 still open (1107) | - |
 | `merge:refused-reply` | standing-merge-grant | "a refusal reply with the pull request still OPEN" | exact | exact | GitHub refuses the merge call (1111); the claim reverts | - |
@@ -207,7 +207,7 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge:base-moved-in-wait` | merge-needs-current-base | "a batch merges only after a green run that holds for the current main." | exact | exact | main moved during the wait, not small (2324) | - |
 | `merge:heal-push-failed` | records-index-at-merge | "When only the page conflicts with the base, the tool rebuilds it on the merged tree." | exact | exact | the heal commit push fails; the claim reverts (2334) | - |
 | `merge:heal-not-green` | merge-needs-current-base | "A heal merge commit ... Its own checks wait before the merge." | exact | exact | the heal commit is red, or the base moved again (2343-2349) | - |
-| `merge:host-refused` | none | - | uncited | exact | the merge call is refused, e.g. the head moved; the claim reverts (2366) | - |
+| `merge:host-refused` | none | - | uncited | exact | the merge call is refused, for example the head moved; the claim reverts (2366) | - |
 | `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push; the claim reverts (2266-2277, 2370) | - |
 | `merge:role-write-failed` | session-tiers | "Local sessions: unchanged." | uncited | exact | `--role` outside the cloud, with no session id, or on an unwritable file (2422, 2424, 2436) | - |
 | `merge:role-tier-invalid` | session-tiers | "The merge tool refuses any other tier, and the refusal lists no tier." | exact | exact | `--role lane` (2426) | - |
