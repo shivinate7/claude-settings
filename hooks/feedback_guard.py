@@ -40,6 +40,15 @@ a turn end in these cases:
     `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
     transcript read and the anchoring of the page check (Pages.sent takes the proof). Its stand-down systemMessage reads
     "Feedback guard: repo sends not checked" and the page one reads "page sends not checked";
+  - page-filed-check. A page item whose send is proved also needs its number filed: the waiting copy at
+    origin/<record branch> (layout.record_branch, then the copy folder of layout.artifacts' waiting-page
+    export, else layout.path "waiting-data") holds an item under `items/` whose field n equals the number
+    (Homes.filed_numbers). Only in a repo that names a waiting page. A number not in the copy blocks, and the
+    remedy says to export the page copy. A copy that cannot be read (no record branch ref, no items folder,
+    the read fails) blocks nothing: a systemMessage "Feedback guard: page filing not checked" says so, and the
+    send check decides alone. Risk kind: likely risk, a send the page writer never filed.
+    Cost: one rev-parse and one `grep` of the copy's items, in the git of the Stop
+    process, once per Stop that holds an open page item with a proved send. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
     (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
     parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
@@ -151,6 +160,7 @@ HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
+FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
 GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, or a"
                " [note] item `-> %s` when the words are no grant" % NOT_A_GRANT)
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
@@ -287,7 +297,8 @@ class Homes:
     down, once, for the systemMessage line."""
 
     def __init__(self, cwd):
-        self.cwd, self.skip, self.skip_closed = cwd, None, None
+        self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
+        self._filed = None  # (numbers or None, branch, folder), read once per Stop
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -374,6 +385,54 @@ class Homes:
             return (root is not None and layout.waiting_page(root) != "unknown"), None
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return False, " ".join(str(e).split()) or type(e).__name__
+
+    def filed_numbers(self):
+        """(numbers, branch, folder): the item numbers, as digit strings, that the waiting copy holds. `numbers`
+        is None when the check does not apply or could not run. The copy is the `items/` folder of the waiting
+        export on origin/<record branch>, read with one `git grep`. None with `skip_filing` unset: the repo
+        names no waiting page. None with `skip_filing` set: the copy is unreadable, so the filing is unknown."""
+        if self._filed is not None:
+            return self._filed
+        self._filed = (None, None, None)
+        try:
+            import layout
+        except ImportError as e:
+            self.skip_filing = " ".join(str(e).split()) or "ImportError"
+            return self._filed
+        try:
+            start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+            root = self._root(start) if start else None
+            if root is None or layout.waiting_page(root) == "unknown":
+                return self._filed
+            branch = layout.record_branch(root)
+            waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+            folder = (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+            ref = "refs/remotes/origin/" + branch
+            run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", ref, "--", folder + "/items/"])
+        except (layout.LayoutError, ruling_home._GitFailure) as e:
+            self.skip_filing = " ".join(str(e).split()) or type(e).__name__
+            return self._filed
+        if run.returncode != 0 or not run.stdout.strip():
+            self.skip_filing = "no waiting copy at origin/%s under %s/items" % (branch, folder)
+            return self._filed
+        files, prefix = {}, ref + ":"
+        for ln in run.stdout.split("\n"):
+            if ln.startswith(prefix):
+                path, _, text = ln[len(prefix):].partition(":")
+                files.setdefault(path, []).append(text)
+        numbers = set()
+        for lines in files.values():
+            try:
+                found = json.loads("\n".join(lines))
+            except ValueError:
+                continue
+            v = found.get("n") if isinstance(found, dict) else None
+            if isinstance(v, int) and not isinstance(v, bool):
+                numbers.add(str(v))
+            elif isinstance(v, str) and v.isdigit():
+                numbers.add(str(int(v)))
+        self._filed = (numbers, branch, folder)
+        return self._filed
 
     def homes_line(self):
         """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
@@ -499,14 +558,20 @@ def _writes_n(node, n):
     return isinstance(node, list) and any(_writes_n(c, n) for c in node)
 
 
-def page_problem(item_id, rest, text, k, stamp, pages):
-    """None when the page item's home is page:<n> and the send is proved, or the check stood down."""
+def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
+    """None when the page item's home is page:<n>, the send is proved and the waiting copy holds n, or the
+    check stood down. The send check decides first; the filing check runs only for a proved send."""
     m = PAGE_HOME.fullmatch(home_word(rest))
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
     n = m.group(1)
     if pages is None or pages.sent(text, k, lambda use: _proves(use, n), stamp):
-        return None
+        numbers, branch, folder = homes.filed_numbers() if homes is not None else (None, None, None)
+        if numbers is None or str(int(n)) in numbers:
+            return None
+        return ("%s [page] page:%s: the waiting copy at origin/%s holds no item with n %s; export the page copy"
+                " (the waiting page's export into %s on that branch), push it, then close this item"
+                % (item_id, n, branch, n, folder))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
@@ -626,7 +691,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
             elif not it[2]:
                 out.append("%s needs `[kind] -> home`, kind one of %s" % (it[0], ", ".join(KINDS)))
             elif it[1].startswith("[page]"):
-                found = None if it[3] else page_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
+                found = None if it[3] else page_problem(it[0], it[1], text, seen[text], b["stamp"], pages, homes)
                 if found:
                     out.append(found)
             elif it[1].startswith("[repo]"):
@@ -966,6 +1031,8 @@ def main():
                     pages.skip.items(), key=lambda kv: kv[0] != "page")])
             if homes.skip_closed:
                 notes.append(FAIL_OPEN_CLOSED % homes.skip_closed)
+            if homes.skip_filing:
+                notes.append(FAIL_OPEN_FILING % homes.skip_filing)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
