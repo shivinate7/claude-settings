@@ -76,7 +76,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
 - **Solo session.** A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool does not yet allow it (record `standing-merge-grant`).
   - A solo session needs no batch runner. It merges only under that repo's own merge grant or the owner's named act (coordinator, 2026-11-02 14:55 CST, reading the owner's 14:02 CST words). It widens no grant. Record `standing-merge-grant` holds the scope.
   - A one-lane session merges its own lone lane, as a solo session does, only under that repo's merge grant or the owner's named act (owner, 2026-11-02 15:14 CST).
-- **A coordinator starts lane sessions** (owner, 2026-11-02 15:14 CST). Inside a standing build the owner started, a coordinator starts lane sessions with no further owner word. Outside one, each start needs the owner's word.
+- **A coordinator starts lane sessions** (owner, 2026-11-02 15:14 CST). Inside a standing build the owner started, a coordinator starts lane sessions with no further owner grant. Outside one, each start needs the owner's grant.
 - **A lane's handoff** lives on a `handoff/<slug>` branch, never in the lane PR (owner, 2026-11-02 14:26 CST).
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
