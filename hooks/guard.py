@@ -199,6 +199,7 @@ refuse() too, so an override lifts them.
 """
 
 import ast
+import glob
 import importlib
 import json
 import os
@@ -1637,13 +1638,20 @@ class _PythonWrites(ast.NodeVisitor):
             return node.value if isinstance(node.value, str) else None
         if isinstance(node, ast.Name):
             return self.names.get(node.id)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
             left, right = self.path_of(node.left), self.path_of(node.right)
-            return None if left is None or right is None else left + "/" + right
+            if left is None or right is None:
+                return None
+            return left + ("/" if isinstance(node.op, ast.Div) else "") + right
+        if isinstance(node, ast.JoinedStr):   # an f-string with no field is a literal
+            parts = [part.value for part in node.values if isinstance(part, ast.Constant)]
+            return "".join(parts) if len(parts) == len(node.values) else None
         if isinstance(node, ast.Call) and node.args and not node.keywords:
             maker = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             parts = [self.path_of(arg) for arg in node.args]
-            if maker in ("Path", "PurePath", "PosixPath") and None not in parts:
+            joins = maker == "join" and (
+                isinstance(node.func, ast.Name) or ast.unparse(node.func.value) in ("os.path", "posixpath", "ntpath"))
+            if (maker in ("Path", "PurePath", "PosixPath") or joins) and None not in parts:
                 return "/".join(parts)
         return None
 
@@ -1720,11 +1728,18 @@ def interpreter_code(tokens: list, segment: str, raw: str, before: int) -> tuple
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, powershell: bool) -> str:
     """The test path a builder's shell command writes, else ''. See the block comment above."""
     def at_test_path(path, where):
-        rel = repo_rel(path, where)
+        # A path in no repository is not judged here, as for the write tool's early warning.
+        if any(mark in path for mark in "*?["):
+            full = _expanded(path, where)
+            return any(is_test_rel(rel) for rel in (repo_rel(found, where, outside=False)
+                                                    for found in sorted(glob.glob(full))[:200])
+                       if rel is not None)
+        rel = repo_rel(path, where, outside=False)
         return rel is not None and is_test_rel(rel)
 
-    matched = _shell_write_hit(guard_core._strip_heredoc_bodies_unconditionally(raw), cwd,
-                               at_test_path, follow_cd=True)
+    # A heredoc fed to a shell is a script, so its lines are read; an interpreter's body is read below.
+    matched = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True), cwd,
+                               at_test_path, follow_cd=True, command_only=True)
     if matched:
         return matched
     ends = []

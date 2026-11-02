@@ -218,7 +218,11 @@ MUTATING_COMMAND = (
 )
 
 
-def writes_to(path: str, cmd: str) -> bool:
+# A word that only runs another command or opens a clause: `sudo rm x` and `then rm x` still run `rm`.
+_COMMAND_PREFIX = re.compile(r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|env|time|nohup|exec|then|do|else)\s+)*")
+
+
+def writes_to(path: str, cmd: str, command_only: bool = False) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -228,13 +232,22 @@ def writes_to(path: str, cmd: str) -> bool:
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.
+
+    `command_only` (opt-in, for a rule that must not alarm on a read) counts a mutating word only
+    as the command word of the segment `cmd`: `grep -n copy x` and `sed -n '/move/p' x` read.
+    Only the MUTATING_COMMAND form changes; the redirect, `sed` and `perl` forms read as before.
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
-    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    if command_only:
+        if re.match(_COMMAND_PREFIX.pattern + MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+            return True
+    elif re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if re.search(r"\bsed\b[^\n;|&]*(?:-i\b|--in-place)[^\n;|&]*" + target, cmd):
+        return True
+    if re.search(r"\bperl\b[^\n;|&]*\s-[pnlaw]*i[\w.]*(?=\s)[^\n;|&]*" + target, cmd):
         return True
     return False
 
@@ -563,11 +576,13 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
+                     command_only=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told."""
+    when that folder cannot be told. `command_only` is `writes_to`'s opt-in: a mutating word counts
+    only as the command word."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -612,7 +627,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, at) and writes_to(word, text):
+            if predicate(word, at) and writes_to(word, text, command_only):
                 return word
     return ""
 
