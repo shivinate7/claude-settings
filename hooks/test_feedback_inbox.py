@@ -233,7 +233,7 @@ def new_cfg():
 
 def run(path, raw, cfg, args=(), extra_env=None):
     """Runs one hook script the way the harness does. Returns a Proc. `extra_env` adds variables
-    for one run, such as a git shim's PATH."""
+    for one run, such as GIT_START_LOG for the git count."""
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
@@ -261,6 +261,13 @@ def capture(cfg, sid, prompt, cwd=None, extra_env=None):
                                  "prompt": prompt, "cwd": cwd or cfg}), cfg, extra_env=extra_env)
 
 
+def capture_counted(cfg, sid, prompt, cwd, env):
+    """capture() run through the probe, so the git starts the capture hook makes land in env's log.
+    The probe installs the same counter the guard runs under, then runs the hook as __main__."""
+    obj = {"hook_event_name": "UserPromptSubmit", "session_id": sid, "prompt": prompt, "cwd": cwd}
+    return run(probe_path(), payload(obj), cfg, args=(HERE, LT_PATH), extra_env=env)
+
+
 def guard(cfg, sid, stop_active=False, cwd=None, transcript=None):
     """Runs the guard, as the Stop hook does, through the probe: its model call is stubbed to answer
     that nothing repeats, so no case reaches a real model. `cwd` is the session's folder in the
@@ -279,10 +286,21 @@ GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
           "-c", "init.defaultBranch=main")
 
 
+# Windows starts a child from one command line of at most 32,767 characters. The check runs on every
+# OS, so a Linux run goes red on a command line that Windows would refuse.
+WIN_CMDLINE_MAX = 32000
+
+
 def git(where, *args, env=None, stdin=None):
-    """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails."""
-    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30,
-                        env=env, input=stdin)
+    """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails, or when
+    the command line is over WIN_CMDLINE_MAX. Long path lists go on stdin, not in args."""
+    argv = ["git", *GIT_ID, "-C", where, *args]
+    line = subprocess.list2cmdline(argv)
+    if len(line) > WIN_CMDLINE_MAX:
+        check("git: %s command line fits the Windows limit" % args[0], False,
+              "%d chars, limit %d" % (len(line), WIN_CMDLINE_MAX))
+        raise RuntimeError("git %s: command line of %d chars" % (args[0], len(line)))
+    cp = subprocess.run(argv, capture_output=True, timeout=30, env=env, input=stdin)
     if cp.returncode != 0:
         raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
     return cp.stdout.decode("utf-8", "replace")
@@ -1855,9 +1873,14 @@ OLD_B_TEXT = "OLD-B: the carousel spins too slow for the reader"
 ANSWER_NONE = json.dumps({"repeats": []})
 
 # The probe installs the stub on decision_watch.invoke_model, the one model caller, and then runs
-# feedback_guard.py as __main__. The stub mirrors decision_watch's defaults, so a call that leaves
-# model, timeout or effort to the default shows the default in the log.
-PROBE_SOURCE = r"""import json, os, runpy, sys
+# the target script (feedback_guard.py, or local_time.py) as __main__. The stub mirrors
+# decision_watch's defaults, so a call that leaves model, timeout or effort to the default shows the
+# default in the log.
+# The probe also counts git starts. Product code starts children through subprocess.run, which looks
+# up subprocess.Popen when it runs, so a subclass installed here sees every start. Each git start
+# appends its argv to GIT_START_LOG when that variable is set. Python does the logging, so the count
+# is the same on every OS.
+PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
 
@@ -1878,8 +1901,20 @@ def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOU
     return json.loads(os.environ.get("FG_STUB_ANSWER", '{"repeats": []}')), None
 
 
+class CountingPopen(subprocess.Popen):
+    def __init__(self, args, *rest, **kwargs):
+        argv = args.split() if isinstance(args, str) else [str(a) for a in args]
+        log = os.environ.get("GIT_START_LOG")
+        if log and argv and argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower() in ("git", "git.exe"):
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(" ".join(argv) + "\n")
+        super().__init__(args, *rest, **kwargs)
+
+
+subprocess.Popen = CountingPopen
 decision_watch.invoke_model = stub
-runpy.run_path(sys.argv[2], run_name="__main__")
+sys.argv = [sys.argv[2]] + sys.argv[3:]
+runpy.run_path(sys.argv[0], run_name="__main__")
 """
 
 JUDGE_RUNS = [0]
@@ -1915,7 +1950,9 @@ def put_ref(root, ref, files):
         path = os.path.join(root + ".ref", *rel.split("/"))
         write_file(path, files[rel])
         paths.append(path)
-    blobs = git(root, "hash-object", "-w", "--", *paths).split()
+    # The paths go on stdin: a few hundred of them in argv pass the Windows command-line limit.
+    blobs = git(root, "hash-object", "-w", "--stdin-paths",
+                stdin="".join(p + "\n" for p in paths).encode("utf-8")).split()
     index = "".join("100644 %s\t%s\n" % (blob, rel) for blob, rel in zip(blobs, files))
     git(root, "update-index", "--index-info", env=env, stdin=index.encode("utf-8"))
     tree = git(root, "write-tree", env=env).strip()
@@ -2007,23 +2044,14 @@ def written_between(before, after):
 
 
 def git_counter(cfg):
-    """A `git` first on PATH for one case's runs. Each start appends one line to the log, then runs
-    the real git. Returns the env for run(). It is a POSIX shell script, and CI runs this file on
-    Linux and macOS only."""
-    base = os.path.dirname(cfg)
-    real = shutil.which("git")
-    if real is None:
-        raise RuntimeError("git is not on PATH")
-    script = os.path.join(base, "shim", "git")
-    write_file(script, '#!/bin/sh\necho "$*" >> "$GIT_SHIM_LOG"\nexec "$GIT_SHIM_REAL" "$@"\n')
-    os.chmod(script, 0o755)
-    return {"PATH": os.path.dirname(script) + os.pathsep + os.environ.get("PATH", ""),
-            "GIT_SHIM_LOG": os.path.join(base, "git-starts.log"), "GIT_SHIM_REAL": real}
+    """The log that counts git starts in one case's runs. The probe appends one line per start to it,
+    for the guard and for the capture hook alike. Returns the env for run()."""
+    return {"GIT_START_LOG": os.path.join(os.path.dirname(cfg), "git-starts.log")}
 
 
 def git_lines(env, since=0):
-    """The shim's log lines from index `since` on: one line per git start, with its arguments."""
-    return read_or_empty(env["GIT_SHIM_LOG"]).splitlines()[since:]
+    """The logged git starts from index `since` on: one line per start, with its arguments."""
+    return read_or_empty(env["GIT_START_LOG"]).splitlines()[since:]
 
 
 def grep_starts(lines):
@@ -2179,13 +2207,13 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
     write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
     start = len(git_lines(env))
-    capture(cfg, sid, MSG_ONE, cwd=root, extra_env=env)
+    capture_counted(cfg, sid, MSG_ONE, root, env)
     check("binding: capture in a repo writes the sidecar with the repo's path",
           read_or_empty(sidecar_of(cfg, sid)).strip() == os.path.realpath(root), read_or_empty(sidecar_of(cfg, sid)))
     check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
           git_lines(env, start))
     mid = snapshot(cfg)
-    capture(cfg, sid, MSG_TWO, cwd=root, extra_env=env)
+    capture(cfg, sid, MSG_TWO, cwd=root)
     check("binding: a second capture leaves the sidecar as it was",
           sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
     add_item(cfg, sid)
@@ -2225,9 +2253,9 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
     root = repeat_repo("repeat-cost", step=True, debt=True)
     cfg, sid = new_cfg(), "repeat-cost"
     env = git_counter(cfg)
-    capture(cfg, sid, MSG_ONE, cwd=root, extra_env=env)
+    capture(cfg, sid, MSG_ONE, cwd=root)
     add_item(cfg, sid, ITEM_LINE)
-    capture(cfg, sid, MSG_TWO, cwd=root, extra_env=env)
+    capture(cfg, sid, MSG_TWO, cwd=root)
     add_item(cfg, sid, ITEM_LINE_2)
     before = snapshot(cfg)
     start = len(git_lines(env))
