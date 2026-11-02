@@ -451,7 +451,6 @@ KILL_REASON = (
 # reading. This rule reads the wrapper word ITSELF, with `_skip_assignments_and_keywords`, the
 # same prefix skip `resolve_command` uses before it unwraps, so a plain detached launch such as
 # `nohup python3 server.py &` is caught here without duplicating rule 2's kill list.
-DETACH_WRAPPERS = {"nohup", "setsid"}
 
 
 def _ends_in_background_paren(tokens) -> bool:
@@ -466,13 +465,26 @@ def _ends_in_background_paren(tokens) -> bool:
 
 
 def detach_wrapper_hit(tokens) -> str:
-    """Return the matched word when a segment's own head, BEFORE any wrapper unwrap, is `nohup`
-    or `setsid`, else ''."""
+    """Return the matched word when a segment's own head, BEFORE any wrapper unwrap, is a wrapper
+    that detaches its child, else ''.
+
+    `setsid` starts its own session and returns at once, so the child outlives the call; `-w`
+    (`--wait`) makes it wait for the child, which then runs in the foreground, so it passes.
+    `nohup` only ignores the hangup signal and waits for its child: with no `&` it detaches
+    nothing. The `&` forms (`nohup cmd &`) are refused by `bare_background_hit`.
+    """
     index = _skip_assignments_and_keywords(tokens)
     if index >= len(tokens):
         return ""
     word = tokens[index]
-    return word if basename(word) in DETACH_WRAPPERS else ""
+    if basename(word) != "setsid":
+        return ""
+    for arg in tokens[index + 1:]:
+        if not arg.startswith("-") or arg == "-":
+            break
+        if arg == "--wait" or (not arg.startswith("--") and "w" in arg):
+            return ""
+    return word
 
 
 def disown_after_background_hit(tokens) -> str:
