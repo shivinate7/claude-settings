@@ -16,17 +16,24 @@ from here, so its UserPromptSubmit path loads no guard module. No other file hol
 """
 
 import ast
+import contextlib
 import glob
 import importlib
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.append(os.path.join(HERE, "..", "lint"))  # append: no lint module shadows a hook this suite imports
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -272,6 +279,142 @@ def case_local_time_fails_open_on_bad_shared_names():
     return not bad, "bad states: %s" % (bad or "none")
 
 
+# ---- the merge role reader: MERGE_ROLES, role_path and read_merge_role live here, and merge/merge.py imports them.
+# The role file is {"session": <CLAUDE_CODE_REMOTE_SESSION_ID>, "role": <tier>}. The id has the cse_ prefix a live
+# coordinator's environment holds; the reader never reads a hook payload's session_id.
+ROLE_SESSION = "cse_013NEJL2pASwRjgJDnsvnpNe"
+ROLE_NAMES = ("MERGE_ROLES", "role_path", "read_merge_role")
+MERGE_PY = os.path.join(os.path.dirname(HERE), "merge", "merge.py")
+
+
+@contextlib.contextmanager
+def role_env(config=None, session=ROLE_SESSION):
+    """CLAUDE_CONFIG_DIR and CLAUDE_CODE_REMOTE_SESSION_ID set (None drops one) for the block, then put back."""
+    wanted = {"CLAUDE_CONFIG_DIR": config, "CLAUDE_CODE_REMOTE_SESSION_ID": session}
+    saved = {name: os.environ.get(name) for name in wanted}
+    try:
+        for name, value in wanted.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def put_role_file(config, text):
+    os.makedirs(os.path.join(config, "state"), exist_ok=True)
+    with open(os.path.join(config, "state", "merge-role.json"), "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def case_merge_role_names_live_in_shared_names():
+    shared = _shared()
+    roles = getattr(shared, "MERGE_ROLES", None)
+    missing = [name for name in ROLE_NAMES if not hasattr(shared, name)]
+    ok = not missing and set(roles) == {"coordinator", "batch-runner"} and all(
+        callable(getattr(shared, name)) for name in ROLE_NAMES[1:])
+    return ok, "missing from shared_names: %s, MERGE_ROLES=%r" % (missing or "none", roles)
+
+
+def case_role_path_is_the_state_file_under_the_config_dir():
+    shared = _shared()
+    config = os.path.join(RUN_FOLDER, "role-path")
+    home = os.path.join(os.path.expanduser("~"), ".claude")
+    bad = []
+    for set_to, folder in ((config, config), (None, home), ("", home)):
+        with role_env(set_to):
+            got = os.path.normpath(os.fspath(shared.role_path()))
+        want = os.path.normpath(os.path.join(folder, "state", "merge-role.json"))
+        if got != want:
+            bad.append("CLAUDE_CONFIG_DIR=%r gave %r, want %r" % (set_to, got, want))
+    return not bad, "wrong paths: %s" % (bad or "none")
+
+
+def case_read_merge_role_matches_the_env_session_only():
+    shared = _shared()
+    config = os.path.join(RUN_FOLDER, "read-role")
+    bad = []
+
+    def read(text, session=ROLE_SESSION):
+        put_role_file(config, text)
+        with role_env(config, session):
+            return shared.read_merge_role()
+
+    for role in ("coordinator", "batch-runner"):
+        got = read(json.dumps({"session": ROLE_SESSION, "role": role}))
+        if got != role:
+            bad.append("%s read as %r" % (role, got))
+    for role in ("lane", "triage", "Coordinator", "coordinator ", "", None, ["coordinator"]):
+        got = read(json.dumps({"session": ROLE_SESSION, "role": role}))
+        if got is not None:
+            bad.append("role %r read as %r, want None" % (role, got))
+    # The file's session must equal the environment's id as written: no mapping of cse_<id> to session_<id>.
+    for recorded in ("cse_01OtherSession", "session_013NEJL2pASwRjgJDnsvnpNe", ""):
+        got = read(json.dumps({"session": recorded, "role": "coordinator"}))
+        if got is not None:
+            bad.append("a file for session %r read as %r, want None" % (recorded, got))
+    for text in ("", '{"session": ', "[]", "null"):
+        got = read(text)
+        if got is not None:
+            bad.append("file text %r read as %r, want None" % (text, got))
+    for session in (None, ""):
+        got = read(json.dumps({"session": session or "", "role": "coordinator"}), session)
+        if got is not None:
+            bad.append("env session %r read as %r, want None" % (session, got))
+    shutil.rmtree(os.path.join(config, "state"))
+    with role_env(config):
+        if shared.read_merge_role() is not None:
+            bad.append("no file read as a role")
+    return not bad, "wrong reads: %s" % (bad or "none")
+
+
+def case_merge_uses_the_shared_objects():
+    """merge/merge.py holds the very objects shared_names holds, and defines none of the three itself."""
+    shared = _shared()
+    spec = importlib.util.spec_from_file_location("merge_for_shared_names", MERGE_PY)
+    merge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(merge)
+    different = [name for name in ROLE_NAMES
+                 if getattr(shared, name, None) is None or getattr(merge, name, None) is not getattr(shared, name)]
+    return not different, "merge.py names that are not shared_names' objects: %s" % (different or "none")
+
+
+def case_no_second_home_for_the_merge_role_reader():
+    """No module outside shared_names.py (merge.py, the guard modules, any other hook) defines the three names."""
+    paths = [MERGE_PY] + [os.path.join(HERE, name) for name in sorted(os.listdir(HERE))
+                          if name.endswith(".py") and name not in ("shared_names.py",)
+                          and not name.startswith(("test_", "mutate_"))]
+    found = []
+    for path in paths:
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name in ROLE_NAMES:
+                found.append("%s: def %s" % (os.path.basename(path), node.name))
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ROLE_NAMES for t in node.targets):
+                found.append("%s: MERGE_ROLES = ..." % os.path.basename(path))
+    return not found, "second definitions: %s" % (found or "none")
+
+
+def case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one():
+    """test-temp-standard: the first request of a run removes sibling run folders older than a day, and keeps newer ones."""
+    root = os.path.join(RUN_FOLDER, "sweep")
+    own, old, new = (os.path.join(root, "%d-%s" % (pid, uuid.uuid4().hex)) for pid in (1, 2, 3))
+    for folder in (own, old, new):
+        os.makedirs(folder)
+    stale = time.time() - 2 * 24 * 60 * 60
+    os.utime(old, (stale, stale))
+    _test_temp.sweep(root, own)
+    left = [os.path.isdir(folder) for folder in (own, old, new)]
+    return left == [True, False, True], "own, old, new kept: %s, want [True, False, True]" % left
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -292,6 +435,15 @@ CASES = [
      case_local_time_output_unchanged),
     ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
      case_local_time_fails_open_on_bad_shared_names),
+    ("(k) shared_names holds MERGE_ROLES, role_path and read_merge_role", case_merge_role_names_live_in_shared_names),
+    ("(l) role_path is the state file under the config dir, or under ~/.claude",
+     case_role_path_is_the_state_file_under_the_config_dir),
+    ("(m) read_merge_role gives the role for the env's own cse_ session id and None for every other state",
+     case_read_merge_role_matches_the_env_session_only),
+    ("(n) merge.py's three names are shared_names' own objects", case_merge_uses_the_shared_objects),
+    ("(o) no module outside shared_names.py defines the three names", case_no_second_home_for_the_merge_role_reader),
+    ("(p) the run folder sweep removes an old sibling and keeps a new one",
+     case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one),
 ]
 
 
@@ -306,6 +458,7 @@ def main() -> int:
         failed += 0 if ok else 1
         print("%s  %s  (%s)" % ("PASS" if ok else "FAIL", name, note))
     print()
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
     if failed:
         print("test_shared_names FAIL: %d of %d cases wrong" % (failed, len(CASES)))
         return 1

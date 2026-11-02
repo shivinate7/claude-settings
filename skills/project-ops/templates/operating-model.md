@@ -92,6 +92,9 @@ parent, or miss a message while busy.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
   runs the merge tool on it. The owner is not asked.
+  - The merge go is one message, in one fixed form: the PR number, the head commit, each review
+    round with its reviewer's role, model and verdict, and the CI state of that head. The message
+    shows the review itself. Its effect on the auto-mode classifier is unmeasured.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.

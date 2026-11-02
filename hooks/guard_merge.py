@@ -14,6 +14,7 @@ from guard_core import (
 from guard_pointer import (
     pointer_checkout,
 )
+from shared_names import MERGE_ROLES
 
 
 # ------------------------------------------------------------------ three git acts
@@ -477,7 +478,6 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("coordinator", "batch-runner")
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -567,7 +567,7 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             own_id = remote_session_id()
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if tier in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + tier in tags:
                     continue
         except Exception:
             pass
