@@ -11135,11 +11135,28 @@ def _diff_log_run(folder, repo, agent_type, agent_id):
     return out, [line.split("\t") for line in text.splitlines() if line.strip()]
 
 
-def diff_logs_case():
-    """A test-author's diff LOGS for the reviewer and never blocks: commit, push and stop each print
-    nothing and write one `noted` line named `author-diff`. A builder's test change is refused, not
-    logged (builder-refuse section). The label keeps its text: hooks/mutate_guard.py selects it by it."""
+def _guard_answers(text):
+    """(decision, reason) for each JSON document in `text`, in order. A guard call prints one document."""
+    found, decoder, index = [], json.JSONDecoder(), 0
+    text = text.strip()
+    while index < len(text):
+        doc, index = decoder.raw_decode(text, index)
+        found.append(read_decision(json.dumps(doc)))
+        while index < len(text) and text[index].isspace():
+            index += 1
+    return found
+
+
+def diff_refusal_case():
+    """The diff check refuses a builder's test change at commit, push and stop, and logs a test-author's
+    diff. A test-author's diff logs for the reviewer and never blocks: commit, push and stop print nothing
+    and write one `noted` line each, named `author-diff`. The builder half is one run of the same three
+    calls on the incident repo; BUILDER_RED pins each call on its own."""
     problems = []
+    out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-incident"), _bd_inc, "builder", "bld1")
+    got = [decision for decision, _reason in _guard_answers(out)]
+    if got != ["deny", "deny", "deny"]:
+        problems.append("builder: expected deny at commit, push and stop, got %r" % got)
     for label, agent_type, agent_id, rule in (
             ("a-product-edit", "test-author", "auth1", "author-diff"),
             # An untracked file: the mutant that reads tracked files only is caught by this row alone.
@@ -11151,21 +11168,27 @@ def diff_logs_case():
         hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == rule]  # six: session last
         if len(hits) != 3:
             problems.append("%s: expected 3 noted/%s lines, found %d" % (label, rule, len(hits)))
-    return (not problems), ("; ".join(problems) or "each diff check logged and allowed")
+    return (not problems), ("; ".join(problems) or "builder refused at three calls; each author diff logged and allowed")
 
 
 def _long_lived_main_tests(w):
-    """A long-lived worktree: cut long ago, main has since gained test files, and the branch has
-    merged main in. Those test files equal main's, so they are not the builder's."""
+    """A long-lived worktree: it was reset to a lane that main has since passed. Main gained test files
+    and a test change, and the branch merged main in. The merge entry is then deleted from HEAD's
+    reflog, so the lane tip and main's tip are two independent bases: the merge base with main is
+    the only route to main's tip. Those test files equal main's, so they are not the builder's."""
     main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "lane")
+    write(os.path.join(main, "src/app.py"), "x = 6\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "lane product")
+    _must(main, "checkout", "-q", "main")
+    _must(w, "reset", "-q", "--hard", "lane")
     write(os.path.join(main, "tests/test_late.py"), "pass  # main added this later\n")
     write(os.path.join(main, "tests/test_a.py"), "pass  # main edited this later\n")
-    run_vcs(main, "add", "-A")
-    run_vcs(main, *IDENT, "commit", "-q", "-m", "main moves")
-    run_vcs(w, "switch", "-q", "-c", "feat")
-    merged = run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "main")
-    if merged.returncode != 0:
-        sys.exit("fixture setup failed: merge in %r: %s" % (w, merged.stderr.strip()))
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "main")
+    _must(w, "reflog", "delete", "HEAD@{0}")
     write(os.path.join(w, "src/app.py"), "x = 7\n")
 
 
@@ -11198,7 +11221,7 @@ def author_mutant_no_log_case():
 
 LOG_CHECKS_EXTRA = _TaggedLogs([
     ("role-diff: every unjudged stop is logged", role_log_case),
-    ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
+    ("builder-diff: the diff check refuses a builder's test change and logs a test-author's diff", diff_refusal_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
     ("author-diff: a test-author's mutation test edit logs no author-diff line",
@@ -11721,6 +11744,30 @@ def _newer_main_merge(w):
     write(os.path.join(w, "src/app.py"), "x = 4\n")
 
 
+def _rebase_then_stale_revert(w):
+    """Cut at main. The builder commits product work and rebases onto the lane tip, then writes the test
+    file back to main's bytes. The rebase received the lane tip, which holds the lane's cases, so main's
+    bytes differ from it and the write is refused. Without the rebase, main's bytes match the only base."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "rebase", "-q", "lane")
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A])
+
+
+def _rebase_clean(w):
+    """Cut at main. The builder commits product work, rebases onto the lane tip and changes product files only."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "rebase", "-q", "lane")
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+
+
+def _two_bases_test_edit(w):
+    """The long-lived worktree, then a builder's test edit that matches neither of its two bases."""
+    _long_lived_main_tests(w)
+    write(os.path.join(w, TEST_A), "pass\n")
+
+
 _bd_inc = diff_repo("bd-incident", _incident)
 # Case 1: the incident. A reset to the lane tip, then a removed line, is refused at commit and push.
 sh("builder-refuse: a reset to the lane tip, then a removed test line, is denied at commit",
@@ -11776,8 +11823,22 @@ sh("builder-refuse: a builder that clean-merges a newer main and changes no test
 sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at push",
    PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
 
+# Rebase: a builder that rebases onto the lane tip is judged against that tip. A test file written back
+# to main's bytes differs from it, so it is refused. The clean rebase is checked with the log checks below.
+_bd_rebase = diff_repo("bd-rebase-stale", _rebase_then_stale_revert)
+sh("builder-refuse: a builder's rebase onto a lane tip, then a test file written back to main's bytes, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_rebase, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's rebase onto a lane tip, then a test file written back to main's bytes, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_rebase, agent_id="bld1", agent_type="builder")
+
+# Two received bases: a test edit that matches neither is refused, and the refusal names no test path.
+_bd_two = diff_repo("bd-two-bases", _two_bases_test_edit)
+sh("builder-refuse: a test edit that matches neither of two received bases is denied at commit, naming no test path",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_two, agent_id="bld1", agent_type="builder",
+   lacks=("tests/", "test_a"), carries=(("restore", "Restore", "put back"), "orchestrator"))
+
 # Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
-# diff_logs_case (the a-product-edit row: author-diff at commit, push and stop).
+# diff_refusal_case (the a-product-edit row: author-diff at commit, push and stop).
 sh("builder-refuse: a test-author's commit with a product file is allowed",
    COMMIT, "allow", cwd=os.path.join(DIFFROOT, "a-product-edit"), agent_id="auth1",
    agent_type="test-author")
@@ -11816,6 +11877,36 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that resets to the lane tip 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder with its own product commit that then merges the lane "
                          "tip is allowed and logs no builder-diff line",
                          clean_builder_case("bd-own-clean-merge")))
+diff_repo("bd-clean-rebase", _rebase_clean)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder that rebases onto a lane tip and changes product files "
+                         "only is allowed and logs no builder-diff line", clean_builder_case("bd-clean-rebase")))
+
+
+def two_bases_reason_case():
+    """A deny on two received bases names the newest base the builder received, the lane tip, and neither
+    older base: main's tip and the cut point."""
+    out, _rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-two"), _bd_two, "builder", "bld1")
+    answers = _guard_answers(out)
+    if not answers:
+        return False, "no guard answer for the commit"
+    decision, reason = answers[0]
+    main = _bd_two + "-main"
+    lane = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    tip = run_vcs(main, "rev-parse", "main").stdout.strip()
+    cut = run_vcs(main, "rev-parse", "main~1").stdout.strip()
+    problems = []
+    if decision != "deny":
+        problems.append("expected deny at commit, got %r" % decision)
+    if lane[:12] not in reason:
+        problems.append("the reason does not name the newest base %s" % lane[:12])
+    for sha, name in ((tip, "main's tip"), (cut, "the cut point")):
+        if sha[:12] in reason:
+            problems.append("the reason names %s, not the newest base" % name)
+    return (not problems), ("; ".join(problems) or "the reason names the newest base, the lane tip, and no older base")
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a deny on two received bases names the newest base and no older one",
+                         two_bases_reason_case))
 
 
 def stop_pair_case():
@@ -19407,6 +19498,14 @@ def ov_role_acts(config, session):
     )
 
 
+def ov_builder_diff_acts(config, session):
+    """A builder's test change at commit, after a reset to the lane tip, as the incident does. builder-diff is
+    a role guard, so no override lifts it."""
+    materialize(_bd_inc)
+    return (OvAct("a builder's commit of a test change after a reset to the lane tip", "Bash",
+                  {"command": COMMIT}, BDIFF, cwd=_bd_inc, agent_id="bld1", agent_type="builder"),)
+
+
 def ov_exclusion_check(timed, make_acts, what):
     """The acts `make_acts` lists stay refused under either kind of override. A refusal the override does
     not lift does not spend it, so the next lifted act still goes through."""
@@ -19526,6 +19625,10 @@ for _label, _check in (
      ov_exclusion_check(False, ov_role_acts, "role")),
     ("override: the model and role guards stay refused under a timed override",
      ov_exclusion_check(True, ov_role_acts, "role")),
+    ("override: a builder's test change stays refused under a one-act override",
+     ov_exclusion_check(False, ov_builder_diff_acts, "bdiff")),
+    ("override: a builder's test change stays refused under a timed override",
+     ov_exclusion_check(True, ov_builder_diff_acts, "bdiff")),
     ("override: a shell write of the agent model cap stays asked under a one-act override",
      ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
     ("override: a shell write of the agent model cap stays asked under a timed override",
