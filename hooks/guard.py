@@ -136,8 +136,16 @@ Other tools, in `judge` order:
                        `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-bypass
+                       deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
+                       Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
+                       path that ends in Simulator.app, `open -b com.apple.iphonesimulator`).
+                       Judged by the command word on the text alone, before any `simctl list`,
+                       and before the two rules below. The remedy is `sim-test`. An override
+                       lifts it. (sim-test-is-the-one-boot-path)
   simulator-boot-cap, simulator-boot-twin
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -241,8 +249,8 @@ while True:
             AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            nested_script, norm,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            inner_commands, nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
@@ -2901,16 +2909,28 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# Decision sweep-shuts-down-idle-simulators, rulings 3 and 4. A boot is an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+# A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
+# `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
+def _simctl_boot_args(word: str, rest: list):
+    """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
+    command is no `simctl boot`. The list is empty when xargs feeds the device."""
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"]:
+            return after[1:]
+    return None
+
+
 def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -2926,11 +2946,46 @@ def _sim_boot_names(segment: str) -> list:
                 os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
                 found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
-    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
-        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"] and len(after) > 1:
-            return [after[1]]
     return []
+
+
+def _simulator_app_open(rest: list) -> bool:
+    """True when the arguments of an `open` name Simulator.app: `-a Simulator[.app]`, a path that ends in
+    Simulator.app, or `-b com.apple.iphonesimulator`. macOS reads these names without case."""
+    for i, arg in enumerate(rest):
+        low = arg.lower().rstrip("/")
+        if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg) and i + 1 < len(rest):  # a cluster (`-ga`, `-an`) with a or b takes the next word
+            value = basename(rest[i + 1].rstrip("/"))
+            if ("a" in arg and re.sub(r"\.app$", "", value) == "simulator") or (
+                    "b" in arg and value == "com.apple.iphonesimulator"):
+                return True
+        elif low.endswith("/simulator.app") or low == "simulator.app":
+            return True
+    return False
+
+
+def sim_bypass_hit(segment: str) -> str:
+    """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
+    command word, at each command of the segment and in each command a wrapper hands on
+    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for start in command_indexes(tokens):
+        word, rest = basename(tokens[start]), tokens[start + 1:]
+        if word == "open" and _simulator_app_open(rest):
+            return ("open " + " ".join(rest))[:100]
+        if _simctl_boot_args(word, rest) is not None:
+            return " ".join([tokens[start]] + rest)[:100]
+    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
+                 if (hit := sim_bypass_hit(part))), "")
+
+
+SIM_BYPASS_REASON = (
+    "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
+    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "(decision sim-test-is-the-one-boot-path)"
+)
 
 
 def sim_boot_refusal(tool: str, names: list) -> None:
@@ -2978,7 +3033,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -3024,7 +3079,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
     unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
     that can write. Liftable by an owner override, unlike `worktree_home_hit`
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
     elif tool in SHELL_TOOLS:
@@ -3412,8 +3467,11 @@ def judge(payload) -> None:
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
                         tool_input.get("description") or "")
-            names = [n for seg in split_segments(strip_heredoc_bodies(command))
-                     for n in _sim_boot_names(seg)]
+            segments = split_segments(strip_heredoc_bodies(command))
+            matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
+            if matched:
+                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
+            names = [n for seg in segments for n in _sim_boot_names(seg)]
             if names:
                 sim_boot_refusal(tool, names)
         return
