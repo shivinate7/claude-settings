@@ -1006,3 +1006,6 @@
 - checkout-f-cluster: `git checkout -fb x` passes while `git switch -fc x` is read as a force; checkout reads -f exactly and switch reads clusters (hooks/guard_shared_tree.py).
 - switch-clean-cluster-false-alarm: `git switch -Cf x` asks or denies, and `git clean -fdn` or `-nfd` in a lost primary is refused, though a dry run deletes nothing (hooks/guard_shared_tree.py).
 - merge-liftable-worktree-gone: the worktree-gone branch of fail() in merge/merge.py raises a plain Stop, so a liftable stop that reaches it prints its flag and also "No override lifts this refusal". It needs the tree removed after the claim push plus an unreadable-history stop. Step: refusal-stricter-fixes (refusals narrowed to their rule).
+- press-label-verb-only: the press-link label excusal reads the verb only, so label "Approve on GitHub" beside "The session approves PR #5." passes. Decision: act-in-place
+- shell-line-no-arg-chain: command-in-item passes a chain of commands with no arguments (`whoami; hostname`, `pwd && whoami`, `date | sort`). Decision: act-in-place
+- shell-line-capital-prose: command-in-item lowercases the command word, so capitalised prose with `;` (`Option A; Option B`) is refused, and the decision does not say so. Decision: act-in-place
