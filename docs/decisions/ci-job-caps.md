@@ -2,7 +2,14 @@
 
 ## The ruling
 
-Owner, 2026-10-27, roadmap step c95: a full CI run must be red only when something is broken, never because a job ran out of time. Each job in `.github/workflows/checks.yml` has a cap of about 2x its slowest run in the last 30 runs. The target is a slowest run under 80% of the cap. A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5). A cap rises only with a measured figure in the comment beside it.
+Owner, 2026-11-01 18:44 CST: each job's cap in `.github/workflows/checks.yml` is generous on purpose, as a stopgap, until each repo's time-pinned tests are gone. The end state is decision `test-strategy-reset`: tests prove outcomes and never fail on runner speed.
+
+Owner, 2026-10-27, roadmap step c95 (the cap rule), still holds:
+
+- A full CI run is red only when something is broken, never because a job ran out of time.
+- The target is a slowest run under 80% of the cap.
+- A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
+- A cap rises only with a measured figure in the comment beside it.
 
 ## The table
 
@@ -30,7 +37,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 - One full run on the branch (workflow dispatch, run 40559535659, 2026-10-27) measured each job under its new cap: checks 16.9 of 36, checks-guard 7.4 of 22, checks-windows-rest 6.2 of 28, checks-windows-sweep 12.4 of 40, shell-macos 7.6 of 18. The highest was checks-windows-guard-2 at 13.0 of 20 (65%). One run is n=1, so the next 30 runs on main replace the projections.
 - `checks-windows-rest`: run 40542065223 (push to main) ended at the 38 min cap that was in force. The job started 16:33:37 UTC, so the cap fired at 17:11:37. GitHub's cancel grace then ran 5 more minutes, to 17:16:37, which is the 43.0 min figure. The step "Record stamp engine fixture suite" (normal slowest 1.5 min, n 28) started at 16:53:15 and never finished. That step now has its own 5 min cap, so a hang reads red at the step.
 - `checks-windows-sweep`: the fixture suite takes 8.2 min slowest and the mutation test 10.9 min slowest (push only).
-- `checks` was not re-capped: 2x its new slowest (19.8) is above 36, and a raise has no measured reason.
+- `checks` is not re-capped. Its projected slowest is 19.8 of 36 (55%), and a raise has no measured reason.
 - `checks` slowest is still above half its cap, so debt `checks-job-near-timeout` stays open.
 
 ## How to measure again
