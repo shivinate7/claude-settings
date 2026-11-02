@@ -43,10 +43,10 @@ BRIEF_MARKERS = (
     ("round", r"(?im)^[ \t]*round" + _N_OF_3, "line-start"),
     # `Try N of 3` counts at a line start only, until note try-marker-sunset.
     ("try", r"(?im)^[ \t]*try" + _N_OF_3, "line-start"),
-    # The first-line round row reads a first line that starts with no marker (the lookahead leaves that line to the
-    # line-start rows). On it, the leftmost marker-shaped text counts, and only when it is `Round`: the tempered
+    # The first-line round row reads a first line that starts with no marker in any case (the whole lookahead
+    # ignores case, as the line-start rows do, and leaves that line to them). On it, the leftmost marker-shaped text counts, and only when it is `Round`: the tempered
     # `.` stops at a leftmost `Try`, so a later `Round` on that line is prose and adds nothing.
-    ("round", r"^(?![ \t]*(?i:round|try)[ \t]+\d[ \t]+of[ \t]+3\b)(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
+    ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
 )
