@@ -1564,8 +1564,52 @@ def entry_kind(subject: str) -> str:
     return "received" if ENTRY_RECEIVED.match(subject) else ""
 
 
+def touched_paths(root: str, commits):
+    """{commit: the paths it changed against each parent (a root commit: against nothing)}; None when
+    git failed. Paths are as git spells them (posix, repo-relative)."""
+    found = {}
+    for sha in commits:
+        answer = guard_core._git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root",
+                                 "--no-renames", "-z", sha)
+        if answer is None or answer.returncode != 0:
+            return None
+        found[sha] = {p for p in answer.stdout.split("\0") if p}
+    return found
+
+
+def conflict_paths(root: str, merge: str):
+    """The paths BOTH sides of a hand-committed merge changed since their merge base, or None when git
+    failed. The resolution of such a path chose what it holds, whichever side it ended on."""
+    parents = guard_core._git(root, "show", "-s", "--format=%P", merge)
+    if parents is None or parents.returncode != 0:
+        return None
+    parents = parents.stdout.split()
+    if len(parents) < 2:
+        return set()
+    # A merge that HEAD no longer holds (reset away) leaves no resolution in the tree.
+    held = guard_core._git(root, "merge-base", "--is-ancestor", merge, "HEAD")
+    if held is None or held.returncode not in (0, 1):
+        return None
+    if held.returncode:
+        return set()
+    sides = []
+    for tip in parents[1:]:
+        mb = guard_core._git(root, "merge-base", parents[0], tip)
+        if mb is None or mb.returncode != 0 or not mb.stdout.strip():
+            return None
+        base = mb.stdout.strip()
+        changed = []
+        for end in (parents[0], tip):
+            names = guard_core._git(root, "diff", "--name-only", "-z", "--no-renames", base, end)
+            if names is None or names.returncode != 0:
+                return None
+            changed.append({p for p in names.stdout.split("\0") if p})
+        sides.append(changed[0] & changed[1])
+    return set.union(*sides)
+
+
 def diff_bases(root: str):
-    """The commits this agent RECEIVED, which its own work is measured against. Empty when git
+    """What this agent's own work is measured against, as `(bases, aside, conflicts)`; None when git
     could not answer: unknown, never clear.
 
     A base is any commit HEAD was handed, read from the HEAD reflog (it survives a new branch name,
@@ -1576,54 +1620,60 @@ def diff_bases(root: str):
       - each non-first parent of a merge commit: the tip merged in. A merge the agent resolved
         by hand (`commit (merge)`) is its own commit, and only these parents count from it;
       - the merge base of HEAD with the default branch, which moves forward as main is merged in.
-    Two filters, in this order:
-      1. A base that holds one of the agent's own commits (reflog `commit`, `commit (amend)`,
-         `commit (merge)`, cherry-pick, a rebase pick) is dropped: it carries the agent's own change.
-      2. A base that is an ancestor of another base is dropped: the newer received tip supersedes it.
-    A path offends only if it differs from EVERY base left. The last base is the newest one."""
+    `aside[base]` holds the paths the agent's OWN commits (reflog `commit`, `commit (amend)`,
+    `commit (merge)`, cherry-pick, a rebase pick) changed, among those the base holds: the base
+    carries the agent's change there, so it is no base for those paths only. A base the agent's
+    commit sits under still vouches for every other path, such as a test-author's commit on top.
+    `conflicts` holds the paths both sides changed in each hand-resolved merge HEAD still holds."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
     if log is None or log.returncode != 0:
-        return []
+        return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
     if not entries:
-        return []
-    bases, own = [entries[0][0]], []
+        return None
+    bases, own, merges = [entries[0][0]], [], []
     default = resolve_default_base(root)
     if default:
         merged = guard_core._git(root, "merge-base", "HEAD", default)
         if merged is not None and merged.returncode == 0 and merged.stdout.strip():
             bases.append(merged.stdout.strip())
-    for index, (sha, subject) in enumerate(entries[1:], 1):
+    for sha, subject in entries[1:]:
         kind = entry_kind(subject)
         if kind == "own":
             own.append(sha)
         elif kind == "received":
             bases.append(sha)
+        if subject.startswith("commit (merge)"):
+            merges.append(sha)
         if subject.startswith("commit (merge)") or (kind == "received" and "Merge made" in subject):
             parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
             if parents is None or parents.returncode != 0:
-                return []
+                return None
             bases.extend(parents.stdout.split()[1:])
     bases = list(dict.fromkeys(bases))
     own = list(dict.fromkeys(own))
+    aside = {base: set() for base in bases}
     if own:
-        kept = []
+        touched = touched_paths(root, own)
+        if touched is None:
+            return None
         for base in bases:
             # `own --not base` lists what the base does not reach: an own commit absent from the
             # list is one the base holds.
             lost = guard_core._git(root, "rev-list", *own, "--not", base)
             if lost is None or lost.returncode != 0:
-                return []
-            if set(own) & set(lost.stdout.split()) == set(own):
-                kept.append(base)
-        bases = kept
-    if len(bases) > 1:
-        tips = guard_core._git(root, "merge-base", "--independent", *bases)
-        if tips is None or tips.returncode != 0:
-            return []
-        tips = set(tips.stdout.split())
-        bases = [base for base in bases if base in tips]
-    return bases
+                return None
+            lost = set(lost.stdout.split())
+            for sha in own:
+                if sha not in lost:
+                    aside[base] |= touched[sha]
+    conflicts = set()
+    for sha in dict.fromkeys(merges):
+        found = conflict_paths(root, sha)
+        if found is None:
+            return None
+        conflicts |= found
+    return bases, aside, conflicts
 
 
 def package_json_author_ok(old: str, new: str) -> bool:
@@ -1726,22 +1776,55 @@ def role_offences(root: str, top: str, base: str, role: str):
     return found
 
 
-def diff_violation(root: str, role: str):
-    """Judge the agent's whole result. Returns ('', base) when clean, (the first offending path,
-    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear. The base is
-    the newest one the agent received: the refusal tells the agent to restore from it.
+def independent_tips(root: str, bases):
+    """The bases no other base descends from (a newer received tip supersedes its ancestors); None
+    when git failed."""
+    if len(bases) < 2:
+        return list(bases)
+    tips = guard_core._git(root, "merge-base", "--independent", *bases)
+    if tips is None or tips.returncode != 0:
+        return None
+    tips = set(tips.stdout.split())
+    return [base for base in bases if base in tips]
 
-    A path offends only if it offends against EVERY base (see `diff_bases`)."""
-    bases = diff_bases(root)
+
+def diff_violation(root: str, role: str):
+    """Judge the agent's whole result. Returns ('', bases) when clean, (the first offending path,
+    bases) when not, and (None, []) when git could not answer: UNKNOWN, never clear. The bases are
+    the ones that judged the offending path: the refusal tells the agent to restore from them.
+
+    A path is judged against the bases that vouch for it: every base but those whose own commits
+    changed it, cut to the newest tips (see `diff_bases`). It offends only if it offends against
+    EVERY one of them, or if no base vouches for it. A builder's test file that both sides changed in
+    a hand-resolved merge offends whatever it holds: the test-author resolves that conflict."""
+    basis = diff_bases(root)
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
-    if not bases or top is None or top.returncode != 0:
-        return None, ""
+    if not basis or top is None or top.returncode != 0:
+        return None, []
+    bases, aside, conflicts = basis
     top = os.path.realpath(top.stdout.strip())
-    sets = [role_offences(root, top, base, role) for base in bases]
-    if any(s is None for s in sets):
-        return None, bases[-1]
-    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]
-    return (both[0] if both else ""), bases[-1]
+    sets = {}
+    for base in bases:
+        found = role_offences(root, top, base, role)
+        if found is None:
+            return None, []
+        sets[base] = set(found)
+    cut = {}
+    for rel in dict.fromkeys(p for base in bases for p in sorted(sets[base])):
+        vouching = tuple(base for base in bases if rel not in aside[base])
+        if vouching not in cut:
+            cut[vouching] = independent_tips(root, vouching)
+            if cut[vouching] is None:
+                return None, []
+        if all(rel in sets[base] for base in cut[vouching]):
+            return rel, cut[vouching] or bases
+    if role == BUILDER_ROLE:
+        for rel in sorted(conflicts):
+            real = os.path.relpath(os.path.realpath(os.path.join(top, rel)), top)
+            if is_test_rel(rel) or is_test_rel(real):
+                tips = independent_tips(root, bases)
+                return rel, bases if tips is None else tips
+    return "", bases
 
 
 def diff_rule(role: str) -> str:
@@ -1749,13 +1832,12 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
-def builder_diff_reason(base: str) -> str:
+def builder_diff_reason(bases) -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
-        BUILDER_TEST_REASON + " Your diff holds a test change. Put the test files back to the commit "
-        "you started from: run `git restore --source=%s --staged --worktree` on them, and delete a "
-        "test file that commit does not hold. This refusal is final: never write the files another "
-        "way." % (base[:12] or "<base>")
+        BUILDER_TEST_REASON + " Your diff holds a test change. Restore each test file from the base "
+        "it came from. Bases: %s. This refusal is final: never write the files another way."
+        % (", ".join(base[:12] for base in bases) or "<none>")
     )
 
 
@@ -1764,13 +1846,13 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
     with the undo route). Any other role's offence is logged for the reviewer, and so is a diff
     that could not be read: a refusal on an unread diff would be a false alarm. The base is the
     commits the agent received (`diff_bases`), so a parent branch's files are not the agent's own."""
-    found, base = diff_violation(root, role)
+    found, bases = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
-        refuse(tool, "deny", diff_rule(role), builder_diff_reason(base), found)
+        refuse(tool, "deny", diff_rule(role), builder_diff_reason(bases), found)
     elif found:
         record(tool, "noted", diff_rule(role), found)
 
@@ -1791,14 +1873,14 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, base = diff_violation(where, role)
+    found, bases = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(base)}))
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(bases)}))
         sys.exit(0)
     elif found:
         record("SubagentStop", "noted", diff_rule(role), found)

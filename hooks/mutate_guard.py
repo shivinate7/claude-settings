@@ -1477,8 +1477,8 @@ MUTATIONS = [
      '    default = None\n    if default:\n        merged', "guard",
      "builder-diff: main's later tests merged into a long-lived worktree log nothing"),
     ("role-diff: a path offends against ANY base, not every base",
-     '    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]',
-     '    both = [rel for s in sets for rel in s]', "guard",
+     '        if all(rel in sets[base] for base in cut[vouching]):',
+     '        if any(rel in sets[base] for base in cut[vouching]):', "guard",
      "builder-diff: main's later tests merged into a long-lived worktree log nothing"),
     ("role-diff: untracked files are never read",
      '    for rel in [p for p in tracked.stdout.split("\\0") if p] + sorted(\n'
