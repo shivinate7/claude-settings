@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.21036,
  "why": "Owner, Nov 1 21:32 CST: \"send a lane to assess whether we should add the plugin iceberg from anthropic and another called ambition lenses, and another called hypotize\".",
- "note": "Assess only: what each plugin does, overlap with skills already in claude-settings (one home per capability), cost, and a verdict per plugin. No install. When the verdicts return, the add-or-not question goes to the owner after the question check. Lane session_013NEJL4F6AQcHRyHCWa7re4, started Nov 1 21:35 CST.",
- "updatedAt": "2026-11-02T03:36:00Z"
+ "note": "Assess only: what each plugin does, overlap with skills already in claude-settings (one home per capability), cost, and a verdict per plugin. No install. When the verdicts return, the add-or-not question goes to the owner after the question check. Lane session_013NEJL4F6AQcHRyHCWa7re4, started Nov 1 21:35 CST. Verdict (record docs/plans/plugin-assess-three.md, draft PR #1036, Nov 1 21:45 CST): skip all three. iceberg is a second prose rulebook that rewrites every plan and doc (prose already has one home: ste-lint and fresh-prose); it is from a community author, not Anthropic. Ambition Lenses is a second rulebook of about 2,000 words loaded into every task (rules have one home: the root CLAUDE.md). Hypotize tracks growth experiments on an outside service; no session here does that work. Nothing installed.",
+ "updatedAt": "2026-11-02T03:47:00Z"
 }
