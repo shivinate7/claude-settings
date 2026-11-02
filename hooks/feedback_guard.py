@@ -43,8 +43,8 @@ a turn end in these cases:
   - chat-grant-needs-home. An owner block whose text, fenced text left out, holds a grant word
     (GRANT: approval, approve, approved, grant, granted, authorize, authorized, authorised, go ahead,
     go-ahead, "permission to", "permissions to"; whole words, any case; a bare "permission" is none)
-    and an act or scope word (ACT: merge, push, ready, delete, close, deploy, release, publish, any,
-    all, always, every, standing, "from now on") needs one real item line of these: a `[ruling]` item
+    and an act or scope word (ACT: merge, push, delete, deploy, release, publish, always, standing,
+    "from now on", and all, any or every right before repo, repos, PR, PRs, branch or branches) needs one real item line of these: a `[ruling]` item
     (its home gets the check above), an open `[page]` item (its send gets the check above), or
     `[note] -> not-a-grant`. Lines inside the message's fence are text, never items. For a block
     with a grant, a ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root
@@ -101,8 +101,8 @@ _WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
 GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
                    re.IGNORECASE)
 # A grant word alone is no grant: the message also names an act or a scope.
-ACT = re.compile(_WORD % r"merge|push|ready|delete|close|deploy|release|publish|any|all|always|every|standing"
-                 r"|from now on", re.IGNORECASE)
+ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
+                 r"|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)", re.IGNORECASE)
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")

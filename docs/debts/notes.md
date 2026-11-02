@@ -907,3 +907,8 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- grant-unfenced-paste: a pasted, unfenced message with a grant word and an act or scope word, such as "approved ... all checks", fires the grant check; a `[note] -> not-a-grant` item clears it (hooks/feedback_guard.py).
+- answer-own-options: a reply such as "2 b" that answers the session's own options, in a repo with a waiting page, needs a send to the page writer (hooks/feedback_guard.py).
+- grant-no-word-miss: a grant with no grant word, such as "you can merge anything green" or "ok to merge", is not caught (hooks/feedback_guard.py).
+- answer-in-prose-miss: a chat answer to a page item with other text after it, such as "143 b, ok" or "143 b!", is not caught (hooks/feedback_guard.py).
+- grant-home-not-read: a grant block passes with any tracked ruling home, and the guard does not read the record; an unclosed inline fence hides the rest of the message from the grant scan (hooks/feedback_guard.py).

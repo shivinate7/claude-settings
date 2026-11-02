@@ -41,8 +41,8 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,
   authorised, go ahead, go-ahead, "permission to", "permissions to"; whole words, any case) and an act
-  or scope word (merge, push, ready, delete, close, deploy, release, publish, any, all, always, every,
-  standing, "from now on"), fenced text left out, needs one of three homes: a
+  or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
+  all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of three homes: a
   `ruling` item whose home passes, an open `page` item with its send, or a `note` item `-> not-a-grant`.
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
