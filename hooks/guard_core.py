@@ -772,25 +772,26 @@ def _operands(tokens, start: int):
     return words, stdin
 
 
-def _script_operands(name: str, words) -> list:
-    """The words that interpreter `name` may run as its script: the first word that is not a flag or
-    a flag's value, or `-` for stdin when there is none or that word is `-`. None when the code is a
-    string or a module (`python3 -m json.tool F`)."""
+def _script_operands(name: str, words):
+    """(the words that interpreter `name` may run as its script, a shell's `-c` string or ""). The
+    script is the first word that is not a flag or a flag's value, or `-` for stdin when there is
+    none or that word is `-`. There is none when the code is a string or a module
+    (`python3 -m json.tool F`); a shell's `-c` string is shell text that may run the file itself."""
     name = re.sub(r"\.(?:exe|cmd)$", "", name)
     kind = ("python" if name.startswith("python") else "node" if name == "node"
             else "shell" if name in ("bash", "sh", "zsh", "dash", "ksh", "source", ".") else None)
     if kind is None:
-        return list(words) + ["-"]
+        return list(words) + ["-"], ""
     takes, no_script = _SCRIPT_FLAGS[kind]
     cut = next((at for at, word in enumerate(words) if word in ("-", "--")), len(words))
     at, flags = _wrapper_flags(name, words[:cut], 0, takes)
     if any(flag in no_script for flag, _ in flags):
-        return []
+        return [], "".join(value for flag, value in flags if kind == "shell" and flag == "-c")
     if kind == "shell" and any(flag == "-s" for flag, _ in flags):
-        return ["-"]   # `bash -s` reads the script from stdin
+        return ["-"], ""   # `bash -s` reads the script from stdin
     if at == cut < len(words) and words[cut] == "--":
         at += 1
-    return [words[at]] if at < len(words) else ["-"]
+    return ([words[at]] if at < len(words) else ["-"]), ""
 
 
 def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
@@ -799,11 +800,14 @@ def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
     giving it as an argument to a script (`python3 lint.py F`), runs nothing."""
     files = {_run_name(name) for name in
              _written_files(header for _, _, header in _split_heredocs(cmd)[1])} - {""}
-    if not files:
-        return False
-    runs = _RUNS_SHELL if shells_only else _RUNS_INTERPRETER
+    return bool(files) and _text_runs(stripped, files, _RUNS_SHELL if shells_only else _RUNS_INTERPRETER)
+
+
+def _text_runs(text: str, files: set, runs) -> bool:
+    """True when a segment of shell `text` runs one of `files`, by name or through an interpreter
+    that `runs` matches. A shell's `-c` string is read again the same way."""
     ends = []
-    segments = split_segments(stripped, ends)
+    segments = split_segments(text, ends)
     fed = False   # the segment before pipes a written file into this one (`cat F | bash`)
     for segment, end in zip(segments, ends):
         tokens = segment_tokens(segment)
@@ -814,7 +818,10 @@ def _runs_written_file(cmd: str, stripped: str, shells_only: bool) -> bool:
             if not runs(name):
                 continue
             words, stdin = _operands(tokens, at + 1)
-            for script in _script_operands(name, words):
+            scripts, code = _script_operands(name, words)
+            if code and _text_runs(code, files, runs):
+                return True
+            for script in scripts:
                 if (_run_name(script) in files) if script != "-" else (
                         fed or any(_run_name(source) in files for source in stdin)):
                     return True
