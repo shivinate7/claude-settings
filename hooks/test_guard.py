@@ -7518,6 +7518,42 @@ sh("env heredoc: incident 2 brief that names the %s folder in prose, no interpre
    "allow", cwd=NOGIT)
 
 
+# A body that a shell runs later. ssh runs its body in a remote shell. A file that a heredoc writes
+# runs on a later line or segment, and then the body is what runs.
+_NESTED_PY = "python3 - <<'PY'\nprint(1)\nPY\n"
+for _label, _body in (
+    ("a cat env line", "cat " + ENV),
+    ("a nested python3 block, then a cat env line", _NESTED_PY + "cat " + ENV),
+):
+    sh("env heredoc: ssh runs its body in a remote shell, %s, denies" % _label,
+       "ssh host <<'EOF'\n" + _body + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a bare forced push of main from a feature branch, the control verdict",
+   VCS + " push --force origin main", "ask", "force-push", cwd=PUSHFEAT)
+sh("env heredoc: ssh runs a forced push of main in its body, the control verdict",
+   "ssh host <<'EOF'\n" + VCS + " push --force origin main\nEOF", "ask", "force-push", cwd=PUSHFEAT)
+_DEPLOY = "cat > deploy <<'EOF'\ncat " + ENV + "\nEOF\n"
+for _run in ("chmod +x deploy && ./deploy", "sh deploy", "bash ./deploy", "source deploy", ". deploy"):
+    sh("env heredoc: a file written by a heredoc, run later by %s, denies" % _run,
+       _DEPLOY + _run, "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a file written by a heredoc, run later by python3, a cat env line in it, denies",
+   _DEPLOY + "python3 deploy", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a file with a nested python3 block written by a heredoc, run later by sh, denies",
+   "cat > deploy <<'EOF'\n" + _NESTED_PY + "cat " + ENV + "\nEOF\nsh deploy", "deny", "env-file",
+   cwd=NOGIT)
+sh("env heredoc: a file written by tee in a heredoc, run later, denies",
+   "tee deploy <<'EOF'\ncat " + ENV + "\nEOF\nchmod +x deploy && ./deploy", "deny", "env-file",
+   cwd=NOGIT)
+# Reading or staging a written file is not running it. A file written with prose and never run is data.
+_BRIEF_WRITE = "cat > briefs/brief.md <<'EOF'\n" + _BRIEF_FORMS + "python3 - <<X\nEOF\n"
+sh("env heredoc: an incident 2 brief written to a file, then read with cat, allowed",
+   _BRIEF_WRITE + "cat briefs/brief.md", "allow", cwd=NOGIT)
+sh("env heredoc: an incident 2 brief written to a file, then staged with git add, allowed",
+   _BRIEF_WRITE + VCS + " add briefs/brief.md", "allow", cwd=NOGIT)
+sh("env heredoc: a file written with env prose and never run, allowed",
+   "cat > deploy <<'EOF'\nKeep secrets out of " + ENV + "s/ and never run cat " + ENV + " by hand.\nEOF",
+   "allow", cwd=NOGIT)
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
