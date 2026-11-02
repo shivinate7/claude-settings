@@ -875,3 +875,4 @@
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
 - undo-presence-skip: a line the merge-base holds, which both parents keep and the merge drops, reads as kept, in place or across a rename, by the `in_b` skip in lost_in_parent (lint/check_silent_undo.py). Decision: silent-undo-check-design
+- undo-readd-old-name: main renames a file and adds a new file at the old name; git pairs no rename, so lost_in_parent reads the base at the new name and flags a line the branch edited (lint/check_silent_undo.py). False alarm, same on main. Decision: silent-undo-check-design
