@@ -1387,10 +1387,21 @@ def _judge(texts, homes, fallback):
     return "no cite", [_norm(t) for t in bad]
 
 
+def _dotted(node):
+    """`a.b.c` as text for a chain of names and attributes, else None."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        inner = _dotted(node.value)
+        return None if inner is None else inner + "." + node.attr
+    return None
+
+
 def _names_read_outside(world, owner):
     """The names of module `owner` that another module of the world reads: `from owner import name`, and
-    `alias.name` where `alias` is `import owner`. A def with one of these may be called where the reader
-    does not look, so it is never a helper. An attribute of any other object is no read of the def."""
+    `alias.name` where `alias` is `import owner` (`import owner.sub` makes the alias `owner.sub`). A def with
+    one of these may be called where the reader does not look, so it is never a helper. An attribute of any
+    other object is no read of the def."""
     names = set()
     for mod in world.values():
         if mod.name == owner:
@@ -1399,7 +1410,7 @@ def _names_read_outside(world, owner):
         aliases = {alias for alias, src in mod.module_alias.items() if src == owner}
         if aliases:
             names.update(n.attr for n in ast.walk(mod.tree)
-                         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in aliases)
+                         if isinstance(n, ast.Attribute) and _dotted(n.value) in aliases)
     return names
 
 
