@@ -53,7 +53,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
-| separate sessions (`start_session`) | main model unless the owner names one | default |
+| separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
 | lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
@@ -83,7 +83,7 @@ Reason the ceiling stays an ask: Claude Code emits no rank over models. A permis
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
 `hooks/guard.py` is the one list. Guard rule `agent-model-floor` refuses an `Agent`, `Task`, `Workflow`
-`agent()` or `start_session` call whose `model` holds "haiku", unless the role is a Haiku role.
+`agent()`, `start_session` or `create_session` call whose `model` holds "haiku", unless the role is a Haiku role.
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
