@@ -199,8 +199,8 @@ CHANGED_LINE = "<p>The template changed this line.</p>"
 DECOY_SLOT = "<script>\nconst SLOT = '<script type=\"application/json\" id=\"designData\">{\"decoy\": 1}<\\/script>';\n</script>"
 
 
-# Owner ruling, 2026-11-02 11:12 CST: the page is named PAGE_NAME. A live title of an old form becomes the name
-# under its prefix. Each other live title is kept byte for byte. The rewrite holds each regex special as text.
+# A live title of an old form becomes PAGE_NAME under its prefix. Each other live title is kept byte for byte.
+# The rewrite holds each regex special as text, so these cases pin `$1`, `\1` and `\g<0>` as literal text.
 OLD_TITLES = [
     ("Queue", ""), ("Queue · Status", ""), ("Roadmap", ""),
     ("Compass Queue", "Compass "), ("Compass Queue · Status", "Compass "), ("Compass Roadmap", "Compass "),
@@ -247,7 +247,7 @@ class Carry(Folder):
         return page[span[0]:span[1]]
 
     def test_the_live_title_is_renamed_and_a_title_in_a_script_does_not_move(self):
-        # Owner ruling, 2026-11-02 11:12 CST: the old title becomes the page name under its prefix. The old title holds a
+        # The old title becomes PAGE_NAME under its prefix. The title holds a
         # lone quote, comment openers, `$1` and `\1`, and the rewrite keeps them. The decoys are <title> strings in a
         # script and a template literal: only the head's title moves.
         live_title = r"Don't /* // # $1 \1 Compass Queue"
@@ -360,7 +360,7 @@ class Carry(Folder):
 
 class PageName(unittest.TestCase):
     """The page's name is splice.PAGE_NAME. page.html's static title, setTitle's literal and the roadmap
-    page's title say it too (owner ruling, 2026-11-02 11:12 CST)."""
+    page's title must say it too."""
 
     def test_the_static_title_is_the_page_name_and_the_page_name_is_cockpit(self):
         span = SPLICE.title_span(TEMPLATE)

@@ -69,7 +69,7 @@ def with_title(text, title):
     return re.sub(r"<title>[^<]*</title>", lambda m: "<title>%s</title>" % title, text, count=1)
 
 
-# The setTitle line of main before the page was named Cockpit (owner ruling, 2026-11-02 11:12 CST). Its escape is JS text.
+# The setTitle line of main before the page was named Cockpit. Its escape is JS text, kept as written.
 OLD_TITLE_LINE = r'  document.title = (name ? name + " " : "") + "Queue" + (state.tab === "s" ? " \u00b7 Status" : "");'
 
 
@@ -190,7 +190,7 @@ class Stale(unittest.TestCase):
         self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
 
     def test_an_old_main_page_titled_with_the_old_name_reads_behind_the_new_template(self):
-        # Owner ruling, 2026-11-02 11:12 CST: the page is named Cockpit. A live page from before the rename still runs
+        # A live page from before the rename still runs
         # the old setTitle line, so it reads behind. The title text alone never makes a page behind; this line does.
         self.assertIsNotNone(re.search(r"^  document\.title = [^\n]*", PAGE, re.M), "page.html has no setTitle document.title line")
         old = re.sub(r"^  document\.title = [^\n]*", lambda m: OLD_TITLE_LINE, PAGE, count=1, flags=re.M)

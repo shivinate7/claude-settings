@@ -54,7 +54,7 @@ TODAY_STUB = """<script>
 </script>
 """
 # sha256 of the roadmap branch's roadmap/page/index.html, the page the old builder used.
-TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
+TODAY_TEMPLATE_SHA256 = "702a3a0986f5ce58ec7ba34242547de303999f7b6fcbaaace06791475e5e8370"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
 

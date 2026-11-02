@@ -14296,7 +14296,7 @@ LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live dat
 
 def page_empty_reason_names_the_page_case():
     """The remedy PAGE_EMPTY_REASON gives names the page "<repo> <page name>", the name in skills/waiting-page/splice.py
-    (owner ruling, 2026-11-02 11:12 CST). The old "<repo> Queue" is checked first, so a red run names the old text."""
+    The old "<repo> Queue" is checked first, so a failure names the old text, not a missing name."""
     guard = _load_guard_module()
     reason = guard.PAGE_EMPTY_REASON
     if "<repo> Queue" in reason:

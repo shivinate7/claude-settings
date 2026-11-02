@@ -90,7 +90,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
-// The page's name, PAGE_NAME in skills/waiting-page/splice.py. Read from that file, never copied here (owner ruling, 2026-11-02 11:12 CST).
+// The page name, PAGE_NAME in skills/waiting-page/splice.py. Read from that file, never copied here.
 function pageName() {
   const m = /^PAGE_NAME = "([^"]*)"/m.exec(fs.readFileSync(path.join(HERE, "..", "splice.py"), "utf8"));
   assert.ok(m, "splice.py has no PAGE_NAME line");
@@ -464,7 +464,7 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    // The title is "<repo> <page name>" on Questions (owner ruling, 2026-11-02 11:12 CST).
+    // The title is "<repo> <page name>" on Questions.
     assert.notEqual(await page.title(), "Agent Q Queue", "the title still names the old page name Queue");
     assert.equal(await page.title(), "Agent Q " + pageName());
   });
@@ -3590,7 +3590,7 @@ test("a note typed on an item survives a press of Status and back, because Statu
   assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
 });
 
-// The title is "<repo> <page name>" on Questions and on Status, with no suffix on Status (owner ruling, 2026-11-02 11:12 CST).
+// The title is "<repo> <page name>" on Questions and on Status. Status adds no suffix.
 test("the document title names the repo and is the same on both tabs: <repo> <page name>", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
   const want = "Compass " + pageName();
@@ -3601,7 +3601,7 @@ test("the document title names the repo and is the same on both tabs: <repo> <pa
   assert.equal(await titleOf(page, want), want);
 });
 
-// With no identity name the title is the page name alone, on both tabs (owner ruling, 2026-11-02 11:12 CST).
+// With no identity name the title is the page name alone, on both tabs.
 test("with no identity name the document title is the page name alone, on both tabs", async (t) => {
   const page = await open(t); if (!page) return;
   const want = pageName();
@@ -3610,7 +3610,7 @@ test("with no identity name the document title is the page name alone, on both t
   assert.equal(await titleOf(page, want), want, "the Status tab adds a suffix to the title");
 });
 
-// setTitle cuts the repo name to 40 characters, so a longer name shows its first 40 (a full-size name, owner ruling, 2026-11-02 11:12 CST).
+// setTitle cuts the repo name to 40 characters, so a longer name shows its first 40.
 test("a repo name over 40 characters is cut to 40 in the title", async (t) => {
   const name = "Repo-" + "x".repeat(60);
   const page = await open(t, { meta: { identity: { name } } }); if (!page) return;
