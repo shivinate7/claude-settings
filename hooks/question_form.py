@@ -337,20 +337,25 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
-# A shell line in a step's backtick span or fence: the command a segment runs (the span read by
-# guard_core's quote-aware reader, after any leading `VAR=value` words) is a Verb-Noun cmdlet, or a
-# program from SHELL_PROGRAMS that has an argument after it or is chained to another segment. An
-# operator alone makes no shell line: `foo|bar`, `title; subtitle`, `// a | b` and a markdown table
-# row start with no program. A program alone (`git`) names the tool in prose, and any other backticked
-# word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is a shell line when
-# an argument follows it, when its name has no extension (`./build`), or when it ends in a script
-# extension and a run verb comes before the span in its sentence, or the span is a fence.
+# A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
+# with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
+# its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
+# is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
+# x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
+# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
+# any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
+# a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
+# in a script extension and a run verb comes before the span in its sentence, or the span is a fence.
 # `./docs/a.md` and an edited `./hooks/guard.py` are files.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
                             "gcloud", "bq", "winget"))
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
+# In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
+CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
+CHAIN_COMMAND = re.compile(r"[a-z][a-z0-9._-]*")
 ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
@@ -480,24 +485,42 @@ def _relative_run(words, run) -> bool:
     return len(words) >= 2 or "." not in name or (run and name.lower().endswith(SHELL_SCRIPT_EXT))
 
 
+def _chain_command(word, args) -> bool:
+    """True when the command `word`, with `args` words after it, plainly runs a command in a chain."""
+    return (word in SHELL_PROGRAMS or bool(CHAIN_CMDLET.fullmatch(word))
+            or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
+
+
 def _shell_line(span, run) -> bool:
     """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
-    _relative_run. The segments and their words come from guard_core, the one quote-aware shell
-    reader, so a quote or a comment opener in text hides no command, and a `|` in text makes none."""
+    _relative_run. The segments, their prefixes and their command words come from guard_core, the one
+    quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
+    starts with `|` (a table row) or `//` is text and is left out."""
     import guard_core   # loads only for a step that holds a code span
-    segments = guard_core.split_segments(guard_core.PosixScript(span))
+    kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
+    segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
+    spaced = bool(re.search(r"\s", "\n".join(kept).strip()))   # `foo|bar` is an alternation, not a pipe
+    chained = len(segments) >= 2 and spaced
     for segment in segments:
-        words = guard_core.segment_tokens(segment)
-        words = list(words) if words is not None else segment.split()
-        while words and ENV_ASSIGNMENT.match(words[0]):
-            words.pop(0)
+        tokens = guard_core.segment_tokens(segment)
+        if tokens is not None:
+            found = guard_core.command_indexes(tokens)
+            words = list(tokens[found[0]:]) if found else []
+        else:   # unparseable text: its first word after any VAR=value is the command
+            words = segment.split()
+            while words and ENV_ASSIGNMENT.match(words[0]):
+                words.pop(0)
         if not words:
             continue
+        word = guard_core.basename(words[0])
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0]) or (
-                words[0] in SHELL_PROGRAMS and (len(words) >= 2 or len(segments) >= 2)):
+        elif SHELL_CMDLET.fullmatch(words[0]):
+            return True
+        elif chained and _chain_command(word, len(words) - 1):
+            return True
+        elif word in SHELL_PROGRAMS and len(words) >= 2:
             return True
     return False
 
