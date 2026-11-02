@@ -944,3 +944,4 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- repo-item-judged-as-repeat: a `[repo]` item is feedback about another repo, but the repeat check (hooks/feedback_guard.py `new_items`, `PROMPT`) judges it against this repo's roadmap, backlog and inboxes, so a "may repeat roadmap:x" flag can be a wrong-repo false alarm. The flag is advisory, and no case covers it. Fix idea: skip `[repo]` items in `new_items`. Decision: owner-feedback-inbox.
