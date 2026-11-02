@@ -213,6 +213,22 @@ def _artifact_link(found, where):
     return found
 
 
+def artifact_id(url):
+    """The artifact id of a claude.ai artifact link: its last path segment, with a trailing slash, a query
+    and a fragment ignored. "" when `url` is no string or names no id, as a bare `.../artifact/` does. The one
+    home of "same artifact", so the /artifact/ and /code/artifact/ forms of one page compare equal."""
+    if not isinstance(url, str):
+        return ""
+    found = url.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return "" if found == "artifact" else found
+
+
+def is_waiting_page_url(root, url):
+    """True when `url` names the waiting page of `root` (same artifact id), false for a repo with no page."""
+    page = waiting_page(root)
+    return page != "unknown" and bool(artifact_id(page)) and artifact_id(page) == artifact_id(url)
+
+
 def waiting_page(root):
     """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
     "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
