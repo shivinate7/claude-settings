@@ -21,6 +21,10 @@ UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_i
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
 entry) is never saved.
+After a save, capture writes `<session_id>.inbox.repo` once, when the payload cwd is inside a git
+repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
+it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
+one small file per session.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
 messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
@@ -125,6 +129,39 @@ def report_marker_path(session_id):
     return None if base is None else base + ".report-block"
 
 
+def repo_marker_path(session_id):
+    """The sidecar that binds a session's inbox to the repo it worked in, or None. Beside the inbox:
+    feedback_guard.py reads it to find other sessions' inboxes of the same repo."""
+    base = _session_base(session_id)
+    return None if base is None else base + ".inbox.repo"
+
+
+def repo_root(start):
+    """The nearest folder at or above `start` that holds `.git` (a folder, or a file in a linked
+    worktree), or None. It starts no process."""
+    here = os.path.realpath(start)
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def bind_repo(session_id, cwd):
+    """Writes the session's sidecar, the real path of `cwd`, once, when `cwd` is inside a repo.
+    A sidecar that exists is left as it is."""
+    marker = repo_marker_path(session_id)
+    if marker is None or not isinstance(cwd, str) or not os.path.isdir(cwd) or repo_root(cwd) is None:
+        return
+    try:
+        with open(marker, "xb") as f:
+            f.write(os.path.realpath(cwd).encode("utf-8", "replace"))
+    except FileExistsError:
+        pass
+
+
 def page_notes_path(session_id):
     """The file of page-note keys already saved for a session, or None. Beside the inbox."""
     base = _session_base(session_id)
@@ -167,6 +204,11 @@ def capture(raw, stamp):
     err = save_message(paths[0], stamp, prompt)
     if err is not None:
         print(not_saved("message", err))
+        return
+    try:
+        bind_repo(hook.get("session_id"), hook.get("cwd"))
+    except (OSError, ValueError) as e:  # the message is saved; only the repeat check loses this inbox
+        print("local_time: repo sidecar: %s" % e, file=sys.stderr)
 
 
 def _strings(obj):

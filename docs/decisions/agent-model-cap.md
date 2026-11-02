@@ -60,6 +60,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
+| feedback guard (`hooks/feedback_guard.py`, Stop; one call per Stop that has a new inbox item and an older item to compare with) | claude-haiku-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default: the call passes no effort |
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
