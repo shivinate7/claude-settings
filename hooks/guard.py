@@ -3240,13 +3240,16 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             owner = _owning_checkout(resolved, roots)
         except Exception:
             return False
-        # A linked worktree can live in the session's own scratchpad, which is in no checkout by
-        # intent. The session made it, so its own writes there are its own.
-        if under_session_scratchpad(resolved, session_id):
-            return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
-        return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+        if not (owner and owner != own
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True):
+            return False
+        # A linked worktree can live in the session's own scratchpad, which is in no checkout by
+        # intent. The session made it, so its own writes inside it are its own. The root itself
+        # stays refused: removing a worktree is `git worktree remove`. Tested last, so a write
+        # that is not refused never reads the temp folder.
+        return not (under_session_scratchpad(resolved, session_id)
+                    and os.path.normcase(resolved) != os.path.normcase(os.path.realpath(owner)))
 
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)
@@ -3495,9 +3498,11 @@ def judge(payload) -> None:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
-    # An agent shares its session's id, so only a call with no `agent_id` may use the scratchpad pass.
+    # An agent shares its session's id, so only a call with no `agent_id` and no `agent_type` may use
+    # the scratchpad pass.
     other_hit = other_checkout_hit(tool, tool_input, cwd,
-                                   "" if not isinstance(payload, dict) or payload.get("agent_id")
+                                   "" if (not isinstance(payload, dict)
+                                          or payload.get("agent_id") or payload.get("agent_type"))
                                    else session_id_of(payload))
     if other_hit:
         refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)

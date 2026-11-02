@@ -1248,18 +1248,19 @@ MUTATIONS = [
      '        if not SHELL_WRITE_HINT.search(command):',
      "guard", "worktree-home: the cross-checkout read costs"),
     ("other-checkout: an agent call uses the session's scratchpad pass",
-     '                                   "" if not isinstance(payload, dict) or payload.get("agent_id")\n'
+     '                                   "" if (not isinstance(payload, dict)\n'
+     '                                          or payload.get("agent_id") or payload.get("agent_type"))\n'
      '                                   else session_id_of(payload))',
      '                                   session_id_of(payload))',
      "guard", "worktree-home: a session's own scratchpad worktree passes"),
     ("other-checkout: a scratchpad of any session passes, not only the caller's own",
-     '        if under_session_scratchpad(resolved, session_id):',
-     '        if in_any_session_scratchpad(resolved):',
+     '        return not (under_session_scratchpad(resolved, session_id)\n',
+     '        return not (in_any_session_scratchpad(resolved)\n',
      "guard", "worktree-home: a session's own scratchpad worktree passes"),
     ("other-checkout: the scratchpad pass reads the path text, not its real path",
-     '        if under_session_scratchpad(resolved, session_id):',
-     '        if session_id and ("/" + session_id + "/scratchpad/") in os.path.abspath(\n'
-     '                os.path.join(at, target)).replace("\\\\", "/"):',
+     '        return not (under_session_scratchpad(resolved, session_id)\n',
+     '        return not (session_id and ("/" + session_id + "/scratchpad/") in os.path.abspath(\n'
+     '                os.path.join(at, target)).replace("\\\\", "/")\n',
      "guard", "worktree-home: a session's own scratchpad worktree passes"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
