@@ -132,6 +132,17 @@ def page_item(tail="", options=None, lines=None, **over):
     return item
 
 
+TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def task_item(steps, **over):
+    """A waiting-page task with these steps and the Why yours line in `context`, so only the rule a case
+    names judges it (task-names-check reads that line). `over` sets or replaces any field."""
+    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
+    item.update(over)
+    return item
+
+
 def chat_box(options=None, **over):
     """A chat box with the same form lines. Options default to test_call_judge.good_options()."""
     return tcj.good_box(options=options, **{k: v for k, v in over.items() if k in LINE_KEYS})
@@ -221,6 +232,21 @@ FORM_VARIANTS = [
     ("comment openers and an apostrophe in the lines are plain text",
      parts(goal="Goal: keep the runner's merge, with //path, /* glob and # tags, working.",
            problem="Problem (risk): don't parse # or // here, so it needs your word."), None),
+    # The copied template, with a real stake and kind, is refused on the page and in a chat box.
+    ("placeholder: the copied Goal line is refused", parts(goal="Goal: <the goal>"), (FORM_RULE, "Goal")),
+    ("placeholder: the copied Problem line is refused",
+     parts(problem="Problem (goal): <the problem in one plain sentence, and why it needs his word>"),
+     (FORM_RULE, "Problem")),
+    ("placeholder: the copied Based on line is refused", parts(based=["Based on (read): <one premise>"]),
+     (FORM_RULE, "Based on")),
+    ("placeholder: the Based on template with <kind> is refused by the kind check",
+     parts(based=["Based on (<kind>): <one premise>"]), (FORM_RULE, "Based on")),
+    # Real text around angle brackets is text, not a placeholder.
+    ("placeholder: real text with angle brackets passes",
+     parts(goal="Goal: render <Button> right", problem="Problem (risk): the <Modal> in the lint job needs your word.",
+           based=["Based on (read): the <Card> prop renders twice."]), None),
+    ("placeholder: a JSX lone quote and comment openers beside angle brackets pass",
+     parts(goal="Goal: fix the <p>Don't</p> text, and keep // and /* in paths as plain text."), None),
 ]
 for _kind in PREMISE_KINDS:
     FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise." % _kind]), None))
@@ -233,6 +259,21 @@ def case_form_lines():
     for name, found, want in FORM_VARIANTS:
         page(name, "set", entry_of(page_item(**found)), want)
         chat(name, chat_box(**found), want)
+
+
+def case_form_placeholders_on_edits():
+    # The copied template on the other page paths: an update that carries the context, a str_replace that
+    # swaps the Goal line, and a stood pick's Problem line. The set path is FORM_VARIANTS.
+    page("placeholder: an update of kind decision with the copied Goal line is refused", "update",
+         entry_of({"kind": "decision", "context": form_text(goal="Goal: <the goal, in the owner's terms>")}),
+         (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for the copied template is refused", GOAL,
+                    "Goal: <the goal>", (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for real text with angle brackets passes", GOAL,
+                    "Goal: render <Button> right", None)
+    page("placeholder: a stood pick with the copied Problem line is refused", "set",
+         entry_of(page_item(problem="Problem: <the problem, and why it needs his word>", stands=True)),
+         (FORM_RULE, "Problem"))
 
 
 # ------------------------------------------------------------------ gain and loss in each option
@@ -288,8 +329,7 @@ def case_older_rules_keep_their_ids():
          entry_of(page_item(options=press)), ("press-link", None))
     press[1]["links"] = [{"label": "the pull request", "url": "https://github.com/shivinate7/home/pull/374"}]
     page("a press in GitHub with a link to the page passes", "set", entry_of(page_item(options=press)), None)
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
-            "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
+    task = task_item(["Open Terminal"])
     page("a task with a Why yours line and no form lines is not judged by the form", "set", entry_of(task), None)
     page("a task with no Why yours line is refused as task-names-check", "set",
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
@@ -438,6 +478,41 @@ def case_line_order_and_prose():
         chat(name, box, want)
 
 
+# ------------------------------------------------------------------ a press the session makes needs no link
+
+def case_session_press_needs_no_link():
+    # Decision act-in-place: the rule covers a press the owner makes. An option whose how says the session makes
+    # the press, after the owner's pick, asks him for no press, so it needs no link. An option that asks him to
+    # press, with no link, is still refused.
+    session = {"key": "a", "label": "Merge PR #374", "how": "The session merges PR #374 after your pick.",
+               "gain": "It lands at once.", "lose": "Nobody reads it first."}
+    owner = dict(session, how="Press Merge in GitHub.")
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    page("a press the session makes after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[session, keep])), None)
+    page("an owner press of Merge PR #374 in GitHub, with no link, is refused as press-link", "set",
+         entry_of(page_item(options=[owner, keep])), ("press-link", None))
+    # Decision act-in-place: an option whose label asks him to press is an owner press, whatever its how says.
+    for label, how in (("Approve on GitHub", "The session records your pick and reruns CI."),
+                       ("Pick this", "The session opens PR #374 after your pick, then press Merge."),
+                       ("Click Merge on GitHub", "The session merges after your pick.")):
+        page("an owner press labelled %r, with no link, is refused as press-link" % label, "set",
+             entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+    page("a session press after the pick, with no link, passes when the pick comes first", "set",
+         entry_of(page_item(options=[dict(session, how="After the pick, the session merges PR #374."), keep])), None)
+    chat("a press the session makes after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge PR #374", "description": "The session merges PR #374 after your pick. "
+                                                                    "Gain: it lands at once. Lose: nobody reads it first."},
+                           {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
+         None)
+    chat("an owner press of Merge PR #374 in GitHub, with no url, is refused as press-link",
+         chat_box(options=[{"label": "Merge PR #374", "description": "Press Merge in GitHub. Gain: it lands at once. "
+                                                                    "Lose: nobody reads it first."},
+                           {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
+         ("press-link", None))
+
+
 # ------------------------------------------------------------------ a press in the how-text only
 
 def case_chat_press_scan_skips_gain_and_lose():
@@ -514,8 +589,7 @@ def case_page_reasons_are_one_table():
     if table is None:
         check("page reasons: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
         return
-    why = "Why yours: a session on your computer was asked first and none could reach the remote"
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"], "context": why}
+    task = task_item(["Open Terminal"])
     press = copy.deepcopy(ITEM92["options"])
     press[1].update(label="Press Merge in GitHub", how="Do it by hand.")
     for name, data in (
@@ -702,6 +776,65 @@ def case_gh_login_switch_on_the_page():
     page("gh login switch: a str_replace on command with no gh text is allowed", "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
           "new_str": "step two"}, None)
+    # A str_replace that changes one gh line to another adds no gh line. Rule gh-login-switch asks for the switch
+    # when an edit adds a gh line (the waiting-page skill's wording); the stored command keeps its own switch.
+    page("gh login switch: a str_replace that changes one gh line to another, on a command that keeps its switch, is allowed",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 4"}, None)
+    # An edit that removes the switch from a command that still runs gh is refused, and so is one that adds a gh
+    # line with no switch beside the line it keeps.
+    page("gh login switch: a str_replace that removes the switch and leaves a gh line is refused", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command",
+          "old_str": "gh auth switch -u shivinate7\ngh pr view 3", "new_str": "gh pr view 3"},
+         ("gh-login-switch", None))
+    page("gh login switch: a str_replace that adds a gh line beside a gh line, with no switch, is refused",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 3\ngh pr merge 3"},
+         ("gh-login-switch", None))
+    # An edit that names a shivinate7 repo on a gh line keeps no switch, so it is refused as its full text is.
+    page("gh login switch: a str_replace that adds a -R shivinate7/ repo to a gh line is refused, as a full write is",
+         "str_replace", {"collection": "items", "doc_id": DOC, "field": "command",
+                         "old_str": "gh pr view 3", "new_str": "gh pr view 3 -R shivinate7/repo"},
+         ("gh-login-switch", None))
+    page("gh login switch: a full write of a gh line that names a shivinate7/ repo with no switch is refused",
+         "set", entry_of(gh_task("gh pr view 3 -R shivinate7/repo", "gh pr view 3 -R shivinate7/repo")),
+         ("gh-login-switch", None))
+
+# ------------------------------------------------------------------ a step's span or fence holds a shell line only as a command
+
+def case_command_in_item_spans():
+    # A span or fence is a shell line when it chains with an operator and starts with a program or cmdlet
+    # (question_form._shell_line). Text with an operator, a lone quote and a comment opener are no command,
+    # and must not hide a real command after them in the same step.
+    for name, steps, want in (
+            ("a regex in a span is no shell line", ["Search for `foo|bar` in the page"], None),
+            ("a span with a semicolon that starts with no program is no shell line",
+             ["Read the `title; subtitle` line on the page"], None),
+            ("a lone quote in text before a regex span is no shell line", ["Don't search for `foo|bar` in the page"], None),
+            ("a comment opener inside a span is text", ["Search for `// a | b` in the page"], None),
+            ("a markdown table in a fence over several lines is no shell line",
+             ["Check the table:\n```\n| lane | state |\n| N1 | done |\n```"], None),
+            ("a git log pipe in a span is a shell line", ["Check the log with `git log | head`"],
+             ("command-in-item", "shell line")),
+            ("a Get-ChildItem pipe in a span is a shell line", ["Check the list with `Get-ChildItem | Select`"],
+             ("command-in-item", "shell line")),
+            ("a cd and semicolon line in a span is a shell line", ["Run `cd x; npm test`"],
+             ("command-in-item", "shell line")),
+            ("a lone quote before a git log pipe is a shell line", ["Don't run `git log | head` yet"],
+             ("command-in-item", "shell line")),
+            ("a comment opener span does not hide a git log pipe after it",
+             ["Run `// note` then `git log | head`"], ("command-in-item", "shell line"))):
+        page(name, "set", entry_of(task_item(steps)), want)
+    # A span whose first word is no program in the list still holds a second command after an operator: the
+    # reader must see past it. Each of these is refused on main.
+    for span in ("grep -n x a.py | head", "find . -name x | xargs rm", "yarn install && yarn test",
+                 "dir | findstr x", "get-process | sort", "env git log | head", "time git log | head",
+                 "$(git log) | head", "cmd /c git log | head"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    page("a fence holding grep x a | head is refused as a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
+
 
 # ------------------------------------------------------------------ a question says how it departs from main
 #
@@ -736,6 +869,8 @@ MALFORMED = [
 # Valid lines: both sides non-empty, the change side a change. The word match is whole words only.
 VALID_LINES = [
     DEPARTS,
+    # A new thing writes "main — adds <X>" (decision port-keeps-behaviour, question-departs section).
+    "Departs from: main — adds a retry button",
     "Departs from: lint/stamp.py:run_stamp - the stamp check moves to the lint job",
     "Departs from: agent-model-cap — Opus above the row needs an owner grant",
     "Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves to the lint job",
@@ -921,6 +1056,50 @@ def case_departs_str_replace_forms():
                     "Departs from: x — adds X", "Departs from: x — keeps X", DEPARTS_REFUSAL)
     context_replace("that swaps a plain Departs from line for a valid one with keeps later in the change is allowed",
                     "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
+
+
+# ------------------------------------------------------------------ a port's main side
+
+def case_port_main_side():
+    # A port item whose line says no change is refused by question-departs, which runs on every question.
+    # The port rule is not the one that refuses it, so the case takes either id.
+    page("a port item whose line says main — nothing is refused", "set",
+         entry_of(page_item(port=True, departs="Departs from: main — nothing")),
+         (("port-question", DEPARTS_RULE), "Departs"))
+
+
+# The port shapes of the round-2 review. A backticked or aliased main side names file:symbol and passes. A
+# placeholder or no-change change side is refused on a port page, a port task and a question box.
+PORT_OK_LINES = [
+    "Departs from: `hooks/guard.py:data_tool_hit` — adds a retry",
+    "Departs from: app/[id]/page.tsx:Home — adds a retry",
+    "Departs from: @/components/x.tsx:Button — adds a retry",
+]
+PORT_BAD_LINES = [
+    "Departs from: main — adds <X>",
+    "Departs from: hooks/guard.py:x — <what changes>",
+    "Departs from: hooks/guard.py:x — none",
+]
+
+
+def port_task(departs):
+    """A port task with a Why yours line, so only the port and departs checks can refuse it."""
+    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+            "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
+                       + departs}
+
+
+def case_port_departs_shapes():
+    for body in PORT_OK_LINES:
+        page("a port page item whose line is %r passes" % body, "set",
+             entry_of(page_item(port=True, departs=body)), None)
+        page("a port task whose line is %r passes" % body, "set", entry_of(port_task(body)), None)
+    for body in PORT_BAD_LINES:
+        page("a port page item whose line is %r is refused" % body, "set",
+             entry_of(page_item(port=True, departs=body)), (("port-question", DEPARTS_RULE), "Departs"))
+        page("a port task whose line is %r is refused" % body, "set", entry_of(port_task(body)),
+             ("port-question", None))
+        chat("a question whose line is %r is refused" % body, chat_box(departs=body), (DEPARTS_RULE, "Departs"))
 
 
 # ------------------------------------------------------------------ call_judge
@@ -1190,18 +1369,19 @@ def case_item_51_stray_field():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_options_state_gain_and_loss,
-                 case_older_rules_keep_their_ids,
+    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+                 case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
-                 case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
+                 case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
-                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page,
+                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_port_main_side, case_port_departs_shapes, case_call_judge,
+                 case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
