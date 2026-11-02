@@ -17,7 +17,7 @@ Both engines take a `lines` filter. `changed_lines` lists the lines that a commi
 
 `hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N] [--suite-timeout S] [--jobs N]` is the replay mode of the same home. It asks of past work what the report asks of a file. Would the suites a merged pull request changed have caught a wrong line in the product code it added? `merged_prs` lists the newest pull request merges on the clone's first-parent line. It sees merge commits only: a squash or rebase merge has no row, so a repository that squashes is not replayable. `replay_pr` reads the files the pull request changed, makes mutants only of the product lines it added (`changed_lines`, then `ast_mutants` or `js_mutants`), and runs only the suites it changed, never one it deleted. It prints a row per pull request as that row ends, then the table (`format_replay`), and exits 0 whatever the scores.
 
-A `REPLAY_PROFILES` entry in `hooks/mutate_guard.py` says how one repository is read. It holds the regex of product files and of suites, and the command that runs one suite. It names the classifier that reads the output (`fail_line`, `node_tap` or `playwright`), the install, and the top folders left out of each checkout. The two counts above hold in a replay. A suite red on the clean source (a crash, a timeout, a missing dependency) is listed unusable, and a row with no usable suite reads UNKNOWN with its reason. A pull request that changed no product file reads NO_PRODUCT. One that changed product code and no suite reads NO_TESTS. UNKNOWN never reads as a rate or as green. A file that does not parse is listed skipped. A pull request is never dropped from the table.
+A `REPLAY_PROFILES` entry in `hooks/mutate_guard.py` says how one repository is read. It holds the regex of product files and of suites, and the command that runs one suite. It names the classifier that reads the output (`fail_line`, `node_tap` or `playwright`), the install, and the top folders left out of each checkout. A test file is not product code, where a profile can name one: q_max's `code_not` leaves out `harness/tests/` and every `*.test.*` or `*.spec.*` file. Banchi's Python part leaves out `harness/tests/` (through its `code` regex) and self-test scripts under `scripts/` (through `code_not`). Banchi's TypeScript part has no `code_not`. The two counts above hold in a replay. A suite red on the clean source (a crash, a timeout, a missing dependency) is listed unusable, and a row with no usable suite reads UNKNOWN with its reason. A pull request that changed no product file reads NO_PRODUCT. One that changed product code and no suite reads NO_TESTS. UNKNOWN never reads as a rate or as green. A file that does not parse is listed skipped. A pull request is never dropped from the table.
 
 A batch pull request can change dozens of suites, and a mutant that survives runs all of them. A profile may carry `select`, a command with `{path}` that prints the suites testing one product file (q_max: `harness/tests-for.mjs`). It runs in the checkout at the pull request's commit. A changed suite then runs on the mutants of a file only when `select` lists it. A `select` that fails or is missing runs every changed suite, and a row note says so. `--pr-budget SECONDS` stops the pull request from starting more mutants once its time has passed.
 
@@ -76,10 +76,8 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 
 Open items, each a debt:
 
-- `qmax-replay-mutates-test-files`: q_max mutates test files.
 - `banchi-replay-no-select`: banchi rows do not say that every changed suite ran.
 - `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
-- `banchi-replay-mutates-selftests`: banchi mutates self-test scripts as product code.
 
 On 2026-11-02 no CI check reads the replay. The owner rules on one.
 
