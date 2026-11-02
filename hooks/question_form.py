@@ -535,6 +535,19 @@ def _shell_reading(guard_core, script):
     return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
 
 
+def _gh_calls(guard_core, reading):
+    """Each gh command of one shell's `reading`, in order, as its tokens from the word gh on. A segment
+    the reader cannot parse that names gh yields None: a gh command, never a switch."""
+    for segment, tokens in reading:
+        if tokens is None:
+            if GH_WORD.search(segment):
+                yield None
+            continue
+        for i in guard_core.command_indexes(tokens):
+            if guard_core.basename(tokens[i]) in ("gh", "gh.exe"):
+                yield tokens[i:]
+
+
 def _gh_script_hit(guard_core, reading, command) -> str:
     """The matched text when one shell's `reading` of `command` runs a gh command other than
     `gh auth ...` with no switch to a login in GH_LOGINS before it, or runs one as GH_FALLBACK_LOGIN
@@ -542,26 +555,62 @@ def _gh_script_hit(guard_core, reading, command) -> str:
     command when the word gh is in it, and never as a switch: the check fails closed there."""
     names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
     login = ""
-    for segment, tokens in reading:
-        if tokens is None:
-            if not GH_WORD.search(segment):
-                continue
-            calls = [None]   # unreadable text that names gh: a gh command, never a switch
-        else:
-            calls = [tokens[i:] for i in guard_core.command_indexes(tokens)
-                     if guard_core.basename(tokens[i]) in ("gh", "gh.exe")]
-        for call in calls:
-            if call is not None and list(call[1:2]) == ["auth"]:
-                if list(call[2:3]) == ["switch"]:
-                    login = _switch_login(list(call[3:]))
-                continue
-            if login not in GH_LOGINS:
-                if login:
-                    return "gh command after a switch to %s, a login outside the pair" % login
-                return "gh command with no gh auth switch before it"
-            if login == GH_FALLBACK_LOGIN and names_default_repo:
-                return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+    for call in _gh_calls(guard_core, reading):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            if list(call[2:3]) == ["switch"]:
+                login = _switch_login(list(call[3:]))
+            continue
+        if login not in GH_LOGINS:
+            if login:
+                return "gh command after a switch to %s, a login outside the pair" % login
+            return "gh command with no gh auth switch before it"
+        if login == GH_FALLBACK_LOGIN and names_default_repo:
+            return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
     return ""
+
+
+def _command_reading(guard_core, shell, text):
+    """One shell's reading of `text`. The script type picks the rules, never the tool this call came
+    from. A `shell` of "" is a str_replace string: bash's rules read it, or PowerShell's when bash
+    cannot read some segment and PowerShell reads every one."""
+    if shell == "powershell":
+        return _shell_reading(guard_core, guard_core.PowerShellScript(text))
+    reading = _shell_reading(guard_core, guard_core.PosixScript(text))
+    if not shell and any(tokens is None for _, tokens in reading):
+        powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
+        if all(tokens is not None for _, tokens in powershell):
+            return powershell
+    return reading
+
+
+def _gh_counts(text):
+    """(gh commands other than `gh auth ...`, `gh auth switch` commands) in a command string."""
+    if not GH_WORD.search(text):
+        return 0, 0
+    import guard_core
+    commands = switches = 0
+    for call in _gh_calls(guard_core, _command_reading(guard_core, "", text)):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            switches += list(call[2:3]) == ["switch"]
+        else:
+            commands += 1
+    return commands, switches
+
+
+def gh_edit_hit(old, new) -> str:
+    """The matched text when a str_replace on `command` turns `old` into `new` and leaves a gh command
+    with no switch. The stored command is unseen, so `new` is judged alone, except for an edit that
+    only changes gh commands `old` already held: it adds no gh command, and it holds no switch in
+    `old` or `new` for the edit to remove or move, so the switch the stored command keeps still
+    stands."""
+    hit = gh_login_hit({"command": new})
+    if not hit:
+        return ""
+    old_gh, old_switch = _gh_counts(old)
+    new_gh, new_switch = _gh_counts(new)
+    if old_gh and new_gh <= old_gh and not old_switch and not new_switch:
+        return ""
+    return hit
 
 
 def gh_login_hit(data) -> str:
@@ -583,16 +632,7 @@ def gh_login_hit(data) -> str:
         if not isinstance(text, str) or not GH_WORD.search(text):
             continue
         import guard_core
-        # The script type picks the rules, never the tool this call came from.
-        if shell == "powershell":
-            reading = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-        else:
-            reading = _shell_reading(guard_core, guard_core.PosixScript(text))
-            if not shell and any(tokens is None for _, tokens in reading):
-                powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-                if all(tokens is not None for _, tokens in powershell):
-                    reading = powershell
-        hit = _gh_script_hit(guard_core, reading, text)
+        hit = _gh_script_hit(guard_core, _command_reading(guard_core, shell, text), text)
         if hit:
             return "%s: %s" % (shell, hit) if shell else hit
     return ""
@@ -709,8 +749,9 @@ def item_hit(op, entry):
         if hit:
             return "task-names-check", hit
         if entry.get("field") == "command":
-            # The stored command is unseen, so new_str is judged as the whole command.
-            hit = gh_login_hit({"command": entry.get("new_str")})
+            # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
+            # a gh command old_str held.
+            hit = gh_edit_hit(str(entry.get("old_str") or ""), entry.get("new_str"))
             if hit:
                 return "gh-login-switch", hit
         hit = form_str_replace_hit(entry)
