@@ -15,10 +15,13 @@
   commit added on the branch alone is the branch's, except to the lane undo read.
 - **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
   and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
-  flags two shapes. One is a whole file put back to its text before E, when E changed 6 or more non-blank
-  lines in it (`BLOCK_LINES`), on any path. The other is a net loss or a delete of E's lines on a test path
-  (`is_test_rel` in `hooks/guard.py`). A line is E's work only when no earlier state of the branch held
-  it, so a restore is never an undo. A merge of main that drops the branch's own lines counts too: a
+  flags two shapes. One is a whole file put back to its text before E, whatever the file held just
+  before, when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
+  non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
+  The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
+  the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
+  A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
+  A line that head holds again in any file, as often as before, is moved, not lost. A merge of main that drops the branch's own lines counts too: a
   conflict fix keeps both sides. A branch of one commit has nothing to read. Reason for two shapes: on
   the 31 batches merged 2026-10-31 to 2026-11-02, they go red on 9, with 4 real undos in 10 findings
   (coordinator, 2026-11-02 11:26 CST; owner's grant pending). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
