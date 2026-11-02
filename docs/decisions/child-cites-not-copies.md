@@ -24,7 +24,7 @@ Probe group `restates` in `lint/compliance_probes.py`: `python3 lint/compliance_
 - Probe group supersede now names `CLAUDE.md` too, when `AGENTS.md` links to it.
 - In a claude-settings checkout it prints n/a and exits 0.
 
-Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: each of the two copied merge-grant lines had 28 covered words. That is 28 of 43 words in home and 28 of 48 in ios-adblock. degen has nothing refused. The highest line with its own content had 16 covered words (25%), measured before the quote change. The threshold of 12 words and half of the unit sits between them.
+Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: each of the two copied merge-grant lines had 28 covered words. That is 28 of 43 words in home and 28 of 48 in ios-adblock. The highest line with its own content had 16 covered words (26%) in home and 15 (3%) in degen. degen has nothing refused. The threshold of 12 words and half of the unit sits between them.
 
 Risk kind: named incident, above. Landed 2026-11-02.
 
@@ -32,11 +32,12 @@ Cost: one python start per child CI run, and one per run of skill `compliance-ch
 
 ## Not mechanized
 
-- A paraphrase. A line that says a ruling in other words passes. A line that names a record and its ruling time is a citation, and passes too. An earlier draft of this check refused a 495-word repo-only rule in degen that cites a record with its time (measured 2026-11-02), so that test was dropped.
+- A paraphrase. A line that says a ruling in other words passes. A line with under 12 shared words passes, a citation included.
 - Copies of rule text from the root `CLAUDE.md`. The check reads decision records only. For example, a child line that repeats "A lone lane is its own integration PR" passes.
 - A shared run under 5 words.
 - A copy inside a heading, an HTML comment or a code span.
 - A copy shorter than 12 words, such as a one-sentence grant line. See debt `short-copy-passes` (the gap for short copies).
+- Owner words that a record keeps in code spans. The check never indexes them, so a copy of 12 or more of them passes. See debt `record-code-spans-unindexed` (the gap for code-span words).
 
 ## Why
 

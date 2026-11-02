@@ -195,7 +195,7 @@ parent clone, never the child's own. It holds no copy of them. Before it compare
 `Plan:` and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read.
 
 A unit is a hit when runs of 5 or more words that it shares with records cover at least 12 of its words
-and at least half of them. A line that names a record and its ruling time cites it, and passes.
+and at least half of them. A line with under 12 shared words passes, a citation included.
 
 An item names the file, the line and the record. It never prints record text.
 
