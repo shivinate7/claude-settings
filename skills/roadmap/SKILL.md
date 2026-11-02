@@ -147,6 +147,14 @@ After each build the builder prints the upkeep list for the triage thread. It na
   - an `items` row has the wrong shape (`n` not an int, `status` or `home` not a string).
 
   A skipped session row does not blank this row. An empty `items` list reads zero;
+- dated claims to re-check before a lane starts: each `doing` or `active` step whose `note` holds a
+  stale claim. A claim is the whole word `Finding` or `Checked` in any case (`Findings` and
+  `Rechecked` do not count), then a date within 40 characters, with no `.` or newline between. The date
+  is `Mon D` or `Month D` with an optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A date with no
+  year takes the build year, or the year before if it would be in the future. When the newest claim in
+  the note is 5 or more days old, the entry reads `<id> (<date as written>)`. Triage asks for a
+  re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
+  `--live` file;
 - `Step:` trailers that name no step.
 
 ## Cost
@@ -155,7 +163,8 @@ About six git processes and one file written per build. With `--live`, the publi
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
-page) to the same publish. The builder adds no git process, file, timer or log for either row.
+page) to the same publish. The builder adds no git process, file, timer or log for either row. The
+dated-claim row reads the notes already loaded and adds nothing.
 No watcher, no timer, no log.
 
 ## Tests

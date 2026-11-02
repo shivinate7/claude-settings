@@ -49,6 +49,14 @@ Each entry reads `<step id> (page item <n>)`. The row reads one unknown entry, n
 when the live file is missing or unreadable, its readAt is bad (the stale-step row's readAt cases), it has no
 items list, or it holds an item row of the wrong shape. A skipped session row does not blank this row.
 
+The upkeep list also names each doing or active step whose note holds a stale dated claim, so triage asks
+for a re-check on main before a lane starts (step stale-note-recheck). A claim is the whole word Finding or
+Checked (any case; "Findings" and "Rechecked" do not count), then within 40 characters, with no "." or
+newline between, a date: `Mon D` or `Month D` with an optional `, YYYY` or ` YYYY`, or ISO `YYYY-MM-DD`. A
+date with no year takes the build year, or the year before if it would be in the future. A date that does
+not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
+`<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -57,7 +65,8 @@ watcher, no timer, no log. The stale-step row adds no git process, file, timer o
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
-process, file, timer or log for it.
+process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
+the notes already loaded.
 """
 import argparse
 import datetime
@@ -757,6 +766,45 @@ def unlaned(open_, marks, work):
     return out
 
 
+CLAIM = re.compile(
+    r"\b(?:finding|checked)\b[^.\n]{0,40}?"
+    r"(?:(?P<iso>\d{4}-\d{2}-\d{2})(?!\d)|"
+    r"(?P<md>(?P<mon>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+    r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(?P<day>\d{1,2})(?!\d)"
+    r"(?:(?:,\s*|\s+)(?P<year>\d{4})(?!\d))?))", re.IGNORECASE)
+MONTH_ABBR = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+
+
+def dated_claims(open_, today):
+    """Entries `<step> (<date as written>)` for each doing or active step whose newest dated claim is STALE_DAYS old."""
+    out = []
+    for k, d in open_:
+        note = d.get("note")
+        if d.get("status") not in ("doing", "active") or not isinstance(note, str):
+            continue
+        newest = None  # (date, as written)
+        for m in CLAIM.finditer(note):
+            try:
+                if m.group("iso"):
+                    when, text = datetime.date.fromisoformat(m.group("iso")), m.group("iso")
+                else:
+                    mon, day = MONTH_ABBR.index(m.group("mon")[:3].lower()) + 1, int(m.group("day"))
+                    if m.group("year"):
+                        when = datetime.date(int(m.group("year")), mon, day)
+                    else:
+                        when = datetime.date(today.year, mon, day)
+                        if when > today:
+                            when = datetime.date(today.year - 1, mon, day)
+                    text = m.group("md")
+            except ValueError:
+                continue
+            if newest is None or when > newest[0]:
+                newest = (when, text)
+        if newest and (today - newest[0]).days >= STALE_DAYS:
+            out.append("%s (%s)" % (k, newest[1]))
+    return out
+
+
 def unfiled(steps, work):
     """Entries `<step> (page item <n>)` for each closed page item whose open home step never cites it, or one unknown entry."""
     work = work or {"read": "unknown (no --live file)"}
@@ -806,6 +854,7 @@ def upkeep(steps, added, marks, strays, work=None):
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
+            ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
             ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
             ("Step trailers naming no step", strays),
