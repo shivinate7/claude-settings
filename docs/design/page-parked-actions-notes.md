@@ -5,6 +5,9 @@ Mockup: `docs/design/page-parked-actions.html`. Screen: `skills/waiting-page/pag
 Deep links: `#s=today|page|staged|sent|pending|routed|gone-6b|legacy|nostore|now-1b|ask-2b|words-3b|note-7b`,
 `&w=all|390|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Sizes: phone 390 and wide 1280. Themes: light and dark.
 Focus ids: `#parked`, `#pk-line-<key>`, `#pk-acts-<key>`, `#pk-unpark-<key>`, `#pk-drop-<key>`, `#pk-change-<key>`, `#pk-why-<key>`. The key is the entry's `id`, or `_<index>` for a line that is not live (a slug holds no underscore, so no two keys meet, and no key meets a page id such as `pk-h`).
+Where the mockup differs, `page.html` and these notes win. The reason for an off act is text under the line, not a hover bubble.
+The ids use the key above, not `pk-<id>` and `noid`. An off act has a solid `--faint` edge and a struck label, not a dashed edge.
+With no store the page draws no parked block, so the mockup's No store state does not occur.
 
 Departs from: `skills/waiting-page/page.html:renderList` — each parked line gets Unpark and Drop, where today it is text only.
 Departs from: `skills/waiting-page/SKILL.md` "The database", `meta/page` `parked` — each entry gets an `id`.
@@ -39,7 +42,7 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 
 - 5A (pick): each `meta/page` `parked` entry gets `id`, a slug of 32 characters or fewer, unique in the list, set by the writer. Gain: stable when the writer rewrites `ref` (rule `speak-rewrite-superseded-in-place`), and safe as a store key. Loss: a SKILL.md change, and old entries need an id.
 - 5B: derive the key from `ref`. Loss: `ref` is prose. A rewrite of its plain name orphans a sent act, and it can hold characters a key cannot.
-- An entry with no `id` (`#s=legacy`) shows both buttons off: a solid `--line` edge and muted text, where a live Drop has a dashed `--faint` edge. They stay focusable. The reason is text under the line, tied to both buttons with `aria-describedby`, "The page's writer has not prepared this line yet. Reply in the thread instead." It is not a hover bubble: a phone has no hover, and a bubble clips at the left edge (`ux-control-earns-place`).
+- An entry with no `id` (`#s=legacy`) shows both buttons off: a solid `--faint` edge, muted text and a struck label, where a live Drop has a dashed `--faint` edge and a plain label. They stay focusable. The reason is text under the line, tied to both buttons with `aria-describedby`, "The page's writer has not prepared this line yet. Reply in the thread instead." It is not a hover bubble: a phone has no hover, and a bubble clips at the left edge (`ux-control-earns-place`).
 - Owner grant: yes. 5A changes SKILL.md "The database" (`parked` is a list of `{id, ref, note}`).
 
 ## 6. After the press
@@ -51,7 +54,6 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 - 6A (pick, `#s=routed`): when the writer removes the entry, the line keeps its height with the filled badge "Unparked" or "Dropped" until it is off screen. It uses the same hold as a receipt (`releaseHeld`). Gain: the Ask box below does not jump while you type in it. Loss: the page keeps the last act in memory to draw it.
 - 6B (`#s=gone-6b`): the line leaves at once, and all below it moves up.
 - Orphan: a record whose entry is gone draws nothing. The writer deletes it at its next read.
-- No store (`#s=nostore`): every toggle is off, and each line shows the reason "This view cannot reach the page's store. Reply in the thread instead." under it.
 
 ## 7. A note on a line
 
@@ -65,7 +67,7 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 
 ## 9. For the builder
 
-- Drop's dashed edge uses `--faint`, where `.btn.dash` elsewhere uses `--line`. An off act uses a solid `--line` edge with `--muted` text, so an off Drop never looks like a live one. `--line` on the surface is under the 3:1 control-edge floor in `a11y.md`. "Mark done" and "None of these" have the same gap today. That is outside this step.
+- Drop's dashed edge uses `--faint`, where `.btn.dash` elsewhere uses `--line`. An off act uses a solid `--faint` edge, `--muted` text and a struck label. The edge meets the 3:1 state-cue floor in `a11y.md`, and the strike is a mark that is not a colour, so an off act never looks like a live one. In forced colours an off act draws in `GrayText`. Elsewhere `.btn.dash` keeps a `--line` edge, which is under that floor: "Mark done" and "None of these" have that gap today. That is outside this step.
 - Forced colors: the accent fill of a pressed Unpark goes away. The ✓ in the label stays, so the state still shows.
 - Classes: `.parked` (section), `.pk-hint`, `.pk-why`, `.pk-list`, `.pk` (line, `.drop` when staged, sent or filed as a Drop), `.pk-txt` with `.ref` and `.nt`, `.pk-acts`, `.btn.pkb` with `.off` and `.on` label spans, `.sent-list .pkref`.
 - Model a park act as a pseudo item `{id: "park." + p.id, park: p, owner: meta.writer}`, so `staged`, `sendAll`, `undoSend`, `withdrawAll` and `saveDraft` take it with no second path. Keep its draft in `waiting.draft` (`ux-keep-what-was-made`).

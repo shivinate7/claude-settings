@@ -339,10 +339,15 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 /* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
 .btn.dash.pkb { border-color: var(--faint); }
 .btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
-/* Off: still focusable, with a solid --line edge and muted text, where a live Drop has a dashed --faint edge (3:1). The reason shows as .pk-why under the line. */
-.btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
+/* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
+   This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
+   This rule stays after .btn.dash.pkb: both have the same weight, so the source order decides. */
+.btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
+.btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
 .sent-list .pkref { max-width: 24ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Forced colours drop --faint and --muted, so an off act draws in the system's off colour. */
+@media (forced-colors: active) { .btn.pkb[aria-disabled="true"] { color: GrayText; border-color: GrayText; } }
 
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -1536,7 +1541,8 @@ function renderList() {
   if (focusId) { const f = $(focusId) || $(focusId.replace(/^pk-change-/, "pk-unpark-")); if (f) f.focus({ preventScroll: true }); }
 }
 const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
-const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.", WHY_NODB = "This view cannot reach the page's store. Reply in the thread instead.";
+// Only a line with no id is off. A view with no store has no meta/page, so it draws no parked block.
+const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.";
 // Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
 // No page id has the form "pk-<part>-<key>", so a parked id such as "h" meets no id of the page.
 function pkToggle(p, it, act, why, key) {
@@ -1544,14 +1550,14 @@ function pkToggle(p, it, act, why, key) {
   if (why) { a["aria-disabled"] = "true"; a["aria-describedby"] = "pk-why-" + key; } else { a["aria-pressed"] = String((state.draft[it.id] || {}).act === act); a.onclick = () => pressPark(it, act); }
   return h("button", a, h("span", { class: "off" }, label), h("span", { class: "on", "aria-hidden": "true" }, "✓ " + label));
 }
-// One line: the text, then its acts in one row. Off (no id, no store), staged, sent with Change, or routed with a filled badge.
+// One line: the text, then its acts in one row. Off (no id), staged, sent with Change, or routed with a filled badge.
 function pkLine(p, it, routed, index) {
   const key = it || routed ? p.id : "_" + index, sv = it && isSaved(it) ? savedOf(it) : null, act = routed ? routed.act : sv ? sv.act : it ? (state.draft[it.id] || {}).act : null;
   let acts, why = "";
   if (routed) acts = [h("span", { class: "ans filed" }, ACT_DONE[routed.act])];
   else if (sv) acts = [h("span", { class: "ans", title: "Sent " + fmt(sv.at) + ". Goes to " + it.owner + "." }, ACT_SENT[sv.act] || "Sent", " ", h("span", { class: "t" }, fmt(sv.at, false))),
     h("button", { class: "btn quiet changebtn", type: "button", id: "pk-change-" + key, "aria-label": "Change " + p.ref, onclick: () => changePark(it, sv) }, "Change")];
-  else { why = !it ? WHY_NOID : !state.db ? WHY_NODB : ""; acts = ACTS.map((a) => pkToggle(p, it, a, why, key)); }
+  else { why = it ? "" : WHY_NOID; acts = ACTS.map((a) => pkToggle(p, it, a, why, key)); }
   return h("li", { class: "pk" + (act === "drop" ? " drop" : "") + (routed ? " routed" : ""), id: "pk-line-" + key },
     h("p", { class: "pk-txt" }, h("span", { class: "ref" }, p.ref + ":"), " ", h("span", { class: "nt" }, p.note)),
     h("div", { class: "pk-acts", id: "pk-acts-" + key }, acts),
@@ -1682,7 +1688,7 @@ async function sendAll() {
     for (const it of st) {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
-      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
+      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });

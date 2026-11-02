@@ -352,7 +352,11 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
-A parked answer (`answers/park.<id>`): the writer finds the entry in `meta/page.parked` by `id`.
+A parked answer (`answers/park.<id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
+Then it reads `answers/park.<id>` again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
+This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
+A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`) or a reply in the thread.
+The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
 - `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
 - `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.
 - Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
