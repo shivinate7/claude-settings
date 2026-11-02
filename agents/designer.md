@@ -47,6 +47,8 @@ real. Label what exists with a dashed "Today: <part>" and what the option adds w
 choice with an id, so the waiting page can focus on it. Draw one mockup per option, each in that
 option's own state, and set `focus` on each to the element being chosen. The waiting page refuses an
 item where two options show the same picture with the same focus, or a focus finds nothing.
+A mockup names its options by name, never by a letter (no "A", "B" or "Option B" in a title, tab or
+caption): the waiting page stamps each option's key, and a second letter would make the owner's answer ambiguous.
 
 For each screen the brief names, write two files in the design folder:
 

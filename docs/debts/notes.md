@@ -154,7 +154,7 @@
 - linked-nm-other-managers: pnpm, yarn, bun, npx and npm.exe are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-shell-c-cd: an inner cd inside bash -c or sh -c is not tracked, so the working folder is the outer one (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - live-pin-first-move-gap: the first pin move renames the live directory, so <clone>-live is absent for milliseconds and links dangle; no check proves the retry covers it (merge/install_from_main.sh)
-- liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/guard.py _process_start_ms)
+- liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
 - local-time-line-cost-unmeasured: the token cost of one local time line per prompt is unmeasured (hooks/local_time.py)
 - lock-read-error-never-expires: GhLock.read returns an infinite expiry when the lock commit read fails for a non-network reason, so the lock never expires (merge/merge.py)
@@ -287,6 +287,16 @@
 - stamp-blank-line-quote-fence: a blank line with no > inside a quoted fence does not end the quote (actions/stamp/stamp.mjs)
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
+- stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-cost-untested-py: no case proves a PR that changes a .py and removes nothing starts 4 git processes and reads no .md; a mutant without that early return passes (lint/test_stale_cites.py CostTests). Decision: stale-cites-at-merge
+- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
@@ -872,5 +882,28 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- option-letter-keys-label-word-tag: a label that opens with a word tag other than Option, such as "Approach B:" or "Plan B:", passes LABEL_TAG. It is kept out because "Plan B" is plain English (hooks/question_form.py LABEL_TAG; decision option-keys-are-letters)
+- report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
+- report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
+- pw-os-release-source-fail: pin.sh sources os-release under `set -eu` with stderr hidden, so a file with shell logic or an unset reference ends the step with no message. Real os-release files hold none (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-release-env-name: pin.sh's test hook `OS_RELEASE` is a generic env name. A job that sets it for another reason gets `os=Linux` and a warning (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-test-gaps: test_action.py has no case for an os-release with no ID, and no check that a normal Ubuntu run prints no warning (actions/playwright-setup/test_action.py). Decision: one-browser-setup-no-apt
+- pw-26-04-cause-unread: the decision cites `libicudata.so.74` on 26.04 from the joyous lane's report, not a log this lane read (docs/decisions/one-browser-setup-no-apt.md). Decision: one-browser-setup-no-apt
 - tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
 - tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
+- page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
+- page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
+- page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- none-direction-roadmap-test: the waiting-page skill names `record_branch()` for "has a roadmap" but not the test that the branch exists (`git rev-parse --verify origin/<branch>`, as skills/roadmap/build.py does), and cites a repo-relative layout.py path where its other lines use `~/.claude/lint/layout.py` (skills/waiting-page/SKILL.md). Decision: questions-go-to-owner
+- none-direction-bare-step: a bare "step" stays where a repo may have no roadmap; GLOSSARY.md makes step a roadmap step. Say "a roadmap step, or a todo record where no roadmap" (skills/waiting-page/SKILL.md, hooks/call_judge.py NONE_DIRECTION_RULE, docs/decisions/questions-go-to-owner.md, rework-leaves-page.md). Decision: questions-go-to-owner
+- none-direction-task-done: `is_reask` reads a task `lastAnswer` `{done: false, note}` written with new `options` as a re-ask, so the page judge gets the none rule there; return False when `done` is present (hooks/call_judge.py). Decision: question-reviewer-agent-hook
+- none-direction-doc-drift: the skill, the rule text and the record say "new options plus a lastAnswer note", but `is_reask` also needs no picked choice; add "with no picked choice" (skills/waiting-page/SKILL.md, hooks/call_judge.py, docs/decisions/question-reviewer-agent-hook.md). Decision: question-reviewer-agent-hook
+- feel-step-set-done-untried: triage can set a feel step to done with no device trial, and the step then leaves every upkeep row (skills/roadmap/build.py upkeep). Decision: feel-fix-waits-device-check.
+- feel-rename-half-similar: a rename under 50% similar, or with diff.renames off, reads as a delete: safe fail, wrong message (lint/check_record_slugs.py).
+- feel-edit-swap-message: an edit that drops `**Feel.**` and adds a valid device trial fails with a misleading message (lint/check_record_slugs.py).
+- feel-trial-time-space: a device-trial time with a space instead of `T` fails, though step JSON takes it (lint/check_record_slugs.py).
+- feel-lint-says-device-check: the lint message says "device check" where prose says "device trial" (lint/check_record_slugs.py).
+- feel-probe-skips-debt-check: the compliance probe in other repos does not run the debt check (lint/compliance_probes.py).
+- feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
+- feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
+- feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
