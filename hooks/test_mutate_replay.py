@@ -28,11 +28,13 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
 import uuid
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -40,6 +42,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import mutate_guard  # noqa: E402  REPLAY_PROFILES, the banchi per-module runner among them
 import mutate_shared  # noqa: E402
 from test_mutate_js import git, unique_line  # noqa: E402  the one home of these two helpers
 
@@ -83,13 +86,17 @@ def new_repo(name):
 
 
 def put(repo, files):
-    """Write each file. A None text removes it. Folders are made as needed."""
+    """Write each file. A None text removes it, and a bytes value is written as it is. Folders are made as needed."""
     for path, text in files.items():
         full = os.path.join(repo, path)
         if text is None:
             os.remove(full)
             continue
         os.makedirs(os.path.dirname(full), exist_ok=True)
+        if isinstance(text, bytes):
+            with open(full, "wb") as handle:
+                handle.write(text)
+            continue
         with open(full, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
 
@@ -407,6 +414,84 @@ def tool_fixture():
     return repo, sha
 
 
+LATIN_NAME_SRC = b"export const NAME = 'caf\xe9';\n"  # latin-1 e-acute: not UTF-8, so no text decodes it
+NAME_TEST = JS_HEAD + """import { NAME } from '../src/name.mjs';
+
+test('the name is a string', () => {
+  assert.equal(typeof NAME, 'string');
+});
+"""
+
+
+def bytes_fixture():
+    """PR 1 is a clean clamp change. PR 2, merged after it, adds a product file that is not UTF-8."""
+    if "bytes" not in CACHE:
+        repo = new_repo("bytes")
+        put(repo, {"README.md": "base\n"})
+        commit(repo, "Base")
+        shas = {1: pull_request(repo, 1, "Clamp scores",
+                                {"src/clamp.mjs": JS_CLAMP_SRC, "test/clamp.test.mjs": JS_CLAMP_TEST}),
+                2: pull_request(repo, 2, "Latin name",
+                                {"src/name.mjs": LATIN_NAME_SRC, "test/name.test.mjs": NAME_TEST})}
+        CACHE["bytes"] = {"repo": repo, "sha": shas}
+    return CACHE["bytes"]
+
+
+# A fixture shaped like banchi's harness: harness/tests with Result (a NamedTuple with a bool `passed`),
+# isolated_home, and one module that the banchi runner reads as a suite.
+BANCHI_SUITE = "harness/tests/t1_x.py"
+BANCHI_INIT = '''"""Shared types for the test modules. A fixture shaped like banchi's harness/tests/__init__.py."""
+
+from typing import NamedTuple
+
+
+class Result(NamedTuple):
+    passed: bool
+    detail: str = ""
+
+
+class NotImplementedYet(Exception):
+    """Raised by a stub. The runner reports it as a failure, never as a skip."""
+'''
+BANCHI_HOME = '''import contextlib
+from pathlib import Path
+
+
+@contextlib.contextmanager
+def isolated_home(root=None):
+    """A stand-in for banchi's isolated_home: a folder under the cwd, yielded as a Path."""
+    home = Path(root or Path.cwd()) / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    yield home
+'''
+BANCHI_GREEN = "from harness.tests import Result\n\n\ndef run():\n    return Result(True, 'all checks passed')\n"
+BANCHI_RED = "from harness.tests import Result\n\n\ndef run():\n    return Result(False, 'the band is wrong')\n"
+BANCHI_RAISE = "def run():\n    raise RuntimeError('boom')\n"
+BANCHI_NONE = "def run():\n    return None\n"
+BANCHI_METHOD = ("class Odd:\n    detail = 'odd'\n\n    def passed(self):\n        return True\n\n\n"
+                 "def run():\n    return Odd()\n")
+
+
+def banchi_part():
+    """The banchi per-module runner's profile part, as hooks/mutate_guard.py names it."""
+    try:
+        return mutate_guard.REPLAY_PROFILES["banchi"]["parts"]["py"]
+    except (KeyError, TypeError):
+        raise AssertionError("REPLAY_PROFILES has no banchi py part")
+
+
+def banchi_suite(module_text):
+    """A tree shaped like banchi's harness, with one module at BANCHI_SUITE. Returns (folder, argv): argv is
+    the profile's own runner command, with the suite path filled in and the test's interpreter in place of
+    the install's venv."""
+    folder = os.path.join(fresh(), "banchi")
+    put(folder, {"harness/tests/__init__.py": BANCHI_INIT, "harness/tests/home.py": BANCHI_HOME,
+                 BANCHI_SUITE: module_text})
+    argv = [sys.executable if piece == "{deps}/venv/bin/python" else piece.replace("{suite}", BANCHI_SUITE)
+            for piece in banchi_part()["argv"]]
+    return folder, argv
+
+
 def install_argv(counter):
     """A stand-in install: it makes node_modules/marker.txt in its folder and counts each run in `counter`."""
     source = ("import os\n"
@@ -418,6 +503,14 @@ def install_argv(counter):
 
 def replay(repo, sha, profile, limit=50, seed=0, suite_timeout=60, jobs=2):
     return api("replay_pr")(repo, sha, profile, limit=limit, seed=seed, suite_timeout=suite_timeout, jobs=jobs)
+
+
+def replay_no_raise(repo, sha, profile, **options):
+    """replay() with a raise reported as a FAIL line, not an ERROR, as the other cases report a contract miss."""
+    try:
+        return replay(repo, sha, profile, **options)
+    except Exception as error:
+        raise AssertionError("the replay raised %s: %s" % (type(error).__name__, error))
 
 
 def js_rows():
@@ -811,6 +904,137 @@ class CostTests(unittest.TestCase):
         self.assertEqual(snapshot(fixture["repo"]), before)
         self.assertEqual(os.listdir(folder), [])
         self.assertEqual(descendants() - procs, set())
+
+
+# Playwright output in the shape `playwright test` prints on a non-terminal: a failure block headed by its
+# number, its title and a rule of box-drawing dashes, then the error text, then the source frame of the line
+# that stood when the error was thrown. The frame quotes `expect(page)` in each red case below.
+PW_HEADER = "  1) [chromium] › unit/nav.unit.ts:6:5 › nav › keeps the url " + "─" * 30 + "\n"
+PW_FRAME = ("      5 | test.describe('nav', () => {\n"
+            "    > 6 |   await expect(page).toHaveURL('/x');\n"
+            "        |                      ^\n"
+            "      7 | });\n\n")
+PW_SUMMARY = "  1 failed\n    [chromium] › unit/nav.unit.ts:6:5 › nav › keeps the url\n"
+PW_CLOSED = ("Running 1 test using 1 worker\n\n" + PW_HEADER + "\n"
+             "    Error: Target page, context or browser has been closed\n\n" + PW_FRAME + PW_SUMMARY)
+PW_TIMEOUT = ("Running 1 test using 1 worker\n\n" + PW_HEADER + "\n"
+              "    Test timeout of 30000ms exceeded.\n\n" + PW_FRAME + PW_SUMMARY)
+PW_PAGE_MATCHER = ("Running 1 test using 1 worker\n\n" + PW_HEADER + "\n"
+                   "    Error: expect(page).toHaveURL(expected) failed\n\n"
+                   "    Expected pattern: /x/\n"
+                   "    Received string:  \"http://127.0.0.1:3000/\"\n"
+                   "    Timeout: 5000ms\n\n" + PW_FRAME + PW_SUMMARY)
+PW_RECEIVED = ("Running 1 test using 1 worker\n\n"
+               "  1) [chromium] › unit/band.unit.ts:4:5 › band › grades " + "─" * 30 + "\n\n"
+               "    Error: expect(received).toBe(expected) // Object.is equality\n\n"
+               "    Expected: \"A\"\n"
+               "    Received: \"B\"\n\n"
+               "      3 | test('grades', () => {\n"
+               "    > 4 |   expect(band(95)).toBe('A');\n"
+               "        |                    ^\n"
+               "      5 | });\n\n"
+               "  1 failed\n    [chromium] › unit/band.unit.ts:4:5 › band › grades\n")
+PW_PASS = "Running 1 test using 1 worker\n\n  1 passed (1.2s)\n"
+
+
+class PlaywrightClassifyTests(unittest.TestCase):
+    """classify_playwright reads the error text of a failure block. The source frame shows where the run
+    stood, not what went wrong, so a frame that quotes `expect(page)` is no evidence of an assertion."""
+
+    def test_a_closed_target_under_an_expect_frame_is_a_crash(self):
+        self.assertEqual(api("classify_playwright")(1, PW_CLOSED, False), "crash")
+
+    def test_a_test_timeout_under_an_expect_frame_is_not_a_kill(self):
+        self.assertIn(api("classify_playwright")(1, PW_TIMEOUT, False), ("crash", "timeout"))
+
+    def test_a_received_expected_failure_is_an_assert(self):
+        self.assertEqual(api("classify_playwright")(1, PW_RECEIVED, False), "assert")
+
+    def test_a_failed_page_matcher_is_an_assert(self):
+        self.assertEqual(api("classify_playwright")(1, PW_PAGE_MATCHER, False), "assert")
+
+    def test_a_pass_is_a_pass(self):
+        self.assertEqual(api("classify_playwright")(0, PW_PASS, False), "pass")
+
+
+class BanchiRunnerTests(unittest.TestCase):
+    """The banchi per-module runner (REPLAY_PROFILES banchi, py part): a module's Result sets its class."""
+
+    def kind(self, module_text):
+        folder, argv = banchi_suite(module_text)
+        classify = mutate_shared.CLASSIFIERS[banchi_part()["classify"]]
+        return mutate_shared.run_suite_file(folder, BANCHI_SUITE, 60, argv=argv, classify=classify)[0]
+
+    def test_a_passed_result_reads_green(self):
+        self.assertEqual(self.kind(BANCHI_GREEN), "pass")
+
+    def test_a_failed_result_prints_a_fail_line_exits_1_and_is_an_assert(self):
+        folder, argv = banchi_suite(BANCHI_RED)
+        done = subprocess.run(argv, cwd=folder, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertTrue(any(line.startswith("FAIL: harness.tests.t1_x") for line in done.stdout.splitlines()),
+                        done.stdout)
+        self.assertEqual(self.kind(BANCHI_RED), "assert")
+
+    def test_a_raise_is_a_crash(self):
+        self.assertEqual(self.kind(BANCHI_RAISE), "crash")
+
+    def test_a_none_result_is_a_crash(self):
+        self.assertEqual(self.kind(BANCHI_NONE), "crash")
+
+    def test_a_passed_that_is_a_method_does_not_read_green(self):
+        self.assertEqual(self.kind(BANCHI_METHOD), "crash")
+
+
+class NonUtf8Tests(unittest.TestCase):
+    """A product file that is not UTF-8 gives its pull request an UNKNOWN row with a reason, and the pull
+    requests replayed after it still get their rows."""
+
+    def test_a_non_utf8_product_file_gives_its_pr_an_unknown_row_with_a_reason(self):
+        fixture = bytes_fixture()
+        row = replay_no_raise(fixture["repo"], fixture["sha"][2], JS_PROFILE)
+        self.assertEqual(row["status"], "UNKNOWN")
+        self.assertTrue(row["reason"].strip(), "an UNKNOWN row needs a reason")
+
+    def test_the_prs_after_a_non_utf8_one_still_get_rows(self):
+        fixture = bytes_fixture()
+        code, out, err = run_cli(["--replay", fixture["repo"], "--profile", "fixture-js", "--prs", "2",
+                                  "--limit", "50", "--suite-timeout", "60", "--jobs", "2"])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertRegex(out, r"#2 UNKNOWN")
+        self.assertRegex(out, r"#1 OK")
+
+
+class InstallTimeoutTests(unittest.TestCase):
+    """An install that times out leaves no process of its own alive, its grandchildren included."""
+
+    def test_an_install_that_times_out_leaves_no_process_alive(self):
+        repo, sha = tool_fixture()
+        real = shutil.which("sleep")
+        self.assertIsNotNone(real, "no sleep on PATH")
+        bin_dir, log = fresh(), os.path.join(fresh(), "sleeps.log")
+        # A shim on PATH logs the pid of each sleep, then execs the real one, so the pid is the sleep's own.
+        shim = os.path.join(bin_dir, "sleep")
+        with open(shim, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write('#!/bin/sh\necho $$ >> "$SLEEP_LOG"\nexec "%s" "$@"\n' % real)
+        os.chmod(shim, 0o755)
+        profile = dict(JS_PROFILE, install=["sh", "-c", "sleep 30 & sleep 30"], lockfile="package-lock.json")
+        env = {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""), "SLEEP_LOG": log}
+        try:
+            with mock.patch.dict(os.environ, env), mock.patch.object(mutate_shared, "INSTALL_TIMEOUT", 1):
+                row = replay_no_raise(repo, sha, profile, suite_timeout=5)
+            self.assertEqual(row["status"], "UNKNOWN", row["reason"])
+            pids = pids_in(log)
+            self.assertTrue(pids, "no install sleep ran, so the check proves nothing")
+            alive = live_pids()
+            self.assertEqual([pid for pid in pids if pid in alive], [], "an install process is alive")
+        finally:
+            for pid in pids_in(log):
+                if pid in live_pids():
+                    try:
+                        os.kill(pid, signal.SIGKILL)  # only the pids this case logged
+                    except OSError:
+                        pass
 
 
 class FixtureSanityTests(unittest.TestCase):
