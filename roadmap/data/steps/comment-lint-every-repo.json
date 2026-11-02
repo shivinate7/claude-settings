@@ -1,0 +1,9 @@
+{
+ "title": "The comment check runs in every repo, not only claude-settings",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3376,
+ "why": "Owner asked, Nov 1 18:39 CST, about the lint work on code and comments. Read: lint/check_comment_narration.py (comments say what and why, never history; rule building-comments-say-why) runs only in claude-settings' own checks; the shared actions/code-check that other repos pin does not run it (git grep, Nov 1 18:41 CST).",
+ "note": "Shape: actions/code-check (or ste-lint, whichever each repo already pins) runs the comment check on changed lines, so each repo gets it when its pin moves. Measured risk: the rule applies in every repo, but only claude-settings checks it. Ready: no open question. Port: yes.",
+ "updatedAt": "2026-11-02T00:43:00Z"
+}

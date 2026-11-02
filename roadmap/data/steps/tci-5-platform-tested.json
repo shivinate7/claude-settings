@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.3375005,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 5 of 12, ranked by harm avoided.",
- "note": "Repos: degen, mailaudit, banchi, home, ios-adblock. Each shipped platform gets a CI job or a named local check, with a green run on the last merge. Waits on page item 133 (Swift tests in CI). Port: yes. Item 133 reworked Nov 1 18:36 CST after the owner's note (a claude-settings rule wins unless the repo states an exemption; degen states none): a, the Swift suite runs in the batch's checks on a GitHub Mac machine (recommended), or b, degen records an exemption and keeps the recorded Mac run.",
- "updatedAt": "2026-11-02T00:37:00Z"
+ "note": "Repos: degen, mailaudit, banchi, home, ios-adblock. Each shipped platform gets a CI job or a named local check, with a green run on the last merge. Waits on page item 133 (Swift tests in CI). Port: yes. Item 133 reworked Nov 1 18:36 CST after the owner's note (a claude-settings rule wins unless the repo states an exemption; degen states none): a, the Swift suite runs in the batch's checks on a GitHub Mac machine (recommended), or b, degen records an exemption and keeps the recorded Mac run. Reworked again Nov 1 18:42 CST on the owner's milestone note (c95 ruling, Oct 27: full runs at milestones in repos that pay for minutes): a, full Swift run at milestones on a GitHub Mac machine (recommended); b, every app batch; c, degen exemption.",
+ "updatedAt": "2026-11-02T00:43:00Z"
 }
