@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
+from typing import Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -80,3 +82,11 @@ def read_merge_role() -> str | None:
     The id is the environment's CLAUDE_CODE_REMOTE_SESSION_ID (cse_<id>), never a hook payload's session_id."""
     role = read_recorded_role()
     return role if role in MERGE_ROLES else None
+
+
+def refusals_path(session_id: object) -> Optional[str]:
+    """The file of tool refusals a session has not yet raised with the owner, or None for an id that
+    is not a plain name. Written by hooks/refusal_note.py, read and trimmed by lint/report_guard.py."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")

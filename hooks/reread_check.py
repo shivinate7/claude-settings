@@ -16,13 +16,16 @@ Spec: docs/decisions/precompact-handoff.md, item 9. One flag file per session,
   --pre-read (PreToolUse, Read)  clears the flag when file_path is the session's own
       handoff, spelled as a full path, with forward slashes, as a short or long Windows
       name, or as ~/.claude/.... Never refuses the read.
+  unread_handoff(payload) (import, no flag)  the guard's PreToolUse check calls it. Returns the
+      handoff path while the flag is set and the handoff exists, else "".
   --stop (Stop)  with the flag set and the handoff file present, prints
       {"decision": "block", "reason": ...} naming the handoff path. Exits quietly on
       stop_hook_active, so it cannot loop. The flag stays set until the handoff is read,
       so it refuses once per turn. SessionEnd (clear) deletes the flag.
 
 Never exits 2: bad stdin, a failed import of the sibling precompact_handoff, and every
-other failure exit 0.
+other failure exit 0. Importing this module never exits: without the sibling,
+`unread_handoff` returns "".
 """
 import json
 import os
@@ -32,8 +35,8 @@ try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import precompact_handoff as ph  # one home for the handoff and flag paths
 except Exception as e:
+    ph = None
     sys.stderr.write("reread_check: cannot import precompact_handoff: %s\n" % e)
-    sys.exit(0)
 
 
 def names_handoff(file_path, session_id):
@@ -42,7 +45,25 @@ def names_handoff(file_path, session_id):
         os.path.expanduser("~/.claude/handoffs/%s.md" % session_id)))
 
 
+def unread_handoff(payload):
+    """The session's handoff path while its re-read flag is set and the handoff exists, else "".
+    An agent's call (`agent_id` on the payload) and a bad payload give "". Checks the flag first,
+    so a session with no flag costs one existence check. Never raises."""
+    try:
+        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):
+            return ""
+        sid = payload.get("session_id")
+        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):
+            return ""
+        handoff = ph.handoff_path(sid)
+        return handoff if os.path.isfile(handoff) else ""
+    except Exception:
+        return ""
+
+
 def main():
+    if ph is None:
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except Exception:   # bad JSON, or a read that fails
