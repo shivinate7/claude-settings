@@ -6869,8 +6869,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/main^2").strip(), "D-002")
 
     def test_pr_1009_ready_with_empty_stamp_kinds_refuses_a_stale_page_before_any_push(self):
-        # PR #1009 (batch 60) was ready, its base config had kinds [], and its page was stale. Confirm pushed a page-only commit and
-        # CI restarted. Owner ask: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST. A ready pull request with no claim is refused.
+        # A ready PR on a base with kinds [] and a stale page: a page-only push restarts CI after green, so confirm refuses it.
         mark = stamp_marker(self)
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
