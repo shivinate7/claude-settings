@@ -40,13 +40,27 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
+The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
+steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
+STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
+that far before the live file's readAt, when no live session step is named by the pull). A draft row with no
+usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when its branch equals the step id or
+its title holds the id as a whole token (names_step); the stale-draft row and the pair line below share that rule.
+
+The build goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
+"todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable live read it prints
+one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
+printed line tells them apart.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
 Cost per build: about six git processes, one read of each scanned file, one page written. No
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
-fields (id, session_status, tags) per session in the live file it already writes.
+fields (id, session_status, tags) per session in the live file it already writes. The red line and the two
+stale-ready rows add no process, file, timer or log: they read the live file the build already reads. The publisher
+adds one field (createdAt) per pull row, from the GitHub list call it already makes.
 """
 import argparse
 import datetime
@@ -61,6 +75,9 @@ NOTE_WORDS = 250
 STALE_DAYS = 5
 # A live file older than this counts a dead lane as live, so the stale-step row reads unknown.
 STALE_LIVE_MINUTES = 60
+STALE_DRAFT_HOURS = 12
+PAIR_LINE = "todo step with an open PR"
+READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 STEP_TAG = "cs-step:"
 REPO_TAG = "cs-repo:"
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
@@ -468,7 +485,7 @@ def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
+    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
@@ -695,9 +712,17 @@ def main(argv=None):
     out.write_text(render_block(data, info) if args.block else render(data, info), encoding="utf-8")
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
+        print("%s: unknown (steps unknown)" % PAIR_LINE)
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
+    pairs = todo_pairs(data["steps"], info["live"])
+    if pairs is None:
+        print("%s: %s" % (PAIR_LINE, live_why(info["live"])))
+    for k, number in pairs or []:
+        print("%s: %s (#%d)" % (PAIR_LINE, k, number))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
+    if pairs:
+        raise SystemExit(1)
 
 
 def added_at(source):
@@ -734,10 +759,58 @@ def device_check(d):
     return "valid" if zoned else "bad"
 
 
+def names_step(pull, sid):
+    """True when the pull's branch is the step id, or its title holds the id as a whole token, ignoring case."""
+    if pull.get("branch") == sid:
+        return True
+    edge = "[A-Za-z0-9_-]"
+    return re.search("(?<!%s)%s(?!%s)" % (edge, re.escape(sid), edge), pull["title"], re.I) is not None
+
+
+def live_why(work):
+    """Why the live read is unknown (no file, unreadable, stale, no sessions list), or None when it can be used."""
+    work = work or {"read": "unknown (no --live file)"}
+    return work["staleWhy"] if "staleWhy" in work else work["read"]
+
+
+def todo_pairs(steps, work):
+    """(id, pull number) for each todo step that an open pull names, or None when the live read is unknown."""
+    if live_why(work):
+        return None
+    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") == "todo"
+            for p in work["pulls"] if names_step(p, k)]
+
+
+def created_at(pull):
+    """The pull's createdAt as an aware datetime, or None when missing, not a string, or not ISO with a zone."""
+    try:
+        at = datetime.datetime.fromisoformat(pull["createdAt"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, ValueError):
+        return None
+    return at if at.tzinfo else None
+
+
+def stale_drafts(work):
+    """Entries for each draft pull older than STALE_DRAFT_HOURS at the live read with no live lane, or one unknown entry."""
+    why = live_why(work)
+    if why:
+        return [why]
+    read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+    out = []
+    for p in work["pulls"]:
+        if p.get("draft") is not True or any(names_step(p, sid) for sid in work["sessionSteps"]):
+            continue
+        at = created_at(p)
+        if at is None:
+            out.append("unknown (#%d has no createdAt)" % p["number"])
+        elif (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600:
+            out.append("#%d (%s)" % (p["number"], p.get("branch") or p["title"]))
+    return out
+
+
 def unlaned(open_, marks, work):
     """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
-    work = work or {"read": "unknown (no --live file)"}
-    why = work["staleWhy"] if "staleWhy" in work else work["read"]
+    why = live_why(work)
     if why:
         return [why]
     live = set(work["sessionSteps"]) | {p["branch"] for p in work["pulls"] if isinstance(p.get("branch"), str)}
@@ -789,9 +862,12 @@ def upkeep(steps, added, marks, strays, work=None):
             closing.append("%s (%s; open a try-it item)" % (k, got))
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
+    ready = [k for k, d in open_ if d.get("status") == "todo" and READY_SENTENCE.search(d.get("note") or "")]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
+            ("ready todo steps", ready),
+            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("landed, waiting for a device trial", waiting),
             ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),

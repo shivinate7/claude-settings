@@ -21,6 +21,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The builder reads it to list steps in progress with no live lane.
+  Each pull row carries `createdAt`, so the builder can list a stale draft.
   Triage, as the waiting-page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. It may run agents.
