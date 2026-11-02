@@ -2430,8 +2430,11 @@ def review_body(n, head, kind, guard, rounds, net):
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. Trailing blank lines are allowed."""
+    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. Trailing blank lines are allowed. The
+    record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
         lines.pop()
     if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:

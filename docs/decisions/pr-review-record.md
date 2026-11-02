@@ -29,7 +29,7 @@ Net value: not owed|zero|positive|negative
 CI: read live by merge --reviewed
 ```
 
-- The first line is the marker.
+- The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
