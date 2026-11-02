@@ -16,7 +16,11 @@ asks for the score. The failure classes under test:
 - a profile's `select` gives the suites to run against each product file's mutants, and a failed select falls
   back to every changed suite, with a note in the row;
 - a `pr_budget` leaves the mutants not started past it as `not_run`, never as a kill, a survivor or a crash;
-- a replay leaves the repository, the temp folders and the child processes as it found them.
+- a replay leaves the repository, the temp folders and the child processes as it found them;
+- a banchi pull request that changes a T7 group module, harness/tests/t7/<group>.py, is scored by that group's own
+  checks, in T7's order and setup, and by no other group's; a changed helper with no CHECKS is no suite; a group
+  with no checks reads unusable, never green; a check that raises is a crash, never a kill; a tN module and the
+  whole t7_store_and_seams.py still score whole.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
 repository root. A missing package is a FAIL, never a skip. A contract name missing from
@@ -619,7 +623,7 @@ def bytes_fixture():
 BANCHI_SUITE = "harness/tests/t1_x.py"
 BANCHI_INIT = '''"""Shared types for the test modules. A fixture shaped like banchi's harness/tests/__init__.py."""
 
-from typing import NamedTuple
+from typing import List, NamedTuple
 
 
 class Result(NamedTuple):
@@ -629,6 +633,34 @@ class Result(NamedTuple):
 
 class NotImplementedYet(Exception):
     """Raised by a stub. The runner reports it as a failure, never as a skip."""
+
+
+class Checks:
+    """Collects assertions so one run reports every failure. Shaped like banchi's Checks: an ok line starts
+    with two spaces, and a run with no checks is a failure."""
+
+    def __init__(self) -> None:
+        self.lines: List[str] = []
+        self.failures = 0
+
+    def ok(self, condition, label):
+        self.lines.append("  %s %s" % ("ok  " if condition else "FAIL", label))
+        if not condition:
+            self.failures += 1
+        return bool(condition)
+
+    def equal(self, actual, expected, label):
+        if self.ok(actual == expected, label):
+            return True
+        self.lines.append("       expected %r, actual %r" % (expected, actual))
+        return False
+
+    def result(self, headline=""):
+        total = sum(1 for line in self.lines if line.startswith(("  ok  ", "  FAIL")))
+        body = ([headline] if headline else []) + self.lines
+        if not total:
+            body.append("  FAIL no checks ran")
+        return Result(self.failures == 0 and total > 0, "\\n".join(body))
 '''
 BANCHI_HOME = '''import contextlib
 from pathlib import Path
@@ -657,6 +689,20 @@ def banchi_part():
         raise AssertionError("REPLAY_PROFILES has no banchi py part")
 
 
+def banchi_profile():
+    """The banchi py part made runnable here: every list value names the test's own interpreter in place of the
+    install's venv, and the install is off, since the fixtures need no requirements. Built from the real part, so a
+    key the build adds reaches these cases."""
+    def local(value):
+        if isinstance(value, list):
+            return [local(item) for item in value]
+        return sys.executable if value == "{deps}/venv/bin/python" else value
+
+    profile = {key: local(value) for key, value in banchi_part().items()}
+    profile["install"] = None
+    return profile
+
+
 def banchi_suite(module_text):
     """A tree shaped like banchi's harness, with one module at BANCHI_SUITE. Returns (folder, argv): argv is
     the profile's own runner command, with the suite path filled in and the test's interpreter in place of
@@ -664,9 +710,240 @@ def banchi_suite(module_text):
     folder = os.path.join(fresh(), "banchi")
     put(folder, {"harness/tests/__init__.py": BANCHI_INIT, "harness/tests/home.py": BANCHI_HOME,
                  BANCHI_SUITE: module_text})
-    argv = [sys.executable if piece == "{deps}/venv/bin/python" else piece.replace("{suite}", BANCHI_SUITE)
-            for piece in banchi_part()["argv"]]
+    argv = [piece.replace("{suite}", BANCHI_SUITE) for piece in banchi_profile()["argv"]]
     return folder, argv
+
+
+# THE T7 GROUP FIXTURE: a banchi repository whose T7 is split into group modules, harness/tests/t7/<group>.py. Each
+# group has a CHECKS tuple, and harness/tests/t7_store_and_seams.py's run(order=) runs the checks of the groups in
+# CHECK_ORDER with hermetic() around each one. Every group, and T7's box-map checks, appends a line to its own log
+# when a check runs. Each log path is baked into the file text from this case's run folder, so a replay leaves
+# the line where the case reads it. Product: pricing/grade.py, which every group tests.
+GRADE_PATH = "pricing/grade.py"
+GRADE_BASE = 'def band(score):\n    return "C"  # the base grades every score C\n'
+GRADE_BANDS = ('def band(score):\n    if score >= 90:\n        return "A"\n    if score >= 50:\n'
+               '        return "B"\n    return "C"\n')
+GRADE_ONE = 'def band(score):\n    return "A"\n'
+GROUPS = ("alpha", "beta", "box")
+STRONG = ((95, "A"), (60, "B"), (10, "C"))
+
+T7_RUNNER = '''"""T7 fixture: shaped like banchi's t7_store_and_seams.py. run() walks CHECK_ORDER, each check in hermetic()."""
+
+from harness.tests import Checks, Result
+from harness.tests.t7 import alpha, beta
+from harness.tests.t7.common import hermetic
+
+NAME = "T7"
+CHECK_ORDER = (*alpha.CHECKS, *beta.CHECKS)
+
+
+def run(order=None) -> Result:
+    from harness.tests import t7_box_map  # its checks run in T7's run, after CHECK_ORDER
+
+    checks = Checks()
+    todo = list(CHECK_ORDER) + list(t7_box_map.CHECKS)
+    if order is not None:
+        todo = list(order(todo))
+    for check in todo:
+        with hermetic():
+            check(checks)
+    return checks.result("store/ and the seams")
+'''
+
+# A helper, not a group. Its text holds every shape a naive scan could take for a CHECKS line, and none is one.
+COMMON = '''"""Helpers the T7 group modules share. Not a group: this file has no checks of its own.
+
+A text scan that reads a CHECKS line at column 0 would take this file for a group:
+CHECKS = (
+    never_run,
+)
+"""
+
+import contextlib
+import os
+
+MARKER = "FIXTURE_HERMETIC"
+# CHECKS = () here is a comment, not a group.
+NOT_A_GROUP = "CHECKS = ()"
+OPENER = "# not a comment, though it opens like one"
+
+
+@contextlib.contextmanager
+def hermetic():
+    """The setup each check runs in: the marker is set while the check runs, and no longer."""
+    os.environ[MARKER] = "1"
+    try:
+        yield
+    finally:
+        os.environ.pop(MARKER, None)
+
+
+def band_label(score):
+    return "band %d" % score
+'''
+COMMON_CHANGED = COMMON + '\n\ndef band_span():\n    return "10 to 95"\n'
+
+ALPHA = '''"""T7 group fixture: alpha. Its first check runs first, and its second reads what the first left behind.
+
+Don't reorder the two: the order is part of what this group proves.
+"""
+
+import os
+
+from harness.tests.t7.common import MARKER
+from pricing import grade
+
+LOG = %(log)r
+RAN = []
+
+
+def _log():
+    with open(LOG, "a", encoding="utf-8") as handle:
+        handle.write("x")
+
+
+def check_first(checks):
+    checks.ok(os.environ.get(MARKER) == "1", "alpha runs inside hermetic()")
+    _log()
+    RAN.append("first")
+%(first)s
+
+
+def check_rest(checks):
+    checks.ok(RAN == ["first"], "alpha's first check ran before this one")
+%(rest)s
+
+
+CHECKS = (check_first, check_rest)
+'''
+
+
+def alpha_text(log, bands, lower=False):
+    """alpha.py for `bands`, a ((score, label), ...) of what band() must return: the first pair is checked in
+    check_first and the rest in check_rest. With `lower`, the result is lowercased before the compare, so a
+    None raises rather than failing the compare."""
+    lines = []
+    for score, label in bands:
+        got = "grade.band(%d)%s" % (score, ".lower()" if lower else "")
+        want = label.lower() if lower else label
+        lines.append('    checks.equal(%s, %r, "band %d is %s")' % (got, want, score, label))
+    return ALPHA % {"log": log, "first": "\n".join(lines[:1]), "rest": "\n".join(lines[1:]) or "    pass"}
+
+
+def beta_text(log):
+    return '''"""T7 group fixture: beta. Its one check writes a line, so a run that reaches it leaves a trace."""
+
+LOG = %r
+
+
+def check_beta(checks):
+    with open(LOG, "a", encoding="utf-8") as handle:
+        handle.write("x")
+    checks.ok(True, "beta check ran")
+
+
+CHECKS = (check_beta,)
+''' % (log,)
+
+
+def box_map_text(log):
+    return '''"""T7 fixture: the box-map checks, which T7's run adds to its own."""
+
+LOG = %r
+
+
+def check_box_map(checks):
+    with open(LOG, "a", encoding="utf-8") as handle:
+        handle.write("x")
+    checks.ok(True, "box map check ran")
+
+
+CHECKS = (check_box_map,)
+''' % (log,)
+
+
+GAMMA = '''"""T7 group fixture: gamma. Its CHECKS tuple is empty, so a run of it checks nothing."""
+
+CHECKS = ()
+'''
+
+T1_X = '''"""Fixture tN module: a suite of its own, run whole, as today."""
+
+from harness.tests import Checks, Result
+from pricing import grade
+
+
+def run() -> Result:
+    checks = Checks()
+    checks.equal(grade.band(95), "A", "band 95 is A")
+    checks.equal(grade.band(60), "B", "band 60 is B")
+    checks.equal(grade.band(10), "C", "band 10 is C")
+    return checks.result("grades")
+'''
+
+
+def t7_base(logs):
+    """The files every T7 case starts from: the banchi harness, the T7 modules at their base, and the product at
+    its base. Its one band() returns "C" for every score, and the base alpha checks exactly that."""
+    return {
+        "README.md": "base\n",
+        "pricing/__init__.py": "",
+        GRADE_PATH: GRADE_BASE,
+        "harness/tests/__init__.py": BANCHI_INIT,
+        "harness/tests/home.py": BANCHI_HOME,
+        "harness/tests/t7_store_and_seams.py": T7_RUNNER,
+        "harness/tests/t7_box_map.py": box_map_text(logs["box"]),
+        "harness/tests/t7/__init__.py": '"""T7 group modules."""\n',
+        "harness/tests/t7/common.py": COMMON,
+        "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], ((10, "C"),)),
+        "harness/tests/t7/beta.py": beta_text(logs["beta"]),
+    }
+
+
+# Each case's pull request: the files it writes, given the case's log paths.
+T7_CHANGES = {
+    "strong": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], STRONG)},
+    "weak": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], ((95, "A"),))},
+    "helper": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], STRONG),
+                            "harness/tests/t7/common.py": COMMON_CHANGED},
+    "helper_alone": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t7/common.py": COMMON_CHANGED},
+    "raise": lambda logs: {GRADE_PATH: GRADE_ONE,
+                           "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], ((95, "A"),), lower=True)},
+    "gamma": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t7/alpha.py": alpha_text(logs["alpha"], STRONG),
+                           "harness/tests/t7/gamma.py": GAMMA},
+    "tn": lambda logs: {GRADE_PATH: GRADE_BANDS, "harness/tests/t1_x.py": T1_X},
+    "whole": lambda logs: {GRADE_PATH: GRADE_BANDS,
+                           "harness/tests/t7_store_and_seams.py": T7_RUNNER + "# a comment this change adds\n"},
+}
+
+
+def t7_pr(name):
+    """(repo, sha, logs) of the case `name`: the base commit, then its pull request. Built once per name. `logs`
+    maps each group, and the box map, to the log path its checks append to."""
+    key = "t7-" + name
+    if key not in CACHE:
+        logs = {group: os.path.join(fresh(), group + ".log") for group in GROUPS}
+        repo = new_repo("t7-" + name)
+        put(repo, t7_base(logs))
+        commit(repo, "Base")
+        sha = pull_request(repo, 1, "T7 group change", T7_CHANGES[name](logs))
+        CACHE[key] = (repo, sha, logs)
+    return CACHE[key]
+
+
+def t7_row(name):
+    """(replay row, logs) of the case `name`, replayed once under the banchi part made runnable here."""
+    key = "t7-row-" + name
+    if key not in CACHE:
+        repo, sha, logs = t7_pr(name)
+        CACHE[key] = (replay_no_raise(repo, sha, banchi_profile(), limit=50), logs)
+    return CACHE[key]
+
+
+def t7_mutants(name):
+    """The engine's own list of mutants for the product lines the case's pull request added."""
+    repo, sha, _logs = t7_pr(name)
+    return expected_mutants(repo, sha, GRADE_PATH, lines=changed(repo, sha, GRADE_PATH))
 
 
 def install_argv(counter):
@@ -1292,6 +1569,91 @@ class BanchiRunnerTests(unittest.TestCase):
 
     def test_a_passed_that_is_a_method_does_not_read_green(self):
         self.assertEqual(self.kind(BANCHI_METHOD), "crash")
+
+
+class BanchiT7GroupTests(unittest.TestCase):
+    """A banchi pull request that changes a T7 group module, harness/tests/t7/<group>.py, is scored by that group's own
+    checks, run in T7's order and setup and nothing else. A changed helper with no CHECKS is not a suite."""
+
+    def scored(self, name):
+        row, logs = t7_row(name)
+        self.assertEqual(row["status"], "OK", "%s\n%s" % (name, api("format_replay_row")(row)))
+        return row, logs
+
+    def test_a_pull_request_that_changes_a_group_and_the_product_reads_ok(self):
+        row, _logs = self.scored("strong")
+        self.assertGreater(row["made"], 0)
+
+    def test_every_mutant_the_group_reaches_is_killed(self):
+        row, _logs = self.scored("strong")
+        want = t7_mutants("strong")
+        self.assertEqual((row["made"], row["killed"], row["crashed"], row["survived"]),
+                         (len(want), len(want), 0, 0), api("format_replay_row")(row))
+
+    def test_only_the_changed_group_runs(self):
+        _row, logs = self.scored("strong")
+        self.assertTrue(os.path.exists(logs["alpha"]), "alpha never ran, so the other assertions prove nothing")
+        self.assertFalse(os.path.exists(logs["beta"]), "beta ran, but only alpha changed")
+        self.assertFalse(os.path.exists(logs["box"]), "T7's box-map checks ran inside a group run")
+
+    def test_a_weak_group_leaves_its_unreached_mutants_as_survivors_with_path_and_line(self):
+        row, _logs = self.scored("weak")
+        repo, sha, _logs = t7_pr("weak")
+        text = show(repo, sha, GRADE_PATH)
+        unreached = {unique_line(text, "    if score >= 50:"), unique_line(text, '        return "B"'),
+                     unique_line(text, '    return "C"')}
+        want = set()
+        for label, _mutated in t7_mutants("weak"):
+            line = int(re.match(r"L(\d+)", label).group(1))
+            if line in unreached:
+                want.add((GRADE_PATH, line, label))
+        self.assertTrue(want, "the band 60 and band 10 lines hold no mutant, so the case proves nothing")
+        self.assertEqual(survivor_set(row), want, api("format_replay_row")(row))
+        line = unique_line(text, "    if score >= 50:")
+        self.assertIn("%s:%d L%d compare GtE -> Lt" % (GRADE_PATH, line, line), api("format_replay_row")(row))
+
+    def test_a_changed_helper_with_no_checks_is_not_a_suite(self):
+        row, _logs = self.scored("helper")
+        self.assertNotIn("harness/tests/t7/common.py", row["unusable"], api("format_replay_row")(row))
+        self.assertGreater(row["killed"], 0)
+
+    def test_a_helper_alone_has_no_suite_and_reads_no_tests(self):
+        row, _logs = t7_row("helper_alone")
+        self.assertEqual(row["status"], "NO_TESTS", api("format_replay_row")(row))
+
+    def test_a_check_that_raises_is_a_crash_and_never_a_kill(self):
+        row, _logs = self.scored("raise")
+        self.assertEqual(row["made"], 2, "one return with a value: its None and its drop are the two mutants")
+        self.assertEqual((row["killed"], row["crashed"], row["survived"]), (0, row["made"], 0),
+                         api("format_replay_row")(row))
+
+    def test_a_group_with_no_checks_is_unusable_and_never_green(self):
+        row, _logs = self.scored("gamma")
+        self.assertIn("harness/tests/t7/gamma.py", row["unusable"], api("format_replay_row")(row))
+        self.assertGreater(row["killed"], 0, "alpha, changed in the same pull request, still scores")
+
+    def test_a_tN_module_is_still_scored_whole(self):
+        row, _logs = self.scored("tn")
+        self.assertEqual(row["unusable"], {}, api("format_replay_row")(row))
+        self.assertGreater(row["killed"], 0)
+
+    def test_a_changed_t7_store_and_seams_is_still_scored_whole(self):
+        row, _logs = self.scored("whole")
+        self.assertEqual(row["unusable"], {}, api("format_replay_row")(row))
+        self.assertGreater(row["killed"], 0)
+
+    def test_the_whole_t7_reaches_beta_and_the_box_map_through_todays_runner(self):
+        """The pins above can go red: the whole module, run as a tN module, does reach beta and the box map."""
+        repo, sha, logs = t7_pr("whole")
+        for path in (logs["beta"], logs["box"]):
+            if os.path.exists(path):
+                os.remove(path)  # the replay of the case left its own lines here
+        folder = checkout_of(repo, sha)
+        argv = [piece.replace("{suite}", "harness/tests/t7_store_and_seams.py") for piece in banchi_profile()["argv"]]
+        done = subprocess.run(argv, cwd=folder, capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertTrue(os.path.exists(logs["beta"]), "the whole run never reached beta")
+        self.assertTrue(os.path.exists(logs["box"]), "the whole run never reached the box map")
 
 
 class NonUtf8Tests(unittest.TestCase):
