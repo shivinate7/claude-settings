@@ -1207,10 +1207,11 @@ def case_past_ruling_cost():
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
 
 
-# ------------------------------------------------------------------ unvetted marker and docs/debts (owner ruling Nov 1 18:48 CST)
+# ------------------------------------------------------------------ unvetted marker and docs/debts
 #
 # When the model review cannot run (a model error, or a decisions folder or roadmap ref that cannot be read), a question
-# is refused once, and its remedy adds an `Unvetted: <reason>` line. A question with that line passes with no model call.
+# is refused once, and its remedy adds an `Unvetted: <reason>` line. A question that already carries the line gets one
+# model attempt. If that attempt fails, the question passes, because the line tells the owner no check ran.
 # The closed page items notice alone never triggers it. docs/debts/*.md records reach the candidates, one line each.
 UNVETTED_LINE = "Unvetted: the model review could not run, so the owner reads this question unchecked."
 DEBT_SLUG = "settled-question-unchecked"
@@ -1274,8 +1275,8 @@ def case_unshown_id_takes_the_unvetted_path():
 
 
 def case_marker_does_not_skip_the_check():
-    # Owner rulings, Nov 1 19:30 CST: the Unvetted line never skips the check. A marker written ahead of time, with a
-    # working model, still runs the check, which refuses a ruled question.
+    # The Unvetted line never skips the check. A marker written ahead of time, with a working model, still runs the
+    # check, which refuses a ruled question.
     box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     box["questions"][0]["question"] += "\n" + UNVETTED_LINE
     refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
@@ -1286,8 +1287,8 @@ def case_marker_does_not_skip_the_check():
 
 
 def case_unknown_names_the_claude_settings_records():
-    # Owner ruling (Nov 1 18:55 CST): the claude-settings checkout is guard_pointer.pointer_checkout(). This repo has
-    # its own docs/decisions and no pointer, so the claude-settings records are unread and the notice names them.
+    # The claude-settings checkout comes from guard_pointer.pointer_checkout(). This repo has its own docs/decisions and
+    # no pointer, so the claude-settings records are unread, and the unknown notice names them.
     r = run_hook(question_input(box=good_box(), cwd=DECISIONS_REPO), answer=ALLOW)
     notes = [line for line in r.err.splitlines() if PAST_UNKNOWN in line]
     check("past ruling unknown: with its own decisions and no pointer, the notice names the claude-settings records",
@@ -1307,8 +1308,8 @@ def case_cite_of_a_shown_record_is_not_bogus():
 
 
 def case_page_task_gets_item_8_and_is_refused():
-    # Owner ruling (Nov 1 19:30 CST): tasks get item 8 too. A page task that asks a ruled question carries the ruling
-    # and item 8, and the judge refuses it. The item text never exempts a task.
+    # A page task gets item 8 too. A task that asks a ruled question carries the ruling and item 8, and the judge refuses
+    # it. The item text never exempts a task.
     import question_form  # the one form check (hooks/question_form.py)
     task = good_task_item(step="Decide whether the GitHub apps keep their access to claude-settings, then say so in chat.")
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t8", "data": task})
@@ -1324,8 +1325,8 @@ def case_page_task_gets_item_8_and_is_refused():
 
 
 def case_mid_reason_unlisted_id_is_a_plain_refusal():
-    # Review round 2: an item 1 to 7 refusal that names an unlisted id mid-reason is a plain refusal. A reason that opens
-    # with an unlisted id is still a bogus cite, and takes the Unvetted path.
+    # An item 1 to 7 refusal that names an unlisted id mid-reason is a plain refusal. A reason that opens with an
+    # unlisted id is still a bogus cite, and takes the Unvetted path.
     box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     mid = json.dumps({"ok": False, "reason": "Item 5: explain decisions/zzz in plain words."})
     r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=mid)

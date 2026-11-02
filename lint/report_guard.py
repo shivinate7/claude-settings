@@ -40,6 +40,18 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
+may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
+report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
+Each line is tracked alone: any main-session reply after it that holds the line satisfies that
+demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
+its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
+the current Recovered line (split on ";" outside parentheses) names a whole-word source: git, page
+or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
+has the report shape. Cost: a scan of the records main()
+already loaded (the rewrite reads the transcript once, as before); no file, log or process.
 On every Stop, landed or not, it also reads <config dir>/state/refusals/<session_id>.jsonl, which
 hooks/refusal_note.py writes for each tool the auto-mode classifier refused. A pending tool the reply
 does not name in its Input Needed section blocks. A built-in tool counts only in backticks; an MCP
@@ -91,8 +103,9 @@ LANDING_TOOLS = {
     "mcp__github__create_or_update_file",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
-# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), never a report label.
-LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from))(.+?)\*\*")
+# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
+# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below; none is a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -557,6 +570,146 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+# compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
+# from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
+# did not), each until one lands. A label counts only where it starts an item: at line start (after
+# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
+# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
+CARRY_MARKS = "*_`\"'“”‘’"
+CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
+               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
+CARRY_LINES = (
+    ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
+    ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
+)
+CARRY_FORMS = {
+    "Recovered": "`Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`",
+    "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
+                    "or `Handoff gave: none`",
+}
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
+
+
+def _reply_text(rec):
+    """The text of a main-session assistant record, else None."""
+    if rec.get("type") != "assistant" or rec.get("isSidechain"):
+        return None
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return None
+    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(parts) if parts else None
+
+
+def _carry_split(rest):
+    """`rest` split into items on ";" outside parentheses, each stripped of marks and a trailing . or ;."""
+    items, depth, cur = [], 0, ""
+    for ch in rest:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+        elif ch == ";" and depth == 0:
+            items.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    items.append(cur)
+    out = []
+    for item in items:
+        item = item.strip(" \t" + CARRY_MARKS).rstrip(" .;").strip(" \t" + CARRY_MARKS)
+        if item:
+            out.append(item)
+    return out
+
+
+def recovered_items(text):
+    """The items of each Recovered line in `text`, or None when it holds no Recovered line. A line's
+    text runs to the end of its line, or to a Handoff gave label on the same line. A bare
+    `Recovered:` takes the lines below it, up to the next report label or carry label, as its items;
+    with nothing below it is no line."""
+    found = None
+    lines = text.splitlines()
+    rx, handoff = CARRY_LINES[0][1], CARRY_LINES[1][1]
+    for n, line in enumerate(lines):
+        m = rx.search(line)
+        if not m:
+            continue
+        cut = handoff.search(line, m.end())
+        items = _carry_split(line[m.end():cut.start() if cut else len(line)])
+        if not items and not cut:
+            for below in lines[n + 1:]:
+                below = below.strip().lstrip(">").strip()
+                label = LABEL_RE.match(below)
+                if label and label.group(1).strip().rstrip(":").strip() in LABEL_ORDER:
+                    break
+                if any(r.match(below) for _, r in CARRY_LINES):
+                    break
+                items.extend(_carry_split(BULLET_RE.sub("", below)))
+        if items:
+            found = (found or []) + items
+    return found
+
+
+def carry_present(name, text):
+    """Whether `text` holds the carry line `name`: a Recovered line with at least one item, or a
+    Handoff gave label where it starts an item."""
+    if name == "Recovered":
+        return recovered_items(text) is not None
+    return bool(dict(CARRY_LINES)[name].search(text))
+
+
+def unsourced_recovered_item(block):
+    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    An item that starts with "none" or "nothing" needs no source."""
+    for item in recovered_items(block) or []:
+        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
+            return item[:60]
+    return ""
+
+
+def recovered_problem(records, text):
+    """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
+    since, or a Recovered item of `text` names no source while no earlier reply has met the Recovered
+    demand, else ''. The newest `compact_boundary` record anywhere in `records` marks the compaction
+    (its subtype alone is read). Each line is tracked alone: a main-session reply after the boundary
+    that holds it, anywhere in its text, satisfies it, and that reply is not judged for sources. The
+    current reply (the last reply record, when its report block equals `text`'s) counts by its
+    blockquote."""
+    boundary = None
+    last_text = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            boundary = i
+        if _reply_text(rec) is not None:
+            last_text = i
+    if boundary is None:
+        return ""
+    block = block_text(text)
+    pending = [name for name, _ in CARRY_LINES]
+    for i in range(boundary + 1, len(records)):
+        reply = _reply_text(records[i])
+        if reply is None:
+            continue
+        if i == last_text:
+            if block_text(reply) == block:
+                continue
+            reply = block_text(reply)
+        pending = [name for name in pending if not carry_present(name, reply)]
+    missing = [name for name in pending if not carry_present(name, block)]
+    reasons = []
+    if missing:
+        reasons.append("a compaction came before this report and no %s line has landed since. "
+                       "Under Deviations, add %s, inside the report blockquote." %
+                       (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
+    bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
+    if bad:
+        reasons.append("the Recovered item %r names no source. End each item with git, page or "
+                       "digest; items split on \";\" outside parentheses." % bad)
+    return "Recovered guard: " + " ".join(reasons) if reasons else ""
+
+
 def repo_root(cwd):
     """The nearest folder at or above `cwd` that holds a git entry, else None."""
     here = os.path.realpath(cwd or os.getcwd())
@@ -703,6 +856,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
+        if recovered:
+            reasons.append(recovered)
         return reasons
     except Exception:
         return []
@@ -993,6 +1149,11 @@ def main():
             pass
         pick += relay
         try:
+            if report_shape_ok(text):
+                pick.append(recovered_problem(records, text))
+        except Exception:
+            pass
+        try:
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
@@ -1027,6 +1188,12 @@ def main():
     except Exception:
         pass
     reasons += [r for r in relay if r]
+    try:
+        recovered = recovered_problem(records, text) if shape_ok else ""
+        if recovered:
+            reasons.append(recovered)
+    except Exception:
+        pass
     cite = bare_cite(text)
     if cite:
         reasons.append(

@@ -6,7 +6,8 @@ Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude`
 Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory.
 Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo never runs on import, and the summary still prints.
 Also asserts the command's pin check: a CI pin whose lint differs exits 3 and names the pin and the remedy,
-an unrelated commit is no drift, an unknown pin changes no exit code, and LINT_FILES holds every file the step runs.
+an unrelated commit is no drift, an unknown pin changes no exit code, a shallow clone that cuts the history above a pin
+says unknown and never "not on main", and LINT_FILES holds every file the step runs.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback."""
@@ -40,6 +41,7 @@ sys.path.append(os.path.join(ROOT, "lint"))
 sys.path.append(os.path.join(ROOT, "testing"))
 import _test_temp  # noqa: E402
 import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
@@ -572,12 +574,22 @@ def run_ste_changed(cmd, work, home=None):
     return p.returncode, p.stdout + p.stderr
 
 
-def pin_case(pin, change=lambda work: None, dead=None):
+def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None):
     """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
-    commit label of the scratch clone. Returns (rc, output, {label: sha})."""
+    commit label of the scratch clone. Returns (rc, output, {label: sha}). `shallow` runs the command from a
+    shallow clone that holds the pin's object and cuts the history above it. `proof`, a dict, takes that clone's facts."""
     with scratch("pin") as d:
         cs = os.path.join(d, "claude-settings")
-        shas = scratch_clone(cs)
+        if shallow:
+            source = os.path.join(d, "source")
+            shas = scratch_clone(source)
+            error = shallow_clone.make(source, cs, shas[pin])
+            if error:
+                raise RuntimeError("shallow fixture could not be built: " + error)
+            if proof is not None:
+                proof.update(shallow_clone.facts(cs, shas[pin]))
+        else:
+            shas = scratch_clone(cs)
         rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"), pin_child(d, shas, pin, change, dead))
         return rc, out, shas
 
@@ -596,12 +608,28 @@ check("a commented-out pin is not a pin: an old one in a comment changes nothing
 rc, out, shas = pin_case("E")
 check("pin ahead: a pin this copy's history lacks exits 3 and says to pull claude-settings",
       rc == 3 and "pull claude-settings" in out, out)
+check("pin ahead, full clone: says does not hold and off main, never unknown (shallow clone)",
+      "does not hold" in out and "off main" in out and "unknown (shallow clone)" not in out, out)
 rc, out, _ = pin_case("f" * 40)
 check("unknown pin: a commit this clone does not hold is unknown and exits 0",
       rc == 0 and "Unknown whether it matches" in out, out)
 rc, out, _ = pin_case("A", default_change)
 check("lint red and drift: the lint's exit code wins, and the drift line still prints",
       rc == 1 and "older than this copy's lint" in out, out)
+
+# The shallow clone: the command's clone holds the pin's object but cuts the history between the pin and HEAD, so
+# `merge-base --is-ancestor` exits 1 there. That answer is unknown, never "not on main" (verification-report-unknown-reads).
+facts = {}
+rc, out, _ = pin_case("A", shallow=True, proof=facts)
+check("shallow fixture: the command's clone is shallow and holds the pin's object",
+      facts.get("shallow") is True and facts.get("pin_present") is True, str(facts))
+check("shallow fixture: the pin's ancestry is cut, so merge-base --is-ancestor exits 1",
+      facts.get("ancestor_rc") == 1, str(facts))
+check("shallow pin: the drift still exits 3, since the lint files differ", rc == 3, out)
+check("shallow pin: the line says unknown (shallow clone) and names git fetch --unshallow",
+      "unknown (shallow clone)" in out and "git fetch --unshallow" in out, out)
+check("shallow pin: the line never says does not hold or off main",
+      "does not hold" not in out and "off main" not in out, out)
 
 
 # The installed copy. install.sh lands bin/ste-changed in ~/.claude: a copy in cloud mode, a symlink into the

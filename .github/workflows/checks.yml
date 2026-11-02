@@ -73,9 +73,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 36 min. Slowest of 30 runs: 30.4 min with the guard suite, about 19.8 min without it, which moved to
-    # checks-guard (decision ci-job-caps). Not lowered: 2x of 19.8 is above 36.
-    timeout-minutes: 36
+    # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 35.4 min
+    # is 68% of it (range 25.2-35.4, median 28.9, n 16 green runs of 20, 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
+    timeout-minutes: 52
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -275,6 +275,11 @@ jobs:
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
+      - name: Mutation replay fixture suite
+        run: |
+          [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
+          python3 hooks/test_mutate_replay.py
+
       - name: Landed-directory check fixture suite
         run: python3 lint/test_check_landed_dirs.py
 
@@ -295,6 +300,9 @@ jobs:
 
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
+
+      - name: Time-pinned finder fixture suite
+        run: python3 lint/test_find_time_pinned.py
 
       - name: Mod version fixture suite
         run: python3 lint/test_check_mod_versions.py
@@ -515,6 +523,8 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
+        # Own cap: slowest 6.98 min is 70% of it, so a hang reads red at this step.
+        timeout-minutes: 10
         run: sh hooks/test_install_src.sh
 
       - name: cloud-setup.sh suite
@@ -649,9 +659,9 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 18 min = 2x the slowest of 30 runs (9.1 min; median 7.2), which passed 80% of the old 10 min cap
-    # (decision ci-job-caps).
-    timeout-minutes: 18
+    # Cap 28 min: slowest about 19.2 min (a floor, run 41407758669 was cut) is 69% of it (range 8.77-19.2, median 12.27,
+    # n 18 = 16 green + 2 cap ends, 2026-11-01 22:11 to 2026-11-02 07:41 UTC; decision ci-job-caps).
+    timeout-minutes: 28
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -670,6 +680,8 @@ jobs:
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        # Own cap: slowest 11.68 min is 73% of it, so a hang reads red at this step.
+        timeout-minutes: 16
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
@@ -697,8 +709,10 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 50 min, about 1.5x the slowest of 30 runs, 32.7 min (decision ci-job-caps).
-    timeout-minutes: 50
+    # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps (the 80% target was
+    # already met): slowest 37.1 min is 67% of it (range 25.6-37.1, median 31.1, n 15 green runs of 20,
+    # 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -712,8 +726,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Own cap: slowest 16.62 min is 76% of it, so a hang reads red at this step.
       - name: Guard fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        timeout-minutes: 22
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
