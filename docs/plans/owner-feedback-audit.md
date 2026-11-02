@@ -1,6 +1,6 @@
 # Feedback audit: 234 owner items, re-read Nov 1 after 19:23 CST
 
-This record holds the audit of the owner's feedback. It has 237 F rows: F1 to F232 and F248 to F252, with F233 to F247 unassigned. Five rows, N1 to N5, record rulings found after the read. Section 2 lists each change made after the read, with its evidence.
+This record holds the audit of the owner's feedback. It has 237 F rows: F1 to F232 and F248 to F252. F233 to F247 have no row text (section 1). Five rows, N1 to N5, record rulings found after the read. Section 2 lists each change made after the read, with its evidence.
 
 Glosses: each id carries a short gloss where it first appears in a section. Section 7 glosses every row id and every PR, step and decision the rows cite.
 
@@ -8,7 +8,7 @@ Owner rules that govern this record (Nov 1, 18:48 to 18:50 CST): "record all of 
 
 ## 1. Unknown reads and gaps
 
-- F233 to F247 (unassigned row numbers): 15 numbers. The merged list said F1 to F247, but its table stopped at F229. The raw-item check found three points with no row of their own. They are F230 to F232 (section 7e). The other 15 numbers stay unassigned, and their state is unknown.
+- F233 to F247 (no row numbers): the merged list said F1 to F247, but its table stopped at F229. strict-coverage.md read all 374 raw items. It matched each one by content to an F row or an M row. Every raw item is covered, so no owner item is lost. The merge claimed F233 to F247 but never wrote them. F230 to F232 are rows this audit wrote from raw items 137, 286 and 371 (section 7e).
 - F39 (earlier session report), F82 (waiting-page width), F84 (Oct 29 re-save), F93 (deleted page), F251 (phone screenshots) and F252 (debug-port question) are unknown. Section 7 gives the reason for each.
 - F138 (the "137 a" pick): delivery to the lane is not verified.
 - Not re-read: the triage "Answered" rows, such as F30, F85 and F99. No triage transcript was in scope for them.
@@ -152,7 +152,7 @@ The 237 F rows total 237. The draft counted 164 landed and 5 unknown before the 
     - Models, tests and lint: F120 (draft PR #995, glossary meets owner), F132 (draft PR #993, brief-marker scanner), F160 (draft PR #996, mutation engine), F165 (draft PR #998, comment check). F168 landed in batch 59.
     - Stale prose and session limits: F172 landed in batch 59 (PR #978).
     - Handoff and compaction: F177 (draft PR #994, handoff read guard), F178 and F183 (draft PR #986, compaction carry watch), F179 (draft PR #994 and held PR #982, handoff checkpoint), F180 (draft PR #1002), F182 (held PR #982).
-23. **Unknown, with no evidence beyond a session's word or a read that could not run.** F39, F82, F84, F93, F251 and F252, plus F233 to F247 (15 numbers, unassigned).
+23. **Unknown, with no evidence beyond a session's word or a read that could not run.** F39, F82, F84, F93, F251 and F252.
 24. **Items the owner raised that landed late or by his own act.** F248 to F250 (item 128, the delete of three merged branches) were done by the owner's own pasted PowerShell run (Nov 1 16:23 CST). Item 128 closed at 16:34 CST. The four branches are absent on origin. F252 (the debug-port question) moved to unknown (section 2a).
 
 ## 5. Patterns
@@ -194,7 +194,7 @@ One line per shortfall, in the same order as section 4. Each line names a step, 
 20. F88, F122 and F203 (dropped replies): no owner yet.
 21. F173 (tally limit): PR #978 merged. The owner's condition ("if it works") has no owner yet.
 22. Waiting work: draft PR #999 and step feedback-repeat-detect (repeat detect step, doing) for F76 and F77. Draft PR #983 and step one-inbox-per-repo (one inbox step, doing) for F78. Draft PR #989 and step lane-closes-after-records (records-first close step, doing) for F81. Draft PR #995 and step glossary-meets-owner-halfway (glossary step, doing) for F120. Draft PR #993 and step one-model-rule (model rule step, doing) for F132. Draft PR #996 and step tci-6-mutation-replay (mutation replay step, doing) for F160. Draft PR #998 for F165, with step comment-narration-patterns (comment narration step, todo). Draft PR #994 and step handoff-read-before-write (handoff read step, doing) for F177 and F179. Draft PR #986 and step compaction-carry-watch (compaction watch step, doing) for F178 and F183. Held PR #982 (handoff checkpoint) for F179 and F182. Draft PR #1002 and step idle-resume-compacts (idle compaction step, doing) for F180.
-23. Unknown rows (F39, F82, F84, F93, F251, F252, F233 to F247, N5): no owner yet. Each unknown names the read that could not run (section 1).
+23. Unknown rows (F39, F82, F84, F93, F251, F252, N5): no owner yet. Each unknown names the read that could not run (section 1).
 24. Owner items that landed by his own act (F248 to F250): none needed.
 
 ### Start now, by hand (existing items only)
@@ -404,7 +404,7 @@ Unknown rows, with the read that could not run:
 - F93: the Artifact read answers "not found". That cannot tell "deleted" from "not shared".
 - F251: the phone screenshots are image-only and unreadable.
 - F252: the owner words were not recovered (section 2a).
-- F233 to F247: 15 row numbers with no row text (section 1).
+- F233 to F247: no row text. strict-coverage.md matched every raw item to an F row or an M row (section 1).
 - N5: the owner words for the 19:27 CST ruling are not in the inputs.
 
 | id | when | owner words | state | evidence |
@@ -641,7 +641,7 @@ Unknown rows, with the read that could not run:
 | F230, pasted setup table (raw item 137) | 2026-11-01 17:14 CST; said 1 | data from the local ponytail scan: ... machine setup report ... system time zone is Eastern Standard Time | LANDED | The reply named four steps as the filing: guard-log-time-offset, install-drops-retired-files, ponytail-local-still-on and local-cc-version-lag. All four step files exist on origin/roadmap (checked). |
 | F231, owner runs branch-protection switch (raw item 286) | Oct 31 14:49 CDT; said 1 | (coordinator relay, not owner words) You agreed in chat, 14:49 CDT, to run this yourself. (the branch-protection switch to the one check all-jobs-passed; the classifier refused the coordinator's PATCH, so the owner runs it) | LANDED | Read on Nov 2: claude-settings main requires one check, all-jobs-passed, with strict false. That matches the coordinator's read-back at 14:52 CDT. Degen and q_max are not covered by this row (F36, F58). |
 | F232, ready list at each wake (raw item 371) | Oct 29 13:45 CDT (relayed standing rule in a compaction summary); said 1 | (relayed) Flywheel duty (shiv via the coordinator, Oct 29 13:45 CDT): at every wake and at each hourly check-in, send the coordinator a ready list. | LANDED | Recorded in decision session-tiers (docs/decisions/session-tiers.md, line 71) on main. Compliance is a session claim: triage says it sent the list at wakes. |
-| F233 to F247, unassigned row numbers | — | none recovered | UNKNOWN | 15 row numbers. The merged list said F1 to F247, but its table stopped at F229. No raw item maps to these numbers. Their state is unknown. |
+| F233 to F247, numbers never written | — | none | — | strict-coverage.md read all 374 raw items and matched each one by content to an F row or an M row. Every raw item is covered, so no owner item is lost. The merge claimed these numbers but never wrote them. |
 | F248, item 128 branch deletes | 2026-11-01 16:23 CST, page save, item 128 (triage `session_013NEJL2KiRdp1PFjjJxDuzq`) | `128 note, not done (PS C:\Users\ShivamSemwal> cd ~ ... foreach ($b in 'lane/impeccable-4.8.0','lane/drop-debug-port-ask','lane/fd-float-cc-newest') { gh api -X DELETE ... } PS C:\Users\ShivamSemwal>)`. He pasted the PowerShell run. The coordinator noted the second block pasted was the Mac version. | LANDED | Owner, Nov 1 16:23 CST, page save, item 128 (triage session_013NEJL2KiRdp1PFjjJxDuzq): "128 note, not done (PS C:\Users\ShivamSemwal> cd ~ ... foreach ($b in 'lane/impeccable-4.8.0','lane/drop-debug-port-ask','lane/fd-float-cc-newest') { gh api -X DELETE ... } PS C:\Users\ShivamSemwal>)". He pasted the PowerShell run; the coordinator noted the second pasted block was the Mac version. Reads of claude-settings branches for lane/impeccable-4.8.0, lane/drop-debug-port-ask and lane/fd-float-cc-newest return 404. The item was reopened later for lane/cc-pin-2.1.311, which is also gone. The standing grant "Acts the cloud refuses" (F51) does not cover item 128. |
 | F249, item 128 done | 2026-11-01 16:34 CST, page save | `128 done` | LANDED | Owner, Nov 1 16:34 CST, page save: "128 done". Triage closed item 128, and the coordinator confirmed lane/cc-pin-2.1.311 gone. Same evidence as F248. |
 | F250, branches-deleted note | 2026-11-01 16:23 CST, page save, relayed in coordinator compaction summary 2 | "Item 128: branches deleted." (coordinator's wording, not the owner's) | LANDED | Coordinator wording, not the owner's, in compaction summary 2 (Nov 1 16:23 CST): "Item 128: branches deleted." Ask: delete three merged branches. Same evidence as F248. The PC session later deleted one merged branch and kept seven unmerged. |
