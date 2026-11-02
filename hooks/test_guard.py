@@ -19373,6 +19373,138 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# The prompt grammar (decision owner-override, the orchestrator's call on the keyword grammar). A
+# punctuation mark after the word separates it from its reason or its length: `override, yes` is a
+# one-act override and `override, 15m` a timed one. A word after a length or after `off` grants nothing.
+# Each row is one prompt, typed in a session of its own at OV_T0. The grant it leaves is "once", "timed"
+# (with minutes) or None for no file. A one-act grant logs its reason, when it has one.
+OV_GRANT_ROWS = (
+    ("override, yes", "once", None, "yes"),
+    ("Override. go", "once", None, "go"),
+    ("override! yes", "once", None, "yes"),
+    ("override; reason", "once", None, "reason"),
+    ("override - reason", "once", None, "reason"),
+    ("override, 15m", "timed", 15, None),
+    ("override", "once", None, None),
+    ("override: reason", "once", None, "reason"),
+    ("override yes", "once", None, "yes"),
+    ("override 15m", "timed", 15, None),
+    ("override: 15m", "timed", 15, None),
+    ("overrides", None, None, None),
+    ("override15m", None, None, None),
+    ("override 15m please", None, None, None),
+    ("override, 15m please", None, None, None),
+    ("please override", None, None, None),
+    ("override, off", None, None, None),
+)
+
+
+def ov_grant_of(config, session):
+    """What the session's override file holds: (kind, until), or (None, None) for no file. A file that
+    does not parse reads as ("unreadable", None)."""
+    path = ov_pass_path(config, session)
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data["kind"], datetime.fromisoformat(data["until"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "unreadable", None
+
+
+def ov_reason_logged(config, session, reason):
+    """True when guard.log holds the reason line of this session's one-act override."""
+    try:
+        with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return False
+    return any(len(f) == 6 and f[2] == "override-reason" and f[5] == session and reason in f[4]
+               for f in (line.split("\t") for line in lines))
+
+
+def ov_grant_phrase(kind, minutes):
+    """The grant a prompt leaves, in words: for a case label and for its pass line."""
+    if kind == "once":
+        return "a one-act override"
+    if kind == "timed":
+        return "a timed override of %d minutes" % minutes
+    return "nothing"
+
+
+def ov_grant_label(prompt, kind, minutes):
+    return "override grammar: `%s` grants %s" % (prompt, ov_grant_phrase(kind, minutes))
+
+
+def ov_grant_check(session, prompt, kind, minutes, reason):
+    """The owner types `prompt` at OV_T0 in `session`. The override file it leaves is `kind`, lasting
+    `minutes` when timed, or no file for None. ov_type writes the file by hand when override.py does not
+    import, so any note from it fails the case."""
+    config = ov_config("grant")
+
+    def check():
+        note = ov_type(config, session, prompt)
+        if note:
+            return False, note
+        got, until = ov_grant_of(config, session)
+        if got != kind:
+            return False, "left %s, want %s" % (got or "no file", kind or "no file")
+        length = OV_ONCE_SECONDS if kind == "once" else minutes * 60 if kind == "timed" else None
+        if length is not None and until != OV_T0 + timedelta(seconds=length):
+            return False, "ends at %s, want %s" % (until, OV_T0 + timedelta(seconds=length))
+        if reason and not ov_reason_logged(config, session, reason):
+            return False, "no override-reason line in guard.log holds %r" % reason
+        return True, ov_grant_phrase(kind, minutes)
+    return check
+
+
+def ov_grammar_lift_check():
+    """`override, yes` is a one-act override: it lifts the next refused act once, then the act is refused."""
+    config, session, rule = ov_config("grant"), "ov-grant-lift", "machine-wide-kill"
+    ok, why = ov_story([("with no override", lambda: ov_kill(config, session, 0), "deny", rule)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override, yes")
+    if note:
+        return False, note
+    ok, why = ov_story([
+        ("first kill", lambda: ov_kill(config, session, 60), "allow", rule),
+        ("second kill, override spent", lambda: ov_kill(config, session, 120), "deny", rule),
+    ])
+    if not ok:
+        return False, why
+    return True, "one kill lifted, then the kill was refused again"
+
+
+def ov_grammar_off_check():
+    """`override off` removes the session's one-act override and leaves no file."""
+    config, session = ov_config("grant"), "ov-grant-off"
+    note = ov_type(config, session, "override")
+    if note:
+        return False, note
+    if ov_grant_of(config, session)[0] != "once":
+        return False, "`override` left no one-act override"
+    note = ov_type(config, session, "override off", 60)
+    if note:
+        return False, note
+    if os.path.exists(ov_pass_path(config, session)):
+        return False, "`override off` left the override file"
+    return True, "`override off` removed the one-act override"
+
+
+for _n, (_prompt, _kind, _minutes, _reason) in enumerate(OV_GRANT_ROWS):
+    _check = ov_grant_check("ov-grant-%d" % _n, _prompt, _kind, _minutes, _reason)
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((ov_grant_label(_prompt, _kind, _minutes), _check))
+for _label, _check in (
+    ("override grammar: `override off` removes the one-act override", ov_grammar_off_check),
+    ("override grammar: `override, yes` lifts one kill, then the kill is refused again", ov_grammar_lift_check),
+):
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
 # =========================================================================== handoff-unread
 # After compaction, the guard refuses each call it judges until the session reads its handoff. The flag
 # is set at PostCompact and cleared by a Read of the handoff (hooks/reread_check.py). Its Stop mode
