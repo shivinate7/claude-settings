@@ -561,6 +561,12 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# PUSHAGENT is the linked worktree an isolated agent works in: branch `worktree-agent-<id>`, under its
+# primary's `.claude/worktrees/agent-<id>` (guard.py's worktree layout note). `_home_fixture` makes it and
+# records its home, so the agent's own calls from it pass rule 0 and the push rule is what refuses them.
+AGENT_PUSH_ID = "pushagent1"
+PUSHAGENT = os.path.join(ROOT, "wthome_" + AGENT_PUSH_ID + "_primary", ".claude", "worktrees",
+                         "agent-" + AGENT_PUSH_ID)
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -1737,6 +1743,29 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+def _build_push_agent():
+    """The worktree an agent works in: branch `worktree-agent-<id>`, with origin named as _build_push names it.
+
+    `_home_fixture` makes the primary and the worktree, and its first call records the home. The scope is
+    asserted before any case reads the subject: the fixture must be PUSHAGENT, on the agent's own branch.
+    """
+    _, worktree, problems = _home_fixture(AGENT_PUSH_ID)
+    if problems:
+        sys.exit("fixture setup failed in build_fixtures: " + "; ".join(problems))
+    if slash(worktree) != slash(PUSHAGENT):
+        sys.exit("fixture setup failed in build_fixtures: _home_fixture made %r, not PUSHAGENT" % worktree)
+    branch = run_vcs(worktree, "symbolic-ref", "-q", "HEAD").stdout.strip()
+    if branch != "refs/heads/worktree-agent-" + AGENT_PUSH_ID:
+        sys.exit("fixture setup failed in build_fixtures: PUSHAGENT must sit on worktree-agent-%s, not %r"
+                 % (AGENT_PUSH_ID, branch))
+    materialize(BRANCHREMOTE)
+    run_vcs(worktree, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(worktree, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(worktree, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    if run_vcs(worktree, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip() != "refs/remotes/origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHAGENT needs origin/HEAD -> origin/main")
+
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2036,6 +2065,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
+lazy_fixture([PUSHAGENT], _build_push_agent)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -6832,6 +6862,53 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+
+# THE AGENT BRANCH (incident 2026-11-02: 32 worktree-agent-* branches reached origin). A worktree-agent-*
+# branch is one agent's own work, and it never reaches origin. The refusal reads where the push GOES: a
+# bare push or a HEAD spec from the agent's worktree, or a named destination from anywhere. A delete, a
+# fetch, a lane slug and a name that holds the prefix only inside stay allowed.
+AGENT_PUSH_RULE = "agent-branch-push"
+
+
+def agent_push(name, tail, expected, cwd=PUSHFEAT, agent_id=None):
+    """One push case of the agent-branch rule. A refusal must name its rule and never name the branch."""
+    refused = expected == "deny"
+    sh("push: " + name, VCS + " push " + tail, expected, AGENT_PUSH_RULE if refused else None,
+       cwd=cwd, agent_id=agent_id, lacks=("worktree-agent",) if refused else ())
+
+
+# REFUSED: the destination is a worktree-agent-* branch.
+agent_push("a bare push from a worktree-agent branch denies", "", "deny", cwd=PUSHAGENT)
+agent_push("-u origin HEAD from a worktree-agent branch denies", "-u origin HEAD", "deny", cwd=PUSHAGENT)
+agent_push("the agent's own bare push from its worktree denies, its home recorded", "", "deny",
+           cwd=PUSHAGENT, agent_id=AGENT_PUSH_ID)
+agent_push("a named worktree-agent destination denies from another branch",
+           "origin worktree-agent-x", "deny")
+agent_push("HEAD:worktree-agent-x denies from another branch",
+           "origin HEAD:worktree-agent-x", "deny")
+agent_push("HEAD:refs/heads/worktree-agent-x denies from another branch",
+           "origin HEAD:refs/heads/worktree-agent-x", "deny")
+agent_push("a quoted HEAD:worktree-agent-x denies", 'origin "HEAD:worktree-agent-x"', "deny")
+agent_push("a plain refs/heads/worktree-agent-x source denies", "origin refs/heads/worktree-agent-x", "deny")
+agent_push("a named worktree-agent destination denies where git cannot read the folder",
+           "origin worktree-agent-x", "deny", cwd=NOGIT)
+
+# ALLOWED: the rule reads the destination, never the source, a substring or a quoted word alone.
+agent_push("HEAD:lane-slug from a worktree-agent branch allows", "origin HEAD:lane-slug", "allow", cwd=PUSHAGENT)
+agent_push("a worktree-agent source pushed to a lane slug allows", "origin worktree-agent-x:lane-slug", "allow")
+agent_push("a delete of a worktree-agent branch allows", "origin :worktree-agent-x", "allow")
+agent_push("a delete of a worktree-agent branch from its own worktree allows", "origin :worktree-agent-x",
+           "allow", cwd=PUSHAGENT)
+agent_push("--delete of a worktree-agent branch allows", "--delete origin worktree-agent-x", "allow")
+agent_push("a lane slug that holds the prefix later in its name allows", "origin HEAD:fix-worktree-agent-x",
+           "allow")
+agent_push("-u of a lane branch allows, the refusal is about the agent's branch only", "-u origin HEAD", "allow")
+sh("fetch: a worktree-agent branch from its own worktree allows", VCS + " fetch origin worktree-agent-x",
+   "allow", cwd=PUSHAGENT)
+sh("false alarm: a push to a worktree-agent branch quoted in an echo allows",
+   'echo "git push origin HEAD:worktree-agent-x"', "allow", cwd=PUSHAGENT)
+sh("false alarm: a commit message quoting a push to a worktree-agent branch allows",
+   VCS + ' commit -m "never push worktree-agent-x"', "allow", cwd=PUSHFEAT)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
