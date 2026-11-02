@@ -38,8 +38,7 @@ that holds the whole word "answered" (any case, outside fences and inline code s
 unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
 `session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
-kind: likely risk, related to incident F188 (claude-settings draft PR #1008, docs/plans/owner-feedback-audit.md; the
-tests hold a synthetic replay), landed 2026-11-02. Cost: regex over the reply, no file, no process.
+kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 """
 import json
 import os
