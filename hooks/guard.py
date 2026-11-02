@@ -250,7 +250,8 @@ while True:
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
             nested_script, norm,
-            path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
+            path_is_inside, primary_checkout, record, refuse, resolve_command,
+            resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
