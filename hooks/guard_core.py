@@ -678,7 +678,8 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETER_FIRST = _interpreter_header(_SHELLS + "|python[\\d.]*|perl|ruby|node")
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 
 def SHELL_HEREDOC(text: str) -> bool:
@@ -799,16 +800,58 @@ def _drop_heredoc_bodies(cmd: str) -> str:
     return "\n".join(_split_heredocs(cmd)[0])
 
 
+# A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
+# word that runs a file named after it. A quote or a comment hides no word from these readers: they can only
+# keep more bodies in view, never fewer.
+_WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
+_WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+
+
+def _plain_words(words):
+    return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
+
+
+def _runs_written_file(text: str, headers) -> bool:
+    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
+    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
+    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
+    for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
+        stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
+        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
+            return True
+    return False
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):
-        return cmd  # the body may be executed, so keep it under inspection
-    if _walk_heredocs(cmd)[2]:
+    _, bodies, unclosed = _walk_heredocs(cmd)
+    if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
-    return _drop_heredoc_bodies(cmd)
+    # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
+    # lines of their own; the prose around them is data. A script body's header test below keeps it whole.
+    runs = []
+    for quote, body, header in bodies:
+        if not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header)):
+            from guard_env import _substitutions   # imported late: guard_env imports this file
+            texts, too_deep = _substitutions(body, heredoc=True)
+            if too_deep:
+                return cmd
+            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
+    dropped = _drop_heredoc_bodies(cmd)
+    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
+    # is text, and no body line may make another body look run.
+    text = _without_message_values(dropped)
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, [header for _, _, header in bodies]):
+        return cmd  # the body may be executed, so keep it under inspection
+    return "\n".join([dropped] + runs)
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
