@@ -14889,6 +14889,97 @@ def pd_budget_case():
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
+# --------------------------------------------------------------------------- a design names its file, in a mockup home
+
+# Rule mockup-home (the file of a waiting item's design, judged at write). A designs entry with no file, or a file the
+# judge refuses (lint/layout.py mockup_home_problem), is denied before the picture check starts node. The checker here
+# is a stub that passes, so a call of it is counted and nothing renders. The repo is "fixture" (origin below), so its
+# machine home is <HOME>/Developer/fixture-imports. HOME is a folder of the case's own, with no Developer folder.
+MH_RULE = "mockup-home"
+MH_ORIGIN = "git@github.com:owner/fixture.git"
+MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
+MH_APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+MH_SHOT = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+MH_WIN_OWNER = "C:/Users/x"  # a Windows owner's home, as Path.home returns it
+
+
+def mh_design(**over):
+    """One design entry with a picture and a file. `over` sets a key; None removes it."""
+    entry = {"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": MH_MACHINE}
+    entry.update(over)
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+def mh_judged(name, data, action="set", windows=False):
+    """(decision, reason, checker calls, guard.log rows) for one ArtifactData write of the fixture's waiting page,
+    judged in this process. `windows` makes Path.home a Windows owner's home, the way a Windows computer reads it."""
+    import pathlib
+    from unittest import mock
+    repo = pd_repo(name, PD_PAGE, origin=MH_ORIGIN)
+    home = os.path.join(ROOT, "pd", "mh-home-" + name)
+    os.makedirs(home, exist_ok=True)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, {"HOME": home}))
+        if windows:
+            stack.enter_context(mock.patch.object(pathlib.Path, "home", return_value=pathlib.PureWindowsPath(MH_WIN_OWNER)))
+        calls, out, rows = pd_judged(pd_body(repo, data, action), name, seam=lambda page_file, item: (0, ""))
+    decision, reason = read_decision(out)
+    return decision, reason, calls, rows
+
+
+def mh_case(label, name, data, want, checker, action="set", windows=False):
+    """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
+    for the rule. An allow prints nothing and starts `checker` checker calls."""
+    def check():
+        decision, reason, calls, rows = mh_judged(name, data, action, windows)
+        if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
+            return False, "want %s, got %s: %s" % (want, decision, reason[:160])
+        if want == "deny":
+            if not reason.startswith(MH_RULE + ":"):
+                return False, "the reason does not open with rule %s: %s" % (MH_RULE, reason[:160])
+            if "file" not in reason.lower():
+                return False, "the reason does not name the file field: %s" % reason[:160]
+            leak = names_the_target(reason, MH_RULE)
+            if leak:
+                return False, "the reason names the forbidden target %r" % leak
+            if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
+                return False, "guard.log holds no deny row for %s" % MH_RULE
+        if calls != checker:
+            return False, "the checker was called %d time(s), want %d" % (calls, checker)
+        return True, "%s, as wanted" % want
+    LOG_CHECKS_EXTRA.append(("mockup-home: " + label, check))
+
+
+mh_case("a design with a file under the machine home is allowed, on a machine with no Developer folder",
+        "mh-machine", pd_item(designs=[mh_design()]), "allow", checker=1)
+mh_case("a design with a file in the design folder is allowed",
+        "mh-design", pd_item(designs=[mh_design(file=PD_FILE)]), "allow", checker=1)
+mh_case("a design with no file is denied, naming the file field",
+        "mh-nofile", pd_item(designs=[mh_design(file=None)]), "deny", checker=0)
+mh_case("a design with an empty file is denied",
+        "mh-empty", pd_item(designs=[mh_design(file="")]), "deny", checker=0)
+mh_case("a mockup under Application Support is denied, its path holds spaces",
+        "mh-appsupport", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0)
+mh_case("an image hosted as an artifact asset is denied",
+        "mh-asset", pd_item(designs=[mh_design(file=MH_SHOT)]), "deny", checker=0)
+mh_case("a file that escapes the home with .. is denied",
+        "mh-dotdot", pd_item(designs=[mh_design(file="~/Developer/fixture-imports/item48/../../../escape/a.html")]),
+        "deny", checker=0)
+mh_case("a Windows owner's machine-home file is allowed",
+        "mh-win-ok", pd_item(designs=[mh_design(file="C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html")]),
+        "allow", checker=1, windows=True)
+mh_case("a Windows owner's AppData mockup is denied",
+        "mh-win-appdata",
+        pd_item(designs=[mh_design(file="C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html")]),
+        "deny", checker=0, windows=True)
+mh_case("an update that carries designs with no file is denied",
+        "mh-update", {"designs": [mh_design(file=None)]}, "deny", checker=0, action="update")
+mh_case("a closed item with a design that has no file is untouched",
+        "mh-closed", pd_item(status="closed", designs=[mh_design(file=None)]), "allow", checker=0)
+mh_case("a write with no designs is untouched by the file rule",
+        "mh-plain", pd_plain(), "allow", checker=0)
+
+
 # --------------------------------------------------------------------------- a pick never widens a shared tool
 FAMILY = "uniform-pick"
 #
