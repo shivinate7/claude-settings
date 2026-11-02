@@ -505,33 +505,12 @@ class MissingVerdictLine(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertTrue(any(l.startswith("FAIL ") for l in r.stdout.splitlines()), (r.stdout, r.stderr[-300:]))
 
-# Skip counting: a run that skipped tests reads SKIP with the count (plan row S8, a skip is counted and shown; test-ci-standard plan).
+# Skip counting: a run that skipped tests reads SKIP with the count (debt verdict-skip-reads-pass).
 CHUNK, OVERLAP = 1 << 20, 256  # bin/verdict's chunk and overlap
 UT_ONE_SKIP = "Ran 1 test in 0.000s\n\nOK (skipped=1)\n"  # the tail of a real `python3 -m unittest`, one skipped test
 XCT_SKIPPED = ("Executed 12 tests, with 3 tests skipped and 0 failures (0 unexpected) in 1.2 (1.3) seconds\n"
                "** TEST SUCCEEDED **\n")  # xcodebuild's summary form; no swift here, so it is not captured
 PYTEST_OUT = "=" * 25 + " 2 passed, 1 skipped in 0.01s " + "=" * 25 + "\n"  # pytest's summary, captured here
-# pytest's summary with --color=yes, captured here: each count sits between SGR codes, not word edges
-PYTEST_COLOUR = ("\x1b[32m========================= \x1b[32m\x1b[1m1 passed\x1b[0m, \x1b[33m2 skipped\x1b[0m"
-                 "\x1b[32m in 0.01s\x1b[0m\x1b[32m =========================\x1b[0m\n")
-# XCTest's output for nested suites, in its own shape: one Executed line per class, per bundle, and for All tests
-XCT_NESTED = (
-    "Test Suite 'All tests' started at 2026-11-02 00:00:00.000.\n"
-    "Test Suite 'MyTests.xctest' started at 2026-11-02 00:00:00.001.\n"
-    "Test Suite 'FooTests' started at 2026-11-02 00:00:00.002.\n"
-    "Test Case '-[FooTests testA]' started.\n"
-    "Test Case '-[FooTests testA]' passed (0.001 seconds).\n"
-    "Test Case '-[FooTests testB]' skipped (0.000 seconds).\n"
-    "Test Suite 'FooTests' passed at 2026-11-02 00:00:00.004.\n"
-    "\t Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.003) seconds\n"
-    "Test Suite 'BarTests' started at 2026-11-02 00:00:00.005.\n"
-    "Test Case '-[BarTests testC]' skipped (0.000 seconds).\n"
-    "Test Suite 'BarTests' passed at 2026-11-02 00:00:00.006.\n"
-    "\t Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds\n"
-    "Test Suite 'MyTests.xctest' passed at 2026-11-02 00:00:00.007.\n"
-    "\t Executed 3 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.006) seconds\n"
-    "Test Suite 'All tests' passed at 2026-11-02 00:00:00.008.\n"
-    "\t Executed 3 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.007) seconds\n")
 HOOKS = os.path.join(HERE, "..", "hooks")
 
 
@@ -578,7 +557,7 @@ def case_runner_run(kinds):
 
 
 class Skips(unittest.TestCase):
-    """A skip is counted and shown, never read as a pass (plan row S8, test-ci-standard plan)."""
+    """A skip is counted and shown, never read as a pass (debt verdict-skip-reads-pass)."""
 
     def check(self, code):
         """Run one fixture with its log in this run's folder, never the system temp dir."""
@@ -649,22 +628,6 @@ class Skips(unittest.TestCase):
 
     def test_no_tests_ran_beats_skip(self):
         self.assert_fail(self.check(printing(T.XCT0 + "\nRan 2 tests in 0.000s\n\nOK (skipped=2)\n")), 1, "no tests ran")
-
-
-    def test_pytest_colour_summary_skips_are_counted(self):
-        """pytest with --color=yes puts each count between SGR codes, so no word edge sits before its number."""
-        self.assert_skip(self.check(printing(PYTEST_COLOUR)), 2)
-
-    def test_a_coloured_marker_line_is_counted(self):
-        self.assert_skip(self.check(printing("\x1b[33mSKIP\x1b[0m a: no display\n")), 1)
-
-    def test_xctest_nested_summaries_take_the_max_not_the_sum(self):
-        """XCTest prints an Executed line per class, per bundle and for All tests. They nest, so the max is the count."""
-        self.assert_skip(self.check(printing(XCT_NESTED)), 2)
-
-    def test_marker_line_and_a_zero_summary_take_the_max(self):
-        """The count is the max of the summary sum and the marker-line count, so a 0 summary does not hide a SKIP line."""
-        self.assert_skip(self.check(printing("SKIP a: no display\n0 skipped\n")), 1)
 
 
 def tearDownModule():

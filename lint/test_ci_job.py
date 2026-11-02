@@ -125,7 +125,7 @@ class Steps(Job):
 
 
 class Skips(Job):
-    """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (plan row S8, test-ci-standard plan)."""
+    """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (debt verdict-skip-reads-pass)."""
 
     SKIPPED = step("unit", "printf 'Ran 1 test in 0.000s\\n\\nOK (skipped=1)\\n'")
 
