@@ -6,10 +6,13 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_report_guard.py -v
 """
+import contextlib
 import errno
 import importlib.util
+import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -27,6 +30,8 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
@@ -40,9 +45,19 @@ _ISOLATION = {}
 
 
 def setUpModule():
-    _ISOLATION["dir"] = _test_temp.run_folder()
+    _ISOLATION["dir"] = RUN_FOLDER  # the run's one folder, made at import (test-temp-standard); teardown removes it
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
+    stub = os.path.join(_ISOLATION["dir"], "stub")  # the stub lives in this run's folder
+    os.makedirs(stub)
+    _ISOLATION["stub"] = stub
+    with open(os.path.join(stub, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(tcj.STUB_SITE)
+    _ISOLATION["env"] = {k: os.environ.get(k) for k in MODEL_ENV}
+    os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (stub, os.environ.get("PYTHONPATH")) if p)
+    os.environ.update(CJ_LOADED_DIR=stub, CJ_RECORD=os.path.join(stub, "calls.jsonl"),
+                      CJ_ANSWER=tcj.ALLOW)
+    os.environ.pop("CJ_MODEL_FAIL", None)
 
 
 def tearDownModule():
@@ -51,6 +66,11 @@ def tearDownModule():
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
     else:
         os.environ["CLAUDE_CONFIG_DIR"] = prev
+    for key, value in _ISOLATION.pop("env").items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
     shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
@@ -1084,6 +1104,19 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
+        # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
+        # "answered" with no source is refused again. Without the marker the same line stays quiet
+        # (test_an_green_stop_hook_active_stays_quiet). A sourced line in the same rewrite passes.
+        self.missing_report_block()
+        reply = "Answered: no permission rule can lift it.\n\n" + self.GOOD
+        out = self.stop(reply, True)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Answered: no permission rule can lift it.", out["reason"])
+        self.missing_report_block()
+        self.assertIsNone(self.stop("Item 143 answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
 
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
         bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
@@ -2381,6 +2414,434 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
 
 
+# rewrite-cite-predates-ruling (the rewrite-stamp check in report_guard.py, Stop, landed turns): a reply
+# that says decision D was rewritten for a ruling blocks when D's record was last committed before that
+# ruling, on any branch or on HEAD. Each case builds its own git repo. Every commit takes its
+# date from GIT_COMMITTER_DATE, so the check reads real history. Each case states the result the check
+# must give; a case that fails names a gap in the check, not in the fixture.
+RULING = "2026-11-01 18:44 CST"
+RULING_SENTENCE = "RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling of %s (PR #1001)" % RULING
+D_LAST_COMMIT = "2026-10-28T22:30:00-05:00"  # late in the Central evening, so the UTC day is the next one
+NOW = "2026-11-01T14:00:00-06:00"  # LOCAL_TIME_NOW: the hook's clock, on the ruling's own date
+
+
+def done_reply(done):
+    return "> **Done** %s\n> **Next** none" % done
+
+
+def write_file(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+class DecisionRepo:
+    """A git repo whose default branch is `main`. Records sit where the layout puts the decisions kind:
+    docs/decisions in a rolled-out repo (its extras file says so), else the legacy decisions/ folder."""
+
+    def __init__(self, folder, rolled_out=True):
+        self.path = folder
+        self.records = "docs/decisions" if rolled_out else "decisions"
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "t")
+        if rolled_out:
+            write_file(os.path.join(folder, ".claude", "layout-extras.json"),
+                       json.dumps({"kinds": {}, "rolled-out": True}))
+        self.touch("2026-10-01T10:00:00Z")
+
+    def _git(self, *args, when=None):
+        env = dict(os.environ)
+        if when:
+            env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = when
+        subprocess.run(["git", "-C", self.path, *args], check=True, capture_output=True, text=True, env=env)
+
+    def commit(self, when, *records):
+        """One commit, dated `when`, that writes one file for each record id in `records`."""
+        for rec in records:
+            write_file(os.path.join(self.path, self.records, rec + ".md"),
+                       "# %s\n\nRevision of %s.\n" % (rec, when))
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def touch(self, when):
+        """One commit, dated `when`, that moves the tip and touches no record."""
+        write_file(os.path.join(self.path, "README.md"), "Revision of %s.\n" % when)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def branch(self, name):
+        self._git("branch", name)
+
+    def switch(self, name):
+        self._git("switch", "-q", name)
+
+    def remote_commit(self, name, when, *records):
+        """One commit, dated `when`, that only the remote-tracking ref origin/<name> holds. HEAD and the
+        local branches never reach it."""
+        temp = "tmp-" + name
+        self._git("switch", "-q", "-c", temp)
+        self.commit(when, *records)
+        self._git("update-ref", "refs/remotes/origin/" + name, "HEAD")
+        self._git("switch", "-q", "main")
+        self._git("branch", "-D", temp)
+
+
+GIT_TRACE_LINE = "trace: built-in: git "
+
+
+def git_process_count(trace_path):
+    """How many git processes wrote to a GIT_TRACE file. Git writes one `built-in: git` line per process."""
+    try:
+        with open(trace_path, encoding="utf-8", errors="replace") as f:
+            return sum(1 for line in f if GIT_TRACE_LINE in line)
+    except FileNotFoundError:
+        return 0
+
+
+class RewriteStampTests(unittest.TestCase):
+    """rewrite-cite-predates-ruling, in report_guard.py's Stop hook. The case numbers are the brief's."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def repo(self, rolled_out=True):
+        return DecisionRepo(tempfile.mkdtemp(dir=self.tmp), rolled_out)
+
+    def red_repo(self):
+        """D's last commit is late in the Central evening, before the ruling. A commit after the ruling
+        moves the tip, so the tip is never D's last commit."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        return repo
+
+    def run_stop(self, repo, reply, landed=True, human_at=None, env_extra=None):
+        first = human("do the task")
+        if human_at:
+            first["timestamp"] = human_at
+        records = [first]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=self.tmp))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                "cwd": repo.path}
+        env = dict(os.environ, LOCAL_TIME_NOW=NOW)
+        env.update(env_extra or {})
+        return run_guard(REPORT_GUARD, hook, env=env)
+
+    def assertBlocks(self, run, *parts):
+        """The guard blocks, and the block's reason names each of `parts`. Stdout is checked before
+        it is parsed, so a missing block fails here and never as a JSON error."""
+        self.assertTrue(run.stdout.strip(), "no rewrite-stamp block. stderr: " + run.stderr[-300:])
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block", out)
+        for part in parts:
+            self.assertIn(part, out.get("reason", ""))
+
+    def assertPasses(self, run):
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_f119_replay_reconstructed_blocks(self):
+        """Case 1. The reply uses the wording the PR body holds. The incident's own chat text is lost, so
+        this is a reconstruction. The variants change only the rewrite wording and the text around the stamp."""
+        repo = self.red_repo()
+        variants = {
+            "reconstructed": RULING_SENTENCE,
+            "rewritten": "RECORDED: decision `ci-job-caps` rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrites": "RECORDED: rewrites decision `ci-job-caps` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrite of": "RECORDED: a rewrite of decision `ci-job-caps`, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            # Catches: a lone quote, a `//` and a `#` in one sentence hide the rewrite or the id.
+            "lone quote and URL": "RECORDED: rewrote decision `ci-job-caps` in place, for the owner's ruling of 2026-11-01 18:44 CST (PR #1001, https://github.com/shivinate7/claude-settings/pull/1001#issuecomment-2)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                run = self.run_stop(repo, done_reply(done))
+                self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+                self.assertNotIn("2026-10-29", run.stdout)  # the date is Central, not UTC
+
+    def test_ruling_stamp_zone_is_read_as_central(self):
+        """Case 1, zone. D's last commit is 14:00 CST on the ruling's own date, so it predates the 18:44 CST
+        ruling. Read as UTC, the ruling falls before D and the check stays quiet."""
+        repo = self.repo()
+        repo.commit("2026-11-01T14:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-11-01", "18:44")
+
+    def test_decisions_folder_comes_from_layout(self):
+        """Case 1, folder. The record sits where layout.path() puts the decisions kind: docs/decisions in a
+        rolled-out repo, the legacy decisions/ folder in one that has not rolled out."""
+        for rolled_out in (True, False):
+            with self.subTest(rolled_out=rolled_out):
+                repo = self.repo(rolled_out)
+                repo.commit(D_LAST_COMMIT, "ci-job-caps")
+                repo.touch("2026-11-02T09:00:00Z")
+                self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
+                                  "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_under_or_by_R_without_a_stamp_passes(self):
+        """Case 3, flipped to green. With no stamp there is no ruling time. R's later commit is no fallback:
+        a typo fix on R would make the check cry wolf. R is committed after D, as before."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.commit("2026-10-30T16:00:00Z", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        variants = {
+            "under R": "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)",
+            "under decision R": "RECORDED: decision `ci-job-caps` rewritten under decision `test-strategy-reset` (PR #1002)",
+            "by R": "RECORDED: decision `ci-job-caps` rewritten by test-strategy-reset (PR #1002)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_r_and_d_in_one_commit_passes(self):
+        """Case 3, green. D's last commit is R's own commit, so D does not predate the ruling."""
+        repo = self.repo()
+        repo.commit("2026-10-30T16:00:00Z", "ci-job-caps", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)")))
+
+    def test_bare_clock_stamp_reads_on_the_turn_date(self):
+        """The `HH:MM <zone>` form, read on the turn's local date. The turn's human record and LOCAL_TIME_NOW
+        name the same Central day. A clock time later than the turn time reads as the day before. The record
+        predates both readings, so the block holds either way."""
+        repo = self.red_repo()
+        reply = done_reply("RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling at 18:44 CST (PR #1001)")
+        self.assertBlocks(self.run_stop(repo, reply, human_at="2026-11-01T20:00:00Z"),
+                          "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_lane_commit_after_ruling_passes(self):
+        """Case 2, green. HEAD is a lane whose own commit to D is after the ruling. Main's last commit
+        to D predates the ruling, and the lane's commit is the reason the check stays quiet."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.switch("lane")
+        repo.commit("2026-11-02T12:00:00Z", "ci-job-caps")
+        self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_record_committed_after_ruling_on_main_passes_when_head_predates_it(self):
+        """Case 4, green. The record's last commit on main is after the ruling. HEAD is a lane forked before
+        that commit. A block needs the record's last commit, on any branch or on HEAD, to predate the ruling,
+        so the check stays quiet on either HEAD."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.branch("lane")
+        repo.commit("2026-11-01T18:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        for head in ("main", "lane"):
+            with self.subTest(head=head):
+                repo.switch(head)
+                self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_sentence_without_a_rewrite_word_passes(self):
+        """Case 4, green. The same record and ruling, with no rewrite word in the sentence."""
+        repo = self.red_repo()
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` recorded for the owner ruling of 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_unknown_ids_and_no_time_pass(self):
+        """Case 4, green. An unknown D, an unknown R, and a rewrite that gives no time at all."""
+        repo = self.red_repo()
+        replies = {
+            "unknown D": "RECORDED: rewrote decision `no-such-decision` in place, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown R": "RECORDED: decision `ci-job-caps` rewritten under no-such-decision (PR #1002)",
+            "no time found": "RECORDED: rewrote decision `ci-job-caps` (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_git_missing_passes(self):
+        """Case 4, green. The red fixture, with no git on PATH. test_f119 runs the same fixture with git
+        and blocks."""
+        empty = tempfile.mkdtemp(dir=self.tmp)
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"PATH": empty}))
+
+    def test_git_failing_passes(self):
+        """Case 4, green. Git runs and fails: GIT_DIR names no repository."""
+        no_repo = os.path.join(self.tmp, "no-such-git-dir")
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"GIT_DIR": no_repo}))
+
+    def test_unlanded_turn_passes(self):
+        """Case 5, green. The red fixture and the same reply, on a turn with no git write."""
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), landed=False))
+
+    def test_bare_id_without_a_decision_word_blocks(self):
+        """Red. The id is named bare, with no word "decision", and its record file exists."""
+        run = self.run_stop(self.red_repo(), done_reply(
+            "RECORDED: ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_only_the_stale_id_of_two_blocks(self):
+        """Red. Two ids share one ruling. test-strategy-reset is committed after the ruling, so only
+        ci-job-caps is stale, and the block may name only it."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        run = self.run_stop(repo, done_reply(
+            "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+            "of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+        self.assertNotIn("test-strategy-reset", run.stdout)
+
+    def test_not_rewritten_yet_or_will_be_passes(self):
+        """Green. The id is stale, but the sentence says it is not rewritten yet, was not rewritten, or
+        will be rewritten. None of these says a rewrite has happened."""
+        repo = self.red_repo()
+        replies = {
+            "is not rewritten yet": "OTHER: Decision ci-job-caps is not rewritten yet for the owner ruling of 2026-11-01 18:44 CST.",
+            "was not rewritten": "OTHER: Decision ci-job-caps was not rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+            "will be rewritten": "OTHER: Decision ci-job-caps will be rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_stamp_tied_to_the_ruling_wins_over_a_later_merge_stamp(self):
+        """Green. The sentence holds two stamps. The one tied to "ruling" is the ruling time. The merge
+        stamp is later than the record's commit, so reading it as the ruling time would block."""
+        repo = self.repo()
+        repo.commit("2026-11-02T08:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision ci-job-caps was rewritten in PR 1001 (merged 2026-11-02 09:00 CST) "
+            "for the owner ruling of 2026-11-01 18:44 CST")))
+
+    def test_reply_with_no_recorded_id_runs_no_git(self):
+        """Cost. A rewrite word with no id that has a record runs no git process."""
+        repo = self.red_repo()
+        replies = {
+            "no id": "RECORDED: rewrote a record in place for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown id": "RECORDED: rewrote decision `no-such-decision` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertEqual(git_process_count(trace), 0)
+
+    def test_matching_reply_runs_at_most_one_git_process_per_cited_id(self):
+        """Cost. A reply that cites ids with records runs at most one git process per cited id."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        replies = (
+            ("one id", 1, "RECORDED: decision ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"),
+            ("two ids", 2, "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+                           "of 2026-11-01 18:44 CST (PR #1001)"),
+        )
+        for name, cited, done in replies:
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertLessEqual(git_process_count(trace), cited)
+
+    def test_trace_counter_sees_each_git_process(self):
+        """The counter behind the cost cases. A zero count means the guard ran no git, not that the counter is
+        blind: one plain git process must count as one."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        subprocess.run(["git", "-C", repo.path, "rev-parse", "HEAD"], check=True, capture_output=True,
+                       env=dict(os.environ, GIT_TRACE=trace))
+        self.assertEqual(git_process_count(trace), 1)
+
+    def test_adjacent_stamp_wins_over_a_later_merge_stamp(self):
+        """Green. The stamp next to "ruling" is the ruling time. A later stamp in the same sentence is not,
+        and read as the ruling time it would make a fresh record look stale."""
+        repo = self.repo()
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "OTHER: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling, PR #1001 (merged 2026-11-02 08:00 CST).")))
+
+    def test_queued_negated_or_future_rewrite_sentences_pass(self):
+        """Green. A queued rewrite, a rewrite not needed, one that should or must happen, one that is needed,
+        and one that is pending each say no rewrite has happened. None is blocked."""
+        repo = self.red_repo()
+        sentences = {
+            "queued": "rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST (lane queued).",
+            "not needed": "no rewrite of `ci-job-caps` is needed for the ruling at 2026-11-01 18:44 CST.",
+            "should be rewritten": "`ci-job-caps` should be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "must be rewritten": "`ci-job-caps` must be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "needs a rewrite": "needs a rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST.",
+            "pending": "the rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST is pending.",
+        }
+        for name, sentence in sentences.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, "> **Done** OTHER: read the rulings.\n> **Next:** " + sentence))
+
+    def test_only_the_id_next_to_the_rewrite_word_is_checked(self):
+        """Green. other-rec is stale, but it follows "per" and is not the id next to the rewrite word, so the
+        check reads ci-job-caps alone. ci-job-caps is fresh, so the reply passes."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "other-rec")
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` per `other-rec` for the ruling at 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_clock_time_later_than_the_turn_means_the_day_before(self):
+        """Green. The turn is 00:20 CST on the day after the ruling. A clock time later than the turn's clock
+        names the day before, so "23:50 CST" is the earlier evening, and the record was rewritten after it."""
+        repo = self.repo()
+        repo.commit("2026-11-01T23:55:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(
+            repo, done_reply("RECORDED: rewrote decision `ci-job-caps` for the 23:50 CST ruling (PR #1001)"),
+            human_at="2026-11-02T06:20:00Z", env_extra={"LOCAL_TIME_NOW": "2026-11-02T00:20:00-06:00"}))
+
+    def test_rewrite_on_a_remote_branch_only_counts(self):
+        """Green. The rewrite is on origin/lane-x only, after the ruling. main and HEAD hold only the stale
+        commit. A rewrite pushed anywhere counts, so the record is not stale."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        repo.remote_commit("lane-x", "2026-11-01T19:00:00-06:00", "ci-job-caps")
+        replies = {
+            "bare id": "OTHER: lane rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+            "decision word": "OTHER: lane rewrote decision `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_f119_replay_still_blocks_when_no_branch_holds_a_later_commit(self):
+        """Block expectation. Every local and remote branch holds only commits that predate the ruling, so the
+        F119 replay still blocks. This passes on the current head as well."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.remote_commit("lane-y", "2026-10-27T10:00:00-05:00", "other-rec")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_same_id_in_three_sentences_runs_one_git_process(self):
+        """Cost. The same id cited in three sentences of one reply runs one git process."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling. "
+            "Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling again. "
+            "The rewrite of `ci-job-caps` for the 2026-11-01 18:44 CST ruling is on main (PR #1001)."),
+            env_extra={"GIT_TRACE": trace})
+        self.assertEqual(git_process_count(trace), 1)
+
+    def test_ids_with_no_or_queued_before_a_hyphen_do_not_skip_the_sentence(self):
+        """Green. "no" and "queued" are skip words in the check. Inside a hyphenated id they are part of the id,
+        so the sentence is still checked, and a stale record still blocks."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "no-x", "queued-x")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        replies = (
+            ("no-x", "RECORDED: Rewrote `no-x` for the 2026-11-01 18:44 CST ruling (PR #1001)."),
+            ("queued-x", "RECORDED: `queued-x` was rewritten for the ruling at 2026-11-01 18:44 CST (PR #1001)."),
+        )
+        for name, done in replies:
+            with self.subTest(variant=name):
+                self.assertBlocks(self.run_stop(repo, done_reply(done)), name, "2026-10-28", "18:44")
+
+
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
 ERROR_CODES = ("STE001", "STE011", "STE013")
 # These six are advisory: reported as warnings, never a failed run.
@@ -3013,6 +3474,517 @@ class GuardLogAppendRaceTests(unittest.TestCase):
                                 "record() did not wait out a contended lock: %.2f s" % seconds)
         self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
+
+
+# ------------------------------------------------------------------ relayed questions and option keys
+#
+# A Stop whose reply holds Input Needed, or a prose line ending in `?` outside code fences, gets one past-ruling model
+# call (spec past-rulings, relayed questions). The model is the stub in hooks/test_call_judge.py, set up in setUpModule:
+# CJ_ANSWER is its answer, CJ_MODEL_FAIL makes it fail, and every call is recorded. A model error refuses once with the
+# Unvetted: remedy; an absent source allows with the stderr notice; question-keys refuses two questions on one key.
+MODEL_ENV = ("PYTHONPATH", "CJ_LOADED_DIR", "CJ_RECORD", "CJ_ANSWER", "CJ_MODEL_FAIL")
+RELAY = "> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+PROSE_Q = "Should the GitHub apps keep their access to claude-settings?"
+DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
+FENCED_Q = "```\nkeep the apps?\n```\n> **Done** OTHER read the audit\n> **Next** wait"
+UNVETTED = "Unvetted: the model review could not run, so the owner reads this question unchecked."
+REFUSE_APPS = json.dumps({"ok": False, "reason": "past-ruling: %s, 2026-10-28, already decides this." % tcj.APPS_SLUG})
+KEYS_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
+KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
+                 "> 2a) about 2x\n> 2b) under 80%")
+KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
+KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+
+
+C153_MARK = "c153-5e7a"
+C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settings as is, because calling into a repo "
+                 "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
+
+
+class PastRulingRelay(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.record = os.path.join(_ISOLATION["stub"], "calls.jsonl")
+        self.reset_calls()
+        self.decided = tcj.make_repo("relay-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        self.bare = tcj.make_repo("relay-bare")
+        self.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
+
+    def reset_calls(self):
+        for name in ("calls.jsonl", "git.log"):
+            path = os.path.join(_ISOLATION["stub"], name)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def git_starts(self):
+        # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
+        path = os.path.join(_ISOLATION["stub"], "git.log")
+        if not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            return len(f.read().split())
+
+    def model_calls(self):
+        if not os.path.exists(self.record):
+            return []
+        with open(self.record, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None):
+        if records is None:
+            records = [human("decide"), assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
+        if model_fail:
+            overrides["CJ_MODEL_FAIL"] = "1"
+        with mock.patch.dict(os.environ, overrides):
+            run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        return out, run.stderr
+
+    @staticmethod
+    def reason(out):
+        return out.get("reason", "") if out.get("decision") == "block" else ""
+
+    def test_relayed_ruling_refuses_with_the_rule_and_the_ruling(self):
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_APPS)
+        calls = self.model_calls()
+        self.assertTrue("past-ruling" in self.reason(out) and tcj.APPS_SLUG in self.reason(out), out)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_absent_sources_allow_with_the_unknown_notice(self):
+        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(out, {}, out)
+        self.assertIn("past-ruling search unknown:", err)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_reply_with_neither_input_needed_nor_a_question_makes_no_call(self):
+        out, _ = self.stop(self.ci, DONE_ONLY)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+        self.assertNotIn("past-ruling", self.reason(out))
+
+    def test_prose_question_triggers_the_check(self):
+        self.stop(self.decided, PROSE_Q, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_question_inside_a_code_fence_does_not_trigger(self):
+        self.stop(self.decided, FENCED_Q)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
+        out, _ = self.stop(self.decided, RELAY, model_fail=True)
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True)
+        self.assertEqual(out, {}, out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_question_keys_refuse_two_questions_with_the_same_keys(self):
+        out, _ = self.stop(self.decided, KEYS_SAME, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_distinct_keys_do_not_trigger_question_keys(self):
+        out, _ = self.stop(self.decided, KEYS_DISTINCT, answer=tcj.ALLOW)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
+    def test_question_keys_see_an_earlier_reply_since_the_last_human(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_unshown_id_cite_takes_the_unvetted_path(self):
+        # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
+        bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
+        out, _ = self.stop(self.decided, RELAY, answer=bogus)
+        self.assertIn("Unvetted:", self.reason(out), out)
+
+    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
+        out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_relay_exception_refuses_unvetted_with_a_stderr_line(self):
+        # relay_reasons catches an exception and fails open. A hook cwd that is not a path raises inside the relay
+        # check, and that must refuse with the Unvetted remedy and a stderr line (owner rulings, Nov 1 19:30 CST).
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": 12345}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("past-ruling", run.stderr)
+
+    def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True, "cwd": self.decided}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": REFUSE_APPS}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_earlier_blockquote_question_does_not_hide_the_input_needed_item(self):
+        # The c153 replay: an earlier blockquote line ends in "?", then the real Input Needed item asks the ruled question.
+        repo = tcj.make_repo("relay-c153", steps={"c153": C153_SENTENCE})
+        reply = "> Did the last audit finish?\n> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+        self.stop(repo, reply, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(C153_MARK, calls[0]["prompt"])
+
+    def test_a_question_mark_inside_a_prose_line_triggers_the_check(self):
+        self.stop(self.decided, "Ship the fix? Say go and I merge.", answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_question_in_an_earlier_assistant_text_block_triggers_the_check(self):
+        records = [human("decide"), assistant_text("Ship the fix?"), assistant_text(DONE_ONLY)]
+        self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_unvetted_line_beside_a_prose_question_passes_when_the_model_fails(self):
+        # A prose question with no Input Needed item. The Unvetted line beside the question passes it, whether it sits
+        # on its own line, in a blockquote, or on the question line.
+        beside = ("Should the GitHub apps keep their access to claude-settings?\n" + UNVETTED,
+                  "> Should the GitHub apps keep their access to claude-settings?\n> " + UNVETTED,
+                  "Should the GitHub apps keep their access to claude-settings? " + UNVETTED)
+        for reply in beside:
+            self.reset_calls()
+            out, _ = self.stop(self.decided, reply, model_fail=True)
+            self.assertEqual(out, {}, reply)
+
+    def test_a_second_stop_after_a_peer_message_makes_no_call_for_an_old_question(self):
+        # The question was asked on the first Stop. A plain reply after a peer message must not ask it again.
+        first = [human("decide"), assistant_text(PROSE_Q)]
+        self.stop(self.ci, records=first, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        second = first + [peer_msg("status: the lane ended"), assistant_text(DONE_ONLY)]
+        self.stop(self.ci, records=second, answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+
+    def test_question_keys_keep_their_window_across_a_peer_message(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), peer_msg("status: the lane ended"),
+                   assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_a_question_mark_only_inside_a_code_span_makes_no_call(self):
+        self.stop(self.decided, "Use `keep the apps?` as the probe.", answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
+        records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
+
+
+class AnsweredNeedsSourceTests(unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
+
+    def hook(self, reply, landed=False, stop_hook_active=False):
+        records = [human("ask the owner")]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+
+    def verdict(self, reply, **kw):
+        run = run_guard(REPORT_GUARD, self.hook(reply, **kw))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, *needles, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block", reply)
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+        return out
+
+    def assert_allowed(self, reply, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    # Red: each case below fails until the verdict exists.
+
+    def test_an_red_synthetic_f188_replay_blocks(self):
+        # Synthetic replay, not a copy. The real F188 line (docs/plans/owner-feedback-audit.md, decision
+        # answered-needs-source) never used the word. This line stands in for a reply that did.
+        # Catches: a line that says "Answered" with no source passes.
+        self.assert_blocked("Answered: no permission rule can lift it.", "Answered: no permission rule can lift it.")
+
+    def test_an_red_any_case_and_any_position_blocks(self):
+        rows = [
+            # Catches: an upper-case ANSWERED passes, so the match is case-sensitive.
+            "The owner ANSWERED it.",
+            # Catches: the word at the end of a line passes.
+            "The owner said yes and answered",
+            # Catches: a word for a number is read as item <n>.
+            "Item one answered in chat.",
+            # Catches: a lane number is read as a source.
+            "Lane 4 answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_each_offending_line_is_listed_in_one_block(self):
+        # Catches: only the first offending line is listed, or a cited line is listed with the red ones.
+        cited = "Item 143 answered in chat at 17:25 CST."
+        reply = "\n".join(["Answered: no permission rule can lift it.", cited, "The owner answered it."])
+        out = self.assert_blocked(reply, "Answered: no permission rule can lift it.", "The owner answered it.")
+        self.assertNotIn(cited, out["reason"])
+
+    def test_an_red_lone_quote_opens_no_quoted_phrase(self):
+        # Catches: a lone double quote counts as a quoted owner phrase, so a line with no pair passes.
+        self.assert_blocked('Answered 9" after the call.', 'Answered 9" after the call.')
+
+    def test_an_red_quotes_do_not_pair_across_lines(self):
+        # Catches: a quote on one line pairs with a quote on the next line, so the first line passes.
+        first = 'Answered, the owner wrote "no.'
+        self.assert_blocked(first + '\nHe then said "yes" later.', first)
+
+    def test_an_red_fence_marker_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
+        self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
+                            "Typed ``` in the middle, then answered.", "The next line answered too.")
+
+    def test_an_red_text_after_a_closed_fence_is_judged(self):
+        # Catches: a fence that never closes in the scan hides the lines after it.
+        self.assert_blocked("```\nkeep the apps\n```\nAnswered: no permission rule can lift it.",
+                            "Answered: no permission rule can lift it.")
+
+    def test_an_red_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        reply = "Answered: no permission rule can lift it.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_blocked(reply, "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_joins_a_missing_report_in_one_block(self):
+        # Catches: the answered line is dropped when the report is missing, or sent as a second block.
+        reply = "Answered: no permission rule can lift it.\n\nAll done."
+        self.assert_blocked(reply, "Report-shape guard", "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_and_or_is_not_a_repo_path_blocks(self):
+        # Ruling (lane orchestrator, process-only): "and/or" is not a repo path, so the slash in it cites nothing.
+        self.assert_blocked("Answered: use a and/or b.", "Answered: use a and/or b.")
+
+    def test_an_red_double_quoted_phrase_is_no_source(self):
+        # Lane choice (process-only): a double-quoted phrase is no longer a source. This re-points the
+        # quoted-phrase row that the green list held.
+        rows = [
+            # Catches: an owner phrase in double quotes still cites the line.
+            'Answered "no, keep the apps" in chat.',
+            # Catches: a quoted label in a Q-line still cites the line.
+            'Q1 ("Departs from" line) was answered.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_each_source_cites_the_word(self):
+        rows = [
+            # Catches: a URL is not read as a source.
+            "Answered at https://github.com/shivinate7/claude-settings/pull/1008 today.",
+            # Catches: a PR ref #<n> is not read as a source.
+            "Answered on PR #1008.",
+            # Catches: a commit hash is not read as a source.
+            "Answered in commit 1a2b3c4d.",
+            # Catches: a repo path with a slash is not read as a source.
+            "Answered in lint/report_guard today.",
+            # Catches: a repo path ending in a file extension is not read as a source.
+            "Answered in report_guard.py and its tests.",
+            # Catches: item <n> is not read as a source.
+            "Answered in item 143.",
+            # Catches: page:<n> is not read as a source.
+            "Answered on page:12.",
+            # Catches: an fb- inbox id is not read as a source.
+            "fb-1042 answered in chat.",
+            # Catches: a session_ id is not read as a source.
+            "Answered by session_0a1b2c3d4e5f.",
+            # Catches: a Central time HH:MM is not read as a source.
+            "Answered at 17:25 CST.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_docs_path_after_the_word_passes(self):
+        # Brief (b): the synthetic F188 line with a docs path.
+        self.assert_allowed("Answered: no permission rule can lift it. (docs: code.claude.com/docs/en/permissions)")
+
+    def test_an_green_item_and_central_time_pass(self):
+        # Brief (c): the item number and the Central time both cite.
+        self.assert_allowed("Item 143 answered in chat at 17:25 CST.")
+
+    def test_an_green_negations_and_inbox_home_word_pass(self):
+        rows = [
+            # Catches: unanswered is read as the word.
+            "Q2 is unanswered.",
+            # Catches: not answered is read as the word.
+            "The owner has not answered.",
+            # Catches: a line that opens with Not answered is read as the word.
+            "Not answered.",
+            # Catches: never answered is read as the word.
+            "The owner never answered.",
+            # Catches: hasn't answered is read as the word.
+            "The lane hasn't answered yet.",
+            # Catches: the upper-case form of a negation is read as the word.
+            "The owner has NOT ANSWERED.",
+            # Catches: the inbox home word in [question] -> answered is read as a claim.
+            "[question] -> answered",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_code_span_and_fence_pass(self):
+        rows = [
+            # Catches: the word inside a one-tick code span is read as a claim.
+            "Use `answered` as the probe.",
+            # Catches: the word inside a two-tick code span is read as a claim.
+            "Use ``answered`` as the probe.",
+            # Catches: the words inside a multi-line fence are read as claims.
+            "```\nAnswered: no permission rule can lift it.\nThe owner answered it.\n```",
+            # Catches: a fence with an info string is read as text.
+            "```text\nanswered\n```",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_not_yet_answered_passes(self):
+        # Ruling (lane orchestrator, process-only): "not yet answered" is exempt, like "not answered".
+        for line in ("The owner has not yet answered.", "Not yet answered."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_source_inside_a_code_span_counts(self):
+        # Ruling (lane orchestrator, process-only): a source in an inline code span counts.
+        for line in ("Answered in `report_guard.py`.", "Answered at `https://github.com/o/r/pull/1`."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_sources_match_in_any_case(self):
+        # Catches: item <n> and fb- ids match only in lower case, so a capitalised source reads as no source.
+        for line in ("Item 143 answered in chat.", "FB-1042 answered in chat."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_negated_forms_beyond_the_list_pass(self):
+        # Catches: a negated "answered" outside the exempt list (wasn't, has not been, could not be, haven't,
+        # has yet to be, No one) is read as a claim.
+        rows = [
+            "The ask wasn't answered.",
+            "The ask has not been answered.",
+            "No one answered.",
+            "The ask could not be answered.",
+            "We haven't answered.",
+            "The ask has yet to be answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_hyphen_joined_word_is_not_the_word(self):
+        # Catches: the word inside a hyphen-joined name (answered-needs-source) is read as the word.
+        self.assert_allowed("The rule answered-needs-source holds.")
+
+    def test_an_green_no_and_nothing_forms_pass(self):
+        # Catches: "No question", "None", "Nothing", and "Cannot tell whether" with "answered" are read as a claim.
+        rows = [
+            "No question was answered.",
+            "None were answered.",
+            "Nothing was answered.",
+            "Cannot tell whether it was answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_tilde_fence_passes(self):
+        # Catches: a line inside a ~~~ fence is read as text, since only ``` fences are skipped.
+        rows = [
+            "~~~\nThe owner answered it.\n~~~",
+            "~~~text\nanswered\n~~~",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_question_line_passes(self):
+        # Catches: a question that asks whether the word happened is read as a claim.
+        self.assert_allowed("Has the owner answered?")
+
+    def test_an_green_word_forms_that_are_not_the_word_pass(self):
+        # Catches: answers, answering, or answer is read as answered.
+        self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
+
+    def test_an_green_landed_turn_with_a_cited_line_passes(self):
+        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_allowed(reply, landed=True)
+
+    def test_an_green_stop_hook_active_stays_quiet(self):
+        # Catches: the check blocks a rewrite, which this guard leaves quiet today.
+        self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
+
+    # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
+    # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
+
+    def guard_opens(self, reply):
+        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
+        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
+        import layout  # noqa: F401
+        import local_time  # noqa: F401
+        hook = self.hook(reply)
+        opened, real_open = [], open
+
+        def watch(path, mode="r", *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, mode, *args, **kwargs)
+        out = io.StringIO()
+        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
+                contextlib.redirect_stdout(out):
+            runpy.run_path(REPORT_GUARD, run_name="__main__")
+        return out.getvalue().strip(), opened, hook["transcript_path"]
+
+    def test_an_cost_no_word_opens_only_the_transcript(self):
+        # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
+        for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
+            with self.subTest(reply=reply):
+                out, opened, transcript = self.guard_opens(reply)
+                self.assertEqual(out, "")
+                self.assertEqual(set(opened), {transcript})
+
+    def test_an_cost_offending_line_still_opens_only_the_transcript(self):
+        # The block is the red part. The read is the cost: the verdict reads the reply, and nothing else opens.
+        out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
+        self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
+        self.assertEqual(set(opened), {transcript})
 
 
 class PendingRefusalTests(unittest.TestCase):

@@ -18,7 +18,7 @@
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
-# line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
+# line names each pull-request step it skips. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
 # joins a batch. Use it with a job such as checks.
 # Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
@@ -29,6 +29,7 @@
 # A step's `if:` reads every needs.scope.outputs flag as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
@@ -330,7 +331,8 @@ def main(argv):
             with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                                  cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
-                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET},
+                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
+                                      **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                     if not line.startswith("verdict: still running"):

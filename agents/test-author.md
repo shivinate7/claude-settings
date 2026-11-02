@@ -24,7 +24,7 @@ Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-p
 
 Follow the practices in decision `test-practices`. At write time: show each new case red on a named old commit, with a green control beside it (P2). The red must be an assert that fails for the named cause, never a crash, an import error or "not built" (P3). For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red (P3). Each failure message names one cause (P4). No fixed sleep, wall-clock wait or real clock in an assert (P5). Assert the scope before the subject when the test probes or branches on the subject (P7). Fixtures reach the empty and full-size states (P8).
 
-Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
+Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<your agent id>-red`. The guard lets you `cd` into that folder only; a `cd` into any other checkout is refused. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
 
 Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text, per building-scanner-respects-strings.
 

@@ -242,6 +242,20 @@ def resolve_default_base(where: str, remote: str = "origin"):
     return read_default_base(where, remote)[0]
 
 
+def last_commit_epoch(where: str, pathspec: str):
+    """The commit time, in epoch seconds, of the newest commit that touches `pathspec` on any local
+    branch, any remote-tracking branch or HEAD. One `git log -1` call, and no read of the default
+    branch: a commit pushed to any branch counts. None when git does not answer, or when no such
+    commit exists (an unknown file): the caller cannot tell the two apart and fails open."""
+    answer = _git(where, "log", "-1", "--format=%ct", "--branches", "--remotes", "HEAD", "--", pathspec)
+    if answer is None or answer.returncode != 0:
+        return None
+    try:
+        return int(answer.stdout.strip())
+    except ValueError:
+        return None
+
+
 def is_shallow(where: str):
     """True in a shallow clone, False in a full one, None when git could not tell. The one home of the
     shallow probe: a shallow clone cuts history, so an ancestry exit 1 there proves nothing."""

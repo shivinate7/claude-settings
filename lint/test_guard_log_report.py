@@ -900,6 +900,30 @@ def fresh_log(lines=None):
     return path
 
 
+class CloudCheckOneHome(unittest.TestCase):
+    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) gate
+    and the brake gate in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
+
+    def helper(self):
+        import guard_core
+        return getattr(guard_core, "is_cloud", None)
+
+    def test_guard_core_has_is_cloud_true_only_for_exactly_true(self):
+        fn = self.helper()
+        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
+        for value, want in ((None, False), ("true", True), ("TRUE", False), ("1", False), ("", False), ("false", False)):
+            with self.subTest(value=value), mock.patch.dict(os.environ):
+                os.environ.pop("CLAUDE_CODE_REMOTE", None)
+                if value is not None:
+                    os.environ["CLAUDE_CODE_REMOTE"] = value
+                self.assertIs(fn(), want)
+
+    def test_the_report_check_holds_the_guard_core_is_cloud(self):
+        fn = self.helper()
+        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
+        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) gate does not hold guard_core.is_cloud")
+
+
 class CloudPaceReadTests(unittest.TestCase):
     """Pace number four (reports-batch-pace-numbers) reads the local brake count. In a cloud session,
     CLAUDE_CODE_REMOTE == "true" (the check merge/merge.py makes), `--between ... --rule load-brake` prints
