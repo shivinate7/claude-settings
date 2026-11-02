@@ -34,6 +34,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 
 import ast
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -96,6 +97,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -116,6 +118,7 @@ FAMILIES = {
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -473,6 +476,18 @@ GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is 
 # else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
 # setup if gh resolves here.
 GHNONE_PATH = GHNONE
+# lane-closes-after-records: the step slug a lane's cs-step tag carries, and the head its pull request names.
+ARCHIVE_SLUG = "lane-closes-after-records"
+# A lane's own pull request has a head ref equal to its step slug, exactly (the roadmap ruling: a step is live when
+# an open pull request's branch equals the step id). Near misses that only contain the slug or a lane's id do not count.
+ARCHIVE_HEAD = ARCHIVE_SLUG
+ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open: the refusal
+ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
+ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
+ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
+ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
+ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
+ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -821,6 +836,9 @@ def make_blind_git(folder):
 
 FAKE_GH_PY = r'''import json, os, re, sys, time
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
+if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
+    with open(state["count_file"], "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + "\n")
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
@@ -901,9 +919,12 @@ else:
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": "feat%d" % o["number"], "sha": o["head"]},
-                       base={"ref": o.get("base", "main")}) for o in state["others"]]
-        print(listing([dict(state["pr"], number=state["number"])] + others, None, fields, flags))
+        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
+                       base={"ref": o.get("base", "main")}, state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
+        rows = [dict(state["pr"], number=state["number"])] + others
+        if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
+            rows = [row for row in rows if row["state"] == "open"]
+        print(listing(rows, None, fields, flags))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
@@ -932,8 +953,12 @@ else:
 
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
-                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None):
+                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
+                 count_file=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
+    JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -985,7 +1010,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
         "page_cap": page_cap,
-        "others": [dict(o) for o in others],  # more open pull requests on the base, each {number, head, draft, checks}: the batch brake reads them
+        "others": [dict(o) for o in others],  # more pull requests on the base, each {number, head, draft, checks, ref, state, merged}: the batch brake and the archive guard read them; ref defaults to feat<number>, state to open
         "required": list(required),  # the names the base's protection requires
         "protection": protection,  # None: the read answers `required`; "absent": 404; "server": 500; "network": a refused connection
         "runs": runs if runs is not None else [
@@ -994,6 +1019,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
+        "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -1190,6 +1216,23 @@ def build_fixtures():
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
     make_fake_gh(GHDEV, "dev", delay=1)
+    # lane-closes-after-records. `need` pins the repo the guard reads: from the lane's cs-repo tag, as `repos/o/r/...`.
+    # A call that names another repo, or `{owner}/{repo}`, answers as a broken tool.
+    slug_head = {"number": 13, "head": "d" * 40, "ref": ARCHIVE_HEAD}
+    make_fake_gh(ARCHOPEN, "main", need=["o/r"], others=[slug_head])
+    make_fake_gh(ARCHCLOSED, "main", need=["o/r"], others=[dict(slug_head, state="closed")])
+    make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
+    # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
+    # every page sees it. The two rows before it name other lanes.
+    make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
+        {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
+        {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
+        dict(slug_head, number=15, head="3" * 40)])
+    # Open pull requests on a near-miss head, one per fake. Each holds a lane's id or slug as a substring only: an
+    # exact read of the open list allows an archive of the lane named in the case beside it.
+    make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
+    make_fake_gh(ARCHNEAR_C10X, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/c10-x1")])
+    make_fake_gh(ARCHNEAR_CI, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/fix-ci-retry-x1")])
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8101,11 +8144,26 @@ def role_tag_call(tool_id, session=ROLE_OWN):
             role_result(tool_id, "ok")]
 
 
+def role_target_call(tool_id, tags, target=ROLE_OTHER):
+    """One paired get_session call for another session, `target`, whose record carries `tags`."""
+    return [role_use(tool_id, GET_SESSION, {"session_id": target}),
+            role_result(tool_id, role_record(tags, target, "a lane session"))]
+
+
 def role_said(text):
     """A user message: words typed or pasted, never a tool's result."""
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+# lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
+ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
+ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
+ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
+ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
+# A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
+ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
 ROLE_LINES = {
@@ -8136,6 +8194,17 @@ ROLE_LINES = {
     # The coordinator-scope tier fallback (no role file): a foreign coordinator record, and a stale untagged read then a coordinator.
     "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
     "untagged-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", COORD_TAGS),
+    # lane-closes-after-records shapes. The batch runner (ROLE_OWN) reads its own record, then the target
+    # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
+    "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
+    "archive-lane-c1": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_C1_TAGS),
+    "archive-lane-ci": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_CI_TAGS),
+    "archive-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS),
+    "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
+    "archive-no-target": role_call("r0", RUNNER_TAGS),
+    "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
+                               + role_target_call("t2", ARCH_LANE_TAGS),
 }
 
 
@@ -8313,6 +8382,82 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+
+# =========================================================================== 5g. archive of a lane
+FAMILY = "lane-closes-after-records"
+#
+# Rule lane-closes-after-records. The cases pin when archive_session of a lane is refused and when it is allowed.
+# A lane must not close while its records pull request is open, or those records are lost. The guard reads
+# the target's newest get_session record in this session's own transcript, as merge-role-proof and
+# trust-card-in-build read theirs:
+#   - the record has no cs-build:lane tag: allow, the target is not a lane;
+#   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
+#   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
+#     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
+# The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
+ARCHIVE_RULE = "lane-closes-after-records"
+ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
+ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
+ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
+
+
+def fake_gh_path(folder):
+    """The PATH a guard run gets to find the fake gh in `folder`, as the merge cases give it."""
+    return folder + os.pathsep + PY_PATH
+
+
+def archive_refuse(name, transcript, env_path, carries=()):
+    """An archive_session of the target the guard refuses. The reason names its rule, never the tool."""
+    add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
+        session_id=ROLE_OTHER)
+
+
+def archive_allow(name, transcript, env_path):
+    """An archive_session of the target the guard lets through silently."""
+    add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+
+
+# A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
+archive_refuse("a lane whose open head is exactly its slug is refused", role_path("archive-lane"),
+               fake_gh_path(ARCHOPEN))
+# A lane whose slug pull request was closed as replaced, or merged, has no open one: the archive is allowed.
+archive_allow("a lane whose slug pull request was closed as replaced is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHCLOSED))
+archive_allow("a lane whose slug pull request was merged is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHMERGED))
+# The match is exact: an open head that only contains the lane's step id is another pull request, not the lane's.
+archive_allow("a lane c1 with an open head c10 is allowed: c10 is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10))
+archive_allow("a lane c1 with an open head claude/c10-x1 is allowed: that head is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10X))
+archive_allow("a lane ci with an open head claude/fix-ci-retry-x1 is allowed: that head is not ci",
+              role_path("archive-lane-ci"), fake_gh_path(ARCHNEAR_CI))
+# A target whose record names no lane is not judged, even with an open pull request on the slug.
+archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
+              role_path("archive-triage"), fake_gh_path(ARCHOPEN))
+# No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
+# gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
+archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
+               role_path("archive-no-target"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
+archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
+               role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# A read that cannot run denies: a broken gh, and a missing gh.
+archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
+               fake_gh_path(GHBROKEN))
+archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+# Every page of the open list is read: the slug's pull request sits on page two.
+archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHPAGE))
+# The newest record of the target counts. A read untagged, then a read tagged lane, is a lane.
+archive_refuse("a target read untagged, then tagged lane, is refused: the newest record counts",
+               role_path("archive-stale-then-lane"), fake_gh_path(ARCHOPEN))
+# No transcript at all: no record can be read, so the target's tags are unknown, and the call is refused.
+archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
 
 
 # =========================================================================== 5d. cite by id
@@ -11272,6 +11417,153 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+# ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
+# several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
+# impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
+FAMILY = "lane-closes-after-records"
+
+
+def archive_override_call(config, seconds):
+    """One archive_session of a lane at OV_T0 + seconds, from the calling session the override names."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "session": ARCHIVE_OWNER,
+        "env_path": fake_gh_path(ARCHOPEN), "config": config, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV, LOCAL_TIME_NOW=ov_clock(seconds)),
+        "tool_input": {"session_id": ROLE_OTHER}, "transcript": role_path("archive-lane"),
+    })
+
+
+def archive_override_case():
+    """The owner override lifts the archive refusal: refused before a timed override, allowed under it."""
+    config = ov_config("archive-lane")
+    problem = ov_want(*archive_override_call(config, 0), "deny", ARCHIVE_RULE)
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, ARCHIVE_OWNER, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: archive_override_call(config, 60), "allow",
+                         ARCHIVE_RULE)], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def archive_matcher_case():
+    """A guard matcher in settings.json covers archive_session, so the guard sees the call at all."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["PreToolUse"]
+    matchers = [entry.get("matcher", "") for entry in entries
+                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    if any(re.fullmatch(matcher, ARCHIVE_TOOL) for matcher in matchers):
+        return True, "a guard matcher covers archive_session"
+    return False, "no guard matcher covers archive_session: %r" % (matchers,)
+
+
+FIXTURELESS_CHECKS.add(archive_matcher_case)
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an owner override lifts the archive refusal",
+                         archive_override_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher routes archive_session to the guard",
+                         archive_matcher_case))
+
+
+# The cost of lane-closes-after-records, pinned: one archive of a lane makes one gh call, a non-lane archive makes
+# none, and an archive writes no file in the folders the session owns. Each check builds its own counted fake, so no
+# other fake logs a call.
+ARCHIVE_CALLS = "calls.log"  # the counted fake's log, beside its state: one line per gh call
+
+
+def archive_judged(transcript, folder):
+    """The guard's verdict on one archive_session of ROLE_OTHER, from the batch runner, with the fake pull request
+    tool at `folder` on PATH. The payload's cwd and the guard's process both run in NOGIT, so a write into the working
+    folder shows in the snapshot. MERGECFG is the config folder: its rules file points at the repo, so a guard copy
+    finds the merge tool there."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+        "env_path": fake_gh_path(folder), "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"session_id": ROLE_OTHER},
+        "transcript": transcript,
+    })
+
+
+def archive_counted_gh():
+    """A counted pull request tool. Its one open pull request is on no slug, so an archive of a lane reads the open
+    list and is allowed: a lane archive is allowed only after that read succeeds."""
+    folder = os.path.join(ROOT, "archcount")
+    make_fake_gh(folder, "main", need=["o/r"], count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def gh_calls_taken(folder):
+    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
+    path = os.path.join(folder, ARCHIVE_CALLS)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        calls = [line for line in handle.read().splitlines() if line.strip()]
+    os.remove(path)
+    return calls
+
+
+def tree_files(*roots):
+    """Every file under `roots`, as path -> sha256, so a new file, a removed file and a changed byte each show."""
+    files = {}
+    for root in roots:
+        for folder, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(folder, name)
+                with open(path, "rb") as handle:
+                    files[path] = hashlib.sha256(handle.read()).hexdigest()
+    return files
+
+
+def archive_lane_one_read_case():
+    """An archive of a lane reads the open pull requests in one gh call, and its open list names no slug: allowed."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-lane"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a lane with no slug pull request on its open list: %s (%r)" % (decision, reason)
+    if len(calls) != 1:
+        return False, "one gh call wanted for the open list, %d seen: %r" % (len(calls), calls)
+    return True, "one gh call, and the lane is allowed"
+
+
+def archive_non_lane_no_read_case():
+    """A target that is no lane is not judged: its archive is allowed and makes no gh call, though its record carries
+    a step slug that an open-list read would find."""
+    folder = archive_counted_gh()
+    gh_calls_taken(folder)
+    decision, reason = archive_judged(role_path("archive-triage-slug"), folder)
+    calls = gh_calls_taken(folder)
+    if decision != "allow" or reason:
+        return False, "a non-lane target: %s (%r)" % (decision, reason)
+    if calls:
+        return False, "a non-lane target made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+def archive_writes_nothing_case():
+    """An archive of a lane writes no file in its working folder, its transcript folder or the config folder."""
+    folder = archive_counted_gh()
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the snapshot
+    trees = (NOGIT, ROLE_DIR, MERGECFG)
+    before = tree_files(*trees)
+    decision, _ = archive_judged(role_path("archive-lane"), folder)
+    after = tree_files(*trees)
+    gh_calls_taken(folder)
+    if decision != "allow":
+        return False, "the lane archive was %s, not allowed, so it is not the allow path under test" % decision
+    changed = sorted(set(before) ^ set(after)) + sorted(p for p in before if p in after and before[p] != after[p])
+    if changed:
+        return False, "the archive wrote %d file(s): %r" % (len(changed), changed[:5])
+    return True, "no file changed in the working, transcript or config folder"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive reads the open pull requests in one gh call",
+                         archive_lane_one_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no gh call",
+                         archive_non_lane_no_read_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
+                         archive_writes_nothing_case))
+
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
@@ -12223,21 +12515,28 @@ wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
 
 
+def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
+    """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
+    Returns the printed stdout, empty when the guard allowed the call."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    run = subprocess.run([sys.executable, WP_GUARD],
+                         input=json.dumps({"tool_name": "Artifact", "cwd": cwd,
+                                           "tool_input": {"url": url, "file_path": file_path}}),
+                         capture_output=True, text=True, env=env, timeout=120)
+    return run.stdout.strip()
+
+
 def wp_stamp_case():
     """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
         os.remove(stamp)
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
-    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    run = subprocess.run([sys.executable, WP_GUARD],
-                         input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
-                                           "tool_input": {"url": PQ_URL, "file_path": WP_CURRENT}}),
-                         capture_output=True, text=True, env=env, timeout=120)
-    if run.stdout.strip():
-        return False, "the publish of main's page was refused: %r" % run.stdout[:100]
+    out = wp_publish_run(WP_CURRENT)
+    if out:
+        return False, "the publish of main's page was refused: %r" % out[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -12250,6 +12549,345 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
+
+
+# --------------------------------------------------------------------------- a design picture is checked at write
+#
+# Rule page-item-design (decision page-item-design). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option with `design` runs skills/waiting-page/check_designs.mjs against the
+# published file stamped at <git common dir>/waiting-page-published. A miss denies, with the page's own
+# sentence. Unknown (no stamp, the file gone, exit 3) allows and logs one `noted` line. A write with no designs
+# never runs the checker: `_run_check_designs` is the seam, and the seam's call count is what the case reads.
+# Each case gets a checkout and a config folder of its own, so no case reads another case's stamp.
+FAMILY = "page-item-design"
+
+PD_STAMP = "waiting-page-published"  # the stamp file, in the git common dir
+PD_DOC = "fill-of-volume-card"
+PD_PAGE = os.path.join(ROOT, "pd", "design-page.html")  # main's page, with the mockups the cases name
+PD_SLOT = '<script type="application/json" id="designData">{}</script>'
+PD_MOCKS = {
+    "m1": '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>',
+    "m2": '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>',  # a strip, drawn at 2400
+}
+with open(WP_SOURCE, encoding="utf-8", newline="") as _handle:
+    _pd_template = _handle.read()
+wp_must(_pd_template.count(PD_SLOT) == 1, "main's page holds its designData slot once")
+wp_put(PD_PAGE, _pd_template.replace(
+    PD_SLOT, '<script type="application/json" id="designData">'
+    + json.dumps(PD_MOCKS).replace("<", "\\u003c") + "</script>", 1))
+
+
+def pd_node_ready():
+    """True when node can launch a Chromium through playwright, with the environment the guard's checker gets."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    probe = subprocess.run([node, "-e", "require('playwright').chromium.launch().then(b => b.close())"],
+                           capture_output=True, text=True, env=dict(os.environ), timeout=120)
+    return probe.returncode == 0
+
+
+# The deny cases render a page through the checker, so they need Chromium. GUARD_CHROMIUM=1 is set only on the
+# CI step that installs Chromium: there, a node that cannot launch it fails the run. Without the marker, a
+# machine that cannot launch Chromium skips those cases and says so (the rule of testing/skip-locally-fail-in-ci.mjs).
+def pd_chromium_missing():
+    """The marker says this run has Chromium. A node that cannot launch it is a failure, not a skip."""
+    return False, ("GUARD_CHROMIUM=1, but node cannot launch Chromium through playwright, so the checker's deny "
+                   "cases cannot run")
+
+
+PD_MARKER = os.environ.get("GUARD_CHROMIUM") == "1"
+PD_NODE = pd_node_ready()
+PD_NEEDS_NODE = PD_NODE or PD_MARKER
+if PD_MARKER and not PD_NODE:
+    LOG_CHECKS_EXTRA.append(("page-item-design: GUARD_CHROMIUM=1 and node cannot launch Chromium", pd_chromium_missing))
+elif not PD_NODE:
+    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped",
+          file=sys.stderr)
+
+
+def pd_repo(name, stamp):
+    """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    where = os.path.join(ROOT, "pd", name)
+    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+    wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
+    wp_git(where, "init", "-q")
+    wp_git(where, "add", "-A")
+    wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
+    if stamp is not None:
+        wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
+    return where
+
+
+def pd_item(designs=None, **over):
+    """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
+    item = {"id": PD_DOC, "kind": "decision", "status": "open", "title": "Which fill should the volume card show?",
+            "context": "The volume card shows the stock level.",
+            "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                        {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
+            "designs": designs if designs is not None else
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+    item.update(over)
+    return with_stake(item, departs=True)
+
+
+def pd_plain():
+    """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
+    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open",
+                       "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
+                       "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
+                                   {"key": "b", "label": "Build first", "how": "The build before any design review."}]},
+                      departs=True)
+
+
+def pd_body(repo, data, action="set"):
+    return {"tool_name": "ArtifactData", "cwd": repo,
+            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+
+
+def pd_run(name, body):
+    """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
+    folder = os.path.join(ROOT, "pd", "cfg-" + name)
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+                         env=env, timeout=120)
+    if got.returncode != 0:
+        return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
+    decision, reason = read_decision(got.stdout)
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return decision, reason, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_case(label, name, stamp, data, want, fragment="", action="set", note=False):
+    """Register one check: a checkout with `stamp`, one ArtifactData write of `data`, and the verdict wanted.
+    A deny's reason must carry `fragment` and no forbidden target. `note` wants one noted line for the rule."""
+    def check():
+        repo = pd_repo(name, stamp)
+        decision, reason, rows = pd_run(name, pd_body(repo, data, action))
+        problems = []
+        if decision != want:
+            problems.append("want %s, got %s: %s" % (want, decision, reason[:160]))
+        if want == "deny" and fragment and fragment not in reason:
+            problems.append("the reason does not carry %r: %s" % (fragment, reason[:160]))
+        leak = names_the_target(reason, "page-item-design") if want == "deny" else ""
+        if leak:
+            problems.append("the reason names the forbidden target %r" % leak)
+        if note:
+            noted = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+        return (not problems), ("; ".join(problems) or "%s, as wanted" % want)
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+# The deny cases read the checker's answer, so they run only where the checker can render.
+if PD_NEEDS_NODE:
+    pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names")
+    pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            "deny", fragment="a state its mockup does not draw")
+    pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
+            pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                              "drawn": 2400}]),
+            "deny", fragment="option A")
+    pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names", action="update")
+
+pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
+pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        "allow")
+pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
+pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
+        pd_item(), "allow", note=True)
+
+
+def pd_stamp_case():
+    """An allowed publish of this repo's waiting page writes the absolute path of the published file to
+    <git common dir>/waiting-page-published. A relative file path resolves against the checkout, and a refused
+    publish leaves the stamp as it was."""
+    materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
+    stamp = os.path.join(WP_CHECK, ".git", PD_STAMP)
+
+    def stamped():
+        return open(stamp, encoding="utf-8").read().strip() if os.path.isfile(stamp) else None
+
+    def names(got):
+        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_CURRENT)
+
+    if os.path.exists(stamp):
+        os.remove(stamp)
+    if wp_publish_run(WP_CURRENT):
+        return False, "the publish of main's page was refused"
+    if not names(stamped()):
+        return False, "after an allowed publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+    os.remove(stamp)
+    if wp_publish_run(os.path.relpath(WP_CURRENT, WP_CHECK)):
+        return False, "the publish by a relative file path was refused"
+    if not names(stamped()):
+        return False, "after a relative publish the stamp holds %r, want the absolute path of %s" % (stamped(), WP_CURRENT)
+    behind = wp_publish_run(WP_BEHIND)
+    if "page-stale" not in behind:
+        return False, "a behind publish was not refused by page-stale: %r" % behind[:100]
+    if not names(stamped()):
+        return False, "a refused publish changed the stamp to %r" % stamped()
+    return True, "an allowed publish stamps its absolute path, and a refused one leaves the stamp"
+
+
+FIXTURELESS_CHECKS.add(pd_stamp_case)  # builds only the copy it runs, as wp_stamp_case does
+LOG_CHECKS_EXTRA.append(("page-item-design: an allowed publish of the waiting page stamps the published file",
+                         pd_stamp_case))
+
+
+def pd_rows(folder):
+    """The guard.log rows of one config folder, split on tabs."""
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_noted(rows):
+    """The page-item-design noted rows. A row has six columns, the session last."""
+    return [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+
+
+def pd_judged(payload, name, seam=None, patches=None):
+    """(seam calls, printed output, guard.log rows) for one call, judged in this process with its own config folder.
+    The seam is the real _run_check_designs unless `seam` replaces it. `patches` sets module constants, created when absent."""
+    from unittest import mock
+    module = _load_guard_module()
+    real = module._run_check_designs
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return (seam or real)(*args, **kwargs)
+    folder = os.path.join(ROOT, "pd", "judged-" + name)
+    os.makedirs(folder, exist_ok=True)
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = folder
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(module, "_run_check_designs", spy))
+            for key, value in (patches or {}).items():
+                stack.enter_context(mock.patch.object(module, key, value, create=True))
+            out = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            try:
+                module.judge(payload)
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    return len(calls), out.getvalue(), pd_rows(folder)
+
+
+def pd_seam_case():
+    """The guard calls _run_check_designs once for a write with designs, and never for a write without them."""
+    module = _load_guard_module()
+    if not hasattr(module, "_run_check_designs"):
+        return False, "the guard has no _run_check_designs seam"
+    repo = pd_repo("seam", PD_PAGE)
+    with_calls, with_out, _ = pd_judged(pd_body(repo, pd_item()), "seam-with")
+    without_calls, without_out, _ = pd_judged(pd_body(repo, pd_plain()), "seam-without")
+    problems = []
+    if with_calls != 1:
+        problems.append("a write with designs called the seam %d times, want 1" % with_calls)
+    if with_out.strip():
+        problems.append("a good write with designs was refused: %s" % with_out[:120])
+    if without_calls != 0:
+        problems.append("a write with no designs called the seam %d times, want 0" % without_calls)
+    if without_out.strip():
+        problems.append("a write with no designs was refused: %s" % without_out[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the seam runs once for a write with designs, and never for one without"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
+
+
+def pd_partial_options():
+    """Two options with gain and lose, one with a picture. A partial update's options must pass the form rule too."""
+    return with_stake({"options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                                   {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
+
+
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+
+
+def pd_partial(label, name, data, judged):
+    """One update case of rule page-item-design. A write that carries options or designs but not both is not
+    judged: the checker is not called, the write is allowed, and one noted line says partial. A write that
+    carries both is judged, so the checker is called once."""
+    def check():
+        repo = pd_repo(name, PD_PAGE)
+        calls, out, rows = pd_judged(pd_body(repo, data, "update"), name)
+        noted = pd_noted(rows)
+        problems = []
+        if judged:
+            if calls != 1:
+                problems.append("a write that carries both was judged %d times, want 1" % calls)
+            if out.strip():
+                problems.append("a good write that carries both was refused: %s" % out[:120])
+        else:
+            if calls != 0:
+                problems.append("a partial update called the checker %d times, want 0" % calls)
+            if out.strip():
+                problems.append("a partial update was refused: %s" % out[:120])
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+            elif "partial" not in "\t".join(noted[0]):
+                problems.append("the noted line does not say partial: %r" % noted[0])
+        return (not problems), ("; ".join(problems) or "as wanted")
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+pd_partial("a partial update with options and no designs is not judged: one noted line, no checker call",
+           "partial-options", {"options": pd_partial_options()}, judged=False)
+pd_partial("a partial update with designs and no options is not judged: one noted line, no checker call",
+           "partial-designs", {"designs": PD_FULL_DESIGN}, judged=False)
+pd_partial("an update that carries both options and designs is judged",
+           "update-both", {"options": pd_partial_options(), "designs": PD_FULL_DESIGN}, judged=True)
+
+
+def pd_budget_case():
+    """Pictured items in one batch share one deadline. When the budget is spent, the rest are allowed with a noted
+    line, and the checker is not called for them. The checker is a stand-in that sleeps, so the case stays fast."""
+    import time
+
+    def slow(page_file, item):
+        time.sleep(0.6)
+        return 0, ""
+    repo = pd_repo("budget", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": "budget-%d" % i, "data": pd_item(id="budget-%d" % i)}
+              for i in range(3)]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    calls, out, rows = pd_judged(payload, "budget", seam=slow, patches={"PAGE_ITEM_DESIGN_BATCH_SECONDS": 1.0})
+    noted = pd_noted(rows)
+    problems = []
+    if calls != 2:
+        problems.append("three pictured items in one batch called the checker %d times, want 2 (one deadline per batch)"
+                        % calls)
+    if out.strip():
+        problems.append("a batch with no miss was refused: %s" % out[:120])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for the item past the budget, found %d" % len(noted))
+    return (not problems), ("; ".join(problems) or "two judged, one noted, one deadline for the batch")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
