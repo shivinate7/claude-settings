@@ -2119,15 +2119,45 @@ def role_name(table, subagent_type) -> str:
     return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
+def spawn_inputs(tool: str, tool_input):
+    """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
+    call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
+    and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
+    (decision agent-model-cap). A call whose prompt, model or agentType the scan cannot read, or that names no
+    model, is skipped, as step_up_hit skips it: a static read never guesses. Other tools yield nothing."""
+    if tool in SPAWN_TOOLS:
+        yield tool_input
+    elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        for prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if prompt is None or unseen & {"model", "agentType", "..."} or not keys.get("model"):
+                continue
+            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt}
+
+
 def role_model_check(tool: str, tool_input):
-    """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
+    """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
+    first refusal, else the first unread. Cost: one table read per spawn."""
+    unread = ("", "", False)
+    for spawn in spawn_inputs(tool, tool_input):
+        verdict = role_model_one(spawn)
+        if verdict[0]:
+            return verdict
+        if verdict[2] and not unread[2]:
+            unread = verdict
+    return unread
+
+
+def role_model_one(tool_input):
+    """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
     opus_spawn_hit. An Explore on an audit brief
     (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too.
     An above-row refusal is liftable by the general override (owner ruling, item 127 pick a, Nov 1 17:25 CST); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
-    if tool not in SPAWN_TOOLS:
-        return "", "", False
     pointer = pointer_checkout()
     if not pointer:
         return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
@@ -2338,24 +2368,32 @@ OPUS_BUILDER_REASON = (
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
 
 
-def opus_spawn_hit(tool: str, tool_input) -> str:
-    """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
+def opus_spawn_hit(tool: str, tool_input) -> tuple:
+    """(model, role) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
+    else ("", ""). `role` is the role the spawn names, "" for none. A standing grant
     is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (owner ruling, item 137
     pick a, Nov 1 18:38 CST). Any other spawn above its role's model is refused (owner ruling, item 127 pick a, Nov 1 17:25
     CST), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
-    if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
-        return ""
+    for spawn in spawn_inputs(tool, tool_input):
+        if opus_without_grant(spawn):
+            return str(spawn.get("model")), str(spawn.get("subagent_type") or "")
+    return "", ""
+
+
+def opus_without_grant(tool_input) -> bool:
+    if "opus" not in str(tool_input.get("model") or "").lower():
+        return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
-        return ""
+        return False
     if role == "builder" and builder_third_round(brief):
-        return ""
+        return False
     # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles and the
     # builder stay exact-case, as they were.
     if role_key(role) == role_key(EXPLORE_ROLE) and ("audit", None) in marker_hits(brief):
-        return ""
-    return str(tool_input.get("model"))
+        return False
+    return True
 
 
 # ASK ALONE (ruling ask-commands-run-alone). A command that would ASK is held, not printed, while the other rules run, so a
@@ -3352,12 +3390,12 @@ def judge(payload) -> None:
 
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (owner ruling, item 127 pick a, Nov 1 17:25
     # CST). An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
-    opus_model = opus_spawn_hit(tool, tool_input)
+    opus_model, opus_role = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               OPUS_BUILDER_REASON if tool_input.get("subagent_type") == "builder" else OPUS_SPAWN_REASON,
+               OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON,
                opus_model,
-               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
+               spawn_role=opus_role or "general-purpose")
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
