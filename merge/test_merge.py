@@ -8946,6 +8946,20 @@ class RedMainBrake(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
 
+    def refused_red(self, rc, out, before, *run_ids):
+        """A refusal whose verdict is red, not UNKNOWN, and which names each run id."""
+        self.refused(rc, out, before)
+        self.assertIn("is red", out, out)
+        self.assertNotIn("UNKNOWN", out, out)
+        for i in run_ids:
+            self.assertIn(f"run {i} of", out, out)
+
+    def cross_group(self, red, red_jobs, cand, cand_jobs, cand_newer=True):
+        """A red run and its candidate from another event group; the candidate is newer unless `cand_newer` is false. Each run's jobs
+        are keyed by its id, as MainRunsHost.pages reads them. A run read with no fixture is UNKNOWN, and refused_red fails on that."""
+        runs = [cand, red] if cand_newer else [red, cand]
+        return self.go(runs, {red["id"]: red_jobs, cand["id"]: cand_jobs})
+
     # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
     OCT14 = {901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
 
@@ -9003,27 +9017,105 @@ class RedMainBrake(Env):
         self.merged(rc, out)
 
     def green_run_of(self, event):
-        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")],
+                             {914: [main_job("checks", "failure", 20)], 915: [main_job("checks", "success")]})
         self.merged(rc, out)
 
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
         self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
-    def test_a_green_schedule_run_does_not_clear_an_older_red_push_run(self):
-        # runs are grouped by workflow and event: a schedule run never hides a red push run (roadmap step ci-alarm-reads-by-event)
-        rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
-        self.refused(rc, out, before)
-        self.assertIn("run 914", out)
+    def test_a_green_schedule_run_with_other_jobs_does_not_clear_an_older_red_push_run(self):
+        # runs are grouped by workflow and event: a schedule run with other jobs never hides a red push run; the same job clears it (roadmap step ci-alarm-reads-by-event)
+        rc, out, before = self.go([main_run(915, "success", event="schedule"), main_run(914, "failure")],
+                                  {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]})
+        self.refused_red(rc, out, before, 914)
 
-    def test_a_green_push_run_does_not_clear_an_older_red_schedule_run(self):
-        # a schedule run is judged in its own group: a newer green push never hides it
-        rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")], {920: [main_job("checks", "failure", 20)]})
-        self.refused(rc, out, before)
-        self.assertIn("run 920", out)
+    def test_a_green_push_run_with_other_jobs_does_not_clear_an_older_red_schedule_run(self):
+        # a schedule run is judged in its own group: a newer green push with other jobs never hides it; the same job clears it
+        rc, out, before = self.go([main_run(921, "success"), main_run(920, "failure", event="schedule")],
+                                  {920: [main_job("checks", "failure", 20)], 921: [main_job("scope", "success")]})
+        self.refused_red(rc, out, before, 920)
 
     def test_a_green_schedule_run_clears_an_older_red_schedule_run(self):
         rc, out, _ = self.go([main_run(923, "success", event="schedule"), main_run(922, "failure", event="schedule")], {922: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
+
+    # A red run of one event group is cleared by a newer green run of another group only when that run passed every job the red run
+    # ran, skipped jobs aside. The jobs are compared by exact name.
+    def test_a_newer_green_dispatch_with_the_same_job_clears_an_older_red_schedule_run(self):
+        # the Nov 2 incident (joyous #68): an Oct 26 schedule run kept merges blocked while a newer dispatch run of the same file passed the same job
+        rc, out, _ = self.cross_group(main_run(931, "failure", event="schedule"), [main_job("readme-links", "failure", 20)],
+                                      main_run(932, "success", event="workflow_dispatch"), [main_job("readme-links", "success")])
+        self.merged(rc, out)
+        self.assertCountEqual([r for r in self.host.reads if r.endswith("/jobs")], ["actions/runs/931/jobs", "actions/runs/932/jobs"],
+                              "one jobs read for the red run and one for its candidate, no more")
+
+    def test_a_newer_green_push_with_the_same_job_clears_an_older_red_schedule_run(self):
+        rc, out, _ = self.cross_group(main_run(931, "failure", event="schedule"), [main_job("readme-links", "failure", 20)],
+                                      main_run(932, "success"), [main_job("readme-links", "success")])
+        self.merged(rc, out)
+
+    def test_a_newer_green_schedule_with_the_same_job_clears_an_older_red_push_run(self):
+        rc, out, _ = self.cross_group(main_run(931, "failure"), [main_job("readme-links", "failure", 20)],
+                                      main_run(932, "success", event="schedule"), [main_job("readme-links", "success")])
+        self.merged(rc, out)
+
+    def test_a_newer_green_run_that_ran_more_jobs_clears_it(self):
+        # a newer run may run more jobs than the red run: each job the red run ran must pass in it, the two sets need not match
+        rc, out, _ = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                      main_run(932, "success", event="schedule"), [main_job("scope", "success"), main_job("checks", "success")])
+        self.merged(rc, out)
+
+    def test_a_skipped_job_of_the_red_run_is_not_required_of_the_newer_run(self):
+        rc, out, _ = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20), main_job("scope", "skipped")],
+                                      main_run(932, "success", event="schedule"), [main_job("checks", "success")])
+        self.merged(rc, out)
+
+    def test_a_newer_green_run_without_the_red_job_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20), main_job("scope", "success")],
+                                           main_run(932, "success", event="schedule"), [main_job("scope", "success")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_green_run_that_skipped_the_red_job_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                           main_run(932, "success", event="schedule"), [main_job("checks", "skipped")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_job_whose_name_only_starts_with_the_red_job_name_does_not_clear_it(self):
+        for other in ("checks-macos", "checks (ubuntu)"):
+            with self.subTest(other=other):
+                rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                                   main_run(932, "success", event="schedule"), [main_job(other, "success")])
+                self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_cancelled_run_does_not_clear_it_even_when_its_job_passed(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                           main_run(932, "cancelled", event="schedule"), [main_job("checks", "success")])
+        self.refused_red(rc, out, before, 931)
+
+    def test_a_newer_run_still_in_progress_does_not_clear_it_and_is_not_read(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                           main_run(932, None, status="in_progress", event="schedule"), [main_job("checks", "success")])
+        self.refused_red(rc, out, before, 931)
+        self.assertNotIn("actions/runs/932/jobs", self.host.reads, "a run in progress is not judged")
+
+    def test_a_newer_red_run_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                           main_run(932, "failure", event="schedule"), [main_job("checks", "failure", 20)])
+        self.refused_red(rc, out, before, 931, 932)
+
+    def test_a_red_run_with_no_job_to_require_is_never_cleared(self):
+        # a startup_failure runs no job; a run whose every job was skipped requires none either
+        for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "skipped")])):
+            with self.subTest(conclusion=conclusion, jobs=len(jobs)):
+                rc, out, before = self.cross_group(main_run(931, conclusion), jobs,
+                                                   main_run(932, "success", event="schedule"), [main_job("checks", "success")])
+                self.refused_red(rc, out, before, 931)
+
+    def test_a_green_run_older_than_the_red_run_does_not_clear_it(self):
+        rc, out, before = self.cross_group(main_run(931, "failure"), [main_job("checks", "failure", 20)],
+                                           main_run(930, "success", event="schedule"), [main_job("checks", "success")], cand_newer=False)
+        self.refused_red(rc, out, before, 931)
 
     def test_a_dynamic_event_run_is_not_judged(self):
         # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
