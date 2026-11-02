@@ -1906,8 +1906,8 @@ def marker_scan(brief) -> list:
     """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
     match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
     brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
-    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions differ
-    by the owner's ruling (decision agent-model-cap); BRIEF_MARKERS says how."""
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
+    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
     if not isinstance(brief, str):
         return []
     first = brief_first_line(brief)
