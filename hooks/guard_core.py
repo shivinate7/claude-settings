@@ -45,7 +45,7 @@ from git_reads import (  # noqa: F401
 # text wrapper, so a failure here leaves the old encoding rather than bricking the hook.
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
-    cloud check; the load brake and its report stand down here (owner ruling 2026-11-01 21:34 CST: the brake is local-only)."""
+    cloud check; the load brake and its report stand down here, because the brake is local-only."""
     return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
 
 
