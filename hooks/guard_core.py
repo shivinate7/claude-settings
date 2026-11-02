@@ -28,6 +28,12 @@ from git_reads import (  # noqa: F401
 )
 
 
+def is_cloud() -> bool:
+    """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
+    cloud check; the load brake and its report stand down here, because the brake is local-only."""
+    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+
+
 # ------------------------------------------------------------------ the stream encoding
 #
 # MEASURED 2026-09-09 in a Claude Code session on Windows: `sys.stderr.encoding` was `cp1252`, so
@@ -43,12 +49,6 @@ from git_reads import (  # noqa: F401
 #
 # It never raises. `reconfigure` landed in Python 3.7 and a stream can be something other than a
 # text wrapper, so a failure here leaves the old encoding rather than bricking the hook.
-def is_cloud() -> bool:
-    """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
-    cloud check; the load brake and its report stand down here, because the brake is local-only."""
-    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
-
-
 def _force_utf8_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:

@@ -9627,15 +9627,15 @@ class MergeRoleCheck(CloudSession):
                 self.assertEqual(self.role_files(), {})
 
     def test_the_refusal_of_a_tier_outside_the_merge_set_does_not_list_the_valid_tiers(self):
-        # A lane that asks for a tier must not learn the two that pass. The tiers below hold neither word, so an echo of the
+        # A lane that asks for a tier must not learn the tier that passes. The tiers below hold neither word, so an echo of the
         # argument cannot make the assertion fail by itself.
         for tier in ("lane", "triage", "", "solo"):
             with self.subTest(tier=tier):
                 rc, out, err = self.run_main("--role", tier)
                 self.assertNotEqual(rc, 0, out + err)
                 self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-                for valid in ("coordinator", "batch-runner"):
-                    self.assertNotIn(valid, err)
+                for named in ("coordinator", "batch-runner"):
+                    self.assertNotIn(named, err)
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
@@ -9755,7 +9755,7 @@ class StandingGrantSwitch(CloudSession):
         rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_REMOTE=None)
         self.assert_merged(rc, out, err)
 
-    # ---- false: a cloud coordinator or batch runner may not confirm
+    # ---- false: a cloud batch runner may not confirm, and a coordinator never may
     # decision session-tiers: the role check refuses the coordinator before the PR read and before the grant is read,
     # so the owner-ask line of the grant is not what refuses it
     def test_false_refuses_confirm_for_a_coordinator_in_the_cloud(self):
