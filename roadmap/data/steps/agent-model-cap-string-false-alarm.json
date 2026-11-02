@@ -1,0 +1,9 @@
+{
+ "title": "Guard agent-model-cap stops asking on test strings passed to an interpreter",
+ "phase": "now",
+ "status": "todo",
+ "order": 486,
+ "why": "Incident, Nov 2 01:16 CST: in trial run gd a round-2 reviewer ran python3 -c with JSON test payloads piped into hooks/guard.py; guard agent-model-cap read one payload (a settings file raising the subagent model to Opus) as a real write and asked. Nothing writes settings, and the run stalled on a prompt only the owner can answer (Queue item 162). Same class as step env-heredoc-false-alarm: string data handed to an interpreter read as an act.",
+ "note": "A guard verdict change: red first on this form. Share the fix with step env-heredoc-false-alarm if one rule covers both: interpreter string data that writes no file is not the act. Ready. Port: yes.",
+ "updatedAt": "2026-11-02T07:36:00Z"
+}
