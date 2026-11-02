@@ -432,11 +432,12 @@ def _flat_text(value) -> str:
 
 
 # A clause whose subject is the session ("The session merges it after your pick.") and that names
-# no `you`: the session makes that press, so the owner presses nothing. Only that clause is excused. A
-# press in another clause stays ("..., then press Merge"), and so does a clause that names `you`.
+# no owner (`you`, "the owner", "Shivam", "he"): the session makes that press, so the owner presses
+# nothing. Only that clause is excused. A press in another clause stays ("..., then press Merge",
+# "...: press Merge", "... but click Merge"), and so does a clause that names the owner.
 SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|(?<=[.!?])\s+|\n|\b(?:then|and)\b", re.I)
-OWNER_YOU = re.compile(r"\byou\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+OWNER_YOU = re.compile(r"\b(?:you|the\s+owner|shivam|he)\b", re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
