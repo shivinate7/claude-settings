@@ -696,7 +696,7 @@ class OwnHistory(unittest.TestCase):
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
-        self.own = r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+        self.own = r.commit("feat adds six lines", date=self.T0, app_txt=BODY + "".join("own line %d\n" % i for i in range(1, 7)))
 
     def main_moves(self, n, date):
         r = self.r
@@ -920,10 +920,10 @@ class LaneUndo(unittest.TestCase):
 
     def test_a_commit_that_replaces_a_six_line_case_with_one_line_is_red(self):
         r = self.r
-        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
-        b = r.commit("B: replace the case with one line", app_txt=self.CARD + "one new line\n")
+        a = r.commit("A: add a test case", tests__card_txt=self.CASE)
+        b = r.commit("B: replace the case with one line", tests__card_txt="one new line\n")
         self.assertEqual(self.lane(), [a, b])
-        assert_finding(self, r.verdict(), "app.txt", b, a)
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
 
     def test_a_lane_merged_with_no_ff_into_an_integration_branch_is_red(self):
         r = self.r
