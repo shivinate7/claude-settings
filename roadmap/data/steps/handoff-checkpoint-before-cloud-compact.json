@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.21012,
  "why": "Decision precompact-handoff rule 2 puts the last handoff checkpoint near 450k, but cloud sessions compact at 384k (found by the idle-resume-compacts lane, Nov 1 19:24 CST). A cloud lane may compact before its last handoff and lose rulings.",
- "note": "Unmeasured. First measure: in a cloud session, read the size at which compaction fires and whether the 450k checkpoint ran before it. If it did not, set the checkpoint below the platform trigger for each surface (cloud 384k; desktop by its window). Red first: a fixture at 390k in the cloud gets its checkpoint before compaction. Related: handoff-checkpoint-before-compact. Port: yes, the hook is shared. Ready.",
- "updatedAt": "2026-11-02T01:27:00Z"
+ "note": "Unmeasured. First measure: in a cloud session, read the size at which compaction fires and whether the 450k checkpoint ran before it. If it did not, set the checkpoint below the platform trigger for each surface (cloud 384k; desktop by its window). Red first: a fixture at 390k in the cloud gets its checkpoint before compaction. Related: handoff-checkpoint-before-compact. Port: yes, the hook is shared. Ready. Nov 1 19:36 CST: PR #982 (part 1) now aligns checkpoints to Claude Code's trigger; this step keeps only the cloud measurement, and closes if #982 covers the cloud trigger.",
+ "updatedAt": "2026-11-02T01:38:00Z"
 }

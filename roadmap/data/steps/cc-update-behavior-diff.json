@@ -1,0 +1,9 @@
+{
+ "title": "A Claude Code update that changes compaction is caught and reported",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21013,
+ "why": "Owner ruling, Nov 1 19:27 CST: \"we also need to somehow track a diff whenever claude code desktop and terminal apps update to see if this ever changes as it can go stale\". Our handoff checkpoints and idle setting depend on Claude Code's compaction behaviour.",
+ "note": "When Claude Code's version changes, read once at SessionStart inside the hook already running (no timer, no new process): record the new build's compaction constants and settings keys (autocompact threshold formula and default fraction, idleCompaction, autoCompactWindow handling), and diff them against the last recorded version. A change opens a waiting-page item or a notes line for triage. The record states the cost (process starts, files written, how often) and a test proves it. Red first: a fixture version bump with a changed threshold produces the report; an unchanged bump writes nothing new. Port: yes, every machine. Ready.",
+ "updatedAt": "2026-11-02T01:38:00Z"
+}

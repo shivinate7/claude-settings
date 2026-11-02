@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.33761,
  "why": "From lane c203, Nov 1 17:43 CST: the handoff hook's last checkpoint sits at the window minus 50k (450k on 500k), but compaction may start near 384k, so that checkpoint may never fire.",
- "note": "Inferred, not measured at 500k. Counter-reading: the coordinator's session showed an autocompact threshold of 441,600 (17:13 CST) and got a checkpoint at about 297k; triage 5 got checkpoints from about 290k. Step: measure the real compaction point first, then set the last checkpoint below it. Ready: no open question. Built as PR #982, open at Nov 1 19:32 CST.",
- "updatedAt": "2026-11-02T01:32:00Z"
+ "note": "Inferred, not measured at 500k. Counter-reading: the coordinator's session showed an autocompact threshold of 441,600 (17:13 CST) and got a checkpoint at about 297k; triage 5 got checkpoints from about 290k. Step: measure the real compaction point first, then set the last checkpoint below it. Ready: no open question. Built as PR #982, open at Nov 1 19:32 CST. Nov 1 19:36 CST (coordinator): PR #982 now sets the checkpoints against Claude Code's own compaction trigger (part 1).",
+ "updatedAt": "2026-11-02T01:38:00Z"
 }
