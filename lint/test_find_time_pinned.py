@@ -537,12 +537,12 @@ class JsTrapsTest(FinderCase):
         self.assertEqual(self.rows(out), pinned(
             "tests/divide.test.js", text, ("setTimeout(r, 500)", "sleep")))
 
-    def test_nested_template_holes_with_strings(self):
+    def test_nested_template_parts_with_strings(self):
         text = src('const n = `outer ${ `inner ${ "}" }` } end`;', JS_SLEEP)
-        self.put("tests/holes.test.js", text)
+        self.put("tests/template_parts.test.js", text)
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
-            "tests/holes.test.js", text, ("setTimeout(r, 500)", "sleep")))
+            "tests/template_parts.test.js", text, ("setTimeout(r, 500)", "sleep")))
 
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
@@ -903,7 +903,7 @@ class ExitCodeTest(FinderCase):
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
 
 
-# ---- review round 1: helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
+# ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
 class HelperTaintTest(FinderCase):
     def test_js_helper_that_reads_a_clock_taints_neither_name_nor_result(self):
@@ -994,7 +994,7 @@ class UnlistableFolderTest(FinderCase):
             os.chmod(locked, 0o755)
 
 
-# ---- review round 2: a duration through a call, a function that returns one, and typed helpers ----------
+# ---- a duration through a call, a function that returns one, and typed helpers ----------
 
 def elapsed_lines(out):
     return {line for path, line, cat in out_rows(out) if cat == "elapsed-assert"}
