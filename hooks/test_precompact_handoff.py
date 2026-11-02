@@ -876,11 +876,12 @@ WINDOW_ROWS = [
     ("bad top-level falls to default 500k", {"autoCompactWindow": 0}, None, A_MODEL, False),
     ("settings not an object falls to default", "[1]", None, A_MODEL, False),
     ("no model in transcript uses top-level", ms(B_MODEL, 900000, top=200000), None, None, True),
-    # F2: the CLI's suffix forms are windows too, in the env var and in settings.json.
+    # F2: the env var takes a k/m suffix.
     ("F2: env '200k' is a 200k window", {"autoCompactWindow": 500000}, {WINDOW_ENV: "200k"},
      A_MODEL, True),
-    ("F2: top-level '200K' string is a 200k window", {"autoCompactWindow": "200K"}, None,
-     A_MODEL, True),
+    # W: a settings.json string is ignored, so the 500k default applies and 160k does not block.
+    ("W: top-level '200K' string is ignored, 500k applies", {"autoCompactWindow": "200K"}, None,
+     A_MODEL, False),
 ]
 
 
@@ -915,9 +916,10 @@ def case_window_tier_follows_transcript_model():
         c.cleanup()
 
 
-# F2: window_limit reads the CLI's suffix forms (200k, 1m, 1.5m, any case), not only integers.
-WINDOW_FORMS = (("200k", 200000), ("1m", 1000000), ("1.5m", 1500000),
-                ("200K", 200000), ("1M", 1000000), ("1.5M", 1500000))
+# F2, W: the env var takes the CLI's suffix forms (200k, 1m, 1.5m, any case). W: the env value is
+# clamped to 100,000..1,000,000, so 1.5m is 1,000,000.
+WINDOW_FORMS = (("200k", 200000), ("1m", 1000000), ("1.5m", 1000000),
+                ("200K", 200000), ("1M", 1000000), ("1.5M", 1000000))
 
 
 def window_at(c, env_value=None, settings=None, model=None):
@@ -933,25 +935,57 @@ def window_at(c, env_value=None, settings=None, model=None):
 
 
 def case_window_limit_suffix_forms():
-    """F2: each suffix form gives its token count in the env var and in settings.json. A value
-    that is not a number and not a suffix form ('abc') still falls to the next tier."""
+    """F2, W: each suffix form gives its token count in the env var, clamped at 1,000,000. A
+    settings.json string is ignored, so it falls to the 500k default. A value that is not a
+    number and not a suffix form ('abc') still falls to the next tier."""
     c = Case("wsuffix")
     try:
         for text, want in WINDOW_FORMS:
             got, err = window_at(c, env_value=text)
             expect_value("window: env %r is %d" % (text, want), got, err, want)
-        for text, want in WINDOW_FORMS:
+        # W: settings strings do not count, so each suffix form falls to the default.
+        for text, _ in WINDOW_FORMS:
             got, err = window_at(c, settings={"autoCompactWindow": text})
-            expect_value("window: top-level autoCompactWindow %r is %d" % (text, want),
-                         got, err, want)
+            expect_value("window: top-level autoCompactWindow %r is ignored, 500,000" % text,
+                         got, err, 500000)
+        # W: a modelSettings string is ignored too.
         got, err = window_at(c, model=A_MODEL,
                              settings={"modelSettings": {A_MODEL: {"autoCompactWindow": "1.5m"}}})
-        expect_value("window: modelSettings autoCompactWindow '1.5m' is 1,500,000",
-                     got, err, 1500000)
-        got, err = window_at(c, env_value="abc", settings={"autoCompactWindow": "200k"})
-        expect_value("window: env 'abc' falls to top-level '200k' (200,000)", got, err, 200000)
+        expect_value("window: modelSettings autoCompactWindow '1.5m' is ignored, 500,000",
+                     got, err, 500000)
+        # W: the top-level fallback is an int now, since a settings string is ignored.
+        got, err = window_at(c, env_value="abc", settings={"autoCompactWindow": 200000})
+        expect_value("window: env 'abc' falls to top-level 200,000", got, err, 200000)
         got, err = window_at(c, settings={"autoCompactWindow": "abc"})
         expect_value("window: top-level 'abc' falls to the 500k default", got, err, 500000)
+    finally:
+        c.cleanup()
+
+
+# W (round-2 finding, Claude Code 2.1.316): only the env var takes a k/m suffix, and its value is
+# clamped to 100,000..1,000,000. settings.json counts only ints in that range. A string, or an int
+# outside it, falls to the next tier.
+WINDOW_VALUE_ROWS = (
+    # (name, env value, settings.json object, want)
+    ("env '1.5m' clamps to 1,000,000", "1.5m", None, 1000000),
+    ("env '2m' clamps to 1,000,000", "2m", None, 1000000),
+    ("env '200' clamps to 100,000", "200", None, 100000),
+    ("env '200k' is 200,000", "200k", None, 200000),
+    ("env '500K' is 500,000", "500K", None, 500000),
+    ("settings '1m' is ignored, 500,000", None, {"autoCompactWindow": "1m"}, 500000),
+    ("settings 2,000,000 is ignored, 500,000", None, {"autoCompactWindow": 2000000}, 500000),
+    ("settings 50,000 is ignored, 500,000", None, {"autoCompactWindow": 50000}, 500000),
+    ("settings 300,000 is 300,000", None, {"autoCompactWindow": 300000}, 300000),
+)
+
+
+def case_window_value_rows():
+    """W: window_limit's value for each row, with the env var and settings.json as given."""
+    c = Case("wvalue")
+    try:
+        for name, env_value, settings, want in WINDOW_VALUE_ROWS:
+            got, err = window_at(c, env_value=env_value, settings=settings)
+            expect_value("W: window " + name, got, err, want)
     finally:
         c.cleanup()
 
@@ -1661,6 +1695,9 @@ def case_compact_threshold_pct_override_every_window():
             got, err = threshold_at(c, 500000, pct=pct)
             expect_value("threshold: 500k, PCT %s is not 0 < p <= 100, so ignored" % pct,
                          got, err, 441600)
+        # P (round-2 finding): the value parses like JS parseFloat, so the leading 80 counts.
+        got, err = threshold_at(c, 500000, pct="80%")
+        expect_value("threshold: 500k, PCT '80%' parses as 80, so 384,000", got, err, 384000)
     finally:
         c.cleanup()
 
@@ -1840,11 +1877,17 @@ def case_digest_plain_errors_are_not_refusals():
         c.cleanup()
 
 
-# F5: only the three refusal shapes make a failed tool result a refusal; the rest are not.
+# F5, R: only the listed refusal shapes make a failed tool result a refusal; the rest are not.
+# R (round-2 finding): the four rows after the first three are refusal shapes too.
 REFUSAL_ROWS = (
     ("PreToolUse:Bash hook error: [guard] blocked", True),
     ("The user doesn't want to proceed with this tool use. The tool use was rejected", True),
     ("Permission to use Bash has been denied", True),
+    ("Permission to use Read with .env has been denied.", True),
+    ("Permission for this action has been denied. Reason: x", True),
+    ("The tool call was denied by the Claude Code auto mode classifier.", True),
+    ("This agent is isolated in the worktree X, but the command runs elsewhere. "
+     "Refusing to run it", True),
     ("Error: connect ECONNREFUSED 127.0.0.1", False),
     ("bash: /x: Permission denied", False),
     ("Nobody refused it", False),
@@ -1966,6 +2009,7 @@ def main() -> int:
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
     case_window_limit_suffix_forms()
+    case_window_value_rows()
     case_handoff_path_not_frozen()
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
