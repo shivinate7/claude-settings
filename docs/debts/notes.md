@@ -943,3 +943,5 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- pick-send-mid-turn-notice: a send made before a task notice or queued message in the same turn does not count for a pick asked after it; the cost is one repeat send (lint/report_guard.py `_turn_start`). Decision: decisions-reach-a-clickable-pick.
+- own-session-not-in-guard-set: hooks/own_session.py is imported by hooks/guard.py and hooks/guard_merge.py but is not listed in install.sh `land_guard_set`; it resolves from the hooks folder and the guard's import retry covers the gap. Decision: none.
