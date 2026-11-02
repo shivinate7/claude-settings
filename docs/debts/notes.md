@@ -942,3 +942,6 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- report-guard-url-string-compare: lint/report_guard.py (about :591) compares the page-write URL as a string. It should call layout.is_waiting_page_url (lint/layout.py), the one home of "same artifact". A /code/artifact/<id> form or a URL with a query string blocks wrongly. Decision: questions-go-to-owner (questions go to the owner).
+- send-error-still-counts: a send whose result is an error still counts (lint/_transcript.py send_targets), and the cloud form of fromSession for ack matching (lint/_transcript.py peer_sender) is unmeasured. Decision: questions-go-to-owner (questions go to the owner).
+- waiting-page-chat-first-heading: skills/waiting-page/SKILL.md keeps the heading "Chat first" (about :178) above same-turn text. Decision: questions-go-to-owner (questions go to the owner).
