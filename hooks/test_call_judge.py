@@ -43,6 +43,11 @@ Interface the hook must match:
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
+  records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
+  question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
+  ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
+  line, `past-ruling search unknown:`, and never says clear.
 """
 import atexit
 import json
@@ -84,6 +89,52 @@ os.makedirs(os.path.join(PAGE_REPO, ".claude"))
 with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encoding="utf-8") as _f:
     json.dump({"kinds": {}, "waiting-page": PAGE_URL}, _f)
 
+# ------------------------------------------------------------------ real git fixtures (past rulings)
+#
+# make_repo builds a real git repo under ROOT. `decisions` maps a slug to its ruling paragraph (docs/decisions/<slug>.md).
+# `steps` maps a step id to its note (roadmap/data/steps/<id>.json on a local `roadmap` branch). Every repo carries the
+# waiting page (PAGE_URL) in .claude/layout-extras.json. These git calls run in the test process, not in the hook.
+GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+REPOS = {}
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                           "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, env=GIT_ENV, check=True)
+
+
+def make_repo(name, decisions=None, steps=None):
+    if name in REPOS:
+        return REPOS[name]
+    repo = os.path.join(ROOT, "repo-" + name)
+    os.makedirs(os.path.join(repo, ".claude"))
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "waiting-page": PAGE_URL}, f)
+    git(repo, "init", "-q")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    if decisions:
+        folder = os.path.join(repo, "docs", "decisions")
+        os.makedirs(folder)
+        for slug, ruling in decisions.items():
+            with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
+                f.write("# %s\n\n## The ruling\n\n%s\n" % (slug, ruling))
+        git(repo, "add", "docs")
+        git(repo, "commit", "-q", "-m", "decision records")
+    if steps:
+        git(repo, "checkout", "-q", "-b", "roadmap")
+        folder = os.path.join(repo, "roadmap", "data", "steps")
+        os.makedirs(folder)
+        for step_id, note in steps.items():
+            with open(os.path.join(folder, step_id + ".json"), "w", encoding="utf-8") as f:
+                json.dump({"title": "Step " + step_id, "phase": "test", "status": "done", "note": note, "why": ""}, f)
+        git(repo, "add", "roadmap")
+        git(repo, "commit", "-q", "-m", "step notes")
+        git(repo, "checkout", "-q", "-")
+    REPOS[name] = repo
+    return repo
+
+
 try:
     import override
 except ImportError:
@@ -107,6 +158,20 @@ def _fake_run(argv, **kwargs):
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
 
 
+_real_popen = subprocess.Popen
+
+
+class _CountingPopen(_real_popen):
+    # Records each git process start, so a case counts the git processes a judged call spawns.
+    def __init__(self, args, *rest, **kwargs):
+        argv = args if isinstance(args, (list, tuple)) else [args]
+        if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
+            with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
+                f.write("git\n")
+        _real_popen.__init__(self, args, *rest, **kwargs)
+
+
+subprocess.Popen = _CountingPopen
 subprocess.run = _fake_run
 with open(os.path.join(os.environ["CJ_LOADED_DIR"], "loaded"), "w", encoding="utf-8") as f:
     f.write("1")
@@ -148,6 +213,8 @@ class Run:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 self.calls = [json.loads(line) for line in f if line.strip()]
+        gitlog = os.path.join(base, "git.log")
+        self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
 
@@ -161,8 +228,8 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r calls=%d loaded=%s imports=%s log=%r" % (
-        r.code, r.out[:200], r.err[-200:], len(r.calls), r.loaded, r.imports, r.log[-200:])
+    return "code=%s out=%r err=%r calls=%d git=%d loaded=%s imports=%s log=%r" % (
+        r.code, r.out[:200], r.err[-200:], len(r.calls), r.git, r.loaded, r.imports, r.log[-200:])
 
 
 def write_pass(cfg, session, body):
@@ -227,8 +294,9 @@ def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=No
                            "options": options or good_options()}]}
 
 
-def question_input(session=SID_A, agent=None, box=None):
-    payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box()}
+def question_input(session=SID_A, agent=None, box=None, cwd=PAGE_REPO):
+    payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box(),
+               "cwd": cwd}
     if agent:
         payload["agent_id"] = agent
     return json.dumps(payload)
@@ -279,7 +347,7 @@ def good_task_item(step=GOOD_TASK_STEP, **over):
 
 
 def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=PAGE_URL, session=SID_A,
-               agent=None, **extra):
+               agent=None, cwd=PAGE_REPO, **extra):
     """One ArtifactData call, as the harness sends it, with the payload's cwd set to the fixture repo.
     `doc_id` None leaves the key out (a list). `extra` holds the str_replace fields."""
     tool_input = {"action": action, "url": url, "collection": collection}
@@ -288,7 +356,7 @@ def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=
     if data is not None:
         tool_input["data"] = data
     tool_input.update(extra)
-    payload = {"session_id": session, "tool_name": "ArtifactData", "tool_input": tool_input, "cwd": PAGE_REPO}
+    payload = {"session_id": session, "tool_name": "ArtifactData", "tool_input": tool_input, "cwd": cwd}
     if agent:
         payload["agent_id"] = agent
     return json.dumps(payload)
@@ -449,7 +517,8 @@ def case_question():
           and "$ARGUMENTS" not in prompt, prompt[:160])
     # Code reads the form lines (chat_hit), so the model prompt no longer asks for them. The call's own JSON
     # holds those lines, so it is cut out before the words are read.
-    asks = prompt.replace(json.dumps(good_box(), ensure_ascii=False), "")
+    # Items 1 to 7 only: item 8 (past rulings) names the Based on (ruling) line on purpose.
+    asks = prompt.replace(json.dumps(good_box(), ensure_ascii=False), "").split("\n8. ")[0]
     check("question: the prompt leaves the Goal, Problem and Based on lines to the code check",
           MARK not in asks and not any(t in asks for t in ("Goal:", "Problem:", "Based on", "premise-format")), asks[:400])
     kept = ("gain", "lose", "unexplained", "outside the box", "recommend")
@@ -611,7 +680,7 @@ def case_page_override():
 
 def case_page_model_failure_fails_open():
     r = run_hook(page_input("set", good_page_item()), answer=PAGE_FLAG, model_fail=True)
-    errs = [line for line in r.err.splitlines() if line.strip()]
+    errs = failed_open_lines(r)
     check("page fail open: a model failure on an item write allows, after one model call",
           r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
     check("page fail open: one stderr line from the hook", len(errs) == 1 and r.code == 0
@@ -755,13 +824,14 @@ def case_page_reads_and_other_collections_skip_question_form():
     # import. The last check is a control: a judged items write imports it, so an empty record means an early exit.
     item = good_page_item()
     for label, inp in (
-        ("an items get", page_input("get", None, doc_id="p1")),
-        ("an items list", page_input("list", None, doc_id=None)),
-        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1")),
+        ("an items get", page_input("get", None, doc_id="p1", cwd=CI_REPO)),
+        ("an items list", page_input("list", None, doc_id=None, cwd=CI_REPO)),
+        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1", cwd=CI_REPO)),
     ):
         r = run_hook(inp, answer=PAGE_FLAG)
         check("page import: %s does not import question_form in the hook" % label,
               r.code == 0 and r.out == "" and r.calls == [] and "question_form" not in r.imports, detail(r))
+        check("page import: %s runs no git process" % label, r.git == 0, detail(r))
     r = run_hook(page_input("set", item), answer=ALLOW)
     check("page import: a judged items write imports question_form (the record sees the import)",
           "question_form" in r.imports, detail(r))
@@ -776,7 +846,7 @@ def case_fail_open():
         ("an empty payload", "{}", {}),
     ):
         r = run_hook(inp, **kwargs)
-        errs = [line for line in r.err.splitlines() if line.strip()]
+        errs = failed_open_lines(r)
         check("fail open: %s allows" % label, r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
         if label != "an empty payload":
             check("fail open: %s prints one stderr line, from the hook" % label,
@@ -810,6 +880,163 @@ def case_settings_row():
           proc.returncode == 0 and proc.stdout == "" and len(errs) == 1, (proc.returncode, proc.stderr[-160:]))
 
 
+# ------------------------------------------------------------------ past rulings (spec past-rulings)
+#
+# A judged question carries the decision records and the step rulings of the `roadmap` ref as candidates, and an eighth
+# item that refuses a question a standing ruling already decides. Each fixture ruling holds a marker the question never
+# holds, so a check that finds the marker in the prompt, with the call's JSON cut out, proves the ruling reached the model.
+PAST_UNKNOWN = "past-ruling search unknown:"
+APPS_SLUG, CAPS_SLUG = "github-apps-keep-access", "ci-job-caps"
+APPS_RULING = ("Owner, 2026-10-28, page item 9: keep the apps' access to claude-settings as is, because it makes "
+               "calling into a repo straightforward; revisit if it gets bloated. Marker apps-7b1e.")
+CAPS_RULING = ("Owner, 2026-10-27: the job caps are generous on purpose, a stopgap until time-pinned tests go "
+               "(decision test-strategy-reset). Marker caps-4c09.")
+CI_STEP_ID = "c95"
+CI_STEP_SENTENCE = ("Ruling (owner, Oct 27): a CI milestone run is red only when a test is broken, never because a "
+                    "job ran out of time. Marker c95-1f2a.")
+DECISIONS_REPO = make_repo("decisions", decisions={APPS_SLUG: APPS_RULING, CAPS_SLUG: CAPS_RULING})
+CI_REPO = make_repo("ci", steps={CI_STEP_ID: CI_STEP_SENTENCE})
+BARE_REPO = make_repo("bare")
+
+APPS_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings"
+APPS_PROBLEM = "Problem (risk): the apps can reach the repo, so keeping or removing them needs your word"
+APPS_BASED = ("Based on (read): the GitHub audit lists Cloudflare, Render and Renovate beside Claude",)
+APPS_CITED = ("Based on (ruling): %s says revisit only if the apps get bloated; Renovate opened 2 PRs here" % APPS_SLUG,)
+APPS_OPTIONS = [
+    {"label": "Keep the apps (Recommended)",
+     "description": "Gain: calls into the repo stay straightforward. Lose: an unused app keeps its access."},
+    {"label": "Remove the apps",
+     "description": "Gain: fewer apps can write to the repo. Lose: each call into the repo needs a manual step."}]
+CAPS_GOAL = "Goal: know whether the CI job cap rule means about 2x or under 80%"
+CAPS_PROBLEM = "Problem (rule): the cap decides when a full CI run goes red, so the rule needs your word"
+CAPS_BASED = ("Based on (measured): the slowest checks job ran at about 2x its cap in the last 30 runs",)
+CAPS_OPTIONS = [
+    {"label": "Set the cap to about 2x (Recommended)",
+     "description": "Gain: jobs keep their headroom. Lose: a slow job can still end at its cap."},
+    {"label": "Set the cap under 80%",
+     "description": "Gain: a slow job gets a tighter bar. Lose: a normal run ends at its cap more often."}]
+CI_GOAL = "Goal: finish CI milestone runs without a false red"
+CI_PROBLEM = "Problem (risk): a milestone run ended at its job cap again, so the cap needs your word"
+CI_BASED = ("Based on (measured): the milestone job ran out of time at its cap on the last run",)
+CI_CHAT_OPTIONS = [
+    {"label": "Raise the cap (Recommended)",
+     "description": "Gain: the milestone run stops ending at its cap. Lose: each run takes longer."},
+    {"label": "Keep the cap",
+     "description": "Gain: nothing changes on main. Lose: the milestone run may end at its cap again."}]
+CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE))
+CI_PAGE_OPTIONS = [
+    {"key": "a", "label": "Raise the cap", "gain": "The milestone run stops ending at its cap.",
+     "lose": "Each run takes longer and uses more minutes."},
+    {"key": "b", "label": "Keep the cap", "gain": "Nothing changes on main.",
+     "lose": "The milestone run may end at its cap again."}]
+
+
+def item_text(prompt, number):
+    # The text of judge item `number`, from its line to the reply line; "" when the prompt holds no such item.
+    start = prompt.find("\n%d. " % number)
+    if start < 0:
+        return ""
+    end = prompt.find("Reply JSON only", start)
+    return prompt[start:end if end > start else len(prompt)]
+
+
+def without_call(prompt, call):
+    # The prompt with the call's own JSON cut out, so a check reads only the text the hook added.
+    return prompt.replace(json.dumps(call, ensure_ascii=False), "")
+
+
+def failed_open_lines(r):
+    # The stderr lines of a failed-open run: the past-ruling notice is not one of them.
+    return [line for line in r.err.splitlines() if line.strip() and PAST_UNKNOWN not in line]
+
+
+def case_past_ruling_replay_item_145():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    check("past ruling 145 fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling 145: the prompt holds the keep-the-apps ruling's slug and its line",
+          len(r.calls) == 1 and APPS_SLUG in without_call(prompt, box) and APPS_RULING in without_call(prompt, box),
+          detail(r))
+
+
+def case_past_ruling_replay_item_133():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c133", "data": item})
+    check("past ruling 133 fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling 133: the prompt holds the step c95 ruling sentence",
+          len(r.calls) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
+
+
+def case_past_ruling_cited_passes():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    check("past ruling cited fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("past ruling cited: a Based on (ruling) question is still sent, one model call", len(r.calls) == 1, detail(r))
+    check("past ruling cited: the ok answer allows it, with no deny",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling cited: the eighth item names the Based on (ruling) citation rule",
+          "based on (ruling)" in item_text(prompt, 8).lower(), item_text(prompt, 8)[:200])
+
+
+def case_past_ruling_explained_premise():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CAPS_GOAL, problem=CAPS_PROBLEM, based=CAPS_BASED, options=CAPS_OPTIONS)
+    check("past ruling premise fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling premise: the ci-job-caps record's slug and line reach the prompt",
+          len(r.calls) == 1 and CAPS_SLUG in without_call(prompt, box) and CAPS_RULING in without_call(prompt, box),
+          detail(r))
+    item8 = item_text(prompt, 8).lower()
+    check("past ruling premise: the eighth item covers a premise a standing decision already explains",
+          "premise" in item8 and "explain" in item8 and "standing decision" in item8, item8[:300])
+
+
+def case_past_ruling_unknown_is_named():
+    box = good_box()
+    r = run_hook(question_input(box=box, cwd=BARE_REPO), answer=ALLOW)
+    check("past ruling unknown: the call is allowed, after one model call",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log and len(r.calls) == 1, detail(r))
+    notes = [line for line in r.err.splitlines() if PAST_UNKNOWN in line]
+    line = notes[0].lower() if len(notes) == 1 else ""
+    check("past ruling unknown: one stderr line names the unread sources, closed page items among them",
+          len(notes) == 1 and "decision" in line and "roadmap" in line and "closed page items" in line, detail(r))
+    check("past ruling unknown: the line never says clear",
+          len(notes) == 1 and re.search(r"\bclear\b", line) is None, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling unknown: the model is told which sources were not searched",
+          "closed page items" in without_call(prompt, box), prompt[:200])
+
+
+def case_past_ruling_cost():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+    check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a judged question runs one git process, the roadmap read",
+          len(r.calls) == 1 and r.git == 1, detail(r))
+    item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
+    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
+          len(q.calls) == 1 and q.git <= 1, detail(q))
+    f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a box refused by the form makes no model call and no git process",
+          f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -818,7 +1045,10 @@ def main():
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
                  case_page_task_item_judged, case_page_task_exempt_from_decision_items, case_page_steps_judged,
                  case_page_reads_and_other_collections_skip_question_form,
-                 case_fail_open, case_settings_row):
+                 case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
+                 case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
+                 case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
+                 case_past_ruling_cost):
         try:
             case()
         except Exception as exc:
