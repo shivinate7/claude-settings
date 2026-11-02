@@ -11016,6 +11016,83 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
+# ---- a builder's shell write to a test file. The Nov 1 incident changed lint/test_rule_audit.py through
+# a python heredoc in Bash. The early warning reads a write tool's own path only, so a builder's Bash
+# must be judged on its command. The cases run in a real checkout (GITMAIN), as the 2026-10-13 ruling
+# above asks, so a refusal does not rest on the outside-repo reading. Each DENY writes a test path by a
+# shell form. Each ALLOW reads a test, writes a non-test path, or prints a test path.
+BG = dict(B, cwd=GITMAIN)
+INCIDENT_CMD = (
+    "python3 - <<'EOF'\n"
+    "import pathlib\n"
+    'p = pathlib.Path("lint/test_rule_audit.py")\n'
+    "s = p.read_text()\n"
+    'p.write_text(s.replace("old", "new"))\n'
+    "EOF\n"
+)
+BUILDER_SHELL_TEST_WRITES = (
+    ("the Nov 1 incident: a python heredoc rewrites lint/test_rule_audit.py", INCIDENT_CMD),
+    ("a python heredoc opens a test path for writing",
+     "python3 - <<'EOF'\nopen(\"tests/test_x.py\", \"w\").write(\"x\")\nEOF\n"),
+    ("python -c opens a test path for writing",
+     "python3 -c \"open('src/test_app.py','w').write('x')\""),
+    ("node -e writes a test path",
+     "node -e \"require('fs').writeFileSync('web/a.test.js','x')\""),
+    ("a redirect writes a test path", "echo x > src/test_app.py"),
+    ("an append redirect writes a test path", "echo x >> tests/helper.py"),
+    ("tee writes a test path", "echo x | tee src/test_app.py"),
+    ("sed -i rewrites a test path", "sed -i 's/a/b/' src/test_app.py"),
+    ("cp writes onto a test path", "cp /tmp/x.py tests/test_x.py"),
+    ("perl -pi rewrites a test path", "perl -pi -e 's/a/b/' tests/x.py"),
+    ("a heredoc to a test path, body with a lone quote and a comment",
+     "cat > tests/test_new.py <<'EOF'\n# don't\n# comment\nx = 1\nEOF\n"),
+    ("a cd is followed to a test path", "cd src && echo x > test_app.py"),
+    ("a python heredoc with a lone quote in a comment writes a test path",
+     "python3 - <<'EOF'\n# don't\nopen('tests/test_x.py','w').write('x')\nEOF\n"),
+    # Scanner cases (building-scanner-respects-strings): a comment opener in a string, a multi-line
+    # template literal holding a double quote, and a lone apostrophe in text must not hide the write.
+    ("a comment opener inside a double-quoted string hides no test write",
+     "echo \"# note\" && echo x > src/test_app.py"),
+    ("a multi-line template literal in node -e hides no test write",
+     "node -e 'const s = `\nsaid \"hi\n`; require(\"fs\").writeFileSync(\"web/a.test.js\", s)'"),
+    ("a lone apostrophe inside double quotes hides no test write",
+     "echo \"don't\" > src/test_app.py"),
+    ("a // inside a JS string hides no test write",
+     "node -e \"const u='http://x'; require('fs').writeFileSync('web/a.test.js', u)\""),
+    ("a /* inside a JS string hides no test write",
+     "node -e \"const g='src/*.js'; require('fs').writeFileSync('web/a.test.js', g)\""),
+    ("a # inside a python string on the write line hides no test write",
+     "python3 - <<'EOF'\ns = \"#\"; open(\"tests/test_x.py\", \"w\").write(s)\nEOF\n"),
+)
+BUILDER_SHELL_NON_TEST = (
+    ("cat reads a test", "cat src/test_app.py"),
+    ("grep reads a test", "grep -n x tests/helper.py"),
+    ("a python heredoc reads a test and prints it",
+     "python3 - <<'EOF'\nprint(open(\"tests/x.py\").read())\nEOF\n"),
+    ("a python heredoc writes a product file",
+     "python3 - <<'EOF'\nopen(\"src/app.py\",\"w\").write(\"x\")\nEOF\n"),
+    ("a redirect writes a product file", "echo x > src/app.py"),
+    ("echo prints a test path in quotes", "echo \"src/test_app.py\""),
+    ("printf prints a test path", "printf 'see tests/x.py\\n'"),
+    ("cp reads a test into /tmp", "cp tests/x.py /tmp/x.py"),
+    ("a heredoc to a product path, body with a lone quote and a comment",
+     "cat > src/app.py <<'EOF'\n# don't\nx = 1\nEOF\n"),
+    ("echo prints a lone apostrophe and writes a product file", "echo \"don't\" > src/app.py"),
+    ("a multi-line template literal in node -e writes a product file",
+     "node -e 'const s = `\nsaid \"hi\n`; require(\"fs\").writeFileSync(\"src/app.js\", s)'"),
+    ("a commented-out test write in a python heredoc",
+     "python3 - <<'EOF'\n# open(\"tests/test_x.py\", \"w\")\nprint(1)\nEOF\n"),
+)
+for _label, _cmd in BUILDER_SHELL_TEST_WRITES:
+    sh("builder-test shell: " + _label, _cmd, "deny", rule=BT, **BG)
+for _label, _cmd in BUILDER_SHELL_NON_TEST:
+    sh("builder-test shell: " + _label + " is allowed", _cmd, "allow", **BG)
+sh("test-author shell: the Nov 1 incident form writes a test file and is allowed", INCIDENT_CMD,
+   "allow", **A)
+sh("test-author shell: echo x > tests/test_x.py is allowed", "echo x > tests/test_x.py", "allow", **A)
+sh("builder-test shell: main session echo x > src/test_app.py is allowed", "echo x > src/test_app.py",
+   "allow", cwd=GITMAIN)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
