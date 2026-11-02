@@ -1858,7 +1858,7 @@ def builder_diff_reason() -> str:
         "you added. If a commit of yours holds the change, stop and report it. "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
         "and report the conflict to the orchestrator; a test-author resolves it. "
-        "This refusal is final: never write the files another way."
+        "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
 
@@ -1872,7 +1872,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
-        refuse(tool, "deny", diff_rule(role), builder_diff_reason(), found)
+        refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
 
