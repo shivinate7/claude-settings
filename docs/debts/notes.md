@@ -884,3 +884,7 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- red-run-rebase-judges-old-commits: a lane rebased onto main after the check landed has each of its commits judged, so a commit from before the check needs a trailer after the rebase. Decision: red-run-trailer-on-test-commits
+- red-run-sha-not-verified: the old-code sha in a Red-run trailer is never checked to exist, so a made-up sha passes (lint/check_red_run.py). Decision: red-run-trailer-on-test-commits
+- red-run-existing-behaviour-claims-none: a test of existing behaviour fails on no old code, so it can only claim `Red-run: none: <reason>` (lint/check_red_run.py). Decision: red-run-trailer-on-test-commits
+- test-temp-sweep-unproven: no test proves the sweep in lint/_test_temp.py, which removes run folders older than a day; the red-run suite sweep case was dropped. Decision: red-run-trailer-on-test-commits
