@@ -279,7 +279,10 @@ put_file() {
 INSTALL_LOG="$CLAUDE_DIR/claude-settings-install.log"
 INSTALL_LOCK="$CLAUDE_DIR/.claude-settings-install.lock"
 OWN_INSTALL_LOCK=1
-install_log_line() { printf '%s install.sh: %s id=%s pid=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$INSTALL_ID_VALUE" "$$" >> "$INSTALL_LOG"; }
+# log_stamp: ISO 8601 time with the UTC offset (date +%z gives +HHMM; the colon is added). One form for GNU,
+# BSD/macOS and Git Bash. merge/install_from_main.sh has its own copy: the two scripts share no sourced file.
+log_stamp() { stamp_t=$(date +%Y-%m-%dT%H:%M:%S%z); printf '%s:%s' "${stamp_t%??}" "${stamp_t#"${stamp_t%??}"}"; }
+install_log_line() { printf '%s install.sh: %s id=%s pid=%s\n' "$(log_stamp)" "$1" "$INSTALL_ID_VALUE" "$$" >> "$INSTALL_LOG"; }
 finish_install() {
   rc=$?
   install_log_line "end exit=$rc"

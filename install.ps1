@@ -71,6 +71,9 @@ if (-not $RepoDir -or -not (Test-Path (Join-Path $RepoDir 'CLAUDE.md')) -or -not
 # time plus the process id. The log lines name it with the pid.
 $InstallId = (Get-Date -Format yyyyMMddHHmmssfff) + $PID
 $InstallLogPath = Join-Path $ClaudeDir 'claude-settings-install.log'
+# Get-LogTime: the time stamp of every install-log line, ISO 8601 with the UTC offset (+HH:MM), the same
+# shape the sh writers use. The colons are quoted so a culture's time separator cannot change them.
+function Get-LogTime { Get-Date -Format "yyyy-MM-dd'T'HH':'mm':'sszzz" }
 function Add-InstallLogLine([string]$Line) {
     [System.IO.File]::AppendAllText($InstallLogPath, "$Line`n", (New-Object System.Text.UTF8Encoding $false))
 }
@@ -99,7 +102,7 @@ while (-not $LockStream -and -not $HeldByParent) {
         Start-Sleep -Milliseconds 200
     }
 }
-Add-InstallLogLine "$(Get-Date -Format s) install.ps1: start id=$InstallId pid=$PID"
+Add-InstallLogLine "$(Get-LogTime) install.ps1: start id=$InstallId pid=$PID"
 try {
 
 # Decision merge-reinstalls-from-main: run from a clone that has a branch named main, the links
@@ -139,7 +142,7 @@ if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
 # One dated line per install.ps1 run, on every exit path, so a copy-mode machine has a record
 # of what happened without re-reading Write-Host output.
 function Write-InstallLog([string]$SettingsMode, [string]$AgentsMode, [string]$HookMode) {
-    Add-InstallLogLine "$(Get-Date -Format s) install.ps1: settings.json=$SettingsMode agents/lint=$AgentsMode hook=$HookMode"
+    Add-InstallLogLine "$(Get-LogTime) install.ps1: settings.json=$SettingsMode agents/lint=$AgentsMode hook=$HookMode"
 }
 
 # Pure: returns $Current with $Bin appended when absent (case-insensitive, trailing \ ignored).
@@ -185,7 +188,7 @@ function Remove-PostMergeHook {
     catch {
         $why = "could not delete the post-merge hook at ${hookPath}: $($_.Exception.Message)"
         Log $why
-        Add-InstallLogLine "$(Get-Date -Format s) install.ps1: $why"
+        Add-InstallLogLine "$(Get-LogTime) install.ps1: $why"
         return 'delete failed'
     }
     Log "symlinks work; removed the post-merge hook at $hookPath"
@@ -225,10 +228,12 @@ if [ "`$branch" != "main" ]; then
 fi
 cfg="`${CLAUDE_CONFIG_DIR:-`$HOME/.claude}"
 log="`$cfg/claude-settings-install.log"
+# stamp: ISO 8601 time with the UTC offset (date +%z gives +HHMM; the colon is added), as install.sh writes it.
+stamp() { stamp_t=`$(date +%Y-%m-%dT%H:%M:%S%z); printf '%s:%s' "`${stamp_t%??}" "`${stamp_t#"`${stamp_t%??}"}"; }
 if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
    && git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD | grep -qx 'install.ps1'; then
   mkdir -p "`$cfg"
-  echo "`$(date) post-merge: install.ps1 changed, re-running install.ps1" >> "`$log"
+  echo "`$(stamp) post-merge: install.ps1 changed, re-running install.ps1" >> "`$log"
   exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$repo/install.ps1"
 fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
@@ -256,7 +261,7 @@ while ! ( set -C; printf '%s\n' "`$`$" > "`$lock" ) 2>/dev/null; do
   fi
   sleep 0.2
 done
-logline() { printf '%s post-merge: %s id=%s pid=%s\n' "`$(date +%Y-%m-%dT%H:%M:%S)" "`$1" "`$id" "`$`$" >> "`$log"; }
+logline() { printf '%s post-merge: %s id=%s pid=%s\n' "`$(stamp)" "`$1" "`$id" "`$`$" >> "`$log"; }
 logline start
 trap 'rc=`$?; logline "end exit=`$rc"; rm -f "`$lock"' EXIT
 put() {
@@ -274,7 +279,7 @@ put() {
   rm -f "`$t"
   echo "claude-settings: could not replace `$2; left as it was. Re-run install.ps1." >&2
   mkdir -p "`$cfg"
-  echo "`$(date) post-merge: could not replace `$2" >> "`$log"
+  echo "`$(stamp) post-merge: could not replace `$2" >> "`$log"
   failed=1
   return 1
 }
@@ -855,6 +860,6 @@ if ($env:OS -ne 'Windows_NT') {
 if ($StillFailed.Count -gt 0) { Exit-Install 1 }
 $script:ExitCode = 0
 } finally {
-    Add-InstallLogLine "$(Get-Date -Format s) install.ps1: end id=$InstallId pid=$PID exit=$($script:ExitCode)"
+    Add-InstallLogLine "$(Get-LogTime) install.ps1: end id=$InstallId pid=$PID exit=$($script:ExitCode)"
     if ($LockStream) { $LockStream.Dispose() }
 }
