@@ -466,7 +466,11 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    `<out>` keeps the live roadmap block with the live designs. In `<out>`, add `"slug": "<html string>"` to the JSON in
    `<script type="application/json" id="designData">`, and change nothing else. Never edit the live
    page's own code.
-4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
+4. Add `designs: [{slug, label, file}]` to the item, one per option, and set `design: "<slug>"` on each option.
+   - Every design carries `file`, the path of its mockup file, in one of two homes: `~/Developer/<repo name>-imports/<item folder>/<file>`
+     on the owner's computer, or the repo's design folder (`docs/design/<item folder>/<file>`). Write the mockup there first. A path in a Claude app folder,
+     such as `side-session-notes`, or a link is refused: an account switch loses it. `side-session-notes` may hold a copy, never the
+     only one (guard rule `mockup-home`, decision `mockup-home`). A mockup to keep on another computer goes in the design folder, in git.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element, scaled to fit the card, so the part being decided is in frame.
      Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, and opens at the top of what the card shows. It draws as wide as a 390 × 844 phone picture (221.8px), or as the card's column less its border and scrollbar if that is less. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element

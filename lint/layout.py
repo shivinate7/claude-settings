@@ -23,7 +23,9 @@ Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The la
 Standard library only, and safe to import: it reads files only when a function is called.
 """
 import json
+import ntpath
 import os
+import posixpath
 import re
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
@@ -423,6 +425,121 @@ def shared_resources(root):
         if repo_name(root) == item["owner"].lower() and not os.path.isfile(os.path.join(root, *item["preflight"].split("/"))):
             raise LayoutError("%s: %s preflight %s is missing in the owner repo" % (where, label, item["preflight"]))
     return found
+
+
+# ---------------------------------------------------------------------------- mockup homes
+#
+# Decision mockup-home. A mockup that a waiting item or a roadmap step names must live where an account switch cannot
+# lose it: the machine home, a folder of the owner's own computer outside every Claude app folder, or the repo's
+# design folder. This is the one home of both paths (rule building-allow-list-is-the-constant): the guard
+# (hooks/question_form.py) and the roadmap build (skills/roadmap/build.py) import it and keep no copy.
+MACHINE_HOME_PARENT = "Developer"  # under the owner's home
+MACHINE_HOME_SUFFIX = "-imports"  # <repo name><suffix>, one item folder below it, the file in that
+URL_FORM = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+WIN_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def _owner_home(home):
+    """`home` as text, else this machine's home read now (HOME), else None when it cannot be told."""
+    found = str(home) if home is not None else os.path.expanduser("~")
+    return None if found in ("", "~") else found
+
+
+def mockup_homes(root, home=None):
+    """(machine_home, design_home) of the repo at `root`, as paths. The machine home is
+    <home>/Developer/<repo name>-imports, the name from the origin (`owner/name`, the name only), or None when the
+    origin or the home cannot be read. The design home is the repo's design folder inside the checkout. `home`
+    is the owner's home, else this machine's. Reads the git config file and HOME; starts no process."""
+    owner, name = _owner_home(home), repo_name(root)
+    machine = None
+    if owner and name:
+        join = ntpath.join if WIN_DRIVE.match(owner) else os.path.join
+        machine = join(owner, MACHINE_HOME_PARENT, name.split("/")[1] + MACHINE_HOME_SUFFIX)
+    return machine, os.path.join(root, *path(root, "design").split("/"))
+
+
+def mockup_home_words(root):
+    """The two homes as a sentence shows them, with no absolute path."""
+    name = repo_name(root)
+    machine = "~/%s/%s%s" % (MACHINE_HOME_PARENT, name.split("/")[1] if name else "<repo name>", MACHINE_HOME_SUFFIX)
+    return "%s/<item folder>/<file> or %s/<file>" % (machine, path(root, "design"))
+
+
+def _flavour(*texts):
+    """ntpath when any text is a Windows form (a drive letter or a backslash), else posixpath."""
+    return ntpath if any(t and (WIN_DRIVE.match(t) or "\\" in t) for t in texts) else posixpath
+
+
+def _parts(mod, text):
+    """The parts of `text` with `.` and `..` folded out, in `mod`'s form. A `..` that escapes the start stays."""
+    return tuple(part for part in re.split(r"[\\/]+", mod.normpath(text)) if part and part != ".")
+
+
+def _is_absolute(mod, text):
+    return bool(WIN_DRIVE.match(text)) or text.startswith(("/", "\\")) or mod.isabs(text)
+
+
+def _below(parts, home, fold):
+    """The parts of `parts` below `home` (both tuples of parts), or None when `parts` is not strictly below it."""
+    head = parts[:len(home)]
+    same = [p.casefold() for p in head] == [p.casefold() for p in home] if fold else head == home
+    return parts[len(home):] if same and len(parts) > len(home) else None
+
+
+def mockup_file(root, file, home=None):
+    """(kind, path, why) for a mockup `file`. kind is "machine" or "design" when the file sits in that home, with
+    its path as this machine reads it: `~` expanded, a relative file joined to `root`, `.` and `..` folded.
+    Else kind and path are None and why is "empty" (no file), "url", "shallow" (in the machine home with no item
+    folder) or "outside". A Windows form reads in any case, with either slash. Starts no process."""
+    if not isinstance(file, str) or not file.strip():
+        return None, None, "empty"
+    file = file.strip()
+    if URL_FORM.match(file):
+        return None, None, "url"
+    machine, design = mockup_homes(root, home)
+    owner = _owner_home(home)
+    mod = _flavour(file, owner, machine)
+    if file == "~" or file.startswith(("~/", "~\\")):
+        if owner is None:
+            return None, None, "outside"
+        file = mod.join(owner, file[2:])
+    elif not _is_absolute(mod, file):
+        file = mod.join(root, file)
+    parts, shallow = _parts(mod, file), False
+    if machine:
+        below = _below(parts, _parts(mod, machine), True)
+        if below is not None and len(below) >= 2:
+            return "machine", mod.normpath(file), None
+        shallow = below is not None
+    if _below(parts, _parts(mod, design), mod is ntpath) is not None:
+        return "design", mod.normpath(file), None
+    return None, None, "shallow" if shallow else "outside"
+
+
+def mockup_home_problem(root, file, home=None):
+    """None when `file` sits in a mockup home of the repo at `root`, else one sentence that says why not and names
+    the homes. The guard prints it, so it holds no absolute path."""
+    kind, _, why = mockup_file(root, file, home)
+    if kind:
+        return None
+    cause = {"empty": "has no file", "url": "is a link, and a link does not stay with the repo",
+             "shallow": "is in the machine home with no item folder"}.get(why, "is outside the mockup homes")
+    return "the design's `file` %s. Keep the mockup in %s, and put its path in `file`." % (cause, mockup_home_words(root))
+
+
+def mockup_elsewhere(root, file, home=None):
+    """True when `file` is a machine-home path of another computer: an absolute path (a Windows drive path too)
+    that holds Developer/<repo name>-imports/<item folder>/<file> below an owner's home, and is not in this
+    machine's homes. The roadmap build reads it as unknown, never as a miss. A relative path or a link is not one."""
+    if not isinstance(file, str) or mockup_file(root, file, home)[0]:
+        return False
+    name, file = repo_name(root), file.strip()
+    mod = _flavour(file)
+    if not name or URL_FORM.match(file) or not _is_absolute(mod, file):
+        return False
+    parts = [p.casefold() for p in _parts(mod, file)]
+    want = [MACHINE_HOME_PARENT.casefold(), (name.split("/")[1] + MACHINE_HOME_SUFFIX).casefold()]
+    return any(parts[i:i + 2] == want and len(parts) - i >= 4 for i in range(1, len(parts)))
 
 
 def folders(root, flag):

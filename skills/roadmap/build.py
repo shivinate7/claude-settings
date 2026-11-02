@@ -53,6 +53,15 @@ The build goes red (step roadmap-pr-without-step) when a todo step is named by a
 needed) it prints one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
 printed line tells them apart.
 
+The build goes red (decision mockup-home) when a step's note, why or ask cites a mockup by its id (`item<N>-<letter>`,
+a whole token) and the step's `mockups` field, {"<id>": "<path>"}, holds no file for it. It prints
+"mockup with no file: <step id> <mockup id>" per miss, writes the page, then exits 1. An entry is a miss when its
+path is outside both mockup homes (lint/layout.py mockup_homes: ~/Developer/<repo name>-imports/<item folder>/ and the
+repo's design folder), is a link, or names a file that is not there while its home's folder is. It reads unknown, never
+a miss, and prints "mockup file unread: <step id> <mockup id> (<why>)" with exit 0, when this machine has no
+<repo name>-imports folder (a cloud build) or the path is a machine-home path of another computer (a Windows drive path
+to the item folder, read on Linux). Cost: one stat per entry, no process, file or log.
+
 The upkeep list also names each closed waiting-page item whose home is an open step that never cites
 the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
 of the repo's waiting page: {"n": int, "status": str, "home": str}. An item is listed when its status
@@ -101,6 +110,11 @@ STALE_DAYS = 5
 STALE_LIVE_MINUTES = 60
 STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
+MOCKUP_LINE = "mockup with no file"
+MOCKUP_UNREAD_LINE = "mockup file unread"
+# A mockup id cited in a step's text: item<N>-<letter>, a whole token (no letter, digit, "_" or "-" touches it).
+MOCKUP_ID = re.compile(r"(?<![A-Za-z0-9_-])item\d+-[a-z](?![A-Za-z0-9_-])", re.I)
+MOCKUP_TEXT = ("note", "why", "ask")
 READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 STEP_TAG = "cs-step:"
 REPO_TAG = "cs-repo:"
@@ -761,9 +775,69 @@ def main(argv=None):
         print("%s: %s" % (PAIR_LINE, pair_why(info["live"])))
     for k, number in pairs or []:
         print("%s: %s (#%d)" % (PAIR_LINE, k, number))
+    misses, unread_files = mockup_misses(repo, data["steps"])
+    for sid, mid in misses:
+        print("%s: %s %s" % (MOCKUP_LINE, sid, mid))
+    for sid, mid, why in unread_files:
+        print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
-    if pairs:
+    if pairs or misses:
         raise SystemExit(1)
+
+
+def mockup_cites(step):
+    """The mockup ids a step's note, why and ask cite, lowercased, in first-cited order, each once."""
+    found = []
+    for field in MOCKUP_TEXT:
+        text = step.get(field)
+        for hit in MOCKUP_ID.findall(text) if isinstance(text, str) else []:
+            if hit.lower() not in found:
+                found.append(hit.lower())
+    return found
+
+
+def mockup_state(repo, layout, file):
+    """(state, why): "ok", "miss" or "unknown" for one `mockups` entry. A path in neither home, or a design-folder
+    file that is not in the checkout, or a machine-home file that is not there while the machine home's folder is, is
+    a miss. No folder for the machine home here (a cloud build), or the machine-home path of another computer, is
+    unknown (decision mockup-home)."""
+    kind, found, _ = layout.mockup_file(str(repo), file)
+    if kind is None:
+        return ("unknown", "a machine-home path of another computer") if layout.mockup_elsewhere(str(repo), file) \
+            else ("miss", "")
+    if os.path.isfile(found):
+        return "ok", ""
+    if kind == "machine" and not os.path.isdir(layout.mockup_homes(str(repo))[0] or ""):
+        return "unknown", "no %s folder on this machine" % os.path.basename(layout.mockup_homes(str(repo))[0] or "imports")
+    return "miss", ""
+
+
+def mockup_misses(repo, steps):
+    """([(step id, mockup id)], [(step id, mockup id, why)]): each cited mockup id that has no file, and each whose
+    file could not be read here. A step with no cited id holds none. The layout failing to load reads every cited
+    id as unknown."""
+    cites = {sid: mockup_cites(step) for sid, step in sorted(steps.items()) if isinstance(step, dict)}
+    if not any(cites.values()):
+        return [], []
+    try:
+        sys.path.insert(0, str(LINT))
+        import layout
+    except Exception as err:  # the layout is a shared file; a fault in it makes every file unknown
+        return [], [(sid, mid, "the layout could not be read: %s" % err) for sid, ids in cites.items() for mid in ids]
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+    misses, unread = [], []
+    for sid, ids in cites.items():
+        entries = steps[sid].get("mockups")
+        entries = {str(k).lower(): v for k, v in entries.items()} if isinstance(entries, dict) else {}
+        for mid in ids:
+            state, why = mockup_state(repo, layout, entries.get(mid)) if mid in entries else ("miss", "")
+            if state == "miss":
+                misses.append((sid, mid))
+            elif state == "unknown":
+                unread.append((sid, mid, why))
+    return misses, unread
 
 
 def added_at(source):

@@ -122,6 +122,21 @@ fix is to set the step to `doing`, or to close the pull. With no usable `--live`
 `todo step with an open PR: unknown (<why>)` and the build exits 0. The conflict-marker refusal also
 exits 1. The printed line tells the two apart.
 
+## Mockups
+
+A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a whole token (`item48-a`). The step then
+carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a file in a mockup home: the
+machine home `~/Developer/<repo name>-imports/<item folder>/<file>`, or the repo's design folder (decision `mockup-home`).
+
+The build prints `mockup with no file: <step id> <mockup id>` for each cited id with no entry, with a path outside both
+homes (a link too), with a design-folder file that is not in the checkout, or with a machine-home file that is not there
+while the `<repo name>-imports` folder is. It writes the page, then exits 1. The fix is to keep the file in a home and
+name it in `mockups`.
+
+A cloud build has no `<repo name>-imports` folder, and a path from another computer (a Windows
+`C:\Users\x\Developer\<repo name>-imports\item48\a.html`) is not this machine's. Both read unknown, never a miss. The build
+prints `mockup file unread: <step id> <mockup id> (<why>)` and exits 0.
+
 ## Upkeep list
 
 After each build the builder prints the upkeep list for the triage thread. It names:
@@ -199,6 +214,7 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file the build already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
+The mockup check reads one stat per cited id and adds no process, file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
