@@ -221,6 +221,21 @@ FORM_VARIANTS = [
     ("comment openers and an apostrophe in the lines are plain text",
      parts(goal="Goal: keep the runner's merge, with //path, /* glob and # tags, working.",
            problem="Problem (risk): don't parse # or // here, so it needs your word."), None),
+    # The copied template, with a real stake and kind, is refused on the page and in a chat box.
+    ("placeholder: the copied Goal line is refused", parts(goal="Goal: <the goal>"), (FORM_RULE, "Goal")),
+    ("placeholder: the copied Problem line is refused",
+     parts(problem="Problem (goal): <the problem in one plain sentence, and why it needs his word>"),
+     (FORM_RULE, "Problem")),
+    ("placeholder: the copied Based on line is refused", parts(based=["Based on (read): <one premise>"]),
+     (FORM_RULE, "Based on")),
+    ("placeholder: the Based on template with <kind> is refused by the kind check",
+     parts(based=["Based on (<kind>): <one premise>"]), (FORM_RULE, "Based on")),
+    # Real text around angle brackets is text, not a placeholder.
+    ("placeholder: real text with angle brackets passes",
+     parts(goal="Goal: render <Button> right", problem="Problem (risk): the <Modal> in the lint job needs your word.",
+           based=["Based on (read): the <Card> prop renders twice."]), None),
+    ("placeholder: a JSX lone quote and comment openers beside angle brackets pass",
+     parts(goal="Goal: fix the <p>Don't</p> text, and keep // and /* in paths as plain text."), None),
 ]
 for _kind in PREMISE_KINDS:
     FORM_VARIANTS.append(("a Based on kind %s" % _kind, parts(based=["Based on (%s): the premise." % _kind]), None))
@@ -233,6 +248,21 @@ def case_form_lines():
     for name, found, want in FORM_VARIANTS:
         page(name, "set", entry_of(page_item(**found)), want)
         chat(name, chat_box(**found), want)
+
+
+def case_form_placeholders_on_edits():
+    # The copied template on the other page paths: an update that carries the context, a str_replace that
+    # swaps the Goal line, and a stood pick's Problem line. The set path is FORM_VARIANTS.
+    page("placeholder: an update of kind decision with the copied Goal line is refused", "update",
+         entry_of({"kind": "decision", "context": form_text(goal="Goal: <the goal, in the owner's terms>")}),
+         (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for the copied template is refused", GOAL,
+                    "Goal: <the goal>", (FORM_RULE, "Goal"))
+    context_replace("placeholder: that swaps the Goal line for real text with angle brackets passes", GOAL,
+                    "Goal: render <Button> right", None)
+    page("placeholder: a stood pick with the copied Problem line is refused", "set",
+         entry_of(page_item(problem="Problem: <the problem, and why it needs his word>", stands=True)),
+         (FORM_RULE, "Problem"))
 
 
 # ------------------------------------------------------------------ gain and loss in each option
@@ -736,6 +766,8 @@ MALFORMED = [
 # Valid lines: both sides non-empty, the change side a change. The word match is whole words only.
 VALID_LINES = [
     DEPARTS,
+    # A new thing writes "main — adds <X>" (decision port-keeps-behaviour, question-departs section).
+    "Departs from: main — adds a retry button",
     "Departs from: lint/stamp.py:run_stamp - the stamp check moves to the lint job",
     "Departs from: agent-model-cap — Opus above the row needs an owner grant",
     "Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves to the lint job",
@@ -923,6 +955,50 @@ def case_departs_str_replace_forms():
                     "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
 
 
+# ------------------------------------------------------------------ a port's main side
+
+def case_port_main_side():
+    # A port item whose line says no change is refused by question-departs, which runs on every question.
+    # The port rule is not the one that refuses it, so the case takes either id.
+    page("a port item whose line says main — nothing is refused", "set",
+         entry_of(page_item(port=True, departs="Departs from: main — nothing")),
+         (("port-question", DEPARTS_RULE), "Departs"))
+
+
+# The port shapes of the round-2 review. A backticked or aliased main side names file:symbol and passes. A
+# placeholder or no-change change side is refused on a port page, a port task and a question box.
+PORT_OK_LINES = [
+    "Departs from: `hooks/guard.py:data_tool_hit` — adds a retry",
+    "Departs from: app/[id]/page.tsx:Home — adds a retry",
+    "Departs from: @/components/x.tsx:Button — adds a retry",
+]
+PORT_BAD_LINES = [
+    "Departs from: main — adds <X>",
+    "Departs from: hooks/guard.py:x — <what changes>",
+    "Departs from: hooks/guard.py:x — none",
+]
+
+
+def port_task(departs):
+    """A port task with a Why yours line, so only the port and departs checks can refuse it."""
+    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+            "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
+                       + departs}
+
+
+def case_port_departs_shapes():
+    for body in PORT_OK_LINES:
+        page("a port page item whose line is %r passes" % body, "set",
+             entry_of(page_item(port=True, departs=body)), None)
+        page("a port task whose line is %r passes" % body, "set", entry_of(port_task(body)), None)
+    for body in PORT_BAD_LINES:
+        page("a port page item whose line is %r is refused" % body, "set",
+             entry_of(page_item(port=True, departs=body)), (("port-question", DEPARTS_RULE), "Departs"))
+        page("a port task whose line is %r is refused" % body, "set", entry_of(port_task(body)),
+             ("port-question", None))
+        chat("a question whose line is %r is refused" % body, chat_box(departs=body), (DEPARTS_RULE, "Departs"))
+
+
 # ------------------------------------------------------------------ call_judge
 
 def case_call_judge():
@@ -1003,8 +1079,8 @@ def case_item_51_stray_field():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_options_state_gain_and_loss,
-                 case_older_rules_keep_their_ids,
+    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+                 case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
@@ -1014,7 +1090,8 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_port_main_side, case_port_departs_shapes, case_call_judge,
+                 case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()
