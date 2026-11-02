@@ -884,3 +884,5 @@
 - page-stale-page-id-copy: `stale_pages.py` `page_id` copies `layout.artifact_id`, and its comment's reason is false: only batch mode calls it, which already imports `layout`. The copy keeps a query or fragment. Fix: call `layout.artifact_id` there. Decision: page-stale-publish
 - page-stale-untested-paths: no test pins `artifact_id` returning "" for a bare artifact url, or the `noted` line when the stamp write fails (hooks/guard.py page_stale_hit). Decision: page-stale-publish
 - page-stale-url-forms: the `/artifact/{id}` and `/code/artifact/{uuid}` links may carry different ids for one page; then the by-id compare matches neither across forms. Unmeasured. Decision: page-stale-publish
+- sim-lock-uncovered-boots: `xcodebuild -destination` and MCP `launch` boot outside the sim-test lock, since no guard rule sends them to sim-test. Decision: sim-test-is-the-one-boot-path.
+- sim-test-boot-unrecorded: a sim-test boot writes no `sim-boots.jsonl` line. If sim-test is killed with SIGKILL, its booted simulator stays unrecorded, and the sweep keeps it. Decision: sweep-shuts-down-idle-simulators.
