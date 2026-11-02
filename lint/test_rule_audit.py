@@ -9,7 +9,10 @@ Run with:
 
     python3 lint/test_rule_audit.py -v
 """
+import ast
+import glob
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -736,6 +739,608 @@ class EmittedRuleIdsTests(unittest.TestCase):
         ids = self.ids_of(self.files())
         self.assertIn("main-rule", ids)
         self.assertNotIn("watch-rule", ids)
+
+
+# ------------------------------------------------------------ refusal cites
+# A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
+# a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
+# id with a site that prints no cite, or whose reason the scan cannot read, fails unless it is in
+# REFUSAL_UNCITED_EXEMPT with its home. The exempt list only shrinks.
+
+CITE_RE = re.compile(r"\b(decision|rule) ([a-z0-9][a-z0-9-]*)\b")
+HOME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+MAX_DEPTH = 12
+PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call sites are scanned
+
+# Refusal id -> its home (a step slug or debt id), for an id that still prints no cite. The refusal
+# sweep (PR 1029) gives the uncited rule rewrites to refusal-uncited-rewrites, agent-model-cap to
+# refusal-looser-fixes, and the rest to the sweep step refusal-matches-rule.
+REFUSAL_UNCITED_EXEMPT = {
+    "agent-model-cap": "refusal-looser-fixes",
+    "agent-model-floor": "refusal-matches-rule",
+    "ask-alone": "refusal-matches-rule",
+    "background-end": "refusal-matches-rule",
+    "bare-merge": "refusal-matches-rule",
+    "builder-test-edit": "refusal-matches-rule",
+    "cite-by-id": "refusal-matches-rule",
+    "command-in-item": "refusal-matches-rule",
+    "designer-scope": "refusal-matches-rule",
+    "destructive-delete": "refusal-matches-rule",
+    "detached-launch": "refusal-matches-rule",
+    "draft-pr": "refusal-matches-rule",
+    "force-push": "refusal-matches-rule",
+    "frozen-path": "refusal-matches-rule",
+    "git-env-set": "refusal-matches-rule",
+    "hand-made-worktree": "refusal-matches-rule",
+    "impeccable-review-only": "refusal-matches-rule",
+    "lane-by-slug": "refusal-matches-rule",
+    "linked-node-modules": "refusal-matches-rule",
+    "live-stream": "refusal-matches-rule",
+    "ln-over-directory": "refusal-uncited-rewrites",
+    "load-brake": "refusal-matches-rule",
+    "machine-wide-kill": "refusal-matches-rule",
+    "merge-checks": "refusal-matches-rule",
+    "other-checkout": "refusal-matches-rule",
+    "owner-judge": "refusal-matches-rule",
+    "playwright-browsers-path": "refusal-matches-rule",
+    "playwright-install": "refusal-matches-rule",
+    "port-question": "refusal-matches-rule",
+    "press-link": "refusal-matches-rule",
+    "question-form": "refusal-matches-rule",
+    "record-writer-scope": "refusal-matches-rule",
+    "records-page": "refusal-matches-rule",
+    "rm-after-cd": "refusal-matches-rule",
+    "rm-var-unguarded": "refusal-matches-rule",
+    "roles-third-round-steps-up": "refusal-matches-rule",
+    "session-home": "refusal-matches-rule",
+    "shared-tree": "refusal-matches-rule",
+    "silent-write": "refusal-matches-rule",
+    "simulator-boot-cap": "refusal-matches-rule",
+    "simulator-boot-twin": "refusal-matches-rule",
+    "task-names-check": "refusal-matches-rule",
+    "test-author-scope": "refusal-matches-rule",
+    "uniform-pick": "refusal-matches-rule",
+    "waiter": "refusal-matches-rule",
+    "worktree-home": "refusal-matches-rule",
+    "wsl-allow-list": "refusal-matches-rule",
+}
+
+
+def cite_homes(root=rule_audit.ROOT):
+    """-> (decision slugs, rule anchors), read from the repo as it is now."""
+    decisions_dir = os.path.join(root, "docs", "decisions")
+    decisions = {name[:-3] for name in os.listdir(decisions_dir) if name.endswith(".md")}
+    anchors = set(rule_audit.claude_md_anchors(rule_audit.read(os.path.join(root, "CLAUDE.md"))))
+    for path in glob.glob(os.path.join(root, "output-styles", "*.md")):
+        anchors.update(rule_audit.claude_md_anchors(rule_audit.read(path)))
+    return decisions, anchors
+
+
+def cites(text, homes):
+    decisions, anchors = homes
+    return any(slug in (decisions if kind == "decision" else anchors) for kind, slug in CITE_RE.findall(text))
+
+
+def _own(node):
+    """The nodes that run in `node`'s own scope: not the bodies of the functions or classes it defines."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        child = stack.pop()
+        yield child
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(child))
+
+
+def _bound_names(target):
+    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
+
+
+def _locals(fdef):
+    """name -> [(value, slot)] for each binding in a function. A value of None is a binding made at
+    run time (an argument, a loop target), so the name has no static text. A slot is the position
+    in a tuple value that the name unpacks."""
+    locs = {}
+    args = fdef.args
+    for arg in args.posonlyargs + args.args + args.kwonlyargs + [a for a in (args.vararg, args.kwarg) if a]:
+        locs.setdefault(arg.arg, []).append((None, None))
+    for node in _own(fdef):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    locs.setdefault(target.id, []).append((node.value, None))
+                elif isinstance(target, ast.Tuple) and all(isinstance(e, ast.Name) for e in target.elts):
+                    for i, e in enumerate(target.elts):
+                        locs.setdefault(e.id, []).append((node.value, i))
+                else:
+                    for name in _bound_names(target):
+                        locs.setdefault(name, []).append((None, None))
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+            for name in _bound_names(node.target):
+                locs.setdefault(name, []).append((None, None))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                for name in _bound_names(item.optional_vars) if item.optional_vars else []:
+                    locs.setdefault(name, []).append((None, None))
+    return locs
+
+
+def _union(parts):
+    """Join the alternatives of several branches. None when a branch is read only at run time, so
+    the reason is not read at all. A branch that is [] never yields text, and adds nothing."""
+    if any(part is None for part in parts):
+        return None
+    return [text for part in parts for text in part]
+
+
+def _dict_get_options(call):
+    """The values that `{...}.get(key, default)` can return, or None when the call is no such call."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr == "get" and isinstance(func.value, ast.Dict):
+        return list(func.value.values) + call.args[1:2]
+    return None
+
+
+class _Module:
+    """One hooks module, read with ast: its module-level values, its functions and its imports."""
+
+    def __init__(self, name, text):
+        self.name = name
+        self.tree = ast.parse(text)
+        self.values = {}
+        self.defs = {}
+        self.from_names = {}
+        self.module_alias = {}
+        for node in _own(self.tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.values.setdefault(target.id, []).append(node.value)
+                    elif isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple) \
+                            and len(target.elts) == len(node.value.elts):  # `A, B = "x", "y"`
+                        for name, value in zip(target.elts, node.value.elts):
+                            if isinstance(name, ast.Name):
+                                self.values.setdefault(name.id, []).append(value)
+            elif isinstance(node, ast.FunctionDef):
+                self.defs[node.name] = node
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                for alias in node.names:
+                    self.from_names[alias.asname or alias.name] = (node.module.split(".")[-1], alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.module_alias[alias.asname or alias.name] = alias.name.split(".")[-1]
+
+
+class _Reasons:
+    """The static text a reason expression can take, followed across the modules in `world`.
+    -> a list with one string per branch, or None when some piece is known only at run time."""
+
+    def __init__(self, world):
+        self.world = world
+        self._locals = {}
+
+    def locals_of(self, fdef):
+        if id(fdef) not in self._locals:
+            self._locals[id(fdef)] = _locals(fdef)
+        return self._locals[id(fdef)]
+
+    def alts(self, expr, mod, locs, depth=0):
+        if depth > MAX_DEPTH:
+            return None
+        d = depth + 1
+        if isinstance(expr, ast.Constant):
+            if expr.value is None or expr.value == "":  # a falsy branch: the caller tests it before refusing
+                return []
+            return [expr.value] if isinstance(expr.value, str) else None
+        if isinstance(expr, ast.JoinedStr):
+            text = "".join(v.value for v in expr.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
+            return [text] if text else None
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Mod):  # the arguments of `%` carry no text
+            return self.alts(expr.left, mod, locs, d)
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+            # A run-time piece in a join adds no static text; the static pieces around it still count.
+            left, right = self.alts(expr.left, mod, locs, d), self.alts(expr.right, mod, locs, d)
+            if left == [] or right == []:
+                return []
+            if left is None and right is None:
+                return None
+            left, right = left or [""], right or [""]
+            return [a + b for a in left for b in right]
+        if isinstance(expr, ast.IfExp):
+            return _union([self.alts(expr.body, mod, locs, d), self.alts(expr.orelse, mod, locs, d)])
+        if isinstance(expr, ast.Name):
+            return self._name(expr.id, mod, locs, d, None)
+        if isinstance(expr, ast.Subscript):
+            return self._dict(expr, mod, locs, d)
+        if isinstance(expr, ast.Call):
+            if isinstance(expr.func, ast.Attribute) and expr.func.attr == "format":
+                return self.alts(expr.func.value, mod, locs, d)
+            options = _dict_get_options(expr)
+            if options is not None:
+                return _union([self.alts(o, mod, locs, d) for o in options])
+            return self._call(expr, mod, locs, d, None)
+        return None
+
+    def _value(self, value, slot, index, mod, locs, depth):
+        if slot is not None:
+            return self._elt(value, slot, mod, locs, depth)
+        if index is not None:
+            return self._elt(value, index, mod, locs, depth)
+        return self.alts(value, mod, locs, depth)
+
+    def _elt(self, expr, i, mod, locs, depth):
+        """The text of element `i` of a tuple-valued expression."""
+        if depth > MAX_DEPTH:
+            return None
+        d = depth + 1
+        if isinstance(expr, ast.Tuple):
+            return self.alts(expr.elts[i], mod, locs, d) if i < len(expr.elts) else None
+        if isinstance(expr, ast.IfExp):
+            return _union([self._elt(expr.body, i, mod, locs, d), self._elt(expr.orelse, i, mod, locs, d)])
+        if isinstance(expr, ast.Call):
+            options = _dict_get_options(expr)
+            if options is not None:
+                return _union([self._elt(o, i, mod, locs, d) for o in options])
+            if isinstance(expr.func, ast.Name):
+                return self._call(expr, mod, locs, d, i)
+            return None
+        if isinstance(expr, ast.Name):
+            return self._name(expr.id, mod, locs, d, i)
+        return None
+
+    def _name(self, name, mod, locs, depth, index):
+        if name in locs:
+            return _union([self._value(v, slot, index, mod, locs, depth) if v is not None else None
+                           for v, slot in locs[name]])
+        home = self._home(mod, name)
+        if home is None:
+            return None
+        hmod, values = home
+        return _union([self._value(v, None, index, hmod, {}, depth) for v in values])
+
+    def _home(self, mod, name, depth=0):
+        """(module, values) where a module-level name is bound, following `from` imports."""
+        if name in mod.values:
+            return mod, mod.values[name]
+        if name in mod.from_names and depth < MAX_DEPTH and mod.from_names[name][0] in self.world:
+            src, orig = mod.from_names[name]
+            return self._home(self.world[src], orig, depth + 1)
+        return None
+
+    def _function(self, name, mod, depth=0):
+        if name in mod.defs:
+            return mod, mod.defs[name]
+        if name in mod.from_names and depth < MAX_DEPTH and mod.from_names[name][0] in self.world:
+            src, orig = mod.from_names[name]
+            return self._function(orig, self.world[src], depth + 1)
+        return None
+
+    def _call(self, call, mod, locs, depth, index):
+        """The reason a call returns: each return value, or element `index` of each return tuple."""
+        if not isinstance(call.func, ast.Name) or depth > MAX_DEPTH:
+            return None
+        found = self._function(call.func.id, mod)
+        if found is None:
+            return None
+        fmod, fdef = found
+        flocs = self.locals_of(fdef)
+        returns = [n.value for n in _own(fdef) if isinstance(n, ast.Return) and n.value is not None]
+        return _union([self._value(v, None, index, fmod, flocs, depth + 1) for v in returns])
+
+    def _dict(self, sub, mod, locs, depth):
+        """`TABLE["key"]` or `module.TABLE["key"]`, where TABLE is a module-level dict literal."""
+        if not isinstance(sub.slice, ast.Constant):
+            return None
+        base = sub.value
+        if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name) and base.value.id in mod.module_alias:
+            owner, name = self.world.get(mod.module_alias[base.value.id]), base.attr
+        elif isinstance(base, ast.Name):
+            owner, name = mod, base.id
+        else:
+            return None
+        home = self._home(owner, name) if owner is not None else None
+        if home is None or len(home[1]) != 1 or not isinstance(home[1][0], ast.Dict):
+            return None
+        hmod, table = home[0], home[1][0]
+        for key, value in zip(table.keys, table.values):
+            if self._key_text(key, hmod) == sub.slice.value:
+                return self.alts(value, hmod, {}, depth + 1)
+        return None
+
+    def _key_text(self, key, mod):
+        """A dict key's text: a string literal, or a module-level name bound to one."""
+        if isinstance(key, ast.Name):
+            home = self._home(mod, key.id)
+            if home is None or len(home[1]) != 1:
+                return None
+            key = home[1][0]
+        return key.value if isinstance(key, ast.Constant) and isinstance(key.value, str) else None
+
+
+def _tuple_options(expr):
+    """The tuple options a table value holds: a dict's values, or a `.get` call's values and default.
+    None when an option is not a tuple, so the scan cannot read its ids."""
+    if isinstance(expr, ast.Tuple):
+        return [expr]
+    if isinstance(expr, ast.Dict):
+        options = list(expr.values)
+    else:
+        options = _dict_get_options(expr) if isinstance(expr, ast.Call) else None
+        if options is None:
+            return None
+    return options if all(isinstance(o, ast.Tuple) for o in options) else None
+
+
+def _refusals_of(call, locs, where, unattributed):
+    """-> [(refusal id, reason expression)] for one call that prints a refusal; [] for other calls."""
+    name = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+    if name == "refuse" and len(call.args) >= 4:
+        rule, reason = call.args[2], call.args[3]
+        if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
+            return [(rule.value, reason)]
+        if isinstance(rule, ast.Name):
+            bound = locs.get(rule.id, [])
+            if any(isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == PENDING_ASK
+                   for v, _ in bound):
+                return []  # the ask_command() call sites carry these ids
+            for value, slot in bound:
+                options = _tuple_options(value) if slot == 0 else None
+                if options and all(len(t.elts) == 2 and isinstance(t.elts[0], ast.Constant) for t in options):
+                    return [(t.elts[0].value, t.elts[1]) for t in options]
+        unattributed.append(where)
+        return []
+    if name == "ask_command" and len(call.args) >= 2:
+        rule = call.args[0]
+        if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
+            return [(rule.value, call.args[1])]
+        unattributed.append(where)
+    return []
+
+
+def refusal_status(sources, homes, scope):
+    """-> (statuses, unattributed). statuses: refusal id -> [(where, status)], where a `file:line`
+    and status `cited`, `no cite` or `not resolved`. `sources` maps each module name to its text;
+    `scope` names the guard modules whose refusals count. unattributed: the refuse() or ask_command()
+    calls whose id the scan cannot read."""
+    world = {name: _Module(name, text) for name, text in sources.items()}
+    reasons = _Reasons(world)
+    statuses, unattributed = {}, []
+    for mod in world.values():
+        if mod.name not in scope:
+            continue
+        scopes = [(mod.tree, {})] + [(n, reasons.locals_of(n)) for n in ast.walk(mod.tree)
+                                     if isinstance(n, ast.FunctionDef)]
+        for node, locs in scopes:
+            for call in (n for n in _own(node) if isinstance(n, ast.Call)):
+                where = "%s.py:%d" % (mod.name, call.lineno)
+                for rid, expr in _refusals_of(call, locs, where, unattributed):
+                    text = reasons.alts(expr, mod, locs)
+                    if not text:
+                        status = "not resolved"
+                    elif all(cites(t, homes) for t in text):
+                        status = "cited"
+                    else:
+                        status = "no cite"
+                    statuses.setdefault(rid, []).append((where, status))
+    for rows in statuses.values():
+        rows.sort(key=lambda row: (row[0].rsplit(":", 1)[0], int(row[0].rsplit(":", 1)[1])))
+    return statuses, unattributed
+
+
+def refusal_problems(sources, homes, exempt, scope, emitted=None):
+    """The ratchet's problems, one line each. Empty when every refusal id cites or is exempt."""
+    statuses, unattributed = refusal_status(sources, homes, scope)
+    problems = ["%s: refuse() or ask_command() id is not a string literal the scan can read" % w
+                for w in unattributed]
+    if emitted is not None:
+        problems += ["%s: refusal id is not in rule_audit.emitted_rule_ids" % rid
+                     for rid in sorted(set(statuses) - emitted)]
+    failing = {rid: [(w, s) for w, s in rows if s != "cited"] for rid, rows in statuses.items()}
+    failing = {rid: rows for rid, rows in failing.items() if rows}
+    for rid in sorted(failing):
+        if rid not in exempt:
+            problems.append("%s: %s" % (rid, "; ".join("%s %s" % row for row in failing[rid])))
+    for rid, home in sorted(exempt.items()):
+        if rid not in statuses:
+            problems.append("%s: remove from exempt; no refusal prints it" % rid)
+        elif rid not in failing:
+            problems.append("%s: remove from exempt; every site now cites" % rid)
+        if not HOME_RE.fullmatch(home):
+            problems.append("%s: exempt home `%s` is not a step slug or debt id" % (rid, home))
+    return problems
+
+
+def _hooks_world():
+    """The text of every hooks module but the tests: the guard modules and the modules they import."""
+    paths = glob.glob(os.path.join(rule_audit.ROOT, "hooks", "*.py"))
+    return {os.path.splitext(os.path.basename(p))[0]: rule_audit.read(p)
+            for p in paths if not os.path.basename(p).startswith("test_")}
+
+
+def _guard_scope():
+    """The guard modules, by the same glob as rule_audit.guard_paths."""
+    return {os.path.splitext(os.path.basename(p))[0] for p in rule_audit.guard_paths(rule_audit.ROOT)}
+
+
+class RefusalCiteRepoTests(unittest.TestCase):
+    """The ratchet, run on this repo as it is now."""
+
+    def test_every_guard_refusal_prints_a_cite_or_is_exempt(self):
+        problems = refusal_problems(_hooks_world(), cite_homes(), REFUSAL_UNCITED_EXEMPT, _guard_scope(),
+                                    rule_audit.emitted_rule_ids(rule_audit.ROOT))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_cite_homes_reads_the_style_file_anchors(self):
+        decisions, anchors = cite_homes()
+        self.assertIn("owner-override", decisions)
+        self.assertIn("outcomes-tests-are-statements", anchors)  # CLAUDE.md
+        self.assertIn("style-cut-narration", anchors)  # output-styles/shiv-stylisms.md
+
+
+HOMES = ({"alpha"}, {"anchor-one"})
+SCOPE = {"guard"}
+
+
+def status_of(src, rid, extra=None, homes=HOMES):
+    sources = dict(extra or {}, guard=src)
+    statuses, _ = refusal_status(sources, homes, SCOPE)
+    return [s for _, s in statuses.get(rid, [])]
+
+
+class RefusalCiteFixtureTests(unittest.TestCase):
+    """The cite pattern and the scanner, on in-memory source."""
+
+    def test_a_decision_slug_that_exists_cites(self):
+        self.assertEqual(status_of('refuse(t, "deny", "r1", "see decision alpha", m)', "r1"), ["cited"])
+
+    def test_a_decision_slug_that_is_missing_does_not_cite(self):
+        self.assertEqual(status_of('refuse(t, "deny", "r1", "see decision beta", m)', "r1"), ["no cite"])
+
+    def test_a_rule_anchor_that_exists_cites_and_a_missing_one_does_not(self):
+        self.assertEqual(status_of('refuse(t, "deny", "r1", "rule anchor-one holds", m)', "r1"), ["cited"])
+        self.assertEqual(status_of('refuse(t, "deny", "r1", "rule anchor-two holds", m)', "r1"), ["no cite"])
+
+    def test_the_cite_word_must_stand_alone(self):
+        self.assertEqual(status_of('refuse(t, "deny", "r1", "undecision alpha", m)', "r1"), ["no cite"])
+
+    def test_a_hash_inside_a_reason_string_is_text_not_a_comment(self):
+        src = 'refuse(t, "deny", "hash-id", "use the # sign, see decision alpha", m)\n'
+        self.assertEqual(status_of(src, "hash-id"), ["cited"])
+
+    def test_a_commented_out_refusal_is_no_site(self):
+        src = '# refuse(t, "deny", "ghost", "see decision alpha", m)\n'
+        self.assertEqual(status_of(src, "ghost"), [])
+
+    def test_a_multi_line_reason_that_cites_is_read(self):
+        src = 'refuse(t, "deny", "multi", """first line\nsecond line, see decision alpha""", m)\n'
+        self.assertEqual(status_of(src, "multi"), ["cited"])
+
+    def test_a_lone_quote_in_text_is_no_cite_and_no_parse_error(self):
+        src = 'refuse(t, "deny", "quote", "Don\'t refuse this act", m)\n'
+        self.assertEqual(status_of(src, "quote"), ["no cite"])
+
+    def test_a_record_only_id_is_not_a_refusal(self):
+        self.assertEqual(status_of('record(t, "noted", "note-only", m)\n', "note-only"), [])
+
+    def test_a_module_constant_with_a_cite_passes(self):
+        src = 'REASON = "held, see decision alpha"\nrefuse(t, "deny", "const-id", REASON, m)\n'
+        self.assertEqual(status_of(src, "const-id"), ["cited"])
+
+    def test_a_function_reason_needs_every_return_to_cite(self):
+        src = ('def why(x):\n'
+               '    if x:\n'
+               '        return "see decision alpha"\n'
+               '    return "no citation here"\n'
+               'refuse(t, "deny", "fn-id", why(1), m)\n')
+        self.assertEqual(status_of(src, "fn-id"), ["no cite"])
+
+    def test_an_imported_constant_is_followed_into_its_module(self):
+        core = 'HELD = "held, see decision alpha"\n'
+        src = 'def go():\n    from guard_core import HELD\n    refuse(t, "deny", "imp-id", HELD, m)\n'
+        self.assertEqual(status_of(src, "imp-id", extra={"guard_core": core}), ["cited"])
+
+    def test_a_format_call_and_a_conditional_both_read(self):
+        src = ('A = "one {x}, see decision alpha"\nB = "two {x}"\n'
+               'def go(c):\n'
+               '    reason = (A if c else B)\n'
+               '    refuse(t, "deny", "fmt-id", reason.format(x=1), m)\n')
+        self.assertEqual(status_of(src, "fmt-id"), ["no cite"])
+
+    def test_a_reason_passed_in_as_an_argument_is_not_resolved(self):
+        src = 'def go(reason):\n    refuse(t, "deny", "param-id", reason, m)\n'
+        self.assertEqual(status_of(src, "param-id"), ["not resolved"])
+
+    def test_one_uncited_site_fails_an_id_with_a_cited_site(self):
+        src = ('refuse(t, "deny", "two-sites", "see decision alpha", m)\n'
+               'refuse(t, "deny", "two-sites", "no cite", m)\n')
+        self.assertEqual(status_of(src, "two-sites"), ["cited", "no cite"])
+
+    def test_a_table_of_codes_gives_each_code_its_own_reason(self):
+        src = ('def go(role):\n'
+               '    code, why = {"a": ("tbl-one", "see decision alpha")}.get(role, ("tbl-two", "no cite"))\n'
+               '    refuse(t, "deny", code, why, m)\n')
+        self.assertEqual(status_of(src, "tbl-one"), ["cited"])
+        self.assertEqual(status_of(src, "tbl-two"), ["no cite"])
+
+    def test_an_ask_command_call_is_a_site(self):
+        src = 'ask_command("ask-id", "see decision alpha", m, "cmd")\n'
+        self.assertEqual(status_of(src, "ask-id"), ["cited"])
+
+    def test_the_pending_ask_rule_is_covered_by_the_ask_command_sites(self):
+        src = ('def flush():\n'
+               '    rule, reason, matched, command = PENDING_ASK[0]\n'
+               '    refuse(t, "ask", rule, reason, matched)\n')
+        _, unattributed = refusal_status({"guard": src}, HOMES, SCOPE)
+        self.assertEqual(unattributed, [])
+
+    def test_a_variable_rule_outside_a_table_is_unattributed(self):
+        src = 'def go(rule):\n    refuse(t, "deny", rule, "see decision alpha", m)\n'
+        _, unattributed = refusal_status({"guard": src}, HOMES, SCOPE)
+        self.assertEqual(unattributed, ["guard.py:2"])
+
+    def test_a_module_outside_the_scope_is_not_scanned(self):
+        src = 'refuse(t, "deny", "blind-id", "no cite", m)\n'
+        statuses, _ = refusal_status({"blind_brief": src}, HOMES, SCOPE)
+        self.assertEqual(statuses, {})
+
+    def test_a_falsy_branch_is_no_reason_and_the_live_branch_cites(self):
+        src = ('def why(x):\n'
+               '    if x:\n'
+               '        return "see decision alpha"\n'
+               '    return ""\n'
+               'refuse(t, "deny", "dead-id", why(1), m)\n')
+        self.assertEqual(status_of(src, "dead-id"), ["cited"])
+
+    def test_an_empty_reason_is_not_resolved(self):
+        self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
+
+    def test_a_percent_format_keeps_the_static_text(self):
+        src = 'REASON = "held by %s, see decision alpha"\nrefuse(t, "deny", "pct-id", REASON % "x", m)\n'
+        self.assertEqual(status_of(src, "pct-id"), ["cited"])
+
+    def test_a_run_time_piece_in_a_join_keeps_the_static_text_only(self):
+        cited = 'def go(x):\n    refuse(t, "deny", "join-id", "see decision alpha " + x, m)\n'
+        uncited = 'def go(x):\n    refuse(t, "deny", "join-id", "no cite " + x, m)\n'
+        self.assertEqual(status_of(cited, "join-id"), ["cited"])
+        self.assertEqual(status_of(uncited, "join-id"), ["no cite"])
+
+
+class RefusalCiteRatchetTests(unittest.TestCase):
+    """The exempt list: an uncited id must be exempt with a home, and an entry must still be needed."""
+
+    SRC = 'refuse(t, "deny", "bare-id", "no cite here", m)\n'
+
+    def problems(self, exempt, src=None, scope=SCOPE):
+        return refusal_problems({"guard": self.SRC if src is None else src}, HOMES, exempt, scope)
+
+    def test_an_uncited_id_not_in_the_exempt_list_fails_and_names_its_site(self):
+        problems = self.problems({})
+        self.assertEqual(problems, ["bare-id: guard.py:1 no cite"])
+
+    def test_an_uncited_id_with_a_home_passes(self):
+        self.assertEqual(self.problems({"bare-id": "step-one"}), [])
+
+    def test_an_exempt_id_that_no_refusal_prints_is_stale(self):
+        problems = self.problems({"bare-id": "step-one", "gone-id": "step-one"})
+        self.assertEqual(problems, ["gone-id: remove from exempt; no refusal prints it"])
+
+    def test_an_exempt_id_that_now_cites_is_stale(self):
+        src = 'refuse(t, "deny", "bare-id", "see decision alpha", m)\n'
+        self.assertEqual(self.problems({"bare-id": "step-one"}, src),
+                         ["bare-id: remove from exempt; every site now cites"])
+
+    def test_an_exempt_home_must_be_a_slug(self):
+        self.assertEqual(self.problems({"bare-id": "Not A Slug"}),
+                         ["bare-id: exempt home `Not A Slug` is not a step slug or debt id"])
+
+    def test_an_id_with_one_cited_and_one_uncited_site_fails_unless_exempt(self):
+        src = ('refuse(t, "deny", "bare-id", "see decision alpha", m)\n'
+               'refuse(t, "deny", "bare-id", "no cite", m)\n')
+        self.assertEqual(self.problems({}, src), ["bare-id: guard.py:2 no cite"])
+
+    def test_an_unresolved_reason_fails_with_its_own_label(self):
+        src = 'def go(reason):\n    refuse(t, "deny", "param-id", reason, m)\n'
+        self.assertEqual(self.problems({}, src), ["param-id: guard.py:2 not resolved"])
 
 
 if __name__ == "__main__":
