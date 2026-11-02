@@ -44,7 +44,10 @@ CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 INSTALL_LOG="$CLAUDE_DIR/claude-settings-install.log"
 INSTALL_LOCK="$CLAUDE_DIR/.claude-settings-install.lock"
 INSTALL_ID="$(date +%Y%m%d%H%M%S)$$"
-log_line() { printf '%s install_from_main.sh: %s id=%s pid=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$INSTALL_ID" "$$" >> "$INSTALL_LOG"; }
+# log_stamp: ISO 8601 time with the UTC offset (date +%z gives +HHMM; the colon is added). install.sh has its
+# own copy: the two scripts share no sourced file.
+log_stamp() { stamp_t=$(date +%Y-%m-%dT%H:%M:%S%z); printf '%s:%s' "${stamp_t%??}" "${stamp_t#"${stamp_t%??}"}"; }
+log_line() { printf '%s install_from_main.sh: %s id=%s pid=%s\n' "$(log_stamp)" "$1" "$INSTALL_ID" "$$" >> "$INSTALL_LOG"; }
 release_lock() {   # the EXIT trap: the end line with the run's real exit, then the lock if it is still this run's
   rc=$?
   trap - EXIT
