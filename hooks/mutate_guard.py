@@ -1950,7 +1950,7 @@ REPLAY_PROFILES = {
             "sparse_skip": ["demo-assets", "vendor"],
         },
         "py": {
-            "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/[^/]*-selftest\.py$",
+            "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
             "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
             "suite_filter": {"paths": r"^harness/tests/t7/", "keep": "defines_checks"},
             "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
