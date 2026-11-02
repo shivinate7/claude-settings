@@ -50,6 +50,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the CI waits,
   - the merge tool runs,
   - archiving finished lanes.
+  Before it joins a lane, it runs `merge --lane-lint <pr>` on the lane head and refuses a red lane (`lanes-run-no-full-ci-job`, a lane runs no full CI job).
   The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
   - Ruling (owner, 2026-11-01 21:34 CST): "cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again". The coordinator never merges. A batch runner runs every merge, in claude-settings and in other repos, under the coordinator's standing merge grant, which stays the coordinator's (record `standing-merge-grant` holds the words, the repos and the limits). Several batch runners may each own a set of repos.
 - **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The coordinator holds only lane state and talks with the owner.
