@@ -1,0 +1,9 @@
+{
+ "title": "claude-settings reads q_max's accent colour from q_max's own tokens file",
+ "phase": "rollout",
+ "status": "todo",
+ "order": 320.5,
+ "why": "Coordinator, Nov 1 18:35 CST: once q_max's design values move into one tokens file (step r2), the shared repo colour list must point at it, not keep a copy.",
+ "note": "Change: docs/design/repo-colours.json accents.q_max points at q_max src/tokens.css. Waits on: step r2 merging in q_max; the coordinator starts it then. Port: no.",
+ "updatedAt": "2026-11-02T00:40:00Z"
+}

@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.3375007,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 7 of 12, ranked by harm avoided.",
- "note": "Repos: home, mailaudit. Done when XCTAssertTrue(true) is gone and the mailaudit debt is closed. home waits on the owner's go (he is working there). Ready for mailaudit. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held.",
- "updatedAt": "2026-11-02T00:37:00Z"
+ "note": "Repos: home, mailaudit. Done when XCTAssertTrue(true) is gone and the mailaudit debt is closed. home waits on the owner's go (he is working there). Ready for mailaudit. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Scope (coordinator, 18:35 CST): only home and mailaudit; banchi, q_max and degen have no part.",
+ "updatedAt": "2026-11-02T00:40:00Z"
 }
