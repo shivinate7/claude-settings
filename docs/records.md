@@ -147,6 +147,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `detached-launch-refused` | The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. | [`docs/decisions/detached-launch-refused.md`](../docs/decisions/detached-launch-refused.md) |
 | `docs-only-prs-skip-review` | Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. | [`docs/decisions/docs-only-prs-skip-review.md`](../docs/decisions/docs-only-prs-skip-review.md) |
 | `draft-until-reviewed` | Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. | [`docs/decisions/draft-until-reviewed.md`](../docs/decisions/draft-until-reviewed.md) |
+| `env-file-stays-unread` | No session reads, writes or commits the contents of an environment file. | [`docs/decisions/env-file-stays-unread.md`](../docs/decisions/env-file-stays-unread.md) |
 | `feel-fix-waits-device-check` | A feel-fix is a change to how a screen feels: its motion, touch, timing or scroll. | [`docs/decisions/feel-fix-waits-device-check.md`](../docs/decisions/feel-fix-waits-device-check.md) |
 | `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`docs/decisions/fewest-words-mandate.md`](../docs/decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right. | [`docs/decisions/frozen-path-resolves-shell-vars.md`](../docs/decisions/frozen-path-resolves-shell-vars.md) |
@@ -178,6 +179,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-skill-lives-here` | Owner, 2026-10-16: `skills/plain-english-map/` in claude-settings is the one home of the skill. | [`docs/decisions/map-skill-lives-here.md`](../docs/decisions/map-skill-lives-here.md) |
 | `memory-is-never-a-rulings-only-home` | The owner's rulings must reach a tracked file. | [`docs/decisions/memory-is-never-a-rulings-only-home.md`](../docs/decisions/memory-is-never-a-rulings-only-home.md) |
 | `merge-deletes-batch-lanes` | Owner, 2026-10-19 12:14 CDT: each merge deletes the lane branches its batch took in. | [`docs/decisions/merge-deletes-batch-lanes.md`](../docs/decisions/merge-deletes-batch-lanes.md) |
+| `merge-lock` | One lock holds each base branch while a merge run works on it. | [`docs/decisions/merge-lock.md`](../docs/decisions/merge-lock.md) |
 | `merge-needs-current-base` | Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main. | [`docs/decisions/merge-needs-current-base.md`](../docs/decisions/merge-needs-current-base.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`docs/decisions/mods-deferred-table.md`](../docs/decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`docs/decisions/mods-install-via-marketplace.md`](../docs/decisions/mods-install-via-marketplace.md) |
@@ -301,6 +303,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
 | `inbox-saves-other-notices` | The feedback inbox saves some prompts the owner did not type. | [`docs/debts/inbox-saves-other-notices.md`](../docs/debts/inbox-saves-other-notices.md) |
+| `inbox-send-error-counts` | The feedback Stop guard counts a send as proof, even when the send failed. | [`docs/debts/inbox-send-error-counts.md`](../docs/debts/inbox-send-error-counts.md) |
+| `inbox-send-window-unbounded` | The feedback Stop guard accepts any matching send after the owner's message, in any later turn. | [`docs/debts/inbox-send-window-unbounded.md`](../docs/debts/inbox-send-window-unbounded.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`docs/debts/install-set-reads-held-file.md`](../docs/debts/install-set-reads-held-file.md) |
@@ -320,10 +324,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `nowindow-scan-misses-os-system` | lint/test_no_window_spawn.py reads subprocess and Node child_process calls only. | [`docs/debts/nowindow-scan-misses-os-system.md`](../docs/debts/nowindow-scan-misses-os-system.md) |
 | `npm-audit-fix-linked` | The rule judges only npm install, i, ci, update, uninstall and their aliases. | [`docs/debts/npm-audit-fix-linked.md`](../docs/debts/npm-audit-fix-linked.md) |
 | `old-merge-tool-refuses-stamp` | A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. | [`docs/debts/old-merge-tool-refuses-stamp.md`](../docs/debts/old-merge-tool-refuses-stamp.md) |
+| `one-shot-grant-label` | A one-shot approval, such as "go ahead and merge PR 12" or "approved, push it", counts as a grant, so the guard asks for a home. | [`docs/debts/one-shot-grant-label.md`](../docs/debts/one-shot-grant-label.md) |
 | `pin-missing-files-no-install` | `merge/install_from_main.sh` treats a pin at main that has only missing tracked files as dirty: it exits 1 and installs nothing. | [`docs/debts/pin-missing-files-no-install.md`](../docs/debts/pin-missing-files-no-install.md) |
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`docs/debts/pinoff1-freshness-flaky.md`](../docs/debts/pinoff1-freshness-flaky.md) |
 | `playwright-rows-measure` | Unmeasured: whether the Playwright rows in `hooks/test_guard.py` still stop a real mistake. | [`docs/debts/playwright-rows-measure.md`](../docs/debts/playwright-rows-measure.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`docs/debts/pr-ready-unguarded.md`](../docs/debts/pr-ready-unguarded.md) |
+| `press-clause-hides-owner-press` | The press-link check excuses a whole clause whose subject is the session when it holds no `you`. | [`docs/debts/press-clause-hides-owner-press.md`](../docs/debts/press-clause-hides-owner-press.md) |
 | `ps-command-misses-bash` | Guard rule `command-in-item` refuses a `powershell` string only for `&&`, `\|\|`, `<<`, `<<<`, `/dev/null` and `export`. | [`docs/debts/ps-command-misses-bash.md`](../docs/debts/ps-command-misses-bash.md) |
 | `push-head-mismatch-trap` | `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. | [`docs/debts/push-head-mismatch-trap.md`](../docs/debts/push-head-mismatch-trap.md) |
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`docs/debts/push-report-before-checks.md`](../docs/debts/push-report-before-checks.md) |
@@ -345,7 +351,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`docs/debts/verdict-pipe-drops-line.md`](../docs/debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-colon-line` | `bin/verdict` counts marker lines that start `SKIP ` or `SKIPPED`. | [`docs/debts/verdict-skip-colon-line.md`](../docs/debts/verdict-skip-colon-line.md) |
-| `workflow-agent-model-unchecked` | Guard rule agent-role-model checks Agent and Task spawns only. | [`docs/debts/workflow-agent-model-unchecked.md`](../docs/debts/workflow-agent-model-unchecked.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
@@ -357,3 +362,4 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
+| `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
