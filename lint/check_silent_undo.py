@@ -61,6 +61,7 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
+BLOCK_LINES = 6  # the size of a block: a near reversal may miss one line from here up; a lane whole-file reversal counts from here up
 
 
 class Unknown(Exception):
@@ -521,7 +522,7 @@ def undone(o, n, mine, lane=False, net=True):
             if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)], modified=lane) for l in n):
                 return True
             continue
-        if misses(o, big_n) + misses(n, big_o) <= (1 if len(o) + len(n) >= 6 else 0):
+        if misses(o, big_n) + misses(n, big_o) <= (1 if len(o) + len(n) >= BLOCK_LINES else 0):
             return True
     return False
 
@@ -595,8 +596,10 @@ def reversals(cwd, old, new, files, earlier, lane=None):
         for e in touched if mine else []:
             ea, eb = e.files[path]
             test = bool(lane) and (is_test(path) or bool(dst and is_test(dst)))
-            whole = ea == b and eb == a and a != b and not (lane and not test and b == ZERO)  # a delete is a net loss
             theirs = hunks(cwd, e.parent, e.sha, path) if e.parent else []
+            whole = ea == b and eb == a and a != b and not (lane and not test and b == ZERO)  # a delete is a net loss
+            if lane and sum(len(o) + len(n) for o, n in theirs) < BLOCK_LINES:
+                whole = False  # a file one or two lines were changed in, and changed back, is an edit, not a dropped block
             if not whole and not any(undone(o, n, mine, bool(lane), test) for o, n in theirs):
                 continue
             if elsewhere is None:
