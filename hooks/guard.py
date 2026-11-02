@@ -6,7 +6,7 @@ Modes:
   order and refuses or asks on the first match. Bad input allows the call.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. A builder's offence
-  blocks its first stop; any other role's offence is logged for the reviewer.
+  is refused at its first stop; any other role's offence is logged for the reviewer.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -28,9 +28,10 @@ rule is the constant it emits. Its limits are in its decision, or in the comment
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
-                       against the commits the builder received. The reason gives the undo route and
-                       names no path. No override lifts it. SubagentStop (`judge_stop`) blocks the
-                       builder's first stop the same way; a second stop passes.
+                       against the commits the builder made and its working tree. The reason gives
+                       the undo route and names no path. No override lifts it. SubagentStop
+                       (`judge_stop`) refuses the builder's first stop the same way; a second stop
+                       passes.
                        (builders-cannot-edit-tests)
   author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A test-author or record-writer commit or push.
@@ -1817,13 +1818,15 @@ def builder_diff_reason() -> str:
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. This refusal is final: "
-        "never write the files another way."
+        "you added. If a commit of yours holds the change, stop and report it. "
+        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+        "and report the conflict to the orchestrator; a test-author resolves it. "
+        "This refusal is final: never write the files another way."
     )
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Judge a role's own change at commit or push. A builder's test change DENIES (rule `builder-diff`,
+    """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
     with the undo route). A builder's logged change, any other role's offence, and a change that could
     not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
     found, noted = diff_violation(root, role)
@@ -1839,10 +1842,10 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
 
 def judge_stop(payload) -> None:
     """A builder, test-author, record-writer or designer that stops has its own change judged. A
-    builder's test change BLOCKS the first stop (rule `builder-diff`, with the undo route). A second
+    builder's test change is refused at the first stop (rule `builder-diff`, with the undo route). A second
     stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
     its tree never loops. A builder's logged change and the other roles' offences log under the role's
-    rule and never block. A cwd that is the main checkout and a change that could not be read log too,
+    rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
     and allow. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
