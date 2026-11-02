@@ -1416,6 +1416,297 @@ class PickGuardTests(unittest.TestCase):
                     self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
 
 
+class PickSendTests(unittest.TestCase):
+    """The pick-send check (questions-go-to-owner, "Chat first, then the page"). An owner-facing pick open
+    past 5 minutes blocks until a send, an owner message or an items write follows its ask. A lane's pick
+    blocks unless its turn sends it to the parent session. Each case works in its own folder under this
+    run's folder (test-temp-standard). The state file is <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.picks."""
+
+    SID = "ps-sid-1"
+    OWN = "session_pslane1"  # a lane's own record id: the env value with its session_ prefix (hooks/override.py)
+    LANE_ENV = "cse_pslane1"  # CLAUDE_CODE_REMOTE_SESSION_ID for that lane
+    PARENT = "session_pspar1"
+    LANE_TAG = "cs-build:lane"  # a lane's record tag (guard.LANE_TAG)
+    SEND = "mcp__claude-code-remote__send_message"
+    ASK = "AskUserQuestion"
+    DATA = "ArtifactData"
+    STALE = 600  # seconds: an ask this old is past the 5-minute wait
+    PAGE = PickGuardTests.PAGE
+    # The pick with its promise words and the page word. The chat-first clause passes it, so only the
+    # pick-send check can block it.
+    PICK = PickGuardTests.PICK.replace("Two ways:", "Two ways. After 5 minutes unanswered it goes to the waiting page.", 1)
+    LANE_PICK = PICK.replace("> **Next** wait", "> **Next** wait " + PAGE)
+
+    def setUp(self):
+        self.scratch = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.scratch, True)
+        self.cfg = os.path.join(self.scratch, "cfg")
+        os.makedirs(self.cfg)
+        self.repo = self.make_repo("repo", {"kinds": {}, "waiting-page": self.PAGE})
+        self.ask_at = None
+
+    def make_repo(self, name, extras):
+        """A repo folder in this test's scratch folder. `extras` is its layout-extras dict, or None for no file."""
+        root = os.path.join(self.scratch, name)
+        os.makedirs(os.path.join(root, ".git"))
+        os.makedirs(os.path.join(root, ".claude"))
+        if extras is not None:
+            with open(os.path.join(root, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+                json.dump(extras, handle)
+        return root
+
+    def pick_file(self):
+        return os.path.join(self.cfg, "handoffs", self.SID + ".picks")
+
+    def clear_state(self):
+        shutil.rmtree(os.path.join(self.cfg, "handoffs"), ignore_errors=True)
+
+    def files_under(self, root):
+        return [os.path.join(folder, name) for folder, _, names in os.walk(root) for name in names]
+
+    def env(self, lane):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_REMOTE_SESSION_ID"}
+        env["CLAUDE_CONFIG_DIR"] = self.cfg
+        if lane:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = self.LANE_ENV
+        return env
+
+    def stop(self, records, cwd=None, lane=False):
+        """Run the Stop guard on `records`. Returns the printed decision, or None when the Stop passed."""
+        path = write_transcript(records, self.scratch)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                "session_id": self.SID, "cwd": cwd or self.repo}
+        run = run_guard(REPORT_GUARD, hook, env=self.env(lane))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    @staticmethod
+    def stamp(rec, when):
+        rec["timestamp"] = datetime.fromtimestamp(when, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return rec
+
+    def record_pick(self):
+        """Stop 1 of an owner turn. The reply offers the pick with its promise, so the chat-first clause
+        passes it and the pick-send check records it."""
+        out = self.stop([human("decide"), assistant_text(self.PICK)])
+        self.assertFalse(out and out.get("decision") == "block", "the first Stop blocked: %s" % out)
+        self.assertTrue(os.path.exists(self.pick_file()), "the pick was not recorded")
+        with open(self.pick_file(), encoding="utf-8") as handle:
+            self.assertIn("fold the guard", handle.read(), "the recorded pick does not hold its text")
+
+    def age_picks(self, seconds):
+        """Set each recorded pick's ask `seconds` in the past, so the test drives the clock."""
+        with open(self.pick_file(), encoding="utf-8") as handle:
+            state = json.load(handle)
+        self.ask_at = time.time() - seconds
+        for entry in state.values():
+            entry["asked"] = self.ask_at
+        with open(self.pick_file(), "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
+
+    def owner_turn(self, middle=(), reply=PICK):
+        """The owner turn that asked the pick: the owner message before the ask, then the (offset, record)
+        pairs in `middle` with offsets in seconds from the ask, then the final reply, stamped now."""
+        records = [self.stamp(human("decide"), self.ask_at - 60), self.stamp(assistant_text(self.PICK), self.ask_at)]
+        records += [self.stamp(rec, self.ask_at + offset) for offset, rec in middle]
+        records.append(self.stamp(assistant_text(reply), time.time()))
+        return records
+
+    @staticmethod
+    def quiet_work():
+        """Work after the ask that is neither an owner message nor a send."""
+        return [(100, tool_use_msg("Bash", {"command": "ls"})), (101, tool_result_msg())]
+
+    def own_record(self, tags=(), parent=PARENT):
+        """The get_session call and result that name this lane: its ccr record, as the lane's transcript holds it."""
+        body = json.dumps({"ccr": {"id": self.OWN, "tags": list(tags), "parent_session_id": parent}})
+        call = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "tu_own", "name": "mcp__claude-code-remote__get_session",
+             "input": {"session_id": self.OWN}}]}}
+        result = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "tu_own", "content": body}]}}
+        return [call, result]
+
+    def lane_records(self, middle=(), own=None):
+        """A lane's turn: its own record, a peer's message that starts the turn, the records in `middle`,
+        then the reply. A lane's prompts arrive as peer messages, so the turn has no owner record."""
+        own = self.own_record() if own is None else own
+        return own + [peer_msg("Pick the fold or the hook?")] + list(middle) + [assistant_text(self.LANE_PICK)]
+
+    # Failure class 1: a reply that only mentions a past question records nothing and never blocks.
+    def test_c1_mention_of_a_past_question_records_nothing(self):
+        rows = ("> **Done** OTHER asked A (my pick) or B last week; no answer yet\n> **Input Needed** none\n> **Next** wait",
+                "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait",
+                "> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait")
+        for row in rows:
+            with self.subTest(row=row):
+                self.clear_state()
+                out = self.stop([human("decide"), assistant_text(row)])
+                self.assertIsNone(out, "a reply with no pick was blocked: %s" % out)
+                self.assertFalse(os.path.exists(self.pick_file()), "a reply with no pick wrote the pick file")
+
+    # Failure class 2: a box question in the main-session turn is never recorded and never blocks.
+    def test_c2_box_question_is_never_recorded(self):
+        records = [human("decide"), tool_use_msg(self.ASK, {}), tool_result_msg(), assistant_text(self.PICK)]
+        out = self.stop(records)
+        self.assertIsNone(out, "a pick answered in the question box was blocked: %s" % out)
+        self.assertFalse(os.path.exists(self.pick_file()), "a pick answered in the question box wrote the pick file")
+
+    # Failure class 3: a pick sent after its ask never re-blocks, even when the next reply repeats it.
+    def test_c3_sent_pick_never_reblocks_even_when_repeated(self):
+        self.record_pick()
+        self.age_picks(self.STALE)
+        send = tool_use_msg(self.SEND, {"session_id": "session_writer", "message": "Pick: fold the guard or add a hook."})
+        out = self.stop(self.owner_turn([(300, send), (301, tool_result_msg())]))
+        self.assertIsNone(out, "a sent pick blocked again when the next reply repeated it: %s" % out)
+
+    # Failure class 4: a repo with no waiting page never blocks on the pick-send check, and says so.
+    def test_c4_no_waiting_page_says_so_and_records_nothing(self):
+        for label, extras in (("no extras file", None), ("no waiting-page key", {"kinds": {}})):
+            with self.subTest(label):
+                self.clear_state()
+                repo = self.make_repo("bare-" + label.replace(" ", "-"), extras)
+                out = self.stop([human("decide"), assistant_text(self.PICK)], cwd=repo)
+                # The existing promise check refuses a pick with no page and no box. Only its refusal may print.
+                self.assertIsNotNone(out, "the pick passed with no waiting page and no box")
+                self.assertIn("Pick guard", out["reason"])
+                self.assertFalse(os.path.exists(self.pick_file()), "a repo with no waiting page wrote the pick file")
+                self.assertRegex(out.get("systemMessage") or "", r"(?i)waiting page",
+                                 "the systemMessage does not say the pick-send check stood down")
+
+    def test_c4_page_removed_after_a_pick_never_blocks(self):
+        self.record_pick()
+        self.age_picks(self.STALE)
+        os.remove(os.path.join(self.repo, ".claude", "layout-extras.json"))
+        out = self.stop(self.owner_turn(self.quiet_work(), reply="Still waiting on you."), cwd=self.repo)
+        self.assertIsNone(out, "a recorded pick blocked in a repo with no waiting page: %s" % out)
+
+    # Failure class 5: a task notification, agent end, system reminder or peer message after the ask does not clear.
+    def test_c5_non_owner_records_after_the_ask_do_not_clear(self):
+        notices = (("task notification", human("<task-notification>\n<task-id>t9</task-id>\n</task-notification>")),
+                   ("agent end", human("<agent-message>\nLint is green.\n</agent-message>")),
+                   ("system reminder", human("<system-reminder>\nThe task tools were not used.\n</system-reminder>")),
+                   ("peer message", peer_msg("Triage is done.")))
+        for label, rec in notices:
+            with self.subTest(label):
+                self.clear_state()
+                self.record_pick()
+                self.age_picks(self.STALE)
+                out = self.stop(self.owner_turn([(300, rec)]))
+                self.assertIsNotNone(out, "a %s after the ask cleared the pick" % label)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("fold the guard", out["reason"])
+
+    # Failure class 6: an owner message after the ask clears the pick, and an empty file is removed.
+    def test_c6_owner_message_after_the_ask_clears(self):
+        owner_rows = (("owner message", human("Fold it, A.")),
+                      ("queued owner message", {"type": "attachment",
+                                                "attachment": {"type": "queued_command", "prompt": "Fold it, A."}}))
+        for label, rec in owner_rows:
+            with self.subTest(label):
+                self.clear_state()
+                self.record_pick()
+                self.age_picks(self.STALE)
+                out = self.stop(self.owner_turn([(300, rec)], reply="Folding the guard now."))
+                self.assertIsNone(out, "%s after the ask did not clear the pick: %s" % (label, out))
+                self.assertFalse(os.path.exists(self.pick_file()), "a cleared pick left the file behind")
+
+    def test_clear_only_by_an_items_write_or_a_send(self):
+        # Catches: any ArtifactData call clearing a pick. Only a write to the items collection counts.
+        base = {"url": self.PAGE, "doc_id": "q1"}
+        rows = (("items set clears", {"action": "set", "collection": "items"}, True),
+                ("items update clears", {"action": "update", "collection": "items"}, True),
+                ("notes set does not clear", {"action": "set", "collection": "notes"}, False),
+                ("items get does not clear", {"action": "get", "collection": "items"}, False))
+        for label, args, clears in rows:
+            with self.subTest(label):
+                self.clear_state()
+                self.record_pick()
+                self.age_picks(self.STALE)
+                call = tool_use_msg(self.DATA, dict(base, **args))
+                out = self.stop(self.owner_turn([(300, call), (301, tool_result_msg())]))
+                if clears:
+                    self.assertIsNone(out, "%s: the pick was still blocked: %s" % (label, out))
+                else:
+                    self.assertIsNotNone(out, "%s: the pick was cleared" % label)
+                    self.assertIn("fold the guard", out["reason"])
+
+    def test_owner_pick_older_than_five_minutes_blocks_and_names_it(self):
+        self.record_pick()
+        self.age_picks(self.STALE)
+        out = self.stop(self.owner_turn(self.quiet_work()))
+        self.assertIsNotNone(out, "a pick open 10 minutes with no send passed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("fold the guard", out["reason"], "the reason does not name the pick text")
+        self.assertRegex(out["reason"], r"(?i)writer", "the reason does not name the remedy: the page writer")
+        self.assertTrue(os.path.exists(self.pick_file()), "a blocked pick left the file")
+
+    def test_under_five_minutes_does_not_block(self):
+        self.record_pick()
+        self.age_picks(120)
+        out = self.stop(self.owner_turn(self.quiet_work()))
+        self.assertIsNone(out, "a pick two minutes old blocked: %s" % out)
+
+    # Failure class 8: a Stop with no pick and no state file writes no file.
+    def test_c8_no_pick_and_no_state_writes_no_file(self):
+        landed = [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        rows = (("unlanded prose", [assistant_text(PendingRefusalTests.PROSE)]),
+                ("landed clean report", landed + [assistant_text(PendingRefusalTests.LANDED_CLEAN)]))
+        for label, tail in rows:
+            with self.subTest(label):
+                out = self.stop([human("do the task")] + tail)
+                self.assertIsNone(out, "%s: the Stop blocked: %s" % (label, out))
+                self.assertEqual(self.files_under(self.cfg), [], "%s: the Stop wrote a file" % label)
+
+    # Lane (a session whose own record names a parent or carries the lane tag).
+    def test_c7_lane_pick_without_a_send_blocks(self):
+        # Catches: a lane's chat read as a route to the owner. Promise words and the page link do not pass for
+        # a lane, and neither does the question box.
+        rows = (("promise and link", []),
+                ("question box", [tool_use_msg(self.ASK, {}), tool_result_msg()]))
+        for label, middle in rows:
+            with self.subTest(label):
+                out = self.stop(self.lane_records(middle), lane=True)
+                self.assertIsNotNone(out, "a lane's pick with no send passed (%s)" % label)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("Lane pick guard", out["reason"])
+                self.assertIn(self.PARENT, out["reason"], "the reason does not name the parent session")
+                self.assertFalse(os.path.exists(self.pick_file()), "a lane wrote the owner pick file")
+
+    def test_c7_lane_send_in_the_turn_passes(self):
+        send = tool_use_msg(self.SEND, {"session_id": self.PARENT, "message": "Pick: fold the guard or add a hook."})
+        out = self.stop(self.lane_records([send, tool_result_msg()]), lane=True)
+        self.assertIsNone(out, "a lane that sent its pick to the parent was blocked: %s" % out)
+
+    def test_c7_send_from_an_earlier_turn_does_not_pass(self):
+        # Catches: a send in an earlier turn counted for this turn's pick.
+        send = tool_use_msg(self.SEND, {"session_id": self.PARENT, "message": "Pick: fold the guard or add a hook."})
+        records = self.own_record() + [send, tool_result_msg(), peer_msg("Next question."),
+                                       assistant_text(self.LANE_PICK)]
+        out = self.stop(records, lane=True)
+        self.assertIsNotNone(out, "a send from an earlier turn passed for this turn's pick")
+        self.assertIn("Lane pick guard", out["reason"])
+
+    def test_c7_lane_is_read_from_the_own_record(self):
+        # Catches: a lane read from the parent id alone or the lane tag alone is missed, and a session with
+        # no lane record read as a lane because the env id is set.
+        rows = (("parent only", self.own_record(tags=(), parent=self.PARENT), True),
+                ("tag only", self.own_record(tags=(self.LANE_TAG,), parent=""), True),
+                ("neither", self.own_record(tags=(), parent=""), False),
+                ("no own record", [], False))
+        for label, own, is_lane in rows:
+            with self.subTest(label):
+                self.clear_state()
+                out = self.stop(own + [human("decide"), assistant_text(self.PICK)], lane=True)
+                if is_lane:
+                    self.assertIsNotNone(out, "%s: a lane's pick with no send passed" % label)
+                    self.assertIn("Lane pick guard", out["reason"])
+                    self.assertFalse(os.path.exists(self.pick_file()), "%s: a lane wrote the pick file" % label)
+                else:
+                    self.assertIsNone(out, "%s: an owner-facing pick blocked on its first Stop: %s" % (label, out))
+                    self.assertTrue(os.path.exists(self.pick_file()), "%s: an owner-facing pick was not recorded" % label)
+
+
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
 
