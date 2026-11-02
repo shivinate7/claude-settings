@@ -9,4 +9,4 @@
 **Retire.** Two steps:
 
 - Reword the remedy at `lint/check_red_run.py` lines 128-129. It names how to add a trailer to a pushed commit: reword that commit, then push with `--force-with-lease`. Closed when a test in `lint/test_check_red_run.py` pins that text.
-- Add one line to root `CLAUDE.md` under `roles-each-layer-proves-once` (each layer proves a change once) that names the trailer. The owner's word is needed before this line is added.
+- Add one line to root `CLAUDE.md` under `roles-each-layer-proves-once` (each layer proves a change once) that names the trailer. The owner's grant is needed before this line is added.
