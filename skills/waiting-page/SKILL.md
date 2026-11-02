@@ -1,6 +1,6 @@
 ---
 name: waiting-page
-description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page, or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
+description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page or parked lines on it (the page's writer), or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
 ---
 
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
@@ -128,6 +128,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
   has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
+- `answers/park.<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
+  `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
+  counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them on the answered card. With no record, the card says "Answered, filing pending" and the save
@@ -144,7 +147,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
-  `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
+  `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
@@ -281,8 +284,8 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
 sessions that watch the page. Only the owning session reads, routes and closes its items. It reads
-the answers at each wake, and at the start of each turn while it has an item open:
-`ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
+the answers at each wake, and at the start of each turn while it has an item open (the writer also
+while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
 relays an answer. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
@@ -299,7 +302,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
 - On a comment wake, read `answers/` for your own items only (by `owner` and `n`). Route them as
-  below. If no item in the comment is yours, stay silent.
+  below. The writer also reads each `answers/park.<id>` whenever `meta/page.parked` is not empty, and routes it
+  by the parked branch below. If no item in the comment is yours and you are not the writer of a page with parked lines, stay silent.
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
@@ -343,7 +347,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 ## Route and close
 
-Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An answer with `parked: true` goes to the page's writer, not to an item's owner, and takes the
+parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
@@ -382,6 +387,16 @@ item and leaves it open until the lane takes the answer. Then it closes the item
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+
+A parked answer (`answers/park.<id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
+Then it reads `answers/park.<id>` again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
+This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
+A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`) or a reply in the thread.
+The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
+- `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
+- `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.
+- Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
+  With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
 ## Route an ask
 

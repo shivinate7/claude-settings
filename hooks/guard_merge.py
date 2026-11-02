@@ -71,7 +71,7 @@ def gh_call_of(segment: str):
 MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
+# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
 # batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
 # 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
@@ -585,19 +585,19 @@ ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
-    "then retry."
+    "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
-    "that pull request merges or is closed as replaced, then retry."
+    "that pull request merges or is closed as replaced, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry."
+    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers."
+    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 

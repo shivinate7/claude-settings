@@ -15,6 +15,7 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
     - A node or bash suite is hit when its source names any of those words.
     - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
+- During the check wait, a base branch retarget or a conflict (CONFLICTING or DIRTY) stops the merge (sweep row `wait-base-changed`, `wait_checks`); a base tip move goes to the small-move rule.
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
 
