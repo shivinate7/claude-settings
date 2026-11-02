@@ -907,3 +907,6 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- press-label-verb-only: the press-link label excusal reads the verb only, so label "Approve on GitHub" beside "The session approves PR #5." passes. Decision: act-in-place
+- shell-line-no-arg-chain: command-in-item passes a chain of commands with no arguments (`whoami; hostname`, `pwd && whoami`, `date | sort`). Decision: act-in-place
+- shell-line-capital-prose: command-in-item lowercases the command word, so capitalised prose with `;` (`Option A; Option B`) is refused, and the decision does not say so. Decision: act-in-place
