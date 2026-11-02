@@ -254,12 +254,28 @@ def head_moved_since(cwd, base):
         return None
 
 
-def last_incoming_index(records):
-    """Index of the last incoming message (is_incoming), or None when the transcript has none."""
-    found = None
+def peer_sender(rec):
+    """The id of the session that sent a peer message record (origin.fromSession), else None."""
+    origin = rec.get("origin")
+    found = origin.get("fromSession") if _is_peer(origin) else None
+    return found if isinstance(found, str) and found else None
+
+
+def last_incoming_index(records, acks=None):
+    """Index of the last incoming message (is_incoming), or None when the transcript has none.
+
+    `acks` maps a sender id to the send targets that reach it. A peer message from that sender, after a
+    send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
+    sends before it stay in the turn."""
+    found, sent = None, set()
     for i, rec in enumerate(records):
         if is_incoming(rec):
-            found = i
+            if acks and acks.get(peer_sender(rec), set()) & sent:
+                continue
+            found, sent = i, set()
+        elif acks and not rec.get("isSidechain"):
+            for use in tool_uses(rec):
+                sent |= send_targets(use)
     return found
 
 

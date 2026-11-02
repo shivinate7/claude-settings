@@ -27,14 +27,16 @@ On any turn whose reply holds an Input Needed item that asks the owner a questio
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
 holds a qualifying act (`questions-reach-page`: every question goes to the page writer in the same
 turn it is asked, no clock). The turn is every record after the last
-incoming message, a peer's included. Owner-facing session: the question box (main session), a send to
+incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
+starts no turn. Owner-facing session: the question box (main session), a send to
 the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
 collection items to this repo's page. Lane (own get_session record tagged cs-build:lane, or with a
 parent): a send to @parent, the parent id or the writer. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
-transcript this hook already holds; one layout read, the own-record import (hooks/own_session.py) and one
-more transcript read, only on a turn that asks with no qualifying act (`decisions-reach-a-clickable-pick`).
+transcript this hook already holds. Only on a turn that asks with no send to @parent or the writer: the
+own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id; and
+one layout read when no box counts either (`decisions-reach-a-clickable-pick`).
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 
@@ -53,8 +55,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, send_targets,
-    tool_uses)
+    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    send_targets, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -449,12 +451,13 @@ LANE_REFUSAL = (
 )
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
 LANE_TAG = "cs-build:lane"
-PARENT_TARGETS = ("@parent", "parent")
-# A "?" ends a question only before whitespace, the end or markup, so a URL query never counts. Quoted
-# text, backticked text and a blockquoted line are past words, never a question asked now. A quote opens
-# only at a non-word edge, so a lone quote cannot span to the next one.
-QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
-QUESTION_MARK_RE = re.compile(r"\?(?=[^\w?]*(?:\s|$))")
+PARENT_TARGETS = {"@parent", "parent"}
+# A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
+# text, backticked text and a blockquoted line are past words, never a question asked now. A straight
+# quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
+# (Don't) cannot span to the next quote.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
 def input_needed_section(text):
@@ -529,41 +532,55 @@ def departs_problem(text):
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
 
 
-def _own_lane_read(hook, path):
+def _own_lane_read(path, own_id):
     """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
-    tag cs-build:lane or a parent_session_id. No own id or no record reads as owner-facing."""
-    from override import remote_session_id
-    own_id = remote_session_id()
-    if not own_id:
-        return False, None
+    tag cs-build:lane or a parent_session_id. No record reads as owner-facing."""
     import own_session
     tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+def _turn_acts(records, turn, acks):
+    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
+    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+    cut = len(records) - len(turn)
+    if cut and peer_sender(records[cut - 1]) in acks:
+        idx = last_incoming_index(records, acks)
+        turn = records if idx is None else records[idx + 1:]
+    uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
+    return uses, [send_targets(u) for u in uses]
+
+
 def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
-    sentence), judged on `turn`, the records after the last incoming message (questions-reach-page).
+    sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
+    ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: the question box, a send to the page writer, or an items write to this repo's page.
     Lane: a send to the parent or the page writer. A send to @parent passes in any session. Cost: nothing
-    past the text check when the turn has no question or sends to @parent; else the own-record import and a
-    transcript read, and the layout read only when no question box or writer send is in the turn."""
+    past the text check when the turn has no question or sends to @parent or the writer. Else the own-record
+    import and a transcript read, only in a session with a remote id; and the layout read only when no box
+    or send counts."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
-    main = [r for r in turn if not r.get("isSidechain")]
-    uses = [u for r in main for u in tool_uses(r)]
-    sends = [send_targets(u) for u in uses]
-    if any(t & set(PARENT_TARGETS) for t in sends):
-        return "", ""
     writer = page_writer_id(records)
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-    lane, parent = _own_lane_read(hook, hook.get("transcript_path"))
-    if lane:
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set())
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
-    if any(u.get("name") == ASK_TOOL for u in uses):
+    acks = {writer: {writer}} if writer else {}
+    uses, sends = _turn_acts(records, turn, acks)
+    if any(t & PARENT_TARGETS for t in sends) or (writer and any(writer in t for t in sends)):
         return "", ""
-    if writer and any(writer in t for t in sends):
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from override import remote_session_id
+    own_id = remote_session_id()
+    boxed = any(u.get("name") == ASK_TOOL for u in uses)
+    if boxed and not own_id:
+        return "", ""  # no remote id, so no own record: owner-facing, where the box counts
+    lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
+    if lane:
+        if parent:
+            acks[parent] = {parent} | PARENT_TARGETS
+            uses, sends = _turn_acts(records, turn, acks)
+        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+    if boxed:
         return "", ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"

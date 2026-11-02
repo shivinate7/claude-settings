@@ -27,7 +27,7 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 Known limit: a drive name such as "the A: drive and the B: drive" reads as two lettered markers.
 
-Cost: no new process, file or timer. No file written. One layout read, the own-record import and one more transcript read, only on a turn that asks with no qualifying act. A repo with no waiting page is not blocked: the guard prints a systemMessage, and a lane is never failed open.
+Cost: no new process, file or timer. No file written. The extra reads come only on a turn that asks with no send to @parent or the page writer. In a session with a remote id, that turn adds the own-record import and one more transcript read. When no box counts either, it adds one layout read. A repo with no waiting page is not blocked: the guard prints a systemMessage, and a lane is never failed open.
 
 Kind: process
 Home: lint/report_guard.py
