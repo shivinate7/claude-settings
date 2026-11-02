@@ -16025,6 +16025,9 @@ def decide(case):
     # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    # The home clone that other-checkout's stranded-cwd act reads from CLAUDE_PROJECT_DIR. The runner's own
+    # value would reach every case, so it is dropped here, and a case that names one sets it through `env`.
+    env.pop("CLAUDE_PROJECT_DIR", None)
     # A cloud session (CLAUDE_CODE_REMOTE "true") skips the load brake. Every run judges a
     # local machine, as lb_run does.
     env.pop("CLAUDE_CODE_REMOTE", None)
@@ -18220,16 +18223,19 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
-def _cross_checkout_fixture(name, lanes=("lane-a", "lane-b")):
+def _cross_checkout_fixture(name, lanes=("lane-a", "lane-b"), origin=None):
     """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
     shape the harness makes, and a scratch folder outside the clone. Returns the four paths. `lanes`
-    names the two worktrees; an agent case passes `agent-<id>` names, the shape its home takes."""
+    names the two worktrees; an agent case passes `agent-<id>` names, the shape its home takes. `origin`,
+    when given, is the primary's `origin` remote, which a separate-clone case needs to name the same repo."""
     primary = os.path.join(ROOT, name + "_primary")
     lane_a = os.path.join(primary, ".claude", "worktrees", lanes[0])
     lane_b = os.path.join(primary, ".claude", "worktrees", lanes[1])
     scratch = os.path.join(ROOT, name + "_scratch")
     if not os.path.isdir(lane_b):
         make_repo(primary, {"src/app.py": "print(1)\n"})
+        if origin:
+            run_vcs(primary, "remote", "add", "origin", origin)
         run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-" + lanes[0])
         run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-" + lanes[1])
         os.makedirs(scratch, exist_ok=True)
@@ -18485,11 +18491,19 @@ def worktree_home_cross_checkout_cost_case():
          {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
         ("Write from a cwd in no repository", "Write", NOGIT,
          {"file_path": os.path.join(lane_b, "n.txt"), "content": "x"}, None, 0),
+        # A separate clone's origin is read from its config file: the act adds no spawn to the one list.
+        ("Write into a separate clone", "Write", lane_a,
+         {"file_path": os.path.join(XCL_SEP, "note.txt"), "content": "x"}, None, 1),
+        ("shell cd into a separate clone", "Bash", lane_a,
+         {"command": "cd " + slash(XCL_SEP)}, None, 1),
+        ("Read of a separate clone", "Read", lane_a,
+         {"file_path": os.path.join(XCL_SEP, "src", "app.py")}, 0, 0),
     ):
         if os.path.exists(log):
             os.remove(log)
         decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": path,
-                "config": None, "agent_id": None, "tool_input": tool_input})
+                "config": None, "agent_id": None, "tool_input": tool_input,
+                "temp": os.path.join(ROOT, "tmp")})  # a separate clone must sit outside the temp folder
         spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
         listed = sum(1 for line in spawns if "worktree list" in line)
         if (want_all is not None and len(spawns) != want_all) or listed != want_list:
@@ -18497,7 +18511,8 @@ def worktree_home_cross_checkout_cost_case():
                 label, len(spawns), listed, "any" if want_all is None else want_all, want_list))
     if problems:
         return False, "; ".join(problems)
-    return True, "Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write spawns one"
+    return True, ("Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write or a cd into a "
+                  "separate clone spawns one list, and a read of one spawns none")
 
 
 def worktree_home_cross_checkout_override_case():
@@ -19187,6 +19202,260 @@ def worktree_home_cwd_builder_scratch_case():
 FIXTURELESS_CHECKS.update((
     worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
     worktree_home_cwd_builder_scratch_case))
+
+
+# ------------------------------------------------------------------ other-checkout: a separate clone
+#
+# The separate-clone act. A path in another clone of this repo is another checkout too, though no
+# `git worktree add` made it. The clone is found by a stat walk up from the path, never by a guess at
+# its name, and its origin is read from its config file, so the act spawns no git. Two clones are the
+# same repo when their origins name the same owner and repo, in any URL form. A clone with no origin, or
+# an unreadable config, is unknown and passes. A folder in the temp folder, a different repo, a nested
+# repo inside the own checkout and a plain folder with no `.git` all pass. With CLAUDE_PROJECT_DIR naming
+# the home clone, a cwd stranded in a separate clone refuses its writes. Decision:
+# docs/decisions/an-agent-outside-its-home-tree-must-stop.md (other-checkout).
+#
+# Each row is its own case, so a failure names one cause. A refusal row is red on a guard that lets the
+# act through.
+FAMILY = "worktree-home"
+XCL_ORIGIN = "https://github.com/example-owner/claude-settings.git"  # the own clone's origin
+XCL_PRIMARY = os.path.join(ROOT, "xcl_primary")                     # the own clone, with that origin
+XCL_LANE = os.path.join(XCL_PRIMARY, ".claude", "worktrees", "lane-a")  # its own linked worktree
+XCL_NESTED = os.path.join(XCL_PRIMARY, "vendor", "nested")          # a repo inside the own checkout
+XCL_SEP = os.path.join(ROOT, "xcl_sep")                             # a separate clone, same origin
+XCL_SEP_SSH = os.path.join(ROOT, "xcl_sep_ssh")                     # the same repo, ssh origin
+XCL_SEP_PROXY = os.path.join(ROOT, "xcl_sep_proxy")                 # the same repo, proxy URL origin
+XCL_SEP_LOCAL = os.path.join(ROOT, "xcl_sep_local")                 # cloned from the own clone's path
+XCL_SEP_LINKED = os.path.join(ROOT, "xcl_sep_linked")               # a linked worktree of XCL_THIRD
+XCL_THIRD = os.path.join(ROOT, "xcl_third")                         # a third clone of the same repo
+XCL_SEP_NOORIGIN = os.path.join(ROOT, "xcl_sep_noorigin")           # a clone with no origin at all
+XCL_SEP_BADCONF = os.path.join(ROOT, "xcl_sep_badconf")             # a config file that is no config
+XCL_SEP_EMPTY = os.path.join(ROOT, "xcl_sep_empty")                 # the same origin, no commit yet
+XCL_DIFF = os.path.join(ROOT, "xcl_other")                          # a different repo
+XCL_NEAR = os.path.join(ROOT, "xcl_near")                           # a repo name that only starts the same
+XCL_PLAIN = os.path.join(ROOT, "xcl_sep_like")                      # no .git anywhere above it
+XCL_TEMP = os.path.join(ROOT, "tmp")                                # the guard's temp folder for this block
+XCL_TMP = os.path.join(XCL_TEMP, "xcl_tmp_clone")                   # the same repo, under the temp folder
+XCL_SCRATCH = os.path.join(XCL_TEMP, FAKE_SESSION, "scratchpad", "xcl_clone")  # the session's scratchpad
+XCL_KEYS = (XCL_PRIMARY, XCL_NESTED, XCL_SEP, XCL_SEP_SSH, XCL_SEP_PROXY, XCL_SEP_LOCAL, XCL_SEP_LINKED,
+            XCL_SEP_NOORIGIN, XCL_SEP_BADCONF, XCL_SEP_EMPTY, XCL_DIFF, XCL_NEAR, XCL_PLAIN, XCL_TMP,
+            XCL_SCRATCH)
+
+
+def _xcl_clone(where, origin=None, commit=True):
+    """A clone of its own, with one commit unless `commit` is False, and the origin the case names."""
+    if commit:
+        make_repo(where, {"src/app.py": "print(1)\n"})
+    else:
+        os.makedirs(where, exist_ok=True)
+        init = run_vcs(where, "init", "-q", "-b", "main", ".")
+        if init.returncode != 0:
+            sys.exit("fixture setup failed: the init in %r: %s" % (where, init.stderr.strip()))
+    if origin:
+        added = run_vcs(where, "remote", "add", "origin", origin)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed: the origin add in %r: %s" % (where, added.stderr.strip()))
+
+
+def _build_separate_clones():
+    """The own clone and the clones around it. Each one is named by a case; none is copied from another."""
+    primary = _cross_checkout_fixture("xcl", origin=XCL_ORIGIN)[0]
+    _xcl_clone(XCL_NESTED, XCL_ORIGIN)
+    _xcl_clone(XCL_SEP, XCL_ORIGIN)
+    _xcl_clone(XCL_SEP_SSH, "git@github.com:example-owner/claude-settings.git")
+    _xcl_clone(XCL_SEP_PROXY, "http://proxy@127.0.0.1:8080/git/example-owner/claude-settings")
+    _xcl_clone(XCL_SEP_NOORIGIN)
+    _xcl_clone(XCL_SEP_BADCONF, XCL_ORIGIN)
+    write(os.path.join(XCL_SEP_BADCONF, ".git", "config"), "this is not a git config\n")
+    _xcl_clone(XCL_SEP_EMPTY, XCL_ORIGIN, commit=False)
+    _xcl_clone(XCL_DIFF, "https://github.com/example-owner/other-repo.git")
+    _xcl_clone(XCL_NEAR, "https://github.com/example-owner/claude-settings-old.git")
+    _xcl_clone(XCL_TMP, XCL_ORIGIN)
+    _xcl_clone(XCL_SCRATCH, XCL_ORIGIN)
+    _xcl_clone(XCL_THIRD, XCL_ORIGIN)
+    made = run_vcs(XCL_THIRD, "worktree", "add", "-q", XCL_SEP_LINKED, "-b", "xcl-linked")
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the worktree add at %r: %s" % (XCL_SEP_LINKED, made.stderr.strip()))
+    cloned = run_vcs(ROOT, "clone", "-q", primary, XCL_SEP_LOCAL)  # its origin is the own clone's path
+    if cloned.returncode != 0:
+        sys.exit("fixture setup failed: the clone to %r: %s" % (XCL_SEP_LOCAL, cloned.stderr.strip()))
+    write(os.path.join(XCL_PLAIN, "src", "app.py"), "print(1)\n")
+    # A missing clone would also read as an allow, so a refusal row could go red for the wrong cause. Stop here.
+    for where in (XCL_LANE, XCL_SEP, XCL_SEP_SSH, XCL_SEP_PROXY, XCL_SEP_LOCAL, XCL_SEP_LINKED, XCL_SEP_EMPTY):
+        if not os.path.exists(os.path.join(where, ".git")):
+            sys.exit("fixture setup failed: no .git at %r" % where)
+
+
+lazy_fixture(XCL_KEYS, _build_separate_clones)
+
+# The guard reads XCL_TEMP as its temp folder for every row here, so a clone under ROOT is outside it.
+# Left at the system temp, the clones would sit inside it and read as throwaways.
+TEMP_DIR = XCL_TEMP
+
+# Refused: a separate clone of this repo, from the own lane, the own checkout, or a stranded cwd.
+sh("other-checkout: a bare cd into a separate clone of the same repo is refused",
+   "cd " + slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a cd into a separate clone, chained to a build, is refused",
+   "cd " + slash(XCL_SEP) + " && make", "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a cd into a separate clone by a relative climb is refused",
+   "cd ../" + os.path.basename(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a cd into a separate clone in a subshell is refused",
+   "(cd %s && touch x)" % slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a pushd into a separate clone is refused",
+   "pushd " + slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an absolute shell redirect into a separate clone, with no cd, is refused",
+   "echo x > " + slash(os.path.join(XCL_SEP, "note.txt")), "deny", "other-checkout", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a separate clone of the same repo is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_LANE,
+    file_path=os.path.join(XCL_SEP, "note.txt"), content="x")
+add("other-checkout: an Edit into a separate clone of the same repo is refused",
+    "deny", "other-checkout", tool="Edit", cwd=XCL_LANE,
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), old_string="print(1)", new_string="print(2)")
+add("other-checkout: a Write under folders that do not exist yet in a separate clone is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP, "new", "dir", "note.txt"), content="x")
+add("other-checkout: a Write into an empty same-repo clone, with no commit yet, is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_EMPTY, "note.txt"), content="x")
+add("other-checkout: a Write into a linked worktree of a third clone of the same repo is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_LINKED, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone with an ssh origin is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_SSH, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone with a proxy URL origin is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_PROXY, "note.txt"), content="x")
+add("other-checkout: a Write into a clone cloned from the own clone's path is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_LOCAL, "note.txt"), content="x")
+sh("other-checkout: a cwd stranded in a separate clone refuses a relative shell write when CLAUDE_PROJECT_DIR "
+   "names the home clone",
+   "echo x > note.txt", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+add("other-checkout: a cwd stranded in a separate clone refuses a relative Write when CLAUDE_PROJECT_DIR "
+    "names the home clone",
+    "deny", "other-checkout", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+    file_path="note.txt", content="x")
+add("other-checkout: a cwd stranded in a separate clone refuses an absolute Write into that clone when "
+    "CLAUDE_PROJECT_DIR names the home clone",
+    "deny", "other-checkout", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), content="x")
+
+# Allowed: the own checkout, a repo inside it, a different repo, the temp folder, a clone that cannot be
+# read, and a plain folder. Each one is a false alarm the act must not raise.
+add("other-checkout: a Write within its own linked worktree is allowed",
+    "allow", tool="Write", cwd=XCL_LANE, file_path=os.path.join(XCL_LANE, "src", "new.txt"), content="x")
+sh("other-checkout: a cd to a folder inside the own checkout is allowed",
+   "cd %s && ls" % slash(os.path.join(XCL_PRIMARY, "src")), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a nested repo inside the own checkout is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_NESTED, "note.txt"), content="x")
+sh("other-checkout: a cd into a nested repo inside the own checkout is allowed",
+   "cd %s && ls" % slash(XCL_NESTED), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a clone of a different repo is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_DIFF, "note.txt"), content="x")
+sh("other-checkout: a cd into a clone of a different repo is allowed",
+   "cd %s && make" % slash(XCL_DIFF), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a clone whose repo name only starts with this one's is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_NEAR, "note.txt"), content="x")
+add("other-checkout: a Write into a separate clone with no origin is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP_NOORIGIN, "note.txt"), content="x")
+add("other-checkout: a Write into a separate clone whose config is unreadable is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP_BADCONF, "note.txt"), content="x")
+add("other-checkout: a Write into a folder with no .git, named like a clone, is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_PLAIN, "src", "new.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone under the temp folder is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_TMP, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone in this session's scratchpad is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, session=FAKE_SESSION,
+    file_path=os.path.join(XCL_SCRATCH, "note.txt"), content="x")
+add("other-checkout: a Read of a separate clone is allowed",
+    "allow", tool="Read", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP, "src", "app.py"))
+sh("other-checkout: a shell read of a separate clone is allowed",
+   "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git read run with -C into a separate clone is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Grep into a separate clone is allowed",
+    "allow", tool="Grep", cwd=XCL_PRIMARY, pattern="print", path=XCL_SEP)
+sh("other-checkout: a cd word in quotes names no move into a separate clone",
+   'echo "cd %s && make"' % slash(XCL_SEP), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a cd word in a comment names no move into a separate clone",
+   "# cd %s\nls" % slash(XCL_SEP), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset writes its own files",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+add("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a relative Write",
+    "allow", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None}, file_path="note.txt", content="x")
+add("other-checkout: a cwd in a separate clone with CLAUDE_PROJECT_DIR unset takes an absolute Write into it",
+    "allow", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None},
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), content="x")
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming that clone, is not stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_SEP})
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming a different repo, is not stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_DIFF})
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming a folder with no .git, is not "
+   "stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PLAIN})
+sh("other-checkout: a stranded cwd's cd back into the home clone is allowed",
+   "cd " + slash(XCL_PRIMARY), "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's cd into a checkout of the home clone, then a command, is allowed",
+   "cd %s && ls" % slash(XCL_LANE), "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's shell read of its own clone is allowed",
+   "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_SEP,
+   env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+TEMP_DIR = None  # back to the system temp for the sections below
+
+
+def xcl_override_write_case():
+    """The separate-clone act is liftable: under a timed owner override a Write into a separate clone
+    passes, because the owner may mean the write. Refused before the override."""
+    config = ov_config("xcl-write")
+    session = "ov-xcl-write"
+    target = os.path.join(XCL_SEP, "note.txt")
+    call = lambda s: ov_call("Write", {"file_path": target, "content": "x"}, XCL_LANE, config, session, s,
+                             temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def xcl_override_cd_case():
+    """The separate-clone cd act is liftable: under a timed owner override a bare cd into a separate
+    clone passes. Refused before the override."""
+    config = ov_config("xcl-cd")
+    session = "ov-xcl-cd"
+    call = lambda s: ov_call("Bash", {"command": "cd " + slash(XCL_SEP)}, XCL_LANE, config, session, s,
+                             temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def xcl_override_stranded_case():
+    """The stranded-cwd act is liftable too: under a timed owner override a relative write from a cwd
+    stranded in a separate clone passes. Refused before the override."""
+    config = ov_config("xcl-stranded")
+    session = "ov-xcl-stranded"
+    call = lambda s: ov_call("Bash", {"command": "echo x > note.txt"}, XCL_SEP, config, session, s,
+                             env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY}, temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a Write into a separate clone",
+                         xcl_override_write_case))
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a cd into a separate clone",
+                         xcl_override_cd_case))
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd's relative write",
+                         xcl_override_stranded_case))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
