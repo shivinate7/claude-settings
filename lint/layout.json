@@ -1,5 +1,5 @@
 {
-  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. \"legacy-repos\" keeps a kind where one repo holds it now, keyed by the repo's GitHub name, until that repo moves it. Decision one-layout-every-repo. The same file holds the owner's devices, the default device order for each app kind, and the caution levels. A repo names its \"kind\", \"caution\" and \"visibility\" in its extras file, and lists \"devices\" only where it differs. Decision repo-kind-and-caution.",
+  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. \"legacy-repos\" keeps a kind where one repo holds it now, keyed by the repo's GitHub name, until that repo moves it. Decision one-layout-every-repo. The same file holds the owner's devices, the default device order for each app kind, and the caution levels. A repo names its \"kind\", \"caution\" and \"visibility\" in its extras file, and lists \"devices\" only where it differs. A repo whose visibility is missing or unreadable gets the \"unknown\" level, never \"public\". Decision repo-kind-and-caution.",
   "extras": ".claude/layout-extras.json",
   "kinds": {
     "claude-md": {
@@ -122,9 +122,19 @@
   "visibility-caution": {
     "public": "public",
     "private": "private-solo",
-    "default": "public"
+    "default": "unknown"
   },
   "cautions": {
+    "unknown": {
+      "facts": [
+        "This repo's visibility is unread, so no premise about spend or about who can read the repo rests on this level."
+      ],
+      "acts": [
+        "Read each file before you commit it or publish it.",
+        "Keep tokens, passwords, keys and personal data out of commits, pull requests and artifacts.",
+        "Name \"visibility\" in .claude/layout-extras.json to set the level."
+      ]
+    },
     "public": {
       "facts": [
         "Other people can read this repo's commits, pull requests and artifacts.",
