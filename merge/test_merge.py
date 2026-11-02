@@ -8298,9 +8298,10 @@ class LockExtendsForRateWaits(unittest.TestCase):
         self.assertIsNone(self.lock.until)
 
 class LockProseStatesTheCode(unittest.TestCase):
-    """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its record."""
+    """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its file."""
     GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
     README = os.path.join(os.path.dirname(HERE), "README.md")
+    MERGE = os.path.join(HERE, "merge.py")
 
     def read(self, path):
         with open(path, encoding="utf-8") as f:
@@ -8336,20 +8337,27 @@ class LockProseStatesTheCode(unittest.TestCase):
             self.assertIn(term, bullet, f"the bullet does not name {term} as a term of the take expiry: {bullet}")
         self.assertNotIn("600 s lock cap", bullet)
 
-    def assert_unlock_line_checks_the_holder(self, line):
-        self.assertNotIn("Reads no lock state", line)
-        self.assertIn("holder", line, f"the --unlock line does not say it checks the holder: {line}")
+    def test_the_grant_bullet_and_the_take_call_state_the_same_ten_minute_spare(self):
+        bullet = self.lock_bullet()
+        self.assertIn("+ 10 minutes", bullet, f"the bullet does not state the take's ten-minute spare: {bullet}")
+        take = self.read(self.MERGE)
+        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, \(WAITS \* m\["deadlineMinutes"\] \+ 10\) \* 60\)', take),
+                             "merge.py's take call does not hold the ten-minute spare that the bullet states")
 
-    def test_the_readme_unlock_line_says_it_checks_the_holder(self):
+    def assert_unlock_line_never_checks_the_holder(self, line):
+        self.assertNotIn("Reads no lock state", line)
+        self.assertIn("Never checks the holder", line, f"the --unlock line does not say it never checks the holder: {line}")
+
+    def test_the_readme_unlock_line_says_it_never_checks_the_holder(self):
         section = self.read(self.README).split("\n## The `merge` command\n", 1)[1].split("\n## ", 1)[0]
         lines = [l for l in section.splitlines() if l.startswith("merge --unlock")]
         self.assertEqual(len(lines), 1, lines)
-        self.assert_unlock_line_checks_the_holder(lines[0])
+        self.assert_unlock_line_never_checks_the_holder(lines[0])
 
-    def test_the_module_docstring_unlock_line_says_it_checks_the_holder(self):
+    def test_the_module_docstring_unlock_line_says_it_never_checks_the_holder(self):
         lines = [l.strip() for l in merge.__doc__.splitlines() if l.strip().startswith("merge --unlock")]
         self.assertEqual(len(lines), 1, lines)
-        self.assert_unlock_line_checks_the_holder(lines[0])
+        self.assert_unlock_line_never_checks_the_holder(lines[0])
 
 class GitLockExtendsForRateWaits(Env):
     """GitLock and Host under a rate-limited `gh` call: the run hands Host.before_wait the lock's extend_for, as confirm does
