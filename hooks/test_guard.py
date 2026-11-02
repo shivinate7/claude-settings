@@ -561,6 +561,10 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
+# and its extras file names that branch as the record branch, so `roadmap` is not its record.
+RECROADMAP = os.path.join(ROOT, "recroadmap")
+RECFORK = os.path.join(ROOT, "recfork")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -1648,7 +1652,8 @@ def _build_push():
     for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
                                 (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
-                                (PUSHSAMETAG, "main", "main")):
+                                (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
+                                (RECFORK, "main", "roadmap-fork")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
             run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -1661,6 +1666,10 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
+    write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
+          json.dumps({"kinds": {}, "record-branch": "roadmap-fork"}) + "\n")
 
     run_vcs(PUSHSAMETAG, "tag", "main")
     if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
@@ -2035,7 +2044,8 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+             _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
@@ -8102,8 +8112,8 @@ Co-Authored-By: x" 2>&1|tail -1; git -C $W push origin roadmap 2>&1|tail -1; git
 # refused the same way. The escape closed the quote the reader had open, so the prose read as shell words.
 sh("env: heredoc-allow: the incident cat write, a body with bash <<EOF and an env read, is allowed",
    INCIDENT_CAT_WRITE, "allow", cwd=NOGIT)
-sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
-   INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT)
+# The incident python write ends in a push to roadmap, so it is judged in section 5e-2, where the triage record it
+# runs under is defined.
 for _runner in ("python3 -", "node -", "ruby -"):
     sh("env: heredoc-allow: a %s body with an escaped quote and an env word, is allowed" % _runner.split()[0],
        _runner + " <<'EOF'\nx = 'it\\'s " + ENV + " here'\nEOF", "allow", cwd=NOGIT)
@@ -8891,6 +8901,7 @@ LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
 LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
+TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
 MERGE_SHIM = "~/.claude/bin/merge"
 
 
@@ -8970,6 +8981,21 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
+    # the newest own record in either order.
+    "triage": role_call("g1", TRIAGE_TAGS),
+    "triage-then-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1"),
+    # A set_session_tags call on another session leaves the own record current.
+    "triage-then-other-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
+    "triage-then-tags-no-ids": role_call("g1", TRIAGE_TAGS) + [role_use("t1", SET_SESSION_TAGS, {"add": ["x"]}),
+                                                               role_result("t1", "ok")],
+    "untagged-then-other-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER),
+    "untagged-then-both-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER)
+    + role_tag_call("t2"),
+    "triage-title": role_call("g1", LANE_TAGS, title="handed to cs-build:triage"),
+    "other-triage": role_call("g1", TRIAGE_TAGS, session=ROLE_OTHER),
+    "triage-then-lane": role_call("g1", TRIAGE_TAGS) + role_call("g2", LANE_TAGS),
+    "lane-then-triage": role_call("g1", LANE_TAGS) + role_call("g2", TRIAGE_TAGS),
     # lane-closes-after-records shapes. The batch runner (ROLE_OWN) reads its own record, then the target
     # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
     "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
@@ -9095,6 +9121,221 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
 
+# =========================================================================== 5e-2. the record branch's one writer
+#
+# Rule roadmap-one-writer, decision session-tiers. A `git push` that reaches the repo's record branch is
+# denied unless the session's own newest get_session record proves the cs-build:triage tag, and no
+# set_session_tags call follows that record. The record branch is lint/layout.py record_branch(root): the
+# extras key "record-branch", else "roadmap". The proof is read as merge-role-proof reads its tags
+# (_own_session_read, with the env id from ROLE_ENV). Incident (owner, Nov 1, about 17:30 CST): a lane
+# session committed and pushed step c203 to the roadmap branch while triage was the only writer.
+#
+# The pushes run from real checkouts, never from a folder with no repo: outside a repo the default branch is
+# unknown, so a forced push there asks instead of denying. PUSHFEAT sits on feat, RECROADMAP on roadmap,
+# RECFORK on roadmap-fork (its extras name that branch).
+RECORD_RULE = "roadmap-one-writer"
+RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+LANE_TRANSCRIPT = role_path("lane")
+TRIAGE_TRANSCRIPT = role_path("triage")
+
+
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+       transcript=transcript, env=env, cwd=cwd, **kw)
+
+
+def record_allow(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
+    """A git push the guard lets through silently."""
+    sh("roadmap-one-writer: " + name, command, "allow", silent=True, transcript=transcript, env=env,
+       cwd=cwd, **kw)
+
+
+# A lane's push that reaches roadmap is denied, in every form that names the record branch.
+record_refuse("a lane's push that names roadmap is refused", VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lane's push of HEAD into roadmap is refused", VCS + " push origin HEAD:roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push of a ref into refs/heads/roadmap is refused",
+              VCS + " push origin x:refs/heads/roadmap", LANE_TRANSCRIPT)
+record_refuse("a lane's delete of roadmap with --delete is refused", VCS + " push --delete origin roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's delete of roadmap with an empty source is refused", VCS + " push origin :roadmap",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push with git -C into the roadmap checkout is refused, judged by that checkout",
+              VCS + " -C " + slash(RECROADMAP) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
+record_refuse("a lane's bare push from the roadmap checkout is refused", VCS + " push", LANE_TRANSCRIPT,
+              cwd=RECROADMAP)
+record_refuse("a lane's HEAD push from the roadmap checkout is refused", VCS + " push origin HEAD",
+              LANE_TRANSCRIPT, cwd=RECROADMAP)
+# A fork's record branch is its own. Its extras file names roadmap-fork, so that push is refused there.
+record_refuse("a lane's push of roadmap-fork is refused in the fork that names it its record branch",
+              VCS + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=RECFORK)
+# The default name stays a record branch in a fork too, so a fork's lane may not write `roadmap` either.
+record_refuse("a lane's push to roadmap in the fork is refused, since roadmap is a record branch in a fork too",
+              VCS + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECFORK)
+record_refuse("a lane's push to roadmap with git -C into the fork is refused, roadmap being a record branch in a fork too",
+              VCS + " -C " + slash(RECFORK) + " push origin roadmap", LANE_TRANSCRIPT, cwd=RECROADMAP)
+# git -C moves the judgment to that checkout: the fork's own name is refused from a checkout that does not name it.
+record_refuse("a lane's push of roadmap-fork with git -C into the fork is refused, judged by that checkout",
+              VCS + " -C " + slash(RECFORK) + " push origin roadmap-fork", LANE_TRANSCRIPT, cwd=PUSHFEAT)
+# A push handed to a shell, eval or ssh is still a push (decision guard-reads-wrapped-commands).
+record_refuse("a push to roadmap inside bash -c is refused",
+              'bash -c "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_refuse("a push to roadmap inside sh -lc with single quotes is refused",
+              "sh -lc '" + VCS + " push origin roadmap'", LANE_TRANSCRIPT)
+record_refuse("a push to roadmap inside eval is refused", 'eval "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_refuse("a bare push inside bash -c is judged by the checkout the call runs in",
+              'bash -c "' + VCS + ' push"', LANE_TRANSCRIPT, cwd=RECROADMAP)
+record_refuse("a push inside bash -c after a cd is judged by the folder it moved to",
+              "cd " + slash(RECROADMAP) + ' && bash -c "' + VCS + ' push"', LANE_TRANSCRIPT)
+record_allow("a push to lane/foo inside bash -c is allowed", 'bash -c "' + VCS + ' push origin lane/foo"',
+             LANE_TRANSCRIPT)
+record_allow("a triage session's push to roadmap inside bash -c is allowed",
+             'bash -c "' + VCS + ' push origin roadmap"', TRIAGE_TRANSCRIPT)
+# A dry run moves no branch, so it stays allowed (read_verb in guard.py).
+record_allow("a lane's dry run of a push to roadmap with --dry-run is allowed",
+             VCS + " push --dry-run origin roadmap", LANE_TRANSCRIPT)
+record_allow("a lane's dry run of a push to roadmap with -n is allowed", VCS + " push -n origin roadmap",
+             LANE_TRANSCRIPT)
+record_refuse("a push to roadmap after a dry run in another segment is still refused",
+              VCS + " push -n origin lane/foo && " + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+# A set_session_tags call on another session leaves the own proof current. One on the own session voids it.
+record_allow("a triage record then a tag call on another session is allowed", VCS + " push origin roadmap",
+             role_path("triage-then-other-tags"))
+record_refuse("a triage record then a tag call that names no sessions is refused, it may have named this one",
+              VCS + " push origin roadmap", role_path("triage-then-tags-no-ids"))
+record_refuse("a triage record then a tag call on another session and on this one is refused",
+              VCS + " push origin roadmap", role_path("untagged-then-both-tags"))
+# A push in a subshell, behind a pipe, under bash -c or with a trailing `&` is still a push to the checkout it
+# runs in. A cd inside the subshell moves that folder, so the record branch is read there.
+record_refuse("a lane's push to roadmap in a subshell after a cd into the roadmap checkout is refused",
+              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin roadmap)", LANE_TRANSCRIPT)
+record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tail, is refused",
+              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin HEAD:roadmap) 2>&1 | tail -1",
+              LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
+              'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap with a trailing background & is refused",
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
+             "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
+# Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
+record_refuse("a comment opener inside a string does not hide a push to roadmap",
+              'echo "# note" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a multi-line quoted string does not hide a push to roadmap after it",
+              'echo "first\nline" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lone quote inside a string does not hide a push to roadmap",
+              'echo "it\'s" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+record_refuse("a lone quote in a comment does not hide a push to roadmap on the next line",
+              "echo done # it's\n" + VCS + " push origin roadmap", LANE_TRANSCRIPT)
+# A forced push to roadmap is denied by force-push, the earlier rule (rule 4 in guard.py). It is not pinned to a
+# rule name, so this rule may come before or after it. Either way the push is refused, with or without a proof.
+sh("roadmap-one-writer: a lane's forced push to roadmap is refused, by force-push, the earlier rule",
+   VCS + " push -f origin roadmap", "deny", transcript=LANE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+sh("roadmap-one-writer: a triage session's forced push to roadmap is still refused, the proof lifts only this rule",
+   VCS + " push -f origin roadmap", "deny", transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV, cwd=PUSHFEAT)
+# A record with no proof: no get_session, a tag set after it, no session id outside the cloud, or no transcript.
+record_refuse("a session with no get_session record is refused a push to roadmap",
+              VCS + " push origin roadmap", role_path("no-record"))
+record_refuse("a triage record with a set_session_tags call after it is refused a push to roadmap",
+              VCS + " push origin roadmap", role_path("triage-then-tags"))
+record_refuse("outside the cloud, with no session id, a push to roadmap is refused even with a triage record",
+              VCS + " push origin roadmap", TRIAGE_TRANSCRIPT, env=None)
+record_refuse("a push to roadmap with no transcript_path is refused", VCS + " push origin roadmap", None)
+record_refuse("a triage tag in a record's title is not a proof, so the push is refused",
+              VCS + " push origin roadmap", role_path("triage-title"))
+record_refuse("a triage record of another session is not a proof, so the push is refused",
+              VCS + " push origin roadmap", role_path("other-triage"))
+record_refuse("the newest own record wins: a triage record, then a lane record, is refused",
+              VCS + " push origin roadmap", role_path("triage-then-lane"))
+# The proof: a triage record allows the push to roadmap, bare or named.
+record_allow("a triage session's push to roadmap is allowed", VCS + " push origin roadmap", TRIAGE_TRANSCRIPT)
+record_allow("a triage session's bare push from the roadmap checkout is allowed", VCS + " push",
+             TRIAGE_TRANSCRIPT, cwd=RECROADMAP)
+record_allow("the newest own record wins: a lane record, then a triage record, is allowed",
+             VCS + " push origin roadmap", role_path("lane-then-triage"))
+# The incident python write is a triage command that ends in a push to roadmap, so it runs under a triage record.
+sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
+   INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT, transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV)
+# A lane's pushes to other branches, and the fork's own name, are not the record branch.
+record_allow("a lane's push to lane/foo is allowed", VCS + " push origin lane/foo", LANE_TRANSCRIPT)
+record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS + " push origin roadmap-notes",
+             LANE_TRANSCRIPT)
+record_allow("a lane's bare push from the feat checkout is allowed", VCS + " push", LANE_TRANSCRIPT)
+record_allow("a lane's HEAD push from the feat checkout is allowed", VCS + " push origin HEAD", LANE_TRANSCRIPT)
+# Text that names the push is text, in quotes, a heredoc body, a comment and a commit message.
+record_allow("a push to roadmap named in single quotes is text", "echo '" + VCS + " push origin roadmap'",
+             LANE_TRANSCRIPT)
+record_allow("a push to roadmap named in a heredoc body is data",
+             "cat > notes.txt <<'EOF'\n" + VCS + " push origin roadmap\nEOF", LANE_TRANSCRIPT)
+record_allow("a push to roadmap named in a comment is text", "echo done # " + VCS + " push origin roadmap",
+             LANE_TRANSCRIPT)
+record_allow("a multi-line quoted string that names a push to roadmap is text",
+             'echo "first\n' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+record_allow("a commit message that names a push to roadmap is text",
+             VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
+
+
+def record_push_cost_case():
+    """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
+    `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
+    `git config` read of push.default, and a HEAD push reads no push.default. The layout and extras files
+    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
+    transcript is read only when the push reaches the record branch: a push to another branch passes
+    with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
+    on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git("rwcost")
+    if path is None:
+        return False, "no git on PATH"
+    problems = []
+
+    def case_of(command, cwd, transcript):
+        return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+                "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+
+    def spawn_kinds(command, cwd):
+        if os.path.exists(log):
+            os.remove(log)
+        decide(case_of(command, cwd, LANE_TRANSCRIPT))
+        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        kinds = {}
+        for line in lines:
+            words = line.split()
+            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+            while len(words) >= 2 and words[0] in ("-C", "-c"):
+                words = words[2:]
+            word = words[0] if words else ""
+            kinds[word] = kinds.get(word, 0) + 1
+        return kinds, lines
+
+    for label, tail, want in (
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 1, "config": 1}),
+    ):
+        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        if kinds != want:
+            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        if label == "a bare push" and not any("push.default" in line for line in lines):
+            problems.append("a bare push: no read of push.default")
+        if label == "a HEAD push" and any("push.default" in line for line in lines):
+            problems.append("a HEAD push: reads push.default, which it must not")
+    unreadable = role_path("unreadable")
+    for tail in ("push origin lane/foo", "push origin HEAD", "push"):
+        got, _reason = decide(case_of(VCS + " " + tail, PUSHFEAT, unreadable))
+        if got != "allow":
+            problems.append("%s with an unreadable transcript: %s, want allow" % (tail, got))
+    got, _reason = decide(case_of(VCS + " push origin roadmap", PUSHFEAT, unreadable))
+    if got != "deny":
+        problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+                 "the transcript is read only at the record branch"
+
+
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
@@ -9156,6 +9397,10 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-tags"), carries=("get_session",))
     trust_allow(_trust_word + " after a set_session_tags call and then a newer untagged read allows",
                 _trust_tool, role_path("tags-then-untagged"))
+    trust_allow(_trust_word + " after an untagged read and then a set_session_tags call on another session allows",
+                _trust_tool, role_path("untagged-then-other-tags"))
+    trust_refuse(_trust_word + " after an untagged read and set_session_tags calls on another session and on this one is refused",
+               _trust_tool, role_path("untagged-then-both-tags"), carries=("get_session",))
     trust_refuse(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
                _trust_tool, role_path("tags-then-coordinator"))
     trust_refuse(_trust_word + " after an untagged read and then a newer lane read is refused",
@@ -17207,30 +17452,253 @@ add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSI
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
 # lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
+# A lane call also tags the repo it works on (rule lane-repo-tag). Each lane case names its checkout by
+# `cwd`, and carries the origin repo's tag, so this rule judges only the effort pin.
+LANE_REPO = os.path.join(ROOT, "lanerepo")      # a checkout whose origin is claude-settings on GitHub
+LANE_PROXY = os.path.join(ROOT, "laneproxy")    # the same repo, its origin behind the agent proxy's host
+LANE_GIT = os.path.join(ROOT, "lanegit")        # the same repo, its origin with a `.git` suffix
+LANE_LOCAL = os.path.join(ROOT, "lanelocal")    # the same repo, its origin a local path with no scheme
+LANE_SCP = os.path.join(ROOT, "lanescp")        # the same repo, its origin in scp form
+LANE_SSH = os.path.join(ROOT, "lanessh")        # the same repo, its origin an ssh URL with a port
+LANE_ORIGINS = {
+    LANE_REPO: "https://github.com/shivinate7/claude-settings",
+    LANE_PROXY: "http://local_proxy@127.0.0.1:1234/git/shivinate7/claude-settings",
+    LANE_GIT: "https://github.com/shivinate7/claude-settings.git",
+    LANE_LOCAL: "/srv/repos/shivinate7/claude-settings.git",
+    LANE_SCP: "git@github.com:shivinate7/claude-settings.git",
+    LANE_SSH: "ssh://git@github.com:22/shivinate7/claude-settings",
+}
+# The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
+# A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
+RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
+OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+
+
+def _build_lane_origins():
+    """Three real checkouts, each with the origin LANE_ORIGINS names. A lane case names one by `cwd`."""
+    for where, url in LANE_ORIGINS.items():
+        make_repo(where, {"README.md": "# r\n"})
+        added = run_vcs(where, "remote", "add", "origin", url)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                     % (where, added.stderr.strip()))
+
+
+lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\nbrief")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief")
 add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="do the task")
 add("lane-effort-pin: lane tag with /effort high is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort high")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort high")
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
-    tool=LANE_TOOL, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
 add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium")
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium")
 add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
-    "deny", "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
 add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\n")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane "], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["CS-BUILD:LANE"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags="cs-build:lane", prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+
+# ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
+# the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
+# stripped; the host is never read, so the proxy's URL names the same repo. A lane call with no such tag is
+# denied, whatever its other tags. Each case names its checkout by `cwd`, never the runner's own checkout.
+# The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
+# on an origin it cannot parse turns a case red.
+add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
+add("lane-repo-tag: origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"])
+add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
+add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
+# With no origin to compare to, a full `cs-repo:<owner>/<name>` tag passes; the short form and no repo tag
+# are denied. Three cases per checkout: the full tag, the short form, and no repo tag.
+LANE_NO_ORIGIN = os.path.join(ROOT, "lanenoorigin")  # a git checkout with no origin remote
+
+
+def _build_lane_no_origin():
+    """A real checkout that holds no `origin` remote. A lane case names it by `cwd`."""
+    make_repo(LANE_NO_ORIGIN, {"README.md": "# r\n"})
+
+
+lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
+add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+
+# Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
+# without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
+add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+
+# A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
+add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
+add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
+# extras() and github_slug()), so that name wins over the origin's path. The origin here is not a GitHub URL.
+LANE_EXTRAS = os.path.join(ROOT, "laneextras")  # a non-GitHub origin, and an extras file that names org/name
+
+
+def _build_lane_extras():
+    """A real checkout whose extras file names org/name, with a non-GitHub origin. A lane case names it by `cwd`."""
+    make_repo(LANE_EXTRAS, {"README.md": "# r\n",
+                            ".claude/layout-extras.json": json.dumps({"roadmap": {"github": "org/name"}}) + "\n"})
+    added = run_vcs(LANE_EXTRAS, "remote", "add", "origin", "https://git.example.com/x/y")
+    if added.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                 % (LANE_EXTRAS, added.stderr.strip()))
+
+
+lazy_fixture([LANE_EXTRAS], _build_lane_extras)
+add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:org/name"])
+add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:x/y"])
+
+# A denial names the tag the call must carry, so the agent can add it.
+add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
+    carries="cs-repo:shivinate7/claude-settings")
+
+
+# ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
+# other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
+# argv starts with git is the rule's read of the origin.
+def lane_cost_run(body):
+    """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
+    os.makedirs(LB_DIR, exist_ok=True)
+    run = tempfile.mkdtemp(dir=LB_DIR)
+    try:
+        side_file = os.path.join(run, "probe.json")
+        cfg = os.path.join(run, "cfg")
+        os.makedirs(cfg)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = cfg
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+        spec = {"mode": "judge", "reading": LB_NORMAL}
+        done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
+                              input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
+        try:
+            with open(side_file, "r", encoding="utf-8") as handle:
+                side = json.load(handle)
+        except Exception:
+            return [], "", "", "the probe wrote nothing: " + done.stderr.strip()[-160:]
+        decision, reason = read_decision(done.stdout)
+        return side.get("children", []), decision, reason, side.get("probe_error", "")
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+
+
+def is_git_child(child):
+    return child.lstrip("[").lstrip("'\"").startswith("git")
+
+
+def lane_cost_check(label, body, want_git, want_decision):
+    def check():
+        children, decision, _reason, error = lane_cost_run(body)
+        if error:
+            return False, "the probe failed: " + error
+        git = [c for c in children if is_git_child(c)]
+        if len(git) != want_git:
+            return False, "%d git process(es), want %d: %s" % (len(git), want_git, (git or children)[:3])
+        if decision != want_decision:
+            return False, "decided %s, want %s" % (decision, want_decision)
+        return True, "%d git process(es), decided %s" % (len(git), decision)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS}}, 1, "allow")
+lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
+lane_cost_check("lane-repo-tag: a Read call starts no git process",
+                {"tool_name": "Read", "session_id": "lane-cost-read", "cwd": LANE_REPO,
+                 "tool_input": {"file_path": os.path.join(LANE_REPO, "README.md")}}, 0, "allow")
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
@@ -18310,6 +18778,20 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def _stand_in_git(tag):
+    """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
+    Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
+    real = shutil.which(VCS)
+    if not real:
+        return None, None
+    folder = os.path.join(ROOT, tag + "_bin")
+    log = os.path.join(ROOT, tag + "_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    return log, folder + os.pathsep + os.environ.get("PATH", "")
+
+
 def worktree_home_scratchpad_case():
     """Rule 0, `other-checkout`, for a session's own scratchpad. A linked worktree under
     `<temp>/<slug>/<session_id>/scratchpad/` belongs to that session, so its top-level calls may
@@ -18458,16 +18940,10 @@ def worktree_home_cross_checkout_cost_case():
     above it. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
-    real = shutil.which(VCS)
-    if not real:
-        return False, "no git on PATH"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
-    folder = os.path.join(ROOT, "xcocost_bin")
-    log = os.path.join(ROOT, "xcocost_spawns.log")
-    stand_in = os.path.join(folder, VCS)
-    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
-    os.chmod(stand_in, 0o755)
-    path = folder + os.pathsep + os.environ.get("PATH", "")
+    log, path = _stand_in_git("xcocost")
+    if path is None:
+        return False, "no git on PATH"
     problems = []
     for label, tool, cwd, tool_input, want_all, want_list in (
         ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
@@ -19267,6 +19743,8 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
+     "only, and reads the transcript only at the record branch", record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
