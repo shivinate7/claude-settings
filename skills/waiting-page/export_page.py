@@ -37,6 +37,19 @@ under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
 neither one of the five collections nor `page/`, or one doc over the byte cap.
 
+Every artifact, the step "Before you switch Claude accounts":
+
+    python3 ~/.claude/skills/waiting-page/export_page.py --all REPO_ROOT --fetched DIR --worktree RECORD_WORKTREE
+        [--allow-empty COLLECTION]
+
+REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
+artifact id, each laid out as in a single export; a waiting-page entry with `<id>/page.html` also exports its
+designData block. Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting
+page: the waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export.
+Each artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
+the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
+
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
 """
 import argparse
@@ -49,6 +62,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
 
+# The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
+# lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
 PAGE_FOLDER, DESIGN_FILE = "page", "designData.json"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
@@ -181,16 +196,16 @@ def design_data(page_path):
         raise Stop("unknown - the page's designData block is not JSON", UNKNOWN)
 
 
-def refuse(finds):
+def refuse(finds, prefix=""):
     for label, path, kind in finds:
-        print("%s %s %s" % (label, path, kind))
+        print("%s%s %s %s" % (prefix, label, path, kind))
     raise Stop("refused - %d find(s)" % len(finds), REFUSED)
 
 
-def existing(out):
-    """{relative path: bytes} of each doc file the copy holds in a collection folder."""
+def existing(out, collections=COLLECTIONS):
+    """{relative path: bytes} of each doc file the copy holds in a folder of `collections`."""
     found = {}
-    for name in COLLECTIONS:
+    for name in collections:
         folder = os.path.join(out, name)
         if os.path.isdir(folder):
             for file in os.listdir(folder):
@@ -200,9 +215,9 @@ def existing(out):
     return found
 
 
-def export(fetched, out, page, allow_empty):
+def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix=""):
     docs = {}
-    for name in COLLECTIONS:
+    for name in collections:
         folder = os.path.join(fetched, name)
         if not os.path.isdir(folder):
             raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
@@ -210,8 +225,8 @@ def export(fetched, out, page, allow_empty):
             raise Stop("unknown - %s has no %s marker, so the fetch may have stopped early" % (name, MARKER), UNKNOWN)
         docs[name] = docs_in(folder, name)
 
-    have = existing(out)
-    for name in COLLECTIONS:
+    have = existing(out, collections)
+    for name in collections:
         kept = [label for label in have if label.startswith(name + "/")]
         if not docs[name] and kept and name not in allow_empty:
             raise Stop("unknown - %s is empty but the copy holds %d doc(s) of it; pass --allow-empty %s if it emptied"
@@ -219,7 +234,7 @@ def export(fetched, out, page, allow_empty):
 
     want = {}
     finds = []
-    for name in COLLECTIONS:
+    for name in collections:
         for doc_id, data in docs[name].items():
             hits = [("$id", kind) for kind in kinds_in(doc_id)]
             label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)
@@ -233,7 +248,7 @@ def export(fetched, out, page, allow_empty):
         finds.extend(("%s/%s" % (PAGE_FOLDER, DESIGN_FILE), path, kind) for path, kind in found)
         want["%s/%s" % (PAGE_FOLDER, DESIGN_FILE)] = canonical(data)
     if finds:
-        refuse(finds)  # before any write, so a refused run leaves the copy as it was
+        refuse(finds, prefix)  # before any write, so a refused run leaves the copy as it was
 
     if page:
         path = os.path.join(out, PAGE_FOLDER, DESIGN_FILE)
@@ -253,6 +268,38 @@ def export(fetched, out, page, allow_empty):
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
     return "changed %d" % changed if changed else "same"
+
+
+def export_all(root, fetched, worktree, allow_empty):
+    """Export each registry artifact of the repo at `root`; print one line per artifact; the exit code."""
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+    sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
+    import layout  # --all mode only: a single export and the rebuild run with no lint/ beside them
+    try:
+        entries = layout.artifacts(root)
+    except layout.LayoutError as err:
+        raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
+    if not entries:
+        raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
+    worst = 0
+    for entry in entries:
+        name = entry["id"]
+        folder = os.path.join(fetched, name)
+        page = os.path.join(folder, "page.html")
+        try:
+            if not os.path.isdir(folder):
+                raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
+            verdict = export(folder, os.path.join(worktree, *entry["export"].split("/")),
+                             page if entry["role"] == layout.WAITING_ROLE and os.path.isfile(page) else None,
+                             allow_empty, tuple(entry["collections"]), "%s: " % name)
+            code = 0
+        except Stop as stop:
+            verdict, code = str(stop), stop.code
+        except Exception as err:  # one artifact's crash must not hide the verdict of the others
+            verdict, code = "unknown - the run crashed (%s)" % type(err).__name__, CRASH
+        print("%s: %s" % (name, verdict))
+        worst = max(worst, code)
+    return worst
 
 
 def entry_bytes(entry):
@@ -304,16 +351,23 @@ def main(argv):
     ap.add_argument("--fetched", help="the folder `ArtifactData list` saved, one folder per collection")
     ap.add_argument("--out", help="the waiting-data folder to mirror into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
-    ap.add_argument("--allow-empty", action="append", choices=COLLECTIONS, default=[], metavar="COLLECTION",
+    ap.add_argument("--allow-empty", action="append", default=[], metavar="COLLECTION",
                     help="a collection that really emptied, so its docs leave the copy")
+    ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
+    ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     args = ap.parse_args(argv)
-    export_mode, rebuild_mode = bool(args.fetched or args.out or args.page), bool(args.rebuild or args.batches)
-    if export_mode == rebuild_mode or (export_mode and not (args.fetched and args.out)) \
-            or (rebuild_mode and not (args.rebuild and args.batches)):
-        ap.error("use --fetched DIR --out DIR [--page FILE], or --rebuild DIR --batches DIR")
+    all_mode = bool(args.all or args.worktree)
+    export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
+    if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
+            or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
+        ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
+    if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
+        ap.error("--allow-empty names one of: %s" % ", ".join(COLLECTIONS))
     try:
+        if all_mode:
+            return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty)
         if export_mode:
             verdict = export(args.fetched, args.out, args.page, args.allow_empty)
         else:

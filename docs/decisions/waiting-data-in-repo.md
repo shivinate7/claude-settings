@@ -15,6 +15,9 @@ The owner said not to take the ask verbatim, but the gripe is real. The id `wait
 - Recovery needs no live page. The rebuild mode writes batch files of at most 50 writes each. The writer sends them to a new page, then puts the design data back into the page.
 - The lint check flags a repo that has a waiting page but no `waiting/` folder on its record branch. It reads git refs. A missing ref, such as in a shallow clone, prints `unknown`. The check never passes or fails on that.
 - Tools read the folder name through `lint/layout.py`, never as a literal.
+- Coordinator, 2026-11-02 11:49 CST: the same copy covers every claude.ai artifact a repo holds. Each artifact is one entry in the `artifacts` key of the repo's extras file, read by `lint/layout.py`. An entry has an id (a slug of 32 characters or fewer), a url, a role, an account label (never an email) and the collections to export. The `waiting-page` role is the waiting page. The old `waiting-page` key is the fallback. This replaces the sketch's `.claude/artifacts.json`: the extras file stays the one home of the page URL.
+- The export script has an `--all` mode. It exports each registered artifact to its export path, with the same scan and mirror rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
+- A decision or a debt cites an artifact as `artifact:<id>`, never by its link. `lint/check_artifact_cites.py` refuses a bare link and an unregistered id. A roadmap step is refused too, unless the run says `--steps list`. That mode only lists a step's links, because lanes never write the roadmap and triage moves them. Briefs and handoffs are working files, outside the check.
 
 Cost: each run of the writer makes five list calls to the page and starts one python process. It makes one commit when a file changed. No timer and no watcher.
 

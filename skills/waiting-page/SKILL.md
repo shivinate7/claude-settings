@@ -275,6 +275,42 @@ phone numbers. A personal fact in plain words, such as an employer or a city, pa
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
 
+## Register and cite an artifact
+
+Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
+(`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
+`account`. A role other than `waiting-page` also has `collections`, the collections to export. `id` is a slug of
+32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
+the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
+folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
+has that role.
+
+A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and
+the registry then needs one edit. `python3 lint/check_artifact_cites.py` refuses a bare link and an unregistered id
+in decisions and debts. A brief or a handoff is a working file, and the check does not read it. The roadmap steps
+of a repo may still hold links. Run it with `--steps list` to list them for triage to move.
+
+## Before you switch Claude accounts
+
+Run this once before the account, the org or the machine changes. It copies every registered artifact, not only
+the waiting page. A page that moves loses its read access, and the repo then holds its last copy.
+
+1. Check out the record branch in its own worktree, as "Keep a copy in the repo" step 1 says.
+2. Make one new folder. For each entry of the registry, make `<folder>/<id>/`. In it, run `ArtifactData list` for
+   each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
+   `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
+   stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
+   `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
+   `<folder>/<id>/page.html`.
+3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
+   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export.
+4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
+   branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
+   the reply, and fix the cause first.
+
+Cost: one list call per page of each collection of each entry, one python process, and one commit when something
+changed. No timer, no watcher.
+
 ## Rebuild a page from the repo
 
 Use this when the page is gone, or moved to an org this account cannot read. It needs the repo only, never the
@@ -291,7 +327,8 @@ live page.
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
    it to the new URL, as "Keep the page on main's code" step 4 says.
 6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
-7. Write the new URL into the `waiting-page` key of the repo's extras file, in a pull request.
+7. Write the new URL into the repo's extras file, in a pull request: the `url` of the `waiting-page` role entry in
+   `artifacts`, or the `waiting-page` key when the repo has no such entry.
 
 ## Add an item
 

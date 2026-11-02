@@ -14,17 +14,20 @@ coordinator and to batch runner 7.
 ## State
 - Branch `waiting-data-in-repo`, head b655208f0 before this handoff commit (pushed). No PR is open yet: the next step opens the draft.
 - Review: round 1 of 3 FAILED, with 6 must-fixes. Round 2 build (1ab5abea7) fixes all 6. No round-2 review has run yet.
-- Suites at b655208f0: the export suite has 33 cases and 5 fail, all in class All (phase-2 `--all`, not built).
-  Layout and compliance suites were not re-run after the merge.
+- Suites: the export suite (33 cases) and the layout suite are green after phase 2.
+  Compliance suite not re-run by the phase-2 builder.
   Layout.test_this_repo_is_in_shape (lint/test_compliance_probes.py) is red on purpose. It is a true finding
   until the first export lands `waiting/` on origin/roadmap.
-- Phase-2 reds are on the branch (merged from 74ccd4efd): lint/test_layout.py Registry,
-  lint/test_check_artifact_cites.py, test_export_page.py All. Nothing for phase 2 is built yet.
+- Phase 2 is built (builder, 2026-11-02): layout.artifacts(), lint/check_artifact_cites.py, export_page.py --all,
+  two new skill sections, the cite-check suite in checks.yml, the decision record. The Registry, cite-check and All
+  suites are green. origin/main is merged in. claude-settings holds no bare artifact link in decisions or debts, so
+  nothing moved to `artifact:<id>`. Its roadmap steps hold 14 files with links; `check_artifact_cites.py --steps list`
+  lists them for triage.
+- No registry entry is written in claude-settings' own extras file yet: the account label is the owner's to name.
 - Decision record docs/decisions/waiting-data-in-repo.md (Home: skills/waiting-page/SKILL.md) is on the branch.
 
 ## Next steps, in order
-1. A builder builds phase 2 (contract below, "Phase 2" and "Phase 2 rulings"). It adds the cite-check suite to
-   checks.yml, and moves claude-settings' own bare artifact URLs in decisions and debts to `artifact:<id>`.
+1. DONE: phase 2 is built (see State).
 2. A test-author records the 11 mutant Red-run trailers: scan, phone, key scan, doc_id scan, number scan, 50-cap,
    900 KB cap, mirror delete, `.complete`, `--allow-empty`, unrolled unread. Mutant reds for phase 2 follow.
 3. Review round 2 of 3 (reviewer, Sonnet) of the whole diff. Send it the round-1 findings below.
