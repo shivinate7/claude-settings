@@ -778,7 +778,8 @@ class LaneUndo(unittest.TestCase):
     the lane's commits before its verdict (P7), so a setup that drifts fails on its scope, not on the finding."""
     CARD = BODY + "function Card() {}\n"  # app.txt as base_repo() leaves it
     CASE = "".join("card test case line %d\n" % i for i in range(1, 7))  # a 6-line test case the lane adds
-    BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines, the size df25a68d dropped
+    BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines: a full-size drop the read must flag
+    EIGHT = "".join("eight test line %d\n" % i for i in range(1, 9))  # an 8-line block the lane adds
 
     def setUp(self):
         self.r = base_repo()
@@ -934,6 +935,36 @@ class LaneUndo(unittest.TestCase):
         m = r.sh("rev-parse", "HEAD")
         self.assertEqual(self.lane(), [a, b, m])  # scope: the lane's commits are off the first-parent line of integ
         assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_an_edit_inside_an_eight_line_block_then_a_restore_of_the_pre_block_file_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines", app_txt=self.CARD + self.EIGHT)
+        x = r.commit("X: edit one of the eight", app_txt=self.CARD + self.EIGHT.replace("eight test line 3\n", "eight test line 3 edited\n"))
+        c = r.commit("C: restore the pre-E file", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [e, x, c])  # scope: the restore is the third commit, after one edit
+        assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_a_drop_of_three_lines_from_an_eight_line_test_block_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove three of the lines", tests__card_txt="".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_an_eight_line_test_block_moved_from_one_test_file_to_another_over_two_commits_is_green(self):
+        r = self.r
+        e = r.commit("E: add a test block to test_a", tests__test_a_txt=self.EIGHT)
+        x = r.commit("X: take the block out of test_a", tests__test_a_txt="")
+        y = r.commit("Y: put the block in test_b", tests__test_b_txt=self.EIGHT)
+        self.assertEqual(self.lane(), [e, x, y])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_pre_lane_copy_with_one_new_line_undoes_eight_changed_lines_and_is_red(self):
+        r = self.r
+        e = r.commit("E: change eight lines", app_txt="".join("new code path %d\n" % i for i in range(1, 9)) + "function Card() {}\n")
+        c = r.commit("C: the pre-E copy plus one new line", app_txt=self.CARD + "one new line\n")
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "app.txt", c, e)
 
 
 class IntegrationBase(unittest.TestCase):
