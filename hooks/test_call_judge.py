@@ -42,7 +42,8 @@ Interface the hook must match:
   (guard.py refuses a hit). A read, and a write of another collection, never import question_form in the hook.
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
 - A re-ask (ruled Nov 1 17:44 CST): a judged items set or update (question_form.judged_item_writes) whose data has
-  non-empty `options` and a `lastAnswer` dict whose `note` is a string, non-empty after strip. The one model prompt
+  non-empty `options` and a `lastAnswer` dict with choice `none` (or no choice) whose `note` is a string, non-empty
+  after strip. A picked choice with a note is not a re-ask. The one model prompt
   holds call_judge.NONE_DIRECTION_RULE exactly once when a write in the call is a re-ask (a batch too), and not at
   all otherwise. The cases read the constant with load_file_module, never a copy of its text. A missing constant
   fails those checks, with no crash.
@@ -779,6 +780,7 @@ def case_page_reads_and_other_collections_skip_question_form():
 # when a write in the call is a re-ask. The text is read from hooks/call_judge.py at test time, never copied here.
 REASK_NOTE = "Ship the plain page and drop the chart."
 SHOW_CHEAPER_NOTE = "None fit; show me cheaper options."
+PLAIN_NOTE = "Ship the plain page."
 REASK_FLAG = ('{"ok": false, "reason": "the note already gives the direction, so the item closes and is not asked '
               'again."}')
 ANSWERED_AT = "2026-11-01T17:44:00-06:00"
@@ -796,9 +798,9 @@ def last_answer(note, choice="none"):
     return {"choice": choice, "note": note, "at": ANSWERED_AT}
 
 
-def reask_item(mark, note=REASK_NOTE):
+def reask_item(mark, note=REASK_NOTE, choice="none"):
     """Data for an update of an answered decision: its options and the owner's note, no context."""
-    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note)}
+    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice)}
 
 
 def rule_detail(rule, r):
@@ -902,6 +904,34 @@ def case_reask_refusal_denies():
           rule_detail(rule, r))
 
 
+def case_picked_choice_with_note_lacks_rule():
+    # A picked choice (a key) with a note is the owner choosing an option, not a "none of these" direction, so the
+    # write is no re-ask. The call still makes its one model call, so an early exit cannot pass this check.
+    import question_form  # the one form check (hooks/question_form.py)
+    fixture = reask_item(PAGE_MARK, PLAIN_NOTE, choice="a")
+    got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": fixture})
+    check("picked-choice fixture: the update passes question_form.item_hit, so a refusal below is the judge's",
+          got == ("", ""), got)
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", fixture), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("picked choice with a note: one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("picked choice with a note: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
+          rule_detail(rule, r))
+
+
+def case_none_choice_with_note_holds_rule_once():
+    # The same write with choice none is a "none of these" re-ask, so the one prompt holds the rule once.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", reask_item(PAGE_MARK, PLAIN_NOTE, choice="none")), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("none choice with a note: one model call, and no deny",
+          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    check("none choice with a note: the one prompt holds NONE_DIRECTION_RULE exactly once",
+          bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -956,6 +986,7 @@ def main():
                  case_reask_update_holds_rule_once, case_reask_cheaper_note_holds_rule_once,
                  case_options_without_note_lacks_rule, case_blank_note_lacks_rule,
                  case_context_only_note_lacks_rule, case_reask_batch_one_call_rule_once, case_reask_refusal_denies,
+                 case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
                  case_fail_open, case_settings_row):
         try:
             case()
