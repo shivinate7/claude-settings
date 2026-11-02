@@ -1,9 +1,9 @@
 {
  "title": "The roadmap's in-progress check sees every live lane",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.21001,
  "why": "Owner, Nov 2 00:00 CST: the roadmap and the live work must stay in step.",
- "note": "Measured Nov 2 00:08 CST, first build with the live file (triage had published without one, so the check read unknown): 18 in-progress steps flagged, most of them false. Causes: (1) 15 lane sessions carry the short repo tag claude-settings, but the check wants the full GitHub name; (2) roll-out lanes run in another repo carry that repo's tag, so claude-settings steps r5, r2, r4 and o3 never match; (3) a lane tagged with another step id (one-model-rule's lane carries explore-audit-marker). Fix: one tag form at session start (the coordinator's create step), a roll-out lane also carries this roadmap's tag, and triage publishes with the live file every time. Guard basis: measured. Ready: no open question.",
- "updatedAt": "2026-11-02T00:10:00Z"
+ "note": "Measured Nov 2 00:08 CST, first build with the live file (triage had published without one, so the check read unknown): 18 in-progress steps flagged, most of them false. Causes: (1) 15 lane sessions carry the short repo tag claude-settings, but the check wants the full GitHub name; (2) roll-out lanes run in another repo carry that repo's tag, so claude-settings steps r5, r2, r4 and o3 never match; (3) a lane tagged with another step id (one-model-rule's lane carries explore-audit-marker). Fix: one tag form at session start (the coordinator's create step), a roll-out lane also carries this roadmap's tag, and triage publishes with the live file every time. Guard basis: measured. Ready: no open question.\nDoing, Nov 1 18:03 CST: coordinator started its lane.",
+ "updatedAt": "2026-11-02T00:04:00Z"
 }

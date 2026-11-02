@@ -1,9 +1,9 @@
 {
-  "title": "home, mailaudit and banchi each get one required rollup check",
-  "status": "doing",
-  "order": 103.33746,
-  "why": "shiv, Oct 30 15:03 CDT (item 87): the same kinds of checks in every repo, judged by the same outcomes, the count scaling with size; decision same-check-kinds. q_max #994 pick a, 15:08 CDT.",
-  "note": "One lane per repo (home, mailaudit, banchi) adds a single required all-jobs-passed check, as lane qmax-one-rollup-check does for q_max. Done check: each repo's main protection names one required check, all-jobs-passed. Merged: home #400, mailaudit #172. Open: banchi PR 999, q_max #995 (bridge #996 merged 6943da3c, Oct 30 17:18 CDT; deploy readout UNKNOWN, no RENDER_API_KEY in cloud); claude-settings itself in lane cs-one-rollup-check.",
-  "phase": "cleanup",
-  "updatedAt": "2026-10-30T22:20:00Z"
+ "title": "home, mailaudit and banchi each get one required rollup check",
+ "status": "todo",
+ "order": 103.33746,
+ "why": "shiv, Oct 30 15:03 CDT (item 87): the same kinds of checks in every repo, judged by the same outcomes, the count scaling with size; decision same-check-kinds. q_max #994 pick a, 15:08 CDT.",
+ "note": "One lane per repo (home, mailaudit, banchi) adds a single required all-jobs-passed check, as lane qmax-one-rollup-check does for q_max. Done check: each repo's main protection names one required check, all-jobs-passed. Merged: home #400, mailaudit #172. Open: banchi PR 999, q_max #995 (bridge #996 merged 6943da3c, Oct 30 17:18 CDT; deploy readout UNKNOWN, no RENDER_API_KEY in cloud); claude-settings itself in lane cs-one-rollup-check.\nSet back to todo, Nov 1 18:03 CST: no live lane (live check, confirmed by the coordinator).",
+ "phase": "cleanup",
+ "updatedAt": "2026-11-02T00:04:00Z"
 }
