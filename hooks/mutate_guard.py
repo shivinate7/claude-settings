@@ -524,7 +524,7 @@ MUTATIONS = [
     ("env-file: the example glob is held",
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name.startswith(ENV_PREFIX) and not name.startswith(ENV_ALLOWED)', "guard",
-     'env: the example exemption is the whole name, cat .env.example*'),
+     'env: a glob that could name a covered backup, cat .env.example*'),
     ("env-file: a piped echo keeps the text allowance",
      'text_ok and not piped', 'text_ok', "guard", 'env: a relay of the text, echo .env | xargs'),
     ("env-file: a pipe with a double bar counts as a pipe",
