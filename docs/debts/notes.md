@@ -907,3 +907,7 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- guard-log-kolkata-needs-tzdata: the forced-zone `when` test sets TZ=Asia/Kolkata, so a machine with no tzdata falls back to UTC and the test goes red with nothing wrong. Fix: a POSIX zone string such as "IST-5:30" (lint/test_guard_log_report.py). Step: guard-log-time-offset.
+- unread-early-line-east-blind: the early +05:00 line in the unread test can fail only on a clock at or west of UTC+3; CI on UTC covers it (hooks/test_decision_watch.py, mods/decision-watch/decision-watch.test.mjs). Step: guard-log-time-offset.
+- guard-log-between-untested: `--between` in main() has no test, only window(); a `Z` bound fails before Python 3.11, so a pace read passes `+00:00` (lint/guard_log_report.py). Step: guard-log-time-offset.
+- decision-watch-long-comment: a comment line near hooks/decision_watch.py:875 runs to 154 characters. Cosmetic. Step: guard-log-time-offset.
