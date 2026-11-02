@@ -1,0 +1,9 @@
+{
+ "title": "Tests that pass or fail on clock speed become outcome checks, then CI caps return to measured",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21011,
+ "why": "Owner, Nov 1 18:44 CST: \"we have a step regarding fixing CI that eliminates time limits and instead ensures outcomes based testing\". No step did this (searched c34, c39, c128, test-ci-standard, tci-7, tci-8; gap found by tci-12). Generous job caps are a stopgap until it lands (decision ci-job-caps).",
+ "note": "In q_max, banchi, degen, joyous, mailaudit and ios-adblock (home through its own lane): find tests that pass or fail on wall-clock speed (real sleeps, fixed timeouts that assert speed, runner-speed caps inside tests) and replace each with an outcome check (fake clock, wait for a condition), per decision test-strategy-reset. Then return each repo's job caps to measured figures, closing the ci-job-caps stopgap. Done check: a per-repo list of time-pinned tests found, each replaced or recorded as a debt, and caps re-measured. Port: yes, every repo with CI. Ready.",
+ "updatedAt": "2026-11-02T01:25:00Z"
+}
