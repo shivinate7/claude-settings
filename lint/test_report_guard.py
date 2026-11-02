@@ -1991,6 +1991,16 @@ class DecisionRepo:
     def switch(self, name):
         self._git("switch", "-q", name)
 
+    def remote_commit(self, name, when, *records):
+        """One commit, dated `when`, that only the remote-tracking ref origin/<name> holds. HEAD and the
+        local branches never reach it."""
+        temp = "tmp-" + name
+        self._git("switch", "-q", "-c", temp)
+        self.commit(when, *records)
+        self._git("update-ref", "refs/remotes/origin/" + name, "HEAD")
+        self._git("switch", "-q", "main")
+        self._git("branch", "-D", temp)
+
 
 GIT_TRACE_LINE = "trace: built-in: git "
 
@@ -2033,7 +2043,8 @@ class RewriteStampTests(unittest.TestCase):
         path = write_transcript(records, tempfile.mkdtemp(dir=self.tmp))
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                 "cwd": repo.path}
-        env = dict(os.environ, LOCAL_TIME_NOW=NOW, **(env_extra or {}))
+        env = dict(os.environ, LOCAL_TIME_NOW=NOW)
+        env.update(env_extra or {})
         return run_guard(REPORT_GUARD, hook, env=env)
 
     def assertBlocks(self, run, *parts):
@@ -2248,6 +2259,85 @@ class RewriteStampTests(unittest.TestCase):
         trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
         subprocess.run(["git", "-C", repo.path, "rev-parse", "HEAD"], check=True, capture_output=True,
                        env=dict(os.environ, GIT_TRACE=trace))
+        self.assertEqual(git_process_count(trace), 1)
+
+    def test_adjacent_stamp_wins_over_a_later_merge_stamp(self):
+        """Green. The stamp next to "ruling" is the ruling time. A later stamp in the same sentence is not,
+        and read as the ruling time it would make a fresh record look stale."""
+        repo = self.repo()
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "OTHER: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling, PR #1001 (merged 2026-11-02 08:00 CST).")))
+
+    def test_queued_negated_or_future_rewrite_sentences_pass(self):
+        """Green. A queued rewrite, a rewrite not needed, one that should or must happen, one that is needed,
+        and one that is pending each say no rewrite has happened. None is blocked."""
+        repo = self.red_repo()
+        sentences = {
+            "queued": "rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST (lane queued).",
+            "not needed": "no rewrite of `ci-job-caps` is needed for the ruling at 2026-11-01 18:44 CST.",
+            "should be rewritten": "`ci-job-caps` should be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "must be rewritten": "`ci-job-caps` must be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "needs a rewrite": "needs a rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST.",
+            "pending": "the rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST is pending.",
+        }
+        for name, sentence in sentences.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, "> **Done** OTHER: read the rulings.\n> **Next:** " + sentence))
+
+    def test_only_the_id_next_to_the_rewrite_word_is_checked(self):
+        """Green. other-rec is stale, but it follows "per" and is not the id next to the rewrite word, so the
+        check reads ci-job-caps alone. ci-job-caps is fresh, so the reply passes."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "other-rec")
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` per `other-rec` for the ruling at 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_clock_time_later_than_the_turn_means_the_day_before(self):
+        """Green. The turn is 00:20 CST on the day after the ruling. A clock time later than the turn's clock
+        names the day before, so "23:50 CST" is the earlier evening, and the record was rewritten after it."""
+        repo = self.repo()
+        repo.commit("2026-11-01T23:55:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(
+            repo, done_reply("RECORDED: rewrote decision `ci-job-caps` for the 23:50 CST ruling (PR #1001)"),
+            human_at="2026-11-02T06:20:00Z", env_extra={"LOCAL_TIME_NOW": "2026-11-02T00:20:00-06:00"}))
+
+    def test_rewrite_on_a_remote_branch_only_counts(self):
+        """Green. The rewrite is on origin/lane-x only, after the ruling. main and HEAD hold only the stale
+        commit. A rewrite pushed anywhere counts, so the record is not stale."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        repo.remote_commit("lane-x", "2026-11-01T19:00:00-06:00", "ci-job-caps")
+        replies = {
+            "bare id": "OTHER: lane rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+            "decision word": "OTHER: lane rewrote decision `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_f119_replay_still_blocks_when_no_branch_holds_a_later_commit(self):
+        """Block expectation. Every local and remote branch holds only commits that predate the ruling, so the
+        F119 replay still blocks. This passes on the current head as well."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.remote_commit("lane-y", "2026-10-27T10:00:00-05:00", "other-rec")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_same_id_in_three_sentences_runs_one_git_process(self):
+        """Cost. The same id cited in three sentences of one reply runs one git process."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling. "
+            "Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling again. "
+            "The rewrite of `ci-job-caps` for the 2026-11-01 18:44 CST ruling is on main (PR #1001)."),
+            env_extra={"GIT_TRACE": trace})
         self.assertEqual(git_process_count(trace), 1)
 
 
