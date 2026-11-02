@@ -479,9 +479,15 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
+      }
+    },
+    "output-landing-turn-ends-with-report": {
+      "mechanism": {
         "kind": "check",
         "ref": "lint/report_guard.py",
-        "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks"
+        "test": "lint/test_report_guard.py::ReportGuardTests.test_60_real_git_commit_blocks"
       }
     },
     "output-never-echo-agent-report": {
