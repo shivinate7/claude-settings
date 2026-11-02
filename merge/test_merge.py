@@ -3645,7 +3645,7 @@ class GhHalf(Env):
     LOCK_MARGIN = 300  # seconds, written as a literal so these cases do not read merge.LOCK_MARGIN
 
     def rate_waits_the_whole_ladder(self, out):
-        """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's 600 s cap). The run waits
+        """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's take expiry). The run waits
         the whole ladder, 60 + 300 + 900 s, and only then stops as a network error: it never stops for the lock. As each wait starts, the lock on origin
         (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait."""
         self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER, out)
@@ -7980,7 +7980,7 @@ class BeforeWaitHost(FakeHost):
         return super().wait_checks(n, sha, d, prior)
 
 class LockExtensionReachesHost(Env):
-    """A rate wait is the exception to the lock's 600 s cap. So once the lock is
+    """A rate wait is the exception to the lock's take expiry. So once the lock is
     taken, confirm hands the host the lock's own extend_for (host.before_wait): the host runs it before each rate wait. It hands over no bound
     (host.until) that stops a wait at the end of the lock's spare."""
     def test_the_run_hands_the_host_the_lock_extension_before_its_first_wait(self):
@@ -8296,6 +8296,60 @@ class LockExtendsForRateWaits(unittest.TestCase):
         self.assertNotIn("lock-commit-post", steps)
         self.assertEqual(steps.count("pause"), 1)  # the wait itself still happens
         self.assertIsNone(self.lock.until)
+
+class LockProseStatesTheCode(unittest.TestCase):
+    """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its record."""
+    GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
+    README = os.path.join(os.path.dirname(HERE), "README.md")
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def lock_bullet(self):
+        """The top-level bullet of the standing merge grant that names LOCK_MAX_HOLD, with its continuation lines."""
+        bullets, cur = [], None
+        for line in self.read(self.GRANT).splitlines():
+            if line.startswith("- "):
+                cur = [line]
+                bullets.append(cur)
+            elif cur is not None and line.startswith("  "):
+                cur.append(line)
+            else:
+                cur = None
+        named = [" ".join(b) for b in bullets if "`LOCK_MAX_HOLD`" in " ".join(b)]
+        self.assertEqual(len(named), 1, "the grant record must hold one bullet that names LOCK_MAX_HOLD")
+        return named[0]
+
+    def test_the_grant_bullet_states_the_margin_and_the_hold_as_the_code_values(self):
+        bullet = self.lock_bullet()
+        margin = re.search(r"`LOCK_MARGIN`\D{0,40}?(\d+) s\b", bullet)
+        self.assertIsNotNone(margin, f"the bullet does not state LOCK_MARGIN as a number of seconds: {bullet}")
+        self.assertEqual(int(margin.group(1)), merge.LOCK_MARGIN, bullet)
+        hold = re.search(r"`LOCK_MAX_HOLD`\D{0,40}?(\d+) h\b", bullet)
+        self.assertIsNotNone(hold, f"the bullet does not state LOCK_MAX_HOLD as a number of hours: {bullet}")
+        self.assertEqual(int(hold.group(1)), merge.LOCK_MAX_HOLD // 3600, bullet)
+
+    def test_the_grant_bullet_names_the_take_expiry_terms_and_not_the_old_cap(self):
+        bullet = self.lock_bullet()
+        for term in ("`WAITS`", "`merge.deadlineMinutes`"):
+            self.assertIn(term, bullet, f"the bullet does not name {term} as a term of the take expiry: {bullet}")
+        self.assertNotIn("600 s lock cap", bullet)
+
+    def assert_unlock_line_checks_the_holder(self, line):
+        self.assertNotIn("Reads no lock state", line)
+        self.assertIn("holder", line, f"the --unlock line does not say it checks the holder: {line}")
+
+    def test_the_readme_unlock_line_says_it_checks_the_holder(self):
+        section = self.read(self.README).split("\n## The `merge` command\n", 1)[1].split("\n## ", 1)[0]
+        lines = [l for l in section.splitlines() if l.startswith("merge --unlock")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assert_unlock_line_checks_the_holder(lines[0])
+
+    def test_the_module_docstring_unlock_line_says_it_checks_the_holder(self):
+        lines = [l.strip() for l in merge.__doc__.splitlines() if l.strip().startswith("merge --unlock")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assert_unlock_line_checks_the_holder(lines[0])
 
 class GitLockExtendsForRateWaits(Env):
     """GitLock and Host under a rate-limited `gh` call: the run hands Host.before_wait the lock's extend_for, as confirm does
