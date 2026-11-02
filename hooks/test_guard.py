@@ -467,11 +467,16 @@ GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is 
 GHNONE_PATH = GHNONE
 # lane-closes-after-records: the step slug a lane's cs-step tag carries, and the head its pull request names.
 ARCHIVE_SLUG = "lane-closes-after-records"
-ARCHIVE_HEAD = "claude/" + ARCHIVE_SLUG + "-x1"
+# A lane's own pull request has a head ref equal to its step slug, exactly (the roadmap ruling: a step is live when
+# an open pull request's branch equals the step id). Near misses that only contain the slug or a lane's id do not count.
+ARCHIVE_HEAD = ARCHIVE_SLUG
 ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open: the refusal
 ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
 ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
 ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
+ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
+ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
+ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -1212,6 +1217,11 @@ def build_fixtures():
         {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
         {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
         dict(slug_head, number=15, head="3" * 40)])
+    # Open pull requests on a near-miss head, one per fake. Each holds a lane's id or slug as a substring only: an
+    # exact read of the open list allows an archive of the lane named in the case beside it.
+    make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
+    make_fake_gh(ARCHNEAR_C10X, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/c10-x1")])
+    make_fake_gh(ARCHNEAR_CI, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/fix-ci-retry-x1")])
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8127,6 +8137,9 @@ def role_said(text):
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
+ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
+ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
 ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
@@ -8161,6 +8174,8 @@ ROLE_LINES = {
     # lane-closes-after-records shapes. The batch runner (ROLE_OWN) reads its own record, then the target
     # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
     "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
+    "archive-lane-c1": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_C1_TAGS),
+    "archive-lane-ci": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_CI_TAGS),
     "archive-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS),
     "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
     "archive-no-target": role_call("r0", RUNNER_TAGS),
@@ -8382,14 +8397,21 @@ def archive_allow(name, transcript, env_path):
         transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
 
 
-# A lane whose slug pull request is open is refused.
-archive_refuse("a lane with an open pull request on its slug is refused", role_path("archive-lane"),
+# A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
+archive_refuse("a lane whose open head is exactly its slug is refused", role_path("archive-lane"),
                fake_gh_path(ARCHOPEN))
 # A lane whose slug pull request was closed as replaced, or merged, has no open one: the archive is allowed.
 archive_allow("a lane whose slug pull request was closed as replaced is allowed", role_path("archive-lane"),
               fake_gh_path(ARCHCLOSED))
 archive_allow("a lane whose slug pull request was merged is allowed", role_path("archive-lane"),
               fake_gh_path(ARCHMERGED))
+# The match is exact: an open head that only contains the lane's step id is another pull request, not the lane's.
+archive_allow("a lane c1 with an open head c10 is allowed: c10 is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10))
+archive_allow("a lane c1 with an open head claude/c10-x1 is allowed: that head is not c1", role_path("archive-lane-c1"),
+              fake_gh_path(ARCHNEAR_C10X))
+archive_allow("a lane ci with an open head claude/fix-ci-retry-x1 is allowed: that head is not ci",
+              role_path("archive-lane-ci"), fake_gh_path(ARCHNEAR_CI))
 # A target whose record names no lane is not judged, even with an open pull request on the slug.
 archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
               role_path("archive-triage"), fake_gh_path(ARCHOPEN))
