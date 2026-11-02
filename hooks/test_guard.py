@@ -6892,6 +6892,12 @@ agent_push("a quoted HEAD:worktree-agent-x denies", 'origin "HEAD:worktree-agent
 agent_push("a plain refs/heads/worktree-agent-x source denies", "origin refs/heads/worktree-agent-x", "deny")
 agent_push("a named worktree-agent destination denies where git cannot read the folder",
            "origin worktree-agent-x", "deny", cwd=NOGIT)
+agent_push("a forced push to a worktree-agent destination denies", "--force origin HEAD:worktree-agent-x", "deny")
+agent_push("a plus refspec to a worktree-agent destination denies", "origin +HEAD:worktree-agent-x", "deny")
+
+# UNRESOLVABLE: the agent rule cannot name a destination, so the force verdict stands as it was.
+sh("push: a forced push of HEAD where git cannot read the branch still asks", VCS + " push --force origin HEAD",
+   "ask", "force-push", cwd=NOGIT)
 
 # ALLOWED: the rule reads the destination, never the source, a substring or a quoted word alone.
 agent_push("HEAD:lane-slug from a worktree-agent branch allows", "origin HEAD:lane-slug", "allow", cwd=PUSHAGENT)
@@ -6903,6 +6909,9 @@ agent_push("--delete of a worktree-agent branch allows", "--delete origin worktr
 agent_push("a lane slug that holds the prefix later in its name allows", "origin HEAD:fix-worktree-agent-x",
            "allow")
 agent_push("-u of a lane branch allows, the refusal is about the agent's branch only", "-u origin HEAD", "allow")
+agent_push("-d of a worktree-agent branch allows", "-d origin worktree-agent-x", "allow")
+agent_push("HEAD:archive/worktree-agent-x allows, the archive is not the agent's branch",
+           "origin HEAD:archive/worktree-agent-x", "allow")
 sh("fetch: a worktree-agent branch from its own worktree allows", VCS + " fetch origin worktree-agent-x",
    "allow", cwd=PUSHAGENT)
 sh("false alarm: a push to a worktree-agent branch quoted in an echo allows",
