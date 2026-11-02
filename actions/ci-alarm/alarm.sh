@@ -10,13 +10,16 @@ unknown() { echo unknown; echo "::warning::ci-alarm: $1"; exit 0; }
 runs="$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$branch" --status completed \
   --limit 100 --json workflowName,workflowDatabaseId,conclusion,createdAt,url,event)" \
   || unknown "gh run list failed"
-# Only active workflows that are files under .github/workflows count: a deleted workflow keeps
-# its last run for ever, and a Pages build has no file.
-flows="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate | jq -s '[.[].workflows[]]')" \
-  || unknown "gh api workflows failed"
+jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave no list of runs"
+# Only workflow files under .github/workflows count, whatever their state but "deleted" (a disabled one
+# still has a file, and merge.py judges it): a deleted workflow keeps its last run for ever, and a Pages
+# build has no file. A run whose workflow is not in the list is not judged.
+wf="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate)" || unknown "gh api workflows failed"
+flows="$(jq -e -s 'if length > 0 and all(.[]; (.workflows | type) == "array") then [.[].workflows[]] else empty end' <<<"$wf" 2>/dev/null)" \
+  || unknown "gh api workflows gave no list of workflows"
 # Latest completed run per workflow and event group; red = failure, timed_out or startup_failure.
 red="$(jq -r --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
-  ([$flows[] | select(.state == "active" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
+  ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
   | map(select(.workflowName != $self and (.workflowDatabaseId as $i | $ids | index($i)) and ($ev[0][.event] != null))
         | . + {group: $ev[0][.event]})
   | group_by([.workflowDatabaseId, .group])
