@@ -42,14 +42,14 @@ order in a tier, what folds, no fold on a draft, and `article.card[data-seen="tr
 - 3A (pick): `button.unfold`, full width, in the place of the options or the steps. 48px tall, dashed
   `1.5px var(--faint)` edge, `--surface` ground, `--acc` text at 600. Hover: `--acc` edge, `--acc-soft`
   ground. A chevron (`.chev`, ▸ closed, ▾ open) leads. Gain: a large target, and it shows where the
-  options are. Loss: one more boxed shape on the card. Ids: `id="unfold-<n>"`.
+  options are. Loss: one more boxed shape on the card. Ids: `id="unfold-<id>"`, the item id, like every other per-card id (two items may share a number).
 - 3B: a text button, the look of "More context", with a 44px box (`#s=fold-3b`). Gain: small. Loss:
   easy to miss on a long card.
 - Words. Decision: "Show the 3 options" and "Hide the options". Task: "Show the 3 steps and the
   command" ("and the 2 commands" with two shells; no "and the ..." with no command) and "Hide the
-  steps and the command". A hidden `.sr` span adds " for No. <n>", so each name gives the act and its
+  steps and the command". A task with no steps reads "Show the command" and "Hide the command". A hidden `.sr` span adds " for No. <n>", so each name gives the act and its
   item (`a11y.md`).
-- Markup: `aria-expanded`, and `aria-controls="fold-<n>"` on `div.foldbody` (not `.fold`: page.html
+- Markup: `aria-expanded`, and `aria-controls="fold-<id>"` on `div.foldbody` (not `.fold`: page.html
   uses `.fold` on the roadmap). A closed fold has the `hidden` attribute, so its controls leave the
   tab order. The three labels (`.uf-show`, `.uf-hide`, `.uf-lock`, in `.uf-labels`) share one grid cell, so the button keeps the
   box of its widest label and a press moves nothing beside it (ux-press-moves-nothing). CSS shows the

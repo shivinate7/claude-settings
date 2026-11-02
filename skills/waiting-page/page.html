@@ -886,7 +886,8 @@ const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.g
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
 // and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
-const isSeen = (it) => !!state.seen && state.seen.has(it.id);
+// A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
+const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
 const feed = { items: false, answers: false, all: [] };
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
@@ -894,8 +895,7 @@ function freezeSeen() {
   const times = [...Object.values(state.answers).map((a) => a && a.at), ...feed.all.map((i) => i && lastOf(i) && lastOf(i).at)].map(ts).filter(Number.isFinite);
   const last = times.length ? Math.max(...times) : -Infinity;
   const old = (it) => !isRuling(it) && !state.answers[it.id] && ts(it.added) < last;
-  // A group is seen only when every member is.
-  state.seen = new Set(state.items.filter((it) => mates(it).every(old)).map((it) => it.id));
+  state.seen = new Set(state.items.filter(old).map((it) => it.id));
 }
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [] };
@@ -1268,9 +1268,10 @@ function buildRuling(it) {
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
 function unfoldBtn(it, open, locked, ncmd) {
   const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
-  const show = dec ? "Show the " + (it.options || []).length + " options" : "Show the " + (it.steps || []).length + " steps" + tail;
-  const hide = dec ? "Hide the options" : "Hide the steps" + (ncmd > 1 ? " and the commands" : tail);
-  return h("button", { class: "unfold", type: "button", id: "unfold-" + it.n, "aria-expanded": String(open), "aria-controls": "fold-" + it.n, "aria-disabled": locked ? "true" : null,
+  const nsteps = (it.steps || []).length, cmdWord = ncmd > 1 ? "commands" : "command";
+  const show = dec ? "Show the " + (it.options || []).length + " options" : nsteps ? "Show the " + nsteps + " steps" + tail : "Show the " + cmdWord;
+  const hide = dec ? "Hide the options" : nsteps ? "Hide the steps" + (ncmd > 1 ? " and the commands" : tail) : "Hide the " + cmdWord;
+  return h("button", { class: "unfold", type: "button", id: "unfold-" + it.id, "aria-expanded": String(open), "aria-controls": "fold-" + it.id, "aria-disabled": locked ? "true" : null,
     onclick: () => { if (locked) return; state.unfold[it.id] = !open; repaint(it); } },
     h("span", { class: "chev", "aria-hidden": "true" }),
     h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
@@ -1340,10 +1341,10 @@ function buildCard(it) {
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
   put(nb);
   if (fold) {
-    // A draft or a stood pick holds an answer Send would submit, so the fold stays open and the control is locked.
-    const locked = !!eff(it);
+    // A draft, a stood pick or a pending withdraw holds an act Send would submit, so the fold stays open and the control is locked.
+    const locked = !!eff(it) || withdrawing(it);
     if (locked) state.unfold[it.id] = true;
-    card.append(unfoldBtn(it, !!state.unfold[it.id], locked, ncmd), h("div", { class: "foldbody", id: "fold-" + it.n, hidden: !state.unfold[it.id] }, fold));
+    card.append(unfoldBtn(it, !!state.unfold[it.id], locked, ncmd), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, fold));
   }
   if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
@@ -1402,7 +1403,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.note, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
