@@ -19236,8 +19236,10 @@ def hu_cost_check():
 
 
 def hu_copy_check():
-    """With reread_check.py missing beside guard.py, the guard fails open: the call that an intact copy
-    refuses for the unread handoff is allowed. The intact copy is the control, so the fixture is shown to bite."""
+    """With reread_check.py missing beside guard.py, the guard fails open: a call that an intact copy refuses
+    for the unread handoff is allowed. The intact copy is the control, so the fixture is shown to bite.
+    `echo hi` is allowed by every rule, so a copy that crashes and allows everything passes it too. So the
+    dropped copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the model floor refuses."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
@@ -19251,17 +19253,26 @@ def hu_copy_check():
     if run.returncode != 0 or decision != "allow" or reason:
         return False, "without reread_check.py the call is %r (exit %d), want a silent allow" % (
             decision, run.returncode)
-    return True, "reread_check.py missing: the call is allowed, exit 0; the intact copy refuses it"
+    spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
+    why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
+    if why:
+        return False, "without reread_check.py a Haiku spawn is not refused: %s (exit %d)" % (
+            why, spawn.returncode)
+    return True, ("reread_check.py missing: the call is allowed, exit 0, and a Haiku spawn is refused by the "
+                  "model floor; the intact copy refuses the call")
 
 
-def _hu_copy_run(folder, config):
-    """One Bash call through a copy's guard.py, with `config` as its config folder and the session on the payload."""
+def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
+    """One call through a copy's guard.py, with `config` as its config folder and the session on the payload.
+    The call is `echo hi` in Bash unless `tool` and `tool_input` name another call."""
+    if tool_input is None:
+        tool_input = {"command": "echo hi"}
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = config
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "cwd": NOGIT,
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT,
                           "session_id": HU_SID})
     return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
                           capture_output=True, text=True, env=env, timeout=120)
