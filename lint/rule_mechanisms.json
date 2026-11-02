@@ -214,8 +214,9 @@
     },
     "git-never-merge-failing-ci": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Enforcement is GitHub's required-status-checks setting on the branch, not something this repo's files can attest to."
+        "kind": "check",
+        "ref": "merge/merge.py",
+        "test": "merge/test_merge.py::Guards.test_red_check_reverts_the_claim"
       }
     },
     "git-ci-wait-checks-in": {
