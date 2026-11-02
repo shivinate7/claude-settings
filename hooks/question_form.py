@@ -85,7 +85,8 @@ CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the ques
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                 "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
-                "stands: true." % ", ".join(OWNER_STAKES))
+                "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
+                % ", ".join(OWNER_STAKES))
 
 
 def _lines_hit(text, stands=False):
@@ -960,7 +961,8 @@ ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
-                     "with {\"__delete__\": true}.")
+                     "with {\"__delete__\": true}. "
+                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
 def _item_fields(path):
@@ -1068,7 +1070,8 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
-                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
+                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
+                     "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}

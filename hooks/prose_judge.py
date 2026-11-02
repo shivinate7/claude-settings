@@ -28,6 +28,7 @@ def invoke_model(*args, **kwargs):
 
 
 RULE = "prose-judge"
+RULE_CITE = "(decision rulings-declare-kind, each ruling in a decision record declares its kind)"
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}
 
@@ -61,19 +62,20 @@ def is_prose(path):
 def refuse(payload, tool, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits, so its
     exit is returned to main()'s caller as the hook's exit code."""
+    text = reason + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
         guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
         guard_core.set_override_veto(lambda: False)  # a prose rule is no act that no override lifts
-        guard_core.refuse(tool, "deny", RULE, reason, "")
+        guard_core.refuse(tool, "deny", RULE, text, "")
     except SystemExit as done:
         return done.code or 0
     except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
-                                             "permissionDecisionReason": RULE + ": " + reason}}))
+                                             "permissionDecisionReason": RULE + ": " + text}}))
     return 0
 
 

@@ -565,7 +565,8 @@ DETACHED_LAUNCH_REASON = (
     "process. Or capture a pid yourself: `cmd & echo $!` in Bash, or `$p = Start-Process ... "
     "-PassThru` in PowerShell, then stop it later with `kill <pid>` or `Stop-Process -Id "
     "<id>`. Take a free port, such as port 0 or a random high port, never a port another "
-    "project may own, such as 8000, 5173, 3000, or 8080."
+    "project may own, such as 8000, 5173, 3000, or 8080. "
+    "(decision detached-launch-refused, a detached process is refused so a pid can always be named)"
 )
 
 
@@ -917,7 +918,8 @@ GIT_ENV_REASON = (
     "Measured in q_max on 2026-10-14: a test's child `git init` inherited them and wrote "
     "core.worktree into the shared config, and every checkout read the wrong tree. "
     "Remedy: pass the repo path with `git -C <dir>`, or scrub every GIT_* name from the child's "
-    "own environment."
+    "own environment. "
+    "(decision git-env-set-refused, no command sets a git location variable)"
 )
 
 
