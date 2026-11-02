@@ -14073,6 +14073,11 @@ add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-fl
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
+# The floor's remedy names Sonnet only. Opus is refused above a builder's row (owner item 127 pick a,
+# Nov 1 17:25 CST), so a remedy that names it sends the owner into the Opus refusal.
+add("floor: Agent builder with model haiku names sonnet, and not opus", "deny", "agent-model-floor",
+    carries=("model sonnet",), lacks=("opus", "Opus"),
+    tool="Agent", prompt="do it", model="haiku", subagent_type="builder")
 # An Explore on Opus runs only when its brief's first non-blank line carries the Audit: marker (owner ruling,
 # item 137 pick a, Nov 1 18:38 CST). Without it the Opus ceiling refuses it, and an owner override lifts it.
 add("floor: Agent Explore with model opus and no Audit: marker is denied (item 137)", "deny",
