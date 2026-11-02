@@ -1,0 +1,9 @@
+{
+ "title": "The CI alarm judges runs by workflow and event, and one gh error does not block merges",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21014,
+ "why": "The mailaudit lane reviewed actions/ci-alarm at 17492e5 (report Nov 1 19:44 CST): the alarm can hide a red nightly run, and it can turn red on its own and block every merge for up to a day.",
+ "note": "Three defects, each red first. (1) alarm.sh groups runs by workflow name, not by event, so a green push run hides a red nightly of the same workflow; test_action.sh case red-then-fixed-is-quiet pins that masking, and merge.py base_state masks the same way. Group by workflow and event in both. (2) set -e in alarm.sh and issue.sh: one gh error turns the alarm run red, and red_base then refuses every merge for up to a day; a gh error must report unknown, not red. (3) No event filter: a failed Pages build or a deleted workflow's old red run raises a false alarm, though merge.py excludes both; use one exclusion list for both (building-allow-list-is-the-constant). Port: yes, every repo uses ci-alarm. Ready: no open question.",
+ "updatedAt": "2026-11-02T01:46:00Z"
+}
