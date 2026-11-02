@@ -340,8 +340,13 @@ def _proves(use, n):
         return False
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
-        return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
+        return isinstance(msg, str) and names_token(msg, n)
     return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
+
+
+def names_token(text, token):
+    """True when `text` holds `token` as a whole token: no letter, digit or hyphen touches either end."""
+    return re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % re.escape(str(token)), text) is not None
 
 
 def _in_items(d):
@@ -355,25 +360,40 @@ def _is_write(d):
     return not isinstance(verb, str) or verb in WRITE_VERBS
 
 
-def _has_n(node, n):
+def _has_where(node, test):
+    """True when `test` holds for a dict at any depth of `node`, under write dicts only."""
     if isinstance(node, dict):
         if not _is_write(node):
             return False
-        v = node.get("n")
-        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
-                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
-            return True
-        return any(_has_n(c, n) for c in node.values())
-    return isinstance(node, list) and any(_has_n(c, n) for c in node)
+        return test(node) or any(_has_where(c, test) for c in node.values())
+    return isinstance(node, list) and any(_has_where(c, test) for c in node)
+
+
+def _n_is(n):
+    def test(d):
+        v = d.get("n")
+        return (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
+            isinstance(v, str) and v.isdigit() and int(v) == int(n))
+    return test
+
+
+def _has_n(node, n):
+    return _has_where(node, _n_is(n))
+
+
+def writes_where(node, test):
+    """True when a write dict that names the items collection holds, at any depth below it, a dict for
+    which `test` is true. The one walker of page-item writes: `_writes_n` and the report guard use it."""
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        return (_in_items(node) and _has_where(node, test)) or any(writes_where(c, test) for c in node.values())
+    return isinstance(node, list) and any(writes_where(c, test) for c in node)
 
 
 def _writes_n(node, n):
     """True when a write dict that names the items collection holds key n == n at any depth below it."""
-    if isinstance(node, dict):
-        if not _is_write(node):
-            return False
-        return (_in_items(node) and _has_n(node, n)) or any(_writes_n(c, n) for c in node.values())
-    return isinstance(node, list) and any(_writes_n(c, n) for c in node)
+    return writes_where(node, _n_is(n))
 
 
 def page_problem(item_id, rest, text, k, stamp, pages):

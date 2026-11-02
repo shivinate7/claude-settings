@@ -19,7 +19,9 @@ _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")
 # Bandaid (debt inbox-saves-other-notices): a peer's send_message frame, bare at the start of the
 # prompt. The tag name ends at `>` or whitespace.
 _PEER_FRAME_TAGS = tuple("<cross-session-message" + end for end in "> \t\n\r")
-MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + tuple(
+# The notices of a tool or an agent that are no message to the session: a task notification, an agent hand-back.
+NOTICE_TAGS = (TASK_NOTIFICATION_TAG,) + _HAND_BACK_TAGS
+MACHINE_TAGS = ("<system-reminder>",) + NOTICE_TAGS + tuple(
     frame + "\n" + tag
     for frame in ("Another Claude session sent a message:",
                   "Another Claude session sent a message while you were working:")

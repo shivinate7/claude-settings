@@ -48,11 +48,17 @@ page writer (or, with no writer known, a send naming the item id) or a write to 
 A Stop 300 s or more after the ask blocks until it is sent. A repo with no waiting page never blocks: the
 check says once that it failed open and drops the item. A stop_hook_active Stop clears what was sent and
 never blocks or adds.
-Lane: a Stop whose Input Needed offers a pick blocks unless the same turn called the box or sent to the
-parent or the page writer. The page words and the page link pass nothing for a lane.
+A pick cleared by a send, box or items write is remembered by hash for 24 hours, so the same pick re-asked
+later opens no item; one cleared only by an owner message is not. A send clears an item, or answers a lane,
+only when its message carries the pick: the item id or the first 60 characters of the pick's first line.
+Lane: a Stop whose Input Needed offers a pick blocks unless the same turn called the box or sent the pick to
+the parent or the page writer. A tag-only lane (no parent known) passes on a send to the writer or to any
+session, when the send carries the pick. The page words and the page link pass nothing for a lane.
 Cost: no process, timer or log. One stat per Stop when no pick was ever open. One small JSON file per
-session, written only at a Stop that adds or clears an item. One transcript read, which this guard already
-makes. One get_session scan of that transcript per Stop whose reply offers a pick or whose state file exists.
+session, written only at a Stop that adds or clears an item, and a second small file (<state>.sent), written
+only at a Stop where a send cleared a pick and read only when a pick is added. One transcript read, which
+this guard already makes. One get_session scan of that transcript per Stop whose reply offers a pick or
+whose state file exists. A lane or owner-facing Stop that offers a pick loads hooks/guard.py once, for LANE_TAG.
 """
 import hashlib
 import json
@@ -63,7 +69,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_reply, owner_text, parse_utc_timestamp, tool_uses  # noqa: E402
+from _transcript import (  # noqa: E402
+    is_last_human, last_reply, owner_text, parse_utc_timestamp, read_transcript, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -610,16 +617,17 @@ def refusal_reason(tools):
 # questions-go-to-owner, "Chat first, then the page": an Input Needed pick has to reach the owner. The pick guard above passes the turn
 # that asks on a promise (the 5-minute wait and the waiting page); these checks enforce the promise.
 PICK_WAIT_SECONDS = 300
-LANE_TAG = "cs-build:lane"
-ID_TOKEN_EDGE = r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])"
+CARRY_CHARS = 60      # a send carries a pick when it holds this many chars of the first line, or the item id
+SENT_KEEP_SECONDS = 24 * 3600   # how long a pick cleared by a send is remembered
 OPEN_PICK_REASON = (
     "Open-pick guard: an Input Needed pick has waited 5 minutes or more and no send, owner reply or box "
-    "answered it: %s. Send each question to %s by send_message, with the item id in the message.")
+    "answered it: %s. Send each question to %s by send_message, with the item id in the message. A session "
+    "that is the page writer writes the item itself: an ArtifactData write to the items collection naming the item id.")
 NO_PAGE_NOTICE = ("Open-pick guard: failed open. The repo has no waiting page, so the pick %s was dropped "
                   "after 5 minutes and nothing was blocked.")
 LANE_REASON = (
     "Lane pick guard: Input Needed offers a pick, and this turn sent it nowhere. A lane's own chat does "
-    "not reach the owner. Send the question to %s by send_message in this turn.")
+    "not reach the owner. Send the question to %s by send_message in this turn, with the item id %s in the message.")
 
 
 def now():
@@ -635,22 +643,10 @@ def _load_records(path):
     """The transcript's records, or None when it is missing or unreadable."""
     if not path or not os.path.exists(path):
         return None
-    records = []
     try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
+        return read_transcript(path)
     except Exception:
         return None
-    return records
 
 
 def _norm(text):
@@ -694,36 +690,36 @@ def _reads_meta_page(tool_input):
     return (tool_input.get("collection") == "meta" and doc == "page") or doc == "meta/page"
 
 
-def _strings(node):
-    if isinstance(node, str):
-        yield node
-    elif isinstance(node, dict):
-        for child in node.values():
-            yield from _strings(child)
-    elif isinstance(node, list):
-        for child in node:
-            yield from _strings(child)
-
-
 def _feedback_guard():
     _hooks()
     import feedback_guard
     return feedback_guard
 
 
+def pick_keys(section):
+    """(hash, id, first) of an Input Needed section: the sha1 of its normalized text, the item id
+    `ask-<8 hex>` and its normalized first non-blank line. One home of an item's identity."""
+    digest = hashlib.sha1(_norm(section).encode("utf-8")).hexdigest()
+    lines = [line for line in section.splitlines() if line.strip()]
+    return digest, "ask-" + digest[:8], _norm(lines[0]) if lines else ""
+
+
+def carries(message, item_id, first):
+    """True when a message carries the pick: it names the item id as a whole token, or holds the first
+    CARRY_CHARS characters of the item's first line."""
+    return isinstance(message, str) and (
+        _feedback_guard().names_token(message, item_id) or bool(first) and first[:CARRY_CHARS] in _norm(message))
+
+
 def _writes_item(node, item_id, first):
-    """True when a set, update or batch write names the items collection and its text holds the item's id
-    as a whole token or the item's first line. The write shape is feedback_guard's (`_in_items`, `_is_write`)."""
+    """True when a set, update or batch write to the page's items holds the item's id as a whole token or
+    its first line. The walker is feedback_guard's `writes_where`."""
     fg = _feedback_guard()
-    if isinstance(node, dict):
-        if not fg._is_write(node):
-            return False
-        if fg._in_items(node):
-            for text in _strings(node):
-                if re.search(ID_TOKEN_EDGE % re.escape(item_id), text) or (first and first in _norm(text)):
-                    return True
-        return any(_writes_item(c, item_id, first) for c in node.values())
-    return isinstance(node, list) and any(_writes_item(c, item_id, first) for c in node)
+
+    def test(d):
+        return any(isinstance(v, str) and (fg.names_token(v, item_id) or bool(first) and first in _norm(v))
+                   for v in d.values())
+    return fg.writes_where(node, test)
 
 
 def _send_target(use):
@@ -766,26 +762,24 @@ def _facts(records):
     return writer, events
 
 
-def _answered(item, writer, events, timed=True):
-    """True when an event after the item was asked answered it (questions-go-to-owner, "Chat first, then the
-    page"). `timed` False takes every event given, for an item new this Stop: its turn's own sends count."""
-    first = _norm((item.get("text") or "").splitlines()[0]) if item.get("text") else ""
+def _answers(item, writer, events, timed=True):
+    """The kinds of event (owner, box, send, write) that answered the item (questions-go-to-owner, "Chat
+    first, then the page"). A send counts when it goes to the writer (any session when no writer is known)
+    and carries the pick. `timed` False takes every event given, for an item new this Stop."""
+    first = pick_keys(item.get("text") or "")[2]
+    kinds = set()
     for at, kind, use in events:
         if timed and (at is None or at <= item["asked"]):
             continue
         if kind in ("owner", "box"):
-            return True
-        if kind == "send":
-            if writer is not None:
-                if _send_target(use) == writer:
-                    return True
-            else:
-                msg = (use.get("input") or {}).get("message")
-                if isinstance(msg, str) and re.search(ID_TOKEN_EDGE % re.escape(item["id"]), msg):
-                    return True
+            kinds.add(kind)
+        elif kind == "send":
+            if (writer is None or _send_target(use) == writer) and carries(
+                    (use.get("input") or {}).get("message"), item["id"], first):
+                kinds.add(kind)
         elif kind == "write" and _writes_item(use.get("input"), item["id"], first):
-            return True
-    return False
+            kinds.add(kind)
+    return kinds
 
 
 def own_tier(hook):
@@ -800,37 +794,62 @@ def own_tier(hook):
 
 
 def lane_parent(hook):
-    """(is_lane, parent): a lane has the tag cs-build:lane or a parent session. Owner-facing otherwise."""
+    """(is_lane, parent): a lane has the lane tag (hooks/guard.py LANE_TAG) or a parent session.
+    Owner-facing otherwise."""
     tags, parent = own_tier(hook)
-    return (LANE_TAG in (tags or []) or bool(parent)), parent
+    if guard is None:
+        _load_guard()
+    tag = getattr(guard, "LANE_TAG", None)
+    return (tag in (tags or []) or bool(parent)), parent
+
+
+def _message_text(rec):
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) else None
+    else:
+        text = (rec.get("message") or {}).get("content")
+    if isinstance(text, list):
+        text = "\n".join(b.get("text", "") for b in text if isinstance(b, dict) and b.get("type") == "text")
+    return text if isinstance(text, str) else ""
 
 
 def _turn_boundary(rec):
+    """True for a record that starts a turn: an owner, peer or system-reminder message or a queued command.
+    A machine notice (a task notification or an agent hand-back) does not."""
     if rec.get("isSidechain"):
         return False
     if rec.get("type") == "attachment":
         att = rec.get("attachment")
-        return isinstance(att, dict) and att.get("type") == "queued_command"
-    if rec.get("type") != "user":
+        started = isinstance(att, dict) and att.get("type") == "queued_command"
+    elif rec.get("type") != "user":
         return False
-    if isinstance((rec.get("message") or {}).get("content"), str):
-        return True
-    blocks = _blocks(rec)
-    return (any(b.get("type") == "text" for b in blocks)
+    else:
+        blocks = _blocks(rec)
+        started = isinstance((rec.get("message") or {}).get("content"), str) or (
+            any(b.get("type") == "text" for b in blocks)
             and not any(b.get("type") == "tool_result" for b in blocks))
+    if not started:
+        return False
+    import shared_names
+    return not _message_text(rec).strip().startswith(shared_names.NOTICE_TAGS)
 
 
-def lane_reason(records, parent):
-    """The lane check's refusal when this lane's turn sent its pick nowhere, else ''. The turn starts at
-    the last record that holds a message: an owner, peer or system-reminder text, or a queued command."""
+def lane_reason(records, parent, text):
+    """The lane check's refusal when this lane's turn did not send its pick, else ''. The turn starts at
+    the last record that holds a message. A send passes when it carries the pick (item id or first line)
+    and, with a parent known, goes to the parent or the page writer."""
+    _hooks()
+    _digest, item_id, first = pick_keys(input_needed_section(text))
     start = max((i for i, rec in enumerate(records) if _turn_boundary(rec)), default=-1)
     writer = _facts(records)[0]
     ids = {x for x in (parent, writer) if x}
     for _at, kind, use in _facts(records[start + 1:])[1]:
-        if kind == "box" or (kind == "send" and (not parent or _send_target(use) in ids)):
+        if kind == "box" or (kind == "send" and (not parent or _send_target(use) in ids) and carries(
+                (use.get("input") or {}).get("message"), item_id, first)):
             return ""
     return LANE_REASON % ("your parent session (%s)" % parent if parent else
-                          "the page writer (read `ArtifactData get meta/page`) or your parent session")
+                          "the page writer (read `ArtifactData get meta/page`) or your parent session", item_id)
 
 
 def _load_items(path):
@@ -867,10 +886,39 @@ def open_picks_file(hook):
     return local_time.open_picks_path(hook.get("session_id"))
 
 
+def _sent_path(path):
+    return path + ".sent"
+
+
+def _sent_hashes(path):
+    """The hashes of picks a send, box or items write cleared within SENT_KEEP_SECONDS."""
+    try:
+        with open(_sent_path(path), encoding="utf-8") as f:
+            rows = json.load(f)
+    except Exception:
+        return []
+    return [r for r in rows if isinstance(r, dict) and isinstance(r.get("hash"), str)
+            and isinstance(r.get("at"), (int, float)) and now() - r["at"] < SENT_KEEP_SECONDS]
+
+
+def _remember_sent(path, hashes):
+    """Add `hashes` to the sent memory and prune it. Written only when a pick was cleared by a send."""
+    if not hashes:
+        return
+    rows = [r for r in _sent_hashes(path) if r["hash"] not in hashes] + [{"hash": h, "at": now()} for h in hashes]
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(_sent_path(path), "w", encoding="utf-8") as f:
+            json.dump(rows, f)
+    except Exception:
+        pass
+
+
 def open_pick_check(hook, records, text, after, active):
     """The owner-facing check (questions-go-to-owner, "Chat first, then the page"): (reason, notice).
 
-    Step a clears each item the transcript shows sent or answered; step b keeps this reply's pick open;
+    Step a clears each item the transcript shows sent or answered; step b keeps this reply's pick open
+    unless a send, box or items write of this turn, or of an earlier clearing within 24 hours, sent it;
     step c blocks at 300 s unsent; step d writes the state when it changed. A rewrite Stop (`active`) runs
     step a only. Fails open on any error."""
     try:
@@ -879,24 +927,34 @@ def open_pick_check(hook, records, text, after, active):
             return "", ""
         items = _load_items(path) if os.path.exists(path) else []
         before = list(items)
-        writer = None
+        writer, sent = None, []
         if items:
             writer, events = _facts(records)
-            items = [i for i in items if not _answered(i, writer, events)]
+            kept = []
+            for i in items:
+                kinds = _answers(i, writer, events)
+                if kinds - {"owner"}:  # an owner answer is not remembered: he may ask again
+                    sent.append(i["hash"])
+                if not kinds:
+                    kept.append(i)
+            items = kept
         reason = notice = ""
         if not active:
             boxed = any(not rec.get("isSidechain") and any(b.get("name") == ASK_TOOL for b in tool_uses(rec))
                         for rec in after)
             if offers_a_pick(text) and not boxed:
                 section = input_needed_section(text)
-                digest = hashlib.sha1(_norm(section).encode("utf-8")).hexdigest()
-                if not any(i.get("hash") == digest for i in items):
-                    item = {"id": "ask-" + digest[:8], "hash": digest, "asked": now(), "text": section[:200]}
+                digest, item_id, _first = pick_keys(section)
+                if not any(i.get("hash") == digest for i in items) and not any(
+                        r["hash"] == digest for r in _sent_hashes(path)):
+                    item = {"id": item_id, "hash": digest, "asked": now(), "text": section[:200]}
                     # A send, box or items write made earlier in this turn answers the pick: judge a new item
                     # against the turn's own calls (not its owner message), not against its ask time.
                     writer, _ = _facts(records)
                     turn = [e for e in _facts(after)[1] if e[1] != "owner"]
-                    if not _answered(item, writer, turn, timed=False):
+                    if _answers(item, writer, turn, timed=False):
+                        sent.append(digest)
+                    else:
                         items.append(item)
             late = [i for i in items if now() - i["asked"] >= PICK_WAIT_SECONDS]
             if late:
@@ -912,6 +970,7 @@ def open_pick_check(hook, records, text, after, active):
                     items = [i for i in items if i not in late]
         if items != before:
             _save_items(path, items)
+        _remember_sent(path, sent)
         return reason, notice
     except Exception:
         return "", ""
@@ -930,7 +989,7 @@ def open_pick_reasons(hook, records, text, after):
         return None, [], ""
     if lane:
         try:
-            reason = lane_reason(records, parent) if offers_a_pick(text) else ""
+            reason = lane_reason(records, parent, text) if offers_a_pick(text) else ""
         except Exception:
             reason = ""
         return lane, [reason] if reason else [], ""
