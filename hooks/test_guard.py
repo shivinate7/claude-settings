@@ -7556,6 +7556,46 @@ sh("env heredoc: a file written with env prose and never run, allowed",
    "allow", cwd=NOGIT)
 
 
+# A file a heredoc writes is data until a later segment runs it. A runner that takes it as an argument
+# does not run it. The script is the first operand that is not an option, or the word after a flag that
+# takes a script. `-m` takes a module and `-c` a string, so neither names a file.
+_ENV_TEXT = "Refused forms, as text:\ncat " + ENV + "\nnode --env-file=" + ENV + " app.js\n"
+for _run in (
+    "python3 lint.py brief.md",
+    "node check.js brief.md",
+    "bash bin/ste-changed brief.md",
+    "python3 -m json.tool brief.md",
+    "python3 -m py_compile x.py",
+):
+    sh("env heredoc: a brief written to a file, then %s on a later segment, allowed" % _run,
+       "cat > brief.md <<'EOF'\n" + _ENV_TEXT + "EOF\n" + _run, "allow", cwd=NOGIT)
+# The written file is the script, or stdin of an interpreter, so the body runs and stays refused.
+sh("env heredoc: a file written to brief.sh and run as the first operand, denies",
+   "cat > brief.sh <<'EOF'\ncat " + ENV + "\nEOF\npython3 brief.sh", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a file written to deploy and read by python3 on stdin, denies",
+   "cat > deploy <<'EOF'\ncat " + ENV + "\nEOF\npython3 - < deploy", "deny", "env-file", cwd=NOGIT)
+sh("env heredoc: a file written to deploy and read by bash on stdin, denies",
+   "cat > deploy <<'EOF'\ncat " + ENV + "\nEOF\nbash < deploy", "deny", "env-file", cwd=NOGIT)
+# A nested python3 block in the body, then an env read. Each write form, then each run form, must deny.
+_NESTED_BODY = "python3 - <<'PY'\nprint(1)\nPY\ncat " + ENV + "\n"
+for _label, _command in (
+    ("d/deploy, then cd d && ./deploy",
+     "cat > d/deploy <<'EOF'\n" + _NESTED_BODY + "EOF\ncd d && ./deploy"),
+    ("d/deploy, then (cd d && ./deploy)",
+     "cat > d/deploy <<'EOF'\n" + _NESTED_BODY + "EOF\n(cd d && ./deploy)"),
+    ("deploy, then out=$(./deploy)",
+     "cat > deploy <<'EOF'\n" + _NESTED_BODY + "EOF\nout=$(./deploy)"),
+    ("deploy, then cat deploy | bash",
+     "cat > deploy <<'EOF'\n" + _NESTED_BODY + "EOF\ncat deploy | bash"),
+    ("deploy written with &>, then ./deploy",
+     "cat <<'EOF' &> deploy\n" + _NESTED_BODY + "EOF\n./deploy"),
+    ("deploy written with >|, then ./deploy",
+     "cat <<'EOF' >| deploy\n" + _NESTED_BODY + "EOF\n./deploy"),
+):
+    sh("env heredoc: a nested python3 block and an env read written to %s, denies" % _label,
+       _command, "deny", "env-file", cwd=NOGIT)
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
