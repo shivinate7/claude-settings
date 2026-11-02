@@ -4367,6 +4367,12 @@ sh("detached: setsid with no -w starts its own session", "setsid make test", "de
    "detached-launch", cwd=NOGIT)
 sh("detached: setsid -f forks, so the child outlives the call", "setsid -f make test", "deny",
    "detached-launch", cwd=NOGIT)
+# A wrapper inside another wrapper detaches the same way: nohup passes its own command on, so the
+# setsid it wraps is read too.
+sh("detached: setsid with no -w, wrapped in nohup, is refused", "nohup setsid make test", "deny",
+   "detached-launch", cwd=NOGIT)
+sh("detached: setsid -f, wrapped in nohup, is refused", "nohup setsid -f make test", "deny",
+   "detached-launch", cwd=NOGIT)
 sh("detached: setsid -w with a trailing background job is still refused", "setsid -w make test &",
    "deny", "detached-launch", cwd=NOGIT)
 sh("detached: setsid starts its own session",
