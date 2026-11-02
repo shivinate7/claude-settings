@@ -419,11 +419,15 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
 REPEAT_MODEL = "claude-haiku-5-5"
 REPEAT_TIMEOUT = 45  # the settings.json row allows 60
 REPEAT_CUT = 300  # characters of one candidate in the prompt
-REPEAT_MAX = 400  # candidates in the prompt: roadmap first, then backlog, then inbox blocks, newest first
+REPEAT_MAX = 400  # candidates in the prompt: roadmap, backlog, inbox blocks; open steps and newest first
 REPEAT_SHARES = {"roadmap": 200, "backlog": 100, "inbox": 100}  # per source, so one cannot crowd out the rest
 REPEAT_INBOXES = 50  # other sessions' inboxes read, newest by mtime
 MESSAGE_CUT = 1000  # characters of one new message in the prompt
 MARK = " repeats "  # appended to an item line, before the ref
+REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
+# A mark the guard wrote: ` repeats <ref>` at the line tail, before an optional ` [closed]`. The item's
+# own words may hold "repeats", so a bare substring is not a mark.
+MARKED = re.compile(r"%s(?:%s):\S+(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
 INBOX_SUFFIX = ".inbox.md"
 
 
@@ -475,7 +479,8 @@ def new_items(blocks, judged):
 
 def roadmap_candidates(root):
     """[(ref, label, text)] for each step record at the local roadmap ref, from one `git grep` that
-    prints every line of every step. No ref, no hit or a git error: none."""
+    prints every line of every step. Steps whose status is not `done` come first, so the share keeps
+    every open step. No ref, no hit or a git error: none."""
     run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", override.STEP_REF, "--", override.STEP_DIR])
     if run.returncode != 0:
         return []
@@ -484,7 +489,7 @@ def roadmap_candidates(root):
         if ln.startswith(prefix):
             path, _, text = ln[len(prefix):].partition(":")
             files.setdefault(path, []).append(text)
-    out = []
+    out, done = [], set()
     for path in sorted(files):
         try:
             step = json.loads("\n".join(files[path])) if path.endswith(".json") else None
@@ -495,17 +500,20 @@ def roadmap_candidates(root):
         if parts:
             slug = os.path.basename(path)[:-len(".json")]
             out.append(("roadmap:" + slug, squash(parts[0], 60), squash(" ".join(parts))))
-    return out
+            if step.get("status") == "done":
+                done.add(out[-1][0])
+    return sorted(out, key=lambda c: c[0] in done)  # stable: slug order within open and within done
 
 
 def line_candidates(path, prefix):
-    """One candidate per non-blank line of a backlog file, ref `<prefix>:<line number>`."""
+    """One candidate per non-blank line of a backlog file, ref `<prefix>:<line number>`, newest (last)
+    line first, so the share keeps the newest lines."""
     out = []
     with open(path, encoding="utf-8", errors="replace") as f:
         for n, ln in enumerate(f, 1):
             if ln.strip():
                 out.append(("%s:%d" % (prefix, n), squash(ln, 60), squash(ln)))
-    return out
+    return out[::-1]
 
 
 def backlog_candidates(root):
@@ -613,7 +621,11 @@ def judge(homes, inbox, blocks, new):
         return [], " ".join(str(err or "odd answer").split())
     ids, hits = {i for i, _ in new}, {}
     for entry in answer["repeats"]:
-        if isinstance(entry, dict) and entry.get("id") in ids and entry.get("ref") in labels:
+        # a non-str id or ref is skipped alone: a list in a set test raises and would cost every hit
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) \
+                or not isinstance(entry.get("ref"), str):
+            continue
+        if entry["id"] in ids and entry["ref"] in labels:
             hits.setdefault(entry["id"], (entry["id"], entry["ref"], labels[entry["ref"]]))
     return list(hits.values()), None
 
@@ -636,7 +648,7 @@ def mark_items(inbox, blocks, hits):
         if n is None or n > len(lines) or not lines[n - 1].startswith("- %s " % item_id):
             continue
         placed.add(item_id)
-        if MARK in lines[n - 1]:
+        if MARKED.search(lines[n - 1]):
             continue
         tail = "\r" if lines[n - 1].endswith("\r") else ""
         body, closed = lines[n - 1].rstrip(), ""

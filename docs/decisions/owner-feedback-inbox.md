@@ -72,7 +72,8 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   them, through `decision_watch.invoke_model` (`claude-haiku-5-5`, 45 s, no effort; the Stop hook's
   timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
-  100 inbox blocks, newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
+  100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
+  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
   never fetched); the layout's debt, todo and notes files in the working tree; this inbox's other
   blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
   `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
@@ -87,7 +88,8 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   on a hit the inbox. Capture adds one small file per session and no process. Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
   nothing matched the repeat. Ruling 2026-11-01 17:57 CST: a model's meaning match, no glossary.
-  Landed 2026-11-02. Known gaps: inboxes from before the sidecar are not searched. A cloud container
+  Landed 2026-11-01. Known gaps: inboxes from before the sidecar are not searched. Item ids
+  `fb-HHMM-n` can recur after a day, and a recurring id counts as judged, so its item is not judged. A cloud container
   starts with no old inboxes, so there the roadmap and backlog do the work. Outside a repo only this
   inbox's blocks are candidates. A session whose cwd is a linked worktree has its own top level, so
   inboxes bind per worktree, not per repo. A session's cwd is usually the primary checkout.
