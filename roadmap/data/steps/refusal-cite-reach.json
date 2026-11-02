@@ -1,9 +1,9 @@
 {
  "title": "Every refusal cites its rule, in every hook",
  "phase": "next",
- "status": "todo",
+ "status": "doing",
  "order": 472,
  "why": "Lane refusal-uncited-rewrites found refusals its ratchet cannot see: the guard-crash deny, 13 exempt ids that can cite now, 9 later ids, and hooks outside guard*.py, merge.py included.",
- "note": "Items (1) to (4) in step refusal-uncited-rewrites' note. Widen the ratchet to every hook that refuses and to merge.py, then cite or record each. Ready. Port: yes.",
- "updatedAt": "2026-11-02T04:10:00Z"
+ "note": "Items (1) to (4) in step refusal-uncited-rewrites' note. Widen the ratchet to every hook that refuses and to merge.py, then cite or record each. Ready. Port: yes. Draft PR #1061, stacked on #1046 (Nov 2 00:15 CST). Round 1 review found Stop-hook block prints the cite check does not read, filed as step stop-block-cites.",
+ "updatedAt": "2026-11-02T06:17:00Z"
 }
