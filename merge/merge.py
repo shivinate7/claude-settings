@@ -1118,16 +1118,16 @@ class Host:
                 raise ValueError("MERGED with no merge commit")
         except (NetStop, ValueError, KeyError, TypeError) as e:
             raise NetStop(f"the merge of #{n} may have landed, and its state cannot be read. Nothing was reverted. Check the pull request #{n} on GitHub. "
-                          f"If it is merged, do the after-merge steps by hand (move the local {self.base}, run merge.afterMerge, cut the branch). If it is open, run again.\n{out}\n{e if isinstance(e, NetStop) else view}")
+                          f"If it is merged, do the after-merge steps by hand (move the local {self.base}, run merge.afterMerge, cut the branch). If it is open, run again {REFUSED_CITE}.\n{out}\n{e if isinstance(e, NetStop) else view}")
         if state == "MERGED":
             if head == sha:
                 return oid, ""
-            raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted.\n{out}")
+            raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted {REFUSED_CITE}.\n{out}")
         if lost:
-            raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again.\n{out}")
+            raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again {REFUSED_CITE}.\n{out}")
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
             raise NetStop(f"the merge call of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
-                          f"if it merged, do the after-merge steps by hand; if it is open, run again.\n{view}")
+                          f"if it merged, do the after-merge steps by hand; if it is open, run again {REFUSED_CITE}.\n{view}")
         # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
         # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
         return None, out
