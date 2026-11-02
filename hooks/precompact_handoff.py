@@ -45,8 +45,9 @@ the desktop app has none.
   Claude Code's own compaction trigger: min(E - round(E * f), E - 13k), E = limit - 20k, and f =
   summary_fraction(limit), the summary buffer fraction in the flags Claude Code caches in
   $CLAUDE_CONFIG_DIR/.claude.json (else ~/.claude.json): the tengu_amber_moleskin table, then
-  tengu_amber_rokovoko, then 0.2 (384k on 500k with 0.2; 441.6k with 0.08).
+  tengu_amber_rokovoko, then 0.2 (408k on 500k with 0.15).
   CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (its leading number p, 0 < p <= 100) can lower it in every session and window.
+  Cloud sessions set it per session, read live at each Stop (92 gives 441,600 on 500k; 80 gives 384,000).
   The hook cannot read the session's live state, so it reads the same cached flag. The last
   checkpoint is at size = threshold - margin, margin = min(50k, room // 2), so it always sits
   below the live threshold. The bucket lives in
