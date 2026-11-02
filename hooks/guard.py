@@ -116,9 +116,11 @@ Other tools, in `judge` order:
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
                        other than the one holding its cwd. A nested worktree owns its own files.
-                       A target in no checkout, or in the clone's `.git`, passes; unreadable git
-                       passes. The shell form reads the targets frozen-path reads, after a
-                       leading `cd`. An override lifts it.
+                       A target in no checkout, or in the clone's `.git`, passes; so does a
+                       linked checkout in this session's own scratchpad, for a call with no
+                       `agent_id` and a valid session id. Unreadable git passes. The shell form
+                       reads the targets frozen-path reads, after a leading `cd`. An override
+                       lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -3372,11 +3374,14 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
+def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
+                       has_agent: bool = True) -> str:
     """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
-    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
-    unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. A
+    linked checkout in this session's own scratchpad passes for a call with no `agent_id` and a
+    valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
+    state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
+    Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
@@ -3400,6 +3405,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
         except Exception:
+            return False
+        # An agent shares its session's id, and worktree-home judges no shell target, so only a
+        # top-level call may write into the session's own scratchpad worktree.
+        if not has_agent and under_session_scratchpad(resolved, session_id):
             return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
@@ -3656,7 +3665,8 @@ def judge(payload) -> None:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
-    other_hit = other_checkout_hit(tool, tool_input, cwd)
+    other_hit = other_checkout_hit(tool, tool_input, cwd, session_id_of(payload),
+                                   bool(payload.get("agent_id")))
     if other_hit:
         refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
     # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
