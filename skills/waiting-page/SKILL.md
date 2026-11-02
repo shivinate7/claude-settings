@@ -67,6 +67,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
     Never use the key `none`. The page adds its own "None of these" option
     with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
@@ -203,6 +204,10 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.
+
+The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
+repo's waiting page from a file behind main is refused, and its reason repeats steps 1 to 3. An allowed
+publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
 one short read-only git process, with no fetch. It writes `<out>` only, and no file without
