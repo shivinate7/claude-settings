@@ -27,6 +27,7 @@ session transcripts, not a repo.
 | Group | Probe | In shape when |
 | --- | --- | --- |
 | Outcomes | Read the child `CLAUDE.md` and README first screen. Run `ste_lint` on both | rules name the person served; README passes `fresh-prose` |
+| Outcomes | `$PY $P/lint/compliance_probes.py restates .` reads the same child files for a unit that copies a claude-settings record (Restates, below); read each hit in its file | exit 0. A line names a record, such as claude-settings `standing-merge-grant`, and adds only what applies to this repo |
 | Outcomes | `grep -c "rule:" CLAUDE.md`; look for a check per local rule | each local rule has a hook, test, or CI step |
 | Outcomes | `$PY $P/lint/compliance_probes.py supersede .` reads the child's `CLAUDE.md` files, `AGENTS.md` and `.claude/**/*.md` for text that departs from a shared rule (Supersede, below); read each hit in its file | exit 0. A departure passes when its paragraph or list item says "known exemption" and names a live `rule:<id>` |
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
@@ -183,6 +184,30 @@ A bare `rule:<id>` with no "known exemption" never passes a departure. Text is c
 | 0 | `supersede: in shape - M file(s) read`, or `supersede: n/a - this is claude-settings` |
 | 1 | `supersede: out - N line(s) to read in M file(s)`, one item line per hit |
 | 2 | `supersede: unknown`: the rule text cannot be read, it has no anchor, a tracked file of the child cannot be read, or a code fence is still open at the end of a file (the file and the fence's line are named) |
+
+## Restates
+
+`$PY $P/lint/compliance_probes.py restates .` finds a child unit that copies the text of a claude-settings
+record. A child names the record and keeps only what applies to its repo (decision child-cites-not-copies).
+The fix goes in the child: replace the copy with the record's name.
+It reads the same files and units as Supersede. It reads the records from the decisions folder of the
+parent clone, never the child's own. It holds no copy of them. Before it compares, it drops headings, `Kind:`,
+`Plan:` and `Home:` lines, HTML comments, code spans, quoted text, numbers and time zones, on both sides.
+
+A unit is a hit in either case:
+
+- Runs of 5 or more words that it shares with records cover at least 12 of its words and at least half of them.
+- It names a record by its slug, and holds a date and time that the same record holds.
+
+An item names the file, the line and the record. It never prints record text.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `restates: in shape - M file(s) read`, or `restates: n/a - this is claude-settings` |
+| 1 | `restates: out - N line(s) to read in M file(s)`, one item line per hit |
+| 2 | `restates: unknown`: the records folder cannot be read or holds no record, a tracked file of the child cannot be read, or a code fence is still open at the end of a file |
+
+Child CI runs the same probe through the action `actions/claude-md-cites`, after `actions/checkout`.
 
 ## Copies
 
