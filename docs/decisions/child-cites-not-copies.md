@@ -24,7 +24,7 @@ Probe group `restates` in `lint/compliance_probes.py`: `python3 lint/compliance_
 - Probe group supersede now names `CLAUDE.md` too, when `AGENTS.md` links to it.
 - In a claude-settings checkout it prints n/a and exits 0.
 
-Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: each of the two copied merge-grant lines had 33 covered words (80% and 73% of the line). The highest line with its own content had 16 (25%). The threshold sits between them.
+Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: each of the two copied merge-grant lines had 28 covered words. That is 28 of 43 words in home and 28 of 48 in ios-adblock. degen has nothing refused. The highest line with its own content had 16 covered words (25%), measured before the quote change. The threshold of 12 words and half of the unit sits between them.
 
 Risk kind: named incident, above. Landed 2026-11-02.
 
