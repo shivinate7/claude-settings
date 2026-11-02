@@ -119,20 +119,24 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     "Feedback guard: page sends not checked" and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
-  - Chat picks (F46, F43). An owner block whose whole text is page picks (`<n> <letter>`, an optional
-    `(done)`, picks separated by commas), in a repo whose extras name a waiting page (layout.waiting_page),
-    with no item lines, blocks until the transcript shows a send naming each n (the Pages proof). Prose
-    that merely holds a number passes, and so does a pick in a repo with no waiting page.
+  - Chat picks (F46, F43). An owner block whose text holds page picks (`<n> <letter>`, letters a to h, an
+    optional `(done)`, picks separated by commas or lines; `143b` and `143: b` count), in a repo whose
+    extras name a waiting page (layout.waiting_page), blocks until the transcript shows a send naming each
+    n (the Pages proof). Its item lines do not stand in for the send. Prose that merely holds a number
+    passes, and so does a pick in a repo with no waiting page, and "1 y, 2 n", whose letters are no pick.
   - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
-    granted, permission to, permissions to, authorize, authorized, go ahead; whole words, any case) blocks
-    unless the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or
-    a `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or
-    .claude/CLAUDE.md at the repo root, each tracked; a plain ruling there still blocks. Bare "permission"
-    is no grant word, so a pasted "Permission denied" passes. The reason names the message by its stamp or
-    the start of its text.
+    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead; whole
+    words, any case) and, in the same message outside any fence, an act or scope word (merge, push, ready,
+    delete, close, deploy, release, publish, any, all, always, every, standing, from now on) blocks unless
+    the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
+    `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or .claude/CLAUDE.md
+    at the repo root, each tracked; a plain ruling there still blocks. Bare "permission" is no grant word,
+    so a pasted "Permission denied" passes. The reason names the message by its stamp or the start of its
+    text.
   - Closed notes (F88, likely risk; F88 is the related incident, not a measured one). A `[closed]` note's
     home must be a tracked file, `step:<slug>` where roadmap/data/steps/<slug>.json is a blob on some ref,
-    or `page:<n>`. Other kinds are as before.
+    or `page:<n>`. `[closed]` is a whole token after the home, and trailing text is allowed. Other kinds
+    are as before.
   - Cost. The transcript is read only for a pick block in a repo with a waiting page, or for an open
     page item.
   - Another session's inbox is never read.
@@ -1252,10 +1256,11 @@ def case_page_queued_owner_record_anchors():
 
 SHARED = {}  # one repo per run for each key, built the first time a case asks for it
 STEP_SLUG = "inbox-close"
-GRANT_WORDS = (  # one lone message per grant word, as the owner would type it
-    "I approve the merge.", "Approved.", "The approval is in.", "This is my grant.", "Granted for the lane.",
-    "Permission to merge.", "Permissions to merge.", "I authorize the merge.", "You are authorized to merge.",
-    "Go ahead and merge.")
+GRANT_WORDS = (  # one lone message per grant word, each with an act word: a grant needs one (rule 7)
+    "I approve the merge.", "Approved to merge.", "The approval is in for the merge.",
+    "This is my grant to merge.", "Granted to push the lane.", "Permission to merge.", "Permissions to merge.",
+    "I authorize the merge.", "You are authorized to merge.", "Go ahead and merge.",
+    "You have my go-ahead to merge.", "Authorised to merge.")
 F47_TEXT = "YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC."
 GRANT_SCANNER = ("Approved for the merge.\n"
                  "/* a comment opener inside a string */ and // a line comment opener\n"
@@ -1273,7 +1278,8 @@ def shared_repo(key, build):
 def waiting_repo():
     """A repo whose extras name a waiting page, as skills/waiting-page writes them: layout.waiting_page reads it."""
     return shared_repo("waiting", lambda: make_repo(
-        "waiting-page", extras=json.dumps({"kinds": {}, "waiting-page": PAGE_URL})))
+        "waiting-page", tracked=("decisions/a-ruling.md",),
+        extras=json.dumps({"kinds": {}, "waiting-page": PAGE_URL})))
 
 
 def grant_repo():
@@ -1331,6 +1337,38 @@ def case_chat_multi_pick_partial_send_blocks():
     p = page_run(new_cfg(), "pick-partial", [("137 a, 138 b", ())],
                  [owner_rec("137 a, 138 b"), send_rec("Ruling on page 137: a")], cwd=waiting_repo())
     expect_numbers_named("pick answer: a send proving only 137 leaves 138 unproven", p, ("138",))
+
+
+def expect_numbers_in_reason(name, p, numbers):
+    """Blocks, and the reason holds each number as text. For the shapes whose reason may quote the pick."""
+    reason = block_reason(p) or ""
+    check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    for n in numbers:
+        check("%s: names item %s" % (name, n), n in reason, reason)
+
+
+PICK_ITEMS = (("- fb-0958-3 [question] -> answered",), ("- fb-0958-4 [note] -> noted",),
+              ("- fb-0958-1 [ruling] -> decisions/a-ruling.md",))
+
+
+def case_chat_pick_with_items_blocks():
+    """A pick block that also holds items still needs its send: an item does not stand in for the page writer
+    (F46). Red now: the pick check reads only blocks with no item lines."""
+    repo = waiting_repo()
+    for items in PICK_ITEMS:
+        p = page_run(new_cfg(), "pick-items", [("143 b", items)], [owner_rec("143 b"), said_rec("Noted.")],
+                     cwd=repo)
+        expect_numbers_named("pick answer: 143 b, with its item %r and no send" % items[0], p, ("143",))
+
+
+def case_chat_pick_shapes_block():
+    """Picks in shapes the check misses: a full stop after the letter, no space, a colon, and one pick per
+    line. Each needs its send (F46). Red now."""
+    repo = waiting_repo()
+    for text, numbers in (("143 b.", ("143",)), ("143b", ("143",)), ("143: b", ("143",)),
+                          ("143 b\n138 a", ("143", "138"))):
+        p = page_run(new_cfg(), "pick-shape", [(text, ())], [owner_rec(text), said_rec("Noted.")], cwd=repo)
+        expect_numbers_in_reason("pick answer: %r with no send" % text, p, numbers)
 
 
 def case_chat_pick_with_a_send_passes():
@@ -1428,6 +1466,38 @@ def case_grant_words_as_parts_of_words_pass():
                       homed(new_cfg(), "no-grant", (), text=text))
 
 
+FENCED_LOG = ("The run failed, and this is the log, pasted:\n"
+              "```\n"
+              "authorized: true\n"
+              "merge: ready, push: enabled\n"
+              "```\n"
+              "Fix the lint and rerun.")
+
+
+def case_grant_fenced_text_is_not_scanned_passes():
+    """Fenced text is a pasted log, not the owner's words, so its grant and act words are not scanned. The fence
+    holds "authorized: true" beside act words, which would refuse if read (rule 6). Red now."""
+    cfg, sid = new_cfg(), "grant-log"
+    write_file(inbox_of(cfg, sid), render_block(FENCED_LOG, items=("- fb-0958-2 [note] -> noted",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("grant home: a pasted log in a fence, with grant and act words, passes", guard(cfg, sid))
+
+
+def case_grant_needs_an_act_word_passes():
+    """A grant word alone is no grant: a grant needs an act or scope word in the same message (rule 7). Each
+    row holds a grant word and no act word. F47 still refuses, as its act words sit in its message. Red now."""
+    for text in ("Go ahead and fix the typo.", "The grant check misses closed items.", "Authorized: true."):
+        expect_silent("grant home: %r has a grant word and no act word, passes" % text,
+                      homed(new_cfg(), "no-act", (), text=text))
+
+
+def case_pick_letters_a_to_h_passes():
+    """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send (rule 8). Red now."""
+    p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
+                 cwd=waiting_repo())
+    expect_silent("pick answer: \"1 y, 2 n\" is no pick, passes", p)
+
+
 # Closed notes: F88. A closed note holds for good only with a tracked file, a step on some ref, or a page.
 
 def case_closed_note_without_a_home_blocks():
@@ -1442,6 +1512,9 @@ def case_closed_note_without_a_home_blocks():
               cwd=step_repo(), text="closed against a missing step")
     expect_block("close home: a closed note homed to a step with no file on any branch blocks", p,
                  named=("fb-0958-4",))
+    for item in ("- fb-0958-4 [note] -> process-only [closed]", "- fb-0958-4 [note] -> noted [closed] (done)"):
+        p = homed(new_cfg(), "close-odd", (item,), text="closed with an odd home")
+        expect_block("close home: %r blocks" % item, p, named=("fb-0958-4",))
 
 
 def case_closed_note_with_a_home_passes():
@@ -1453,6 +1526,8 @@ def case_closed_note_with_a_home_passes():
     expect_silent("close home: a closed note homed to a step on a lane branch passes", p)
     p = homed(new_cfg(), "close-page", ("- fb-0958-4 [note] -> page:98 [closed]",))
     expect_silent("close home: a closed note homed to a page passes", p)
+    p = homed(new_cfg(), "close-trailing", ("- fb-0958-4 [note] -> decisions/a-ruling.md [closed] (done)",))
+    expect_silent("close home: a tracked file, [closed] and trailing text, passes", p)
     p = homed(new_cfg(), "close-question", ("- fb-0958-3 [question] -> answered [closed]",))
     expect_silent("close home: a closed question homed to answered stays green", p)
     p = homed(new_cfg(), "open-note", ("- fb-0958-4 [note] -> noted",))
@@ -2150,6 +2225,9 @@ CASES = (
     case_page_artifactdata_write_without_n_blocks,
     case_chat_pick_without_a_send_blocks,
     case_chat_multi_pick_partial_send_blocks,
+    case_chat_pick_with_items_blocks,
+    case_chat_pick_shapes_block,
+    case_pick_letters_a_to_h_passes,
     case_chat_pick_with_a_send_passes,
     case_chat_prose_and_no_waiting_page_pass,
     case_grant_without_a_home_blocks,
@@ -2158,6 +2236,8 @@ CASES = (
     case_grant_ruling_home_still_refused,
     case_grant_fake_item_in_the_fence_blocks,
     case_grant_words_as_parts_of_words_pass,
+    case_grant_fenced_text_is_not_scanned_passes,
+    case_grant_needs_an_act_word_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_page_check_reads_no_transcript_for_other_blocks,
