@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-140 rows: exact 86, looser 9, stricter 12, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+140 rows: exact 87, looser 9, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -49,12 +49,12 @@ exact has a gap.
 | `rm-var-unguarded` | rm-on-a-variable-needs-a-guard | "refuses a recursive `rm` only in the shape Claude Code prompts on" | exact | exact | a recursive delete of `"$D"/*` is denied; `"$ROOT/dist"` passes | rule rewrite: the CLAUDE.md line still says "quoted-variable path"; say "a guarded variable path" |
 | `rm-after-cd` | shared-trees-delete-names-absolute-path | "A delete names its target as an absolute or quoted-variable path, never after a cd." | exact | exact | a cd, then a recursive delete of a relative folder, is denied | - |
 | `ln-over-directory` | none | - | uncited | exact | `ln -sf /tmp/x existing_dir` is denied; the comment says only "ported from banchi" and names no risk kind | rule rewrite: land a decision with its risk kind and date, or cull it (building-guard-needs-incident) |
-| `destructive-delete` | rm-path-wrapper | "Also a root, a home, or a glob of one (`rm -r /`, `rm -r ~/*`, `rm -r ../*`)." | looser | exact | a recursive delete of `$(pwd)/*` passes, though the same delete of `./*` is denied. Also stricter: a `cat` heredoc whose text names that delete is denied (seen in this lane) | tool fix: read `$(pwd)` and `$PWD` as `.`; read a non-interpreter heredoc body as text |
+| `destructive-delete` | rm-path-wrapper | "Also a root, a home, or a glob of one (`rm -r /`, `rm -r ~/*`, `rm -r ../*`)." | looser | exact | a recursive delete of `$(pwd)/*` passes, though the same delete of `./*` is denied. So do a delete inside `$(...)` in an unquoted heredoc and a python heredoc that calls shutil.rmtree (step refusal-looser-fixes) | tool fix: read `$(pwd)` and `$PWD` as `.`; read command substitutions in an unquoted heredoc |
 | `linked-node-modules` | guard-linked-node-modules | "A recursive delete into a linked `node_modules` is refused." | exact | exact | `npm ci` in a linked folder is denied; the open holes are the decision's debts | - |
 | `env-file` | none | - | uncited | exact | `cat .env` is denied; `grep -r --exclude=.env foo .` is denied too (debt env-file-rule-false-alarms) | rule rewrite: write an env-file decision; tool fix: skip --exclude and -t values |
 | `frozen-path` | frozen-path-resolves-shell-vars | "A write whose resolved target is frozen is refused." | exact | exact | a write to the settings file under `$HOME/.claude` through a variable is denied | rule rewrite: the guard index lists 3 frozen kinds; the code freezes 11 |
 | `config-edit` | none | - | uncited | exact | a write to `.claude/settings.local.json` is allowed and noted; the code cites "Decision 7", which has no file | rule rewrite: land the "project config edits: allow and report" decision |
-| `records-page` | records-index-at-merge | "refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base." | stricter | exact | `python3 lint/hook_catalog.py && git add -A && git commit` is denied even when the page is unchanged | tool fix: compare the page with the base before refusing |
+| `records-page` | records-index-at-merge | "refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base." | exact | exact | `python3 lint/hook_catalog.py && git add -A && git commit` is denied even when the page would be unchanged. An accepted limit: the guard runs before the generator, so it cannot read the page the command will stage (triage, step refusal-stricter-fixes) | - |
 | `ask-alone` | ask-commands-run-alone | "An agent never chains a command that needs the owner's answer onto other commands in one shell call" | exact | exact | `git worktree prune; echo done` is denied | - |
 | `bare-merge` | bare-merge-asks | "The rule fires on a `gh pr merge` segment when the stamp config of the working tree holds a `merge` key." | exact | exact | a green `gh pr merge 5` in a merge-tool repo asks | - |
 
@@ -233,9 +233,8 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
 
 - **Stricter, tool fix:** `merge-checks:batch` and `merge:batch-refusal` (step overlapping-batches),
   `pointer-head`, `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
-  `impeccable-review-only`, `builder-test-edit`, `records-page`, `destructive-delete` (heredoc text),
-  `merge:preview-base-run`, the "no override" text.
-- **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`), `session-home`,
+  `impeccable-review-only`, `builder-test-edit`, `merge:preview-base-run`, the "no override" text.
+- **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`, heredoc forms), `session-home`,
   `agent-model-floor`, `port-question`, `question-form`, `page-stale`.
 - **Fit the tool to the rule** (process-only, coordinator 2026-11-01 21:14 CST). The rule stays,
   and the tool moves to fit it:
