@@ -5,6 +5,7 @@ set -euo pipefail
 # Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
 # base branch, and a shallow clone would not carry that history.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
+STALE_CITES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/stale_cites.py"
 
 cd "$(git rev-parse --show-toplevel)"  # git diff prints root-relative paths; match them from any subdirectory
 
@@ -102,6 +103,20 @@ export PYTHONPATH="$EMIT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 LOG_OUT="$(mktemp)"
 
+# Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path or
+# function this range removed. Scope changed only. It runs before the "no markdown changed" exit, so a
+# code-only PR is checked. Its findings never go through the split script below: every stale line is
+# untouched by the range, and the split makes an untouched line report-only. FAIL=false prints them and
+# keeps the exit 0, as it does for the STE findings.
+STALE_EXIT=0
+if [ "$SCOPE" != "all" ]; then
+  set +e
+  python3 "$STALE_CITES" --range "$RANGE"
+  STALE_EXIT=$?
+  set -e
+  [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
+fi
+
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "ste-lint: no markdown changed"
   {
@@ -113,7 +128,7 @@ if [ ${#FILES[@]} -eq 0 ]; then
       echo "Excluded: $EXCLUDED_COUNT file(s)."
     fi
   } >> "$SUMMARY"
-  exit 0
+  exit "$STALE_EXIT"
 fi
 
 echo "ste-lint: ${#FILES[@]} file(s) in scope, $EXCLUDED_COUNT excluded"
@@ -253,4 +268,5 @@ CHECK_EXIT=$?
 set -e
 cat "$LOG_OUT"
 
+[ "$STALE_EXIT" -ne 0 ] && CHECK_EXIT="$STALE_EXIT"
 exit "$CHECK_EXIT"
