@@ -128,9 +128,9 @@ A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a w
 carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a file in a mockup home: the
 machine home `~/Developer/<repo name>-imports/<item folder>/<file>`, or the repo's design folder (decision `mockup-home`).
 
-The build prints `mockup with no file: <step id> <mockup id>` for each cited id with no entry, with a path outside both
-homes (a link too), with a design-folder file that is not in the checkout, or with a machine-home file that is not there
-while the `<repo name>-imports` folder is. It writes the page, then exits 1. The fix is to keep the file in a home and
+The build prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. That means no entry, a path outside both
+homes (a link too), or a design-folder file that is not in the checkout. It also means a machine-home file that is not there while the
+`<repo name>-imports` folder is. The build writes the page, then exits 1. The fix is to keep the file in a home and
 name it in `mockups`.
 
 A cloud build has no `<repo name>-imports` folder, and a path from another computer (a Windows
