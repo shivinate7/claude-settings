@@ -57,10 +57,12 @@ def owner_text(rec, notice_tags=()):
     An owner message is a user record that is_last_human accepts, or a queued_command attachment
     (an owner message typed while the session runs; its text is attachment.prompt) with no peer
     origin. Text that starts with one of `notice_tags` (shared_names.MACHINE_TAGS) is a machine
-    notice, never the owner's: the notice queued while a task runs is a queued_command too.
+    notice, never the owner's: the notice queued while a task runs is a queued_command too. An
+    isMeta user record (a Stop hook's feedback, a system reminder) is never the owner's, though
+    is_last_human accepts it as a turn boundary.
     """
     if rec.get("type") == "user":
-        text = (rec.get("message") or {}).get("content") if is_last_human(rec) else None
+        text = (rec.get("message") or {}).get("content") if is_last_human(rec) and not rec.get("isMeta") else None
     elif rec.get("type") == "attachment" and not rec.get("isSidechain"):
         att = rec.get("attachment")
         if (not isinstance(att, dict) or att.get("type") != "queued_command"

@@ -57,7 +57,7 @@ import re
 import sys
 import time
 
-HERE =os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 import layout  # noqa: E402
@@ -589,14 +589,27 @@ def _sends(rec, feedback_guard, items_write):
 
 
 def _turn_start(records):
-    """Index of the last user record that is not a tool result: a lane's prompts arrive as peer
-    messages, so is_last_human would miss them. -1 when there is none."""
+    """Index of the last record that starts a turn, -1 when there is none. A turn starts at a user
+    record that is not a tool result (an owner message, a task notification, a peer message), or at
+    a queued_command attachment (an owner message, a notice or a peer message that arrives while the
+    session runs). A lane's prompts arrive as peer messages, so is_last_human would miss them. A
+    non-peer isMeta user record (a Stop hook's feedback, a system reminder) lands mid-turn and
+    starts none."""
+    import _transcript
     for i in range(len(records) - 1, -1, -1):
         rec = records[i]
+        if rec.get("isSidechain"):
+            continue
+        if rec.get("type") == "attachment":
+            att = rec.get("attachment")
+            if isinstance(att, dict) and att.get("type") == "queued_command":
+                return i
+            continue
+        if rec.get("type") != "user" or (rec.get("isMeta") and not _transcript._is_peer(rec.get("origin"))):
+            continue
         content = (rec.get("message") or {}).get("content")
-        has_result = isinstance(content, list) and any(
-            isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
-        if rec.get("type") == "user" and not rec.get("isSidechain") and not has_result:
+        if not (isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content)):
             return i
     return -1
 
@@ -642,7 +655,7 @@ def _load_picks(path):
     return picks, sent
 
 
-def pick_send(hook, records, after, text):
+def pick_send(hook, records, text):
     """(reason, note, is_lane): the pick-send check at one Stop. Fails open: ("", "", False) on any error.
 
     A lane (own record tagged cs-build:lane or naming a parent) offering a pick blocks unless this
@@ -659,10 +672,11 @@ def pick_send(hook, records, after, text):
         if not offers and not (state and os.path.exists(state)):
             return "", "", False
         import feedback_guard
+        turn = records[_turn_start(records) + 1:]  # the asking turn: its send and box scans read no earlier turn
         if offers:
             lane, parent = _own_lane(hook)
             if lane:
-                if any(_sends(rec, feedback_guard, False) for rec in records[_turn_start(records) + 1:]):
+                if any(_sends(rec, feedback_guard, False) for rec in turn):
                     return "", "", True
                 return LANE_PICK_REASON % (" (send_message to %s)" % parent if parent else ""), "", True
         if state is None:
@@ -670,7 +684,7 @@ def pick_send(hook, records, after, text):
         root = repo_root(hook.get("cwd"))
         page = layout.waiting_page(root) if root else "unknown"
         boxed = any(not rec.get("isSidechain") and any(b.get("name") == ASK_TOOL for b in tool_uses(rec))
-                    for rec in after)
+                    for rec in turn)
         if page == "unknown":
             return "", (PICK_STAND_DOWN if offers and not boxed else ""), False
         import _transcript
@@ -700,7 +714,7 @@ def pick_send(hook, records, after, text):
         if offers and not boxed:
             key, snippet = _pick_key(input_needed_section(text))
             turn_send = next((_transcript.parse_utc_timestamp(rec.get("timestamp")) or now
-                              for rec in after if _sends(rec, feedback_guard, True)), None)
+                              for rec in turn if _sends(rec, feedback_guard, True)), None)
             if turn_send is not None:
                 sent[key] = turn_send  # sent in the turn that asks it
                 picks.pop(key, None)
@@ -897,7 +911,7 @@ def main():
     after = records[last_human_idx + 1:] if last_human_idx is not None else records
     text = last_reply(hook)
     # A lane's turn starts at a peer message, so this runs before the no-human-record exit.
-    pick_out[:] = pick_send(hook, records, after, text)
+    pick_out[:] = pick_send(hook, records, text)
     if last_human_idx is None:
         return stop_for_refusal()
 
