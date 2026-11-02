@@ -17,7 +17,7 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
-In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)`, never 0. No brake count was taken there."""
+In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)`, never 0. The brake is a local-session read (owner ruling 2026-11-01 21:34 CST)."""
 import argparse
 import os
 import re
@@ -216,7 +216,7 @@ def main(argv):
     if args.between and any(t.tzinfo is None for t in args.between):
         ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
     if args.between and args.rule == BRAKE_RULE and os.environ.get("CLAUDE_CODE_REMOTE") == "true":
-        print("n/a (cloud)")  # a cloud session has no brake log, so 0 would claim a reading nobody took
+        print("n/a (cloud)")  # owner ruling 2026-11-01 21:34 CST: the brake is a local-session read
         return 0
     ids = None
     if args.all_rules:
