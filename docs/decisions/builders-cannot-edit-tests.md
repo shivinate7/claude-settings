@@ -25,19 +25,20 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` log l
 - It judges these forms:
   - A redirect (`>`, `>>`) to a test path.
   - `tee` to a test path.
-  - `sed -i` or `sed --in-place` on a test path.
-  - `perl -pi` on a test path.
+  - `sed` with an in-place flag (`-i`, `-ri`, `-Ei`, `-ie`, `--in-place`) on a test path.
+  - `perl` with an in-place flag (`-pi`, `-0pi`, `-pie`) on a test path.
   - `rm`, `mv`, `cp`, `ln`, `install` or `truncate` of a test path, as the command word.
+  - `git rm` or `git mv` of a test path.
   - A heredoc header that redirects to a test path.
   - A heredoc run by a shell (`bash <<EOF`) that writes a test path.
   - An interpreter (python, node) that opens a test path for writing. The code is a heredoc body, or follows `-c` or `-e`.
   - A literal join that builds a test path: `os.path.join`, `+`, or an f-string with no fields.
   - A write target that is a glob. The glob expands in the repo.
-- The command word counts only after `sudo`, `command`, `env`, `time`, `nohup`, `exec`, `then`, `do`, `else` or a `VAR=value`. The shell check keeps its own list (`_COMMAND_PREFIX`, `hooks/guard_frozen.py`). It does not use the shared command reader (`resolve_command`, `hooks/guard_core.py`).
+- The program is the command word that the shared command reader finds (`resolve_command`, `hooks/guard_core.py`). Wrappers and clause words do not hide a write: `sudo`, `timeout N`, `nice -n N`, `env -i`, `xargs`, `if`, `then`, `!`, `{` and `VAR=value`. `/bin/rm` reads as `rm`.
 - The path test is `is_test_rel`, the same test the write tool uses.
 - Python code is read with Python's own parser. A body that does not parse is allowed. Guards stop mistakes, not attackers.
 - A path outside every repo is not judged here. A builder works in a repo, and an outside path named `test` is a false alarm (lane ruling, 2026-11-02). The write tool does judge such a path for a builder.
-- A mutating word that is only an argument is not a write. `grep copy x` passes.
+- A mutating word or an in-place flag that is only an argument is not a write. `grep copy <test>`, `rg "sed -i" <test>` and `awk "/rm/" <test>` pass, and so does a commit or PR body that names one.
 - Reads, prints, and writes to non-test files pass.
 - Test config is not judged here. The check reads no config content. The diff at commit, push and stop still logs it.
 
@@ -48,9 +49,11 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` log l
 - `>|`.
 - Async `fs.writeFile`, `fs.copyFileSync`, and `os.open`.
 - A loop variable, or any other path computed at run time.
-- `xargs`, and `find -exec`.
-- A `git` command that writes a file, such as `git rm`, `git mv` or `git checkout -- <file>`. The command word is `git`, which the shell check does not read.
-- A command word after `timeout N`, `nice -n N` or another wrapper not listed above, such as `timeout 5 rm <test>`.
+- A path that `xargs` reads from its input, and `find -exec`.
+- A `git` command other than `git rm` and `git mv`, such as `git checkout -- <file>`.
+- A command word behind a wrapper that `resolve_command` does not list, such as `flock /tmp/l rm <test>` or `stdbuf -o0 rm <test>`.
+- A `-c` string that a shell runs, such as `sh -c "rm <test>"`.
+- An in-place awk, such as `awk -i inplace 1 <test>`.
 - A script written, then run.
 
 **Roles.** The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
