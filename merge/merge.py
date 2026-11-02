@@ -1711,7 +1711,13 @@ def revert_claim(root, wt, branch, claim_sha):
         say(f"merge: origin {branch} is not the claim commit {claim_sha[:9]}. Nothing reverted. Run again.")
         return False
     cmd = f"git fetch origin {branch} && git checkout {branch} && git revert --no-edit {claim_sha} && git push origin {branch}"
-    c, out = git(wt, "revert", "--no-edit", claim_sha)
+    c, out = git(wt, "revert", "--no-commit", claim_sha)
+    if not c:  # the revert drops the claim's lines on purpose: one excuse line per path, in the last paragraph, so git reads a trailer
+        paths = [p for p in git(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "--no-renames", "-z", claim_sha)[1].split("\0") if p]
+        subject = git(wt, "log", "-1", "--format=%s", claim_sha)[1].strip()
+        why = "the merge tool reverts its own claim"
+        c, out = git(wt, "commit", "-q", "-m", f'Revert "{subject}"', "-m", f"This reverts commit {claim_sha}.",
+                     "-m", "\n".join(f"Drops-lines: {p} -- {why}" for p in paths))
     if not c:
         c, out = git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     if c:
