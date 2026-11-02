@@ -12,7 +12,8 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   waiting-page card is captured the same way. A PostToolUse
   hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get` of `answers` only: the routing
   session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved. Each answer
-  whose `data.note` is non-empty and not `accepted pick` is appended as one block, stamped with the
+  whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
+  (`parked: true`, whose note is the entry's own text), is appended as one block, stamped with the
   answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
