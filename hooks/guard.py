@@ -2902,7 +2902,11 @@ IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review o
                      "screens; make any change to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
-IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
+# The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
+# SKILL.md, Routing); it asks once when two commands fit. So a `;` starts no second command, and a part
+# after it passes only when it opens with a review verb or `focus`. `|`, `&&` and a newline always chain.
+IMPECCABLE_CHAIN = re.compile(r"[|\n]|&&")
+IMPECCABLE_FOLLOWUPS = IMPECCABLE_REVIEWS + ("focus",)
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
 PACKAGE_FLAGS = ("-p", "--package")
 
@@ -2917,9 +2921,12 @@ def impeccable_skill_hit(tool_input) -> str:
     skill, args = tool_input.get("skill"), tool_input.get("args") or ""
     if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
         return ""
-    words = args.split() if isinstance(args, str) else []
-    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
-        return ""
+    words = args.split(";")[0].split() if isinstance(args, str) else []
+    text = args.strip() if isinstance(args, str) else ""
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(text):
+        parts = [part.split() for part in text.split(";")[1:]]
+        if all(part[0] in IMPECCABLE_FOLLOWUPS for part in parts if part):
+            return ""
     return ("skill %s %s" % (skill, args))[:100]
 
 
