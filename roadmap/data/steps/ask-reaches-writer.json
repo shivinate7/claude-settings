@@ -1,0 +1,9 @@
+{
+ "title": "An ask typed on the waiting page reaches its writer, and the owner can send several in a row",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.210104,
+ "why": "Owner report, Nov 2 12:55 CST, Home waiting page: an ask sent 11:55 CST still read 'Waiting for home-triage-4 to read it.' an hour later, and the owner can add only one ask before Send. Owner: 'the triage-r doesn't even seem to read custom asks'.",
+ "note": "Find first, unmeasured. Read: the page tells Claude through one comment (page.html notifyClaude, sendToClaude), which wakes only the session that watches the artifact; the writer otherwise reads asks/ only at a wake or turn start (waiting-page SKILL.md). Likely: after a triage rotation the new writer holds no watch, so nothing wakes it; or canTell was false and the hint said so. Fix the cause: a new writer subscribes to its page at start, and the hint says plainly when no session was told. The one-at-a-time limit: find what blocks a second ask in renderAskForm or sendAsk, and let the owner queue several. Red first: an ask sent after a rotation wakes the new writer in a fixture; two asks typed back to back both save. Port: yes, the page and skill are shared. Ready.",
+ "updatedAt": "2026-11-02T19:00:00Z"
+}
