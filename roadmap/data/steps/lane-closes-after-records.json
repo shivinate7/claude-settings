@@ -1,9 +1,9 @@
 {
  "title": "A lane does not close until its records pull request has merged",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.337586,
  "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
- "note": "Shape: a lane's archive or close is refused while its record step (the records PR) is unmerged. Incident: home's wheel lane closed before its records PR landed. Ready: no open question. Port: yes, every repo.",
- "updatedAt": "2026-11-01T23:47:00Z"
+ "note": "Shape: a lane's archive or close is refused while its record step (the records PR) is unmerged. Incident: home's wheel lane closed before its records PR landed. Ready: no open question. Port: yes, every repo.\nDoing, Nov 1 18:40 CST: draft PR #989 reviewed, with batch runner 6. Built: guard rule lane-closes-after-records refuses archive_session on a lane while an open PR's head branch equals its step id exactly. Known miss: lane PRs on other branch names.",
+ "updatedAt": "2026-11-02T00:46:00Z"
 }
