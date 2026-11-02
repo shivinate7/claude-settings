@@ -104,7 +104,7 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
-    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, and an allowed publish of a page with live data writes the stamp",
+    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
@@ -12021,9 +12021,10 @@ LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writ
 FAMILY = "page-stale"
 #
 # Rule page-stale (hooks/guard.py, the Artifact tool). A republish of this repo's waiting page is refused
-# when its file is behind main's skills/waiting-page/page.html, and when it is main's own page with main's
-# empty designData and roadmap blocks, which would drop the page's live data. A first publish, with no url,
-# is never refused. Main is origin/main of the checkout that holds stale_pages.py, so each case runs a copy
+# when its file is behind main's skills/waiting-page/page.html, and when it is main's own page (main's title)
+# with designData and roadmap blocks that read as empty, white space aside, which would drop the page's live
+# data. A page with its own title was built by --write from a live page, so its empty blocks drop nothing and
+# it is allowed. A first publish, with no url, is never refused. Main is origin/main of the checkout that holds stale_pages.py, so each case runs a copy
 # of the guard in a checkout whose origin/main this suite controls (WP_CHECK), never the real main. The
 # copy finds stale_pages beside itself, as the guard does. An allowed publish writes main's full blob sha
 # to <git common dir>/waiting-page-built. Unknown, when main or the file cannot be read, allows: the rule
@@ -12039,6 +12040,8 @@ WP_BEHIND = os.path.join(WP_DIR, "behind.html")    # main's page with one div af
 WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer's designData, roadmap and title text
 WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
 WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
+WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and both blocks empty
+WP_SPACED = os.path.join(WP_DIR, "spaced-empty.html")        # main's raw page with designData written as "{ }"
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
 WP_OTHER_URL = "https://claude.ai/artifact/wpother"
@@ -12062,7 +12065,8 @@ def wp_must(ok, why):
         sys.exit("fixture setup failed in build_page_checkout: %s" % why)
 
 
-def wp_writer(template, design=True, roadmap=True, title=True):
+def wp_writer(template, design=True, roadmap=True, title=True, design_text=WP_WRITER_DESIGN,
+              title_text="Queue, renamed // not a comment"):
     """main's page with the parts a writer's --write keeps live swapped for new text, each part only when
     its flag is set. Each part must match exactly once in main's page."""
     def swap(pattern, text, repl):
@@ -12070,11 +12074,11 @@ def wp_writer(template, design=True, roadmap=True, title=True):
         return pattern.sub(repl, text, count=1)
     text = template
     if design:
-        text = swap(WP_DESIGN, text, lambda m: m.group(1) + WP_WRITER_DESIGN + m.group(2))
+        text = swap(WP_DESIGN, text, lambda m: m.group(1) + design_text + m.group(2))
     if roadmap:
         text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
     if title:
-        text = swap(WP_TITLE, text, lambda m: "<title>Queue, renamed // not a comment</title>")
+        text = swap(WP_TITLE, text, lambda m: "<title>%s</title>" % title_text)
     return text
 
 
@@ -12093,7 +12097,9 @@ def wp_write_pages():
     behind = template.replace("</style>", "</style>\n<div>x</div>", 1)
     pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
              (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
-             (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)))
+             (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)),
+             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Queue")),
+             (WP_SPACED, wp_writer(template, roadmap=False, title=False, design_text="{ }")))
     for path, text in pages:
         wp_put(path, text)
 
@@ -12131,8 +12137,8 @@ def wp_control(folder, main):
     """The copy's own stale_pages.py gives the verdicts the cases assume: main's page, the behind page and
     the writer's page against a controlled main, or unknown with no main. A miss stops the run."""
     script = os.path.join(folder, "skills", "waiting-page", "stale_pages.py")
-    wants = ([(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0), (WP_DESIGN_LIVE, 0), (WP_ROADMAP_LIVE, 0)]
-             if main else [(WP_CURRENT, 2)])
+    wants = ([(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0), (WP_DESIGN_LIVE, 0), (WP_ROADMAP_LIVE, 0),
+              (WP_TITLED_EMPTY, 0), (WP_SPACED, 0)] if main else [(WP_CURRENT, 2)])
     for page, code in wants:
         run = subprocess.run([sys.executable, script, "--page", page], capture_output=True, text=True,
                              cwd=folder, timeout=120)
@@ -12159,7 +12165,8 @@ def build_page_nomain():
     wp_control(WP_NOMAIN, main=False)
 
 
-lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE], build_page_checkout)
+lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE, WP_TITLED_EMPTY,
+              WP_SPACED], build_page_checkout)
 lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
 
 
@@ -12183,7 +12190,10 @@ wp_publish("main's page republished to the waiting page is refused: its designDa
            "deny", WP_CURRENT, rule="page-stale")
 wp_publish("main's page republished to the code form of the waiting page is refused", "deny", WP_CURRENT,
            rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
+wp_publish("main's page with designData written as a space-padded empty object is refused", "deny", WP_SPACED,
+           rule="page-stale")
 wp_publish("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
+wp_publish("a page with its own title and empty blocks, as a --write builds it, is allowed", "allow", WP_TITLED_EMPTY)
 wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
 wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
