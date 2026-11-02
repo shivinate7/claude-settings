@@ -20,9 +20,10 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
-  lane undo   A commit of the branch itself undoes an earlier commit of the same branch, by the
-              reversal rules with the branch's own earlier commits as the earlier work (a move, a
-              rename, a re-wrap and a rewrite stay excused). Or a merge of main drops a line a
+  lane undo   A non-merge commit of the branch (also one under a merge) undoes an earlier commit of
+              the same branch, by the reversal rules with the branch's own earlier commits as the
+              earlier work (a move, a rename, a re-wrap and a rewrite stay excused). Lines the
+              earlier commit only added count only on net loss: a one-line reword is an edit. Or a merge of main drops a line a
               branch commit added (a conflict taken main's side). Only while head still lacks the
               lines: a later commit that puts them back clears it. A branch of one commit has
               nothing to read. The FAIL names the path, the undoing commit and the earlier one.
@@ -464,8 +465,8 @@ def hunks(cwd, old, new, path=None):
 
 
 class Commit:
-    def __init__(self, cwd, sha, parent, subject, merge=False):
-        self.cwd, self.sha, self.parent, self.subject, self.merge = cwd, sha, parent, subject, merge
+    def __init__(self, cwd, sha, parent, subject):
+        self.cwd, self.sha, self.parent, self.subject = cwd, sha, parent, subject
         self._files = None
 
     @property
@@ -475,14 +476,16 @@ class Commit:
         return self._files
 
 
-def first_parent(cwd, rev, limit=0):
-    a = ["log", "--first-parent", "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
+def first_parent(cwd, rev, limit=0, walk="--first-parent"):
+    """The commits of rev, newest first, each with its first parent. walk is the log's own selector: the first-parent
+    line by default, `--no-merges` for every non-merge commit (the lane undo read)."""
+    a = ["log", walk, "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
     _, out = git(cwd, *a)
     res = []
     for line in out.splitlines():
         head, _, subj = line.partition("\x02")
         bits = head.split()
-        res.append(Commit(cwd, bits[0], bits[1] if len(bits) > 1 else None, subj, len(bits) > 2))
+        res.append(Commit(cwd, bits[0], bits[1] if len(bits) > 1 else None, subj))
     return res
 
 
@@ -495,19 +498,22 @@ def misses(small, big):
     return min(sum(x != y for x, y in zip(small, big[i:])) for i in range(len(big) - len(small) + 1))
 
 
-def undone(o, n, mine, modified=False):
+def undone(o, n, mine, lane=False):
     """True when a hunk of `mine` reverses the earlier hunk (o -> n). Exact. Or the earlier hunk,
     whole and line for line, inside a bigger hunk that holds other edits (a stale value put back
     beside an edited neighbour). Or, with 6 lines or more, on all but one line (a re-worded line).
     Lines the earlier commit only added (o empty) count when this change removes them, edit
-    beside them or not, unless the hunk re-wrote them."""
+    beside them or not, unless the hunk re-wrote them. In the lane read (`lane`) those lines count only on net loss: the
+    hunk removes more of them than it adds lines, so a one-line reword is an edit, and a changed value is a rewrite."""
     for big_o, big_n in mine:
         if (big_o, big_n) == (n, o):
             return True
         if not o:
             if wrapped(" ".join(n), list(big_n)):
                 continue  # the whole block survives, only its line breaks moved
-            if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)], modified=modified) for l in n):
+            if lane and len(n) <= len(big_n):
+                continue
+            if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)], modified=lane) for l in n):
                 return True
             continue
         if misses(o, big_n) + misses(n, big_o) <= (1 if len(o) + len(n) >= 6 else 0):
@@ -536,8 +542,8 @@ def reversals(cwd, old, new, files, earlier, head=None):
     A change with no non-blank difference is no undo, and neither is a removal whose lines
     old->new adds to another file (a move). A file git pairs as renamed is judged on its edits across the
     rename, as it would be in place; the finding keeps the old path, the one earlier commits name.
-    With head (the lane undo read), only a removal of lines the earlier commit added counts, and the lines a value
-    change (`modified`) rewrote are excused, and so is a removal that head has since put back."""
+    With head (the lane undo read), only a net removal of lines the earlier commit added counts (see `undone`), and a
+    removal that head has since put back is excused."""
     found = []
     elsewhere = None
     pairs = renamed(cwd, old, new, files)
@@ -673,12 +679,16 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
-    lane = first_parent(cwd, "%s..%s" % (upstream, h))  # newest first; a lane of one commit has nothing earlier to undo
-    for i, c in enumerate(lane[:-1]):
-        before = [e for e in lane[i + 1:] if not e.merge]  # a merge of main brings main's work, not the lane's own
-        if c.merge or not c.parent or not before:
+    # Every non-merge commit of the branch, also those under a merge (an integration PR holds the lanes' commits there). A merge of
+    # main brings main's work, which upstream holds, so it is not in the range. A lane of one commit has nothing earlier to undo.
+    lane = first_parent(cwd, "%s..%s" % (upstream, h), walk="--no-merges")  # newest first
+    for c in lane if len(lane) > 1 else []:
+        if not c.parent:
             continue
-        items += [(x[0], fmt_lane(*x, c)) for x in reversals(cwd, c.parent, c.sha, c.files, before, h)]
+        anc = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())  # the ancestors of c in the lane
+        before = [e for e in lane if e.sha in anc]
+        if before:
+            items += [(x[0], fmt_lane(*x, c)) for x in reversals(cwd, c.parent, c.sha, c.files, before, h)]
     page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
