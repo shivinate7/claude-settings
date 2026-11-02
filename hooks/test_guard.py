@@ -7046,6 +7046,36 @@ sh("trim: env: the same assignment ahead of a non-runner still denies",
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, ENV + ".example")))
 
+# The family holds every basename that starts with `.env`, except the whole name `.env.example`. One
+# predicate decides it in each form: a write or an edit, a shell name, and a glob that could name one.
+# `.envrc` and `.environment` are the names a rule that reads only `.env` and `.env.<suffix>` lets by.
+ENVRC = ENV + "rc"
+ENVIRONMENT = ENV + "ironment"
+add("env: Write of an envrc file", "deny", "env-file", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVRC)))
+add("env: Edit of an envrc file", "deny", "env-file", tool="Edit", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVRC)))
+add("env: Write of a name that starts with env", "deny", "env-file", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(PROJ, ENVIRONMENT)))
+for held in (
+    "cat " + ENVRC, "cat " + ENVIRONMENT, "cat " + ENVRC + ".example",
+    "echo KEY=1 > " + ENVRC, 'ENVF=' + ENVRC + '; cat "$ENVF"',
+    "cat " + ENV + "r?", "cat " + ENV + "r*", "cat " + ENV + "[a-z]",
+):
+    sh("env: an envrc or env-prefixed name, " + held[:30], held, "deny", "env-file", cwd=NOGIT)
+for text in (
+    "ls -la " + ENVRC, "ls -la " + ENVIRONMENT, "[ -f " + ENVRC + " ] && echo present",
+    "node --env-file=" + ENVRC + " app.js",
+):
+    sh("env: an envrc name in a listing or a runner, " + text[:30], text, "allow", cwd=NOGIT)
+# Decision env-file-stays-unread (the session never reads a file of secrets) exempts the whole name `.env.example`
+# only. A glob that could name `.env.example.bak` could name a held file, so the glob is held too. The
+# plain example file stays allowed.
+sh("env: a glob that could name a covered backup, cat .env.example*", "cat " + ENV + ".example*",
+   "deny", "env-file", cwd=NOGIT)
+# The envrc candidate in the glob check is the only thing that holds this: the sample names hold no name.
+sh("env: a glob that could name an envrc file, cat .*rc", "cat .*rc", "deny", "env-file", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
@@ -7229,6 +7259,9 @@ for held in (
     "cat $(printf " + ENV + ")", "(cat " + ENV + ")",
 ):
     sh("env: a substitution is judged, " + held[:40], held, "deny", "env-file", cwd=NOGIT)
+# The trailing paren is no part of the name, so `.env.example)` is the example file and is allowed.
+sh("env: a substitution is judged, (cat " + ENV + ".example) in a group, is allowed",
+   "(cat " + ENV + ".example)", "allow", cwd=NOGIT)
 for text in (
     "printf '" + ENV + "\\n' > .worktreeinclude",
     'gh pr create --draft --body "Adds ' + ENV + '"',
@@ -7256,7 +7289,7 @@ for text in (
     VCS + " commit -F - <<EOF\nCopy " + ENV + " into worktrees\nEOF",
     VCS + " commit -m \"$(cat <<'EOF'\nCopy " + ENV + " into worktrees\nEOF\n)\"",
     VCS + " commit -m \"$(cat <<EOF\nCopy " + ENV + " into worktrees\nEOF\n)\"",
-    "grep 'process\\." + ENV[1:] + "' src/x.js", "cat " + ENV + ".example*",
+    "grep 'process\\." + ENV[1:] + "' src/x.js",
     "echo " + "$(" * 40 + "date" + ")" * 40 + " > log",
 ):
     sh("env: a normalized allowance, " + text[:36].replace("\n", " "), text, "allow", cwd=NOGIT)
@@ -7298,6 +7331,9 @@ for text in (
     "echo " + ENV + " || echo no; echo done | cat",
 ):
     sh("env: text with no relay, " + text[:40], text, "allow", cwd=NOGIT)
+# The printf escape ends the word, so the name is the example file and the relay is allowed.
+sh("env: a relay of the text, printf '.env.example' with an escape, read back, is allowed",
+   "printf '" + ENV + ".example\\n' > f; cat f", "allow", cwd=NOGIT)
 
 # A duplicated fd on the text segment hides no pipe, and a read that comes BEFORE the write is no relay.
 for held in (

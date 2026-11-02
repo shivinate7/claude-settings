@@ -3540,8 +3540,8 @@ def judge(payload) -> None:
     if not isinstance(tool_input, dict):
         return
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
-    # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
-    # and a frozen path stays readable.
+    # worktree-home never judged them, the settings deny list owns the env files (Read and Edit of
+    # `.env*` at any depth, `.env.example` carved out), and a frozen path stays readable.
     if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
@@ -3731,9 +3731,10 @@ def judge(payload) -> None:
                     role, ("builder-test-edit", BUILDER_TEST_REASON))
                 refuse(tool, "deny", code, why, matched)
 
-        # 5. The environment file. Every writing tool is refused. A read is not judged here: the
-        # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
-        # holds the path the tool asked for.
+        # 5. The environment file. Every writing tool is refused. A read is not judged here: no hook
+        # runs for Read, so settings.json denies Read and Edit of `.env*` at any depth, with `!`
+        # carve-outs for `.env.example`. That deny list is the one layer that holds when the guard
+        # cannot run. The reason names no file, and the log holds the path the tool asked for.
         if is_env(target):
             refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 
