@@ -16,7 +16,7 @@ tree after a rejected push, which four separate tools do not.
   guess one. A gloss in `cite.template` comes from the config only.
 - A number is never reused.
 - The action runs mode `check` only, with `contents: read`. No workflow writes to the default branch. The claim
-  runs before the merge, on the pull request branch, in `merge/merge.py`. A pending record on the default branch
+  runs before the merge, on the pull request branch, in `merge/merge.py`. A head that holds a Record-claim stops the merge when its base is not the default branch (sweep row `claim-off-default-base`). A pending record on the default branch
   fails `check`. The fix is any pull request through the merge tool.
 - Other repos adopt the stamp and the merge tool, each in its own session.
 
