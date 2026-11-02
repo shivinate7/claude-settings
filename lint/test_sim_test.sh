@@ -11,12 +11,13 @@
 #  - At the cap (2 booted devices of any kind, no iPhone among them): no boot, no xcodebuild, exit non-zero, and
 #    the booted devices and the remedy are printed. Under the cap it boots.
 #  - The exit code is otherwise xcodebuild's. The tool runs no top.
-#  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run and freed on every exit.
-#    A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken over.
+#  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run and freed on every exit,
+#    SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken over.
+#    A lock folder with no pid file counts as held for 60 s, then it is taken over.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
-#  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run) stops xcodebuild and exits non-zero.
-#    It shuts down only a simulator it booted itself.
+#  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
+#    folder) stops xcodebuild and exits non-zero. The stop line says "shut down" if it booted the simulator, else "left".
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -61,7 +62,8 @@ crashdir=$work/crash
 lockdir=$work/home/.claude/state/sim-test.lock
 
 # xcodebuild: logs its call. When the lock folder exists it records the lock (lock_during, lock_alive, lock_pid_seen).
-# With STUB_CRASH=N it waits 1 s, then writes N <STUB_CRASH_PREFIX or SpringBoard>-<i>.ips reports into SIM_TEST_CRASH_DIR.
+# With STUB_CRASH=N it waits 1 s, then writes N <STUB_CRASH_PREFIX or SpringBoard>-<i>.ips reports into SIM_TEST_CRASH_DIR,
+# each naming the device folder of STUB_CRASH_UDID (see mkreport).
 # With STUB_HANG or STUB_CRASH it marks a start file and sleeps STUB_HANG_SECS (default 30). It writes xc_finished only
 # when it is not killed, so a stop shows as no xc_finished. Then it exits with STUB_RC.
 cat > "$stubs/xcodebuild" <<'SH'
@@ -79,7 +81,7 @@ if [ "$n" -gt 0 ]; then
   sleep 1
   i=0
   while [ "$i" -lt "$n" ]; do
-    : > "$SIM_TEST_CRASH_DIR/${STUB_CRASH_PREFIX:-SpringBoard}-$i.ips"
+    mkreport "$SIM_TEST_CRASH_DIR/${STUB_CRASH_PREFIX:-SpringBoard}-$i.ips" "$STUB_CRASH_UDID"
     i=$((i + 1))
   done
 fi
@@ -116,6 +118,15 @@ cat > "$stubs/top" <<'SH'
 echo "top $*" >> "$RUN/topcalls"
 echo "CPU usage: 30.00% user, 5.00% sys, 90.00% idle"
 SH
+# mkreport FILE UDID: writes a SpringBoard report whose text names the device folder of UDID. UDID - names no device.
+cat > "$stubs/mkreport" <<'SH'
+#!/bin/sh
+if [ "$2" = - ]; then
+  printf '%s\n' '"procPath" : "/System/Library/CoreServices/SpringBoard.app/SpringBoard"' > "$1"
+else
+  printf '%s\n' "\"procPath\" : \"/Users/x/Library/Developer/CoreSimulator/Devices/$2/data/Containers/Bundle\"" > "$1"
+fi
+SH
 chmod +x "$stubs"/*
 
 booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
@@ -130,10 +141,11 @@ fresh() {
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
-# a 2 s lock wait. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
+# a 2 s lock wait, and reports that name SHARED. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
-  env -u CLAUDE_CONFIG_DIR HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 SIM_TEST_LOCK_WAIT=2 "$@" \
+  env -u CLAUDE_CONFIG_DIR HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 SIM_TEST_LOCK_WAIT=2 \
+    STUB_CRASH_UDID="$SHARED" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
   tool_pid=$!
   set +m
@@ -183,14 +195,17 @@ mkdir_lock_first() {
   [[ -n $m && -n $s && $m -lt $s ]]
 }
 # crash checks: the tool's stop message goes to stderr, so they read run.err.
+# stop_line: the stop line is the stderr line with crash; it is copied to crash_line.
+stop_line() { grep -F crash "$work/run.err" > "$work/crash_line"; }
 crash_msg() { grep -Fq crash "$work/run.err"; }
 no_crash_msg() { ! grep -Fq crash "$work/run.err"; }
-crash_msg_count3() { grep -F crash "$work/run.err" > "$work/crash_line" && grep -Eq '(^|[^0-9])3([^0-9]|$)' "$work/crash_line"; }
+crash_msg_count3() { stop_line && grep -Ewq 3 "$work/crash_line"; }
+crash_line_has() { stop_line && grep -Fq "$1" "$work/crash_line"; }
 no_shutdown() { [[ "$(grep -c '^simctl shutdown' "$calls")" -eq 0 ]]; }
 # old_reports: three reports that exist before the run. They are made 1 s before it, so they are old, not just pre-run.
 old_reports() {
   local n
-  for n in 0 1 2; do : > "$crashdir/SpringBoard-old-$n.ips"; done
+  for n in 0 1 2; do mkreport "$crashdir/SpringBoard-old-$n.ips" "$SHARED"; done
   "$REAL_SLEEP" 1
 }
 
@@ -377,6 +392,7 @@ need "xcodebuild was stopped: no xc_finished" test ! -e "$work/xc_finished"
 need "shutdown of the simulator it booted" has_call "simctl shutdown $SHARED"
 need "stderr has crash" crash_msg
 need "stderr has crash and the count 3" crash_msg_count3
+need "stop line says it shut down the simulator it booted" crash_line_has "shut down"
 end_case "35 crash loop on a simulator it booted: stops xcodebuild, shuts it down, exits non-zero, names crash and 3"
 
 fresh; run STUB_CRASH=3 STUB_HANG_SECS=4
@@ -411,8 +427,46 @@ need "exit is non-zero" test $rc -ne 0
 need "xcodebuild was stopped: no xc_finished" test ! -e "$work/xc_finished"
 need "no simctl boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
 need "no shutdown" no_shutdown
+need "stop line says it was left running" crash_line_has "left"
 need "stderr has crash" crash_msg
 end_case "40 crash loop on a reused iPhone: exits non-zero, no shutdown"
+
+# Lock age: a lock folder with no pid file counts as held for 60 s, then it is stale.
+fresh; /bin/mkdir -p "$lockdir"; touch -t 202001010000 "$lockdir"; run
+need "exit code" rc_is 0
+need "lock taken over: held during xcodebuild" lock_seen
+need "lock taken over: pid in the lock is the tool's pid" lock_pid_is_tool
+need "lock gone after the run" lock_gone
+end_case "42 lock folder with no pid, older than 60 s: taken over"
+
+fresh; /bin/mkdir -p "$lockdir"; run SIM_TEST_LOCK_WAIT=1
+need "exit is non-zero" test $rc -ne 0
+need "no simctl boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
+need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
+need "lock folder kept" test -d "$lockdir"
+end_case "43 lock folder with no pid, younger than 60 s: still held, refused"
+
+# SIGHUP: like TERM, it frees the lock and shuts down the simulator the tool booted.
+sig_case HUP
+need "lock held during xcodebuild" lock_seen
+need "lock gone after SIGHUP" lock_gone
+end_case "44 SIGHUP during xcodebuild: lock gone, booted simulator shut down, like TERM"
+
+# Crash count by UDID: a report that names another simulator does not count.
+fresh; run STUB_CRASH=3 STUB_CRASH_UDID=$OTHER STUB_HANG_SECS=4
+need "exit code" rc_is 0
+need "xcodebuild finished, not stopped" test -e "$work/xc_finished"
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no crash on stderr" no_crash_msg
+end_case "45 control: 3 new reports naming another simulator's UDID do not stop the run"
+
+# A report that names no device folder counts toward the crash loop.
+fresh; run STUB_CRASH=3 STUB_CRASH_UDID=- STUB_HANG_SECS=4
+need "exit is non-zero" test $rc -ne 0
+need "xcodebuild was stopped: no xc_finished" test ! -e "$work/xc_finished"
+need "shutdown of the simulator it booted" has_call "simctl shutdown $SHARED"
+need "stderr has crash and the count 3" crash_msg_count3
+end_case "46 3 new reports naming no device folder: stop"
 
 # sweep: the run-folder sweep (decisions/test-temp-standard.md). The case reads the real sweep_runs from this file and
 # runs it on a private root under the run folder.
