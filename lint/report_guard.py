@@ -32,15 +32,17 @@ A reply that holds Input Needed or a prose line ending in `?` also gets the past
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
-On landed turns it also blocks a reply sentence that says decision D was rewritten (rewritten, rewrote,
-rewrites, rewrite of) for a ruling when D's record was last committed before that ruling, on the default
-branch and on HEAD alike (`reports-rewrite-stamp`, named incident F119: sessions said decision ci-job-caps
-was rewritten for the owner's 2026-11-01 18:44 CST ruling while main showed it last touched on Oct 28).
-The ruling time is a stamp in the sentence (`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's
-Central date), else, for "under" or "by" decision R, R's last commit on the default branch. "In place"
-alone does not trigger. An unknown id, no time or a failed git read passes. Cost: one regex read of the
-reply, and only on a reply that matches it, one `git log -1` process per cited record (at most
-REWRITE_CAP) plus the default-branch lookup; no file, no timer, no log.
+On landed turns it also blocks a reply sentence that says a decision was rewritten (rewritten, rewrote,
+rewrites, rewrite of) for a ruling when that decision's record was last committed before the ruling, on
+the default branch and on HEAD alike (`rewrite-cite-predates-ruling`, named incident F119: sessions said
+decision ci-job-caps was rewritten for the owner's 2026-11-01 18:44 CST ruling while main showed it last
+touched on Oct 28). A cited id is a word that names a file in the decisions folder; no "decision" word is
+needed. "Not rewritten", "will be rewritten" and the like never claim a rewrite. The ruling time is the
+stamp tied to the word "ruling" (`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's Central
+date); with no such stamp the sentence passes. "In place" alone does not trigger. An id with no record
+file, no time or a failed git read passes. Cost: one regex read of the reply, and only on a reply that
+matches it, file reads (the decisions folder and the git folder's refs, no process) and one `git log -1`
+process per cited id with a record file, at most REWRITE_CAP; no file written, no timer, no log.
 """
 import json
 import os
@@ -539,17 +541,24 @@ def pick_has_a_control(records, text, cwd):
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
-# reports-rewrite-stamp: a sentence that says decision D was rewritten for a ruling. See the module docstring.
+# rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
 REWRITE_RE = re.compile(r"\b(?:rewrote|rewritten|rewrites|rewrite\s+of)\b", re.I)
+# "not rewritten", "was never rewritten", "will be rewritten", "yet to be rewritten": no rewrite has happened.
+REWRITE_UNDONE_RE = re.compile(
+    r"(?:\bnot\b|\bnever\b|n't\b|\bwill\b|\bwould\b|\bshall\b|\bto\s+be\b|\bgoing\s+to\b|\byet\b)"
+    r"[\w\s'-]{0,20}$", re.I)
 REWRITE_CAP = 5  # most records one reply may make this check read
-_SLUG = r"[a-z0-9][a-z0-9-]*"
-DECISION_ID_RE = re.compile(r"\bdecisions?\s+`?(" + _SLUG + r")`?", re.I)
-RULING_BY_RE = re.compile(r"\b(?:under|by)\s+(?:decisions?\s+)?`?(" + _SLUG + r")`?", re.I)
+SLUG_RE = re.compile(r"(?<![\w-])[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+RULING_BY_RE = re.compile(r"\b(?:under|by)\s+(?:decisions?\s+)?`?([a-z0-9]+(?:-[a-z0-9]+)*)`?", re.I)
 STAMP_FULL_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
 STAMP_CLOCK_RE = re.compile(r"(?<![\d:-])(\d{1,2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+RULING_WORD_RE = re.compile(r"\brulings?\b", re.I)
+STAMP_AFTER_RULING = 30  # a stamp this close after the word "ruling" is its time
+STAMP_BEFORE_RULING_RE = re.compile(r"^\s*(?:owner(?:'s)?\s+)?$", re.I)
 STAMP_ZONE_HOURS = {"CST": -6, "CDT": -5, "UTC": 0, "GMT": 0}
 FENCE_RE = re.compile(r"```.*?```", re.S)
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+BASE_NAMES = ("origin/main", "origin/master", "main", "master")
 
 
 def _central(at):
@@ -564,70 +573,112 @@ def _parse_iso(value):
     return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
 
 
-def _stamp_time(sentence, human_ts):
-    """The ruling instant a stamp in `sentence` names, else None. A clock-only stamp takes the Central
-    date of the last human record's timestamp, else of the hook's clock."""
+def _claims_a_rewrite(sentence):
+    """True when a rewrite word in `sentence` is not undone by a negation or a future tense just before it."""
+    return any(not REWRITE_UNDONE_RE.search(sentence[max(0, m.start() - 40):m.start()])
+               for m in REWRITE_RE.finditer(sentence))
+
+
+def _ruling_stamp(sentence):
+    """(day, clock, zone) of the stamp tied to the word "ruling" in `sentence`, else None. A stamp is tied
+    when it follows the word within STAMP_AFTER_RULING characters, or sits right before it ("the 2026-11-01
+    18:44 CST ruling"). `day` is None for a clock-only stamp."""
+    stamps = [(m.start(), m.end(), m.groups()) for m in STAMP_FULL_RE.finditer(sentence)]
+    for m in STAMP_CLOCK_RE.finditer(sentence):
+        if not any(s <= m.start() < e for s, e, _ in stamps):
+            stamps.append((m.start(), m.end(), (None,) + m.groups()))
+    for word in RULING_WORD_RE.finditer(sentence):
+        for start, end, groups in sorted(stamps):
+            if word.end() <= start <= word.end() + STAMP_AFTER_RULING:
+                return groups
+        for start, end, groups in sorted(stamps):
+            if end <= word.start() and STAMP_BEFORE_RULING_RE.match(sentence[end:word.start()]):
+                return groups
+    return None
+
+
+def _stamp_time(stamp, human_ts):
+    """The instant a (day, clock, zone) stamp names. A clock-only stamp takes the Central date of the last
+    human record's timestamp, else of the hook's clock."""
     from datetime import datetime, timedelta, timezone
-    full = STAMP_FULL_RE.search(sentence)
-    if full:
-        day, clock, zone = full.groups()
-    else:
-        clk = STAMP_CLOCK_RE.search(sentence)
-        if not clk:
-            return None
+    day, clock, zone = stamp
+    if day is None:
         import local_time
         try:
             turn = _parse_iso(human_ts)
         except (TypeError, ValueError):
             turn = local_time.clock()
         day = _central(turn).split()[0]
-        clock, zone = clk.groups()
     hour, minute = clock.split(":")
-    tz = timezone(timedelta(hours=STAMP_ZONE_HOURS[zone]))
     year, month, date = (int(x) for x in day.split("-"))
+    tz = timezone(timedelta(hours=STAMP_ZONE_HOURS[zone]))
     return datetime(year, month, date, int(hour), int(minute), tzinfo=tz)
 
 
+def _base_refs(root):
+    """The default-branch refs that exist (origin/main, origin/master, main, master), read from the
+    git folder's files: no git process. [] when the folder cannot be read."""
+    common = layout._common_dir(root)
+    if not common:
+        return []
+    try:
+        with open(os.path.join(common, "packed-refs"), encoding="utf-8", errors="replace") as f:
+            packed = {line.split(" ", 1)[1].strip() for line in f if " " in line and not line.startswith(("#", "^"))}
+    except OSError:
+        packed = set()
+    found = []
+    for name in BASE_NAMES:
+        full = ("refs/remotes/" if name.startswith("origin/") else "refs/heads/") + name
+        if full in packed or os.path.isfile(os.path.join(common, *full.split("/"))):
+            found.append(name)
+    return found
+
+
 def rewrite_stamp_problem(text, human_ts, cwd):
-    """The refusal text when a sentence says decision D was rewritten for a ruling that is later than
-    D's last commit on the default branch and on HEAD, else ''. Fails open on any unknown."""
-    sentences = [s for s in SENTENCE_SPLIT_RE.split(FENCE_RE.sub(" ", text)) if REWRITE_RE.search(s)]
+    """The refusal text when a sentence says a decision was rewritten for a ruling that is later than the
+    record's last commit on the default branch and on HEAD, else ''. A cited id is a lowercase word that
+    names a file in the decisions folder of the checkout. Fails open on any unknown: no record file, no
+    stamp tied to "ruling", no default-branch ref, a failed read. Git runs once per cited id, and not at
+    all for an id with no record file. A shallow clone shows a later last commit than the real one, so
+    it can miss a stale rewrite and never blocks a fresh one."""
+    sentences = [s for s in SENTENCE_SPLIT_RE.split(FENCE_RE.sub(" ", text))
+                 if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
     if not sentences:
         return ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-    import git_reads
     from datetime import datetime, timezone
     root = repo_root(cwd)
     if not root:
         return ""
     folder = layout.path(root, "decisions")
-    base = git_reads.resolve_default_base(root)
-    if not base:
-        return ""
-    reasons, seen = [], set()
+    reasons, read = [], 0
     for sentence in sentences:
-        by = RULING_BY_RE.search(sentence)
-        cited = [m for m in DECISION_ID_RE.finditer(sentence) if not (by and by.start() <= m.start() < by.end())]
-        if not cited:
+        ruled_by = {m.start(1) for m in RULING_BY_RE.finditer(sentence)}
+        ids = []
+        for m in SLUG_RE.finditer(sentence):
+            if m.start() in ruled_by or m.group(0) in ids:
+                continue
+            if os.path.isfile(os.path.join(root, *folder.split("/"), m.group(0) + ".md")):
+                ids.append(m.group(0))
+        stamp = _ruling_stamp(sentence) if ids else None
+        if stamp is None or stamp[2] not in STAMP_ZONE_HOURS:
             continue
-        d = cited[0].group(1).lower()
-        if d in seen or len(seen) >= REWRITE_CAP:
-            continue
-        seen.add(d)
-        ruling = _stamp_time(sentence, human_ts)
-        if ruling is None and by:
-            r_epoch = git_reads.last_commit_epoch(root, [base], "%s/%s.md" % (folder, by.group(1).lower()))
-            if r_epoch is not None:
-                ruling = datetime.fromtimestamp(r_epoch, timezone.utc)
-        if ruling is None:
-            continue
-        d_epoch = git_reads.last_commit_epoch(root, [base, "HEAD"], "%s/%s.md" % (folder, d))
-        if d_epoch is None or d_epoch >= ruling.timestamp():
-            continue
-        reasons.append(
-            "Rewrite-stamp guard: decision `%s` was last committed %s, on main and on HEAD, before the "
-            "ruling %s that it is said to be rewritten for. Rewrite the record first, or say it is not "
-            "rewritten yet." % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)), _central(ruling)))
+        ruling = _stamp_time(stamp, human_ts)
+        bases = _base_refs(root)
+        if not bases:
+            return ""
+        import git_reads
+        for d in ids:
+            if read >= REWRITE_CAP:
+                break
+            read += 1
+            d_epoch = git_reads.last_commit_epoch(root, bases + ["HEAD"], "%s/%s.md" % (folder, d))
+            if d_epoch is None or d_epoch >= ruling.timestamp():
+                continue
+            reasons.append(
+                "Rewrite-stamp guard: decision `%s` was last committed %s, on main and on HEAD, before the "
+                "ruling %s that it is said to be rewritten for. Rewrite the record first, or say it is not "
+                "rewritten yet." % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)), _central(ruling)))
     return " ".join(reasons)
 
 
