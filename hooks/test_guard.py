@@ -14594,18 +14594,24 @@ elif not PD_NODE:
           file=sys.stderr)
 
 
-def pd_repo(name, stamp):
+def pd_repo(name, stamp, origin=None):
     """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
-    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP.
+    `origin` is a remote URL to add, for a case whose machine home is named by the repo's origin."""
     where = os.path.join(ROOT, "pd", name)
     wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
     wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
     wp_git(where, "init", "-q")
+    if origin:
+        wp_git(where, "remote", "add", "origin", origin)
     wp_git(where, "add", "-A")
     wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
     if stamp is not None:
         wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
     return where
+
+
+PD_FILE = "docs/design/item48/a.html"  # a design's file: inside the checkout's design folder (rule mockup-home)
 
 
 def pd_item(designs=None, **over):
@@ -14615,7 +14621,7 @@ def pd_item(designs=None, **over):
             "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
                         {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
             "designs": designs if designs is not None else
-            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]}
     item.update(over)
     return with_stake(item, departs=True)
 
@@ -14677,22 +14683,26 @@ def pd_case(label, name, stamp, data, want, fragment="", action="set", note=Fals
 # The deny cases read the checker's answer, so they run only where the checker can render.
 if PD_NEEDS_NODE:
     pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names")
     pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty",
+                              "file": PD_FILE}]),
             "deny", fragment="a state its mockup does not draw")
     pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
             pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
-                              "drawn": 2400}]),
+                              "drawn": 2400, "file": PD_FILE}]),
             "deny", fragment="option A")
     pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names", action="update")
 
 pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
 pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
-        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                          "file": PD_FILE}]),
         "allow")
 pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
 pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
@@ -14812,7 +14822,7 @@ def pd_partial_options():
                                    {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
 
 
-PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]
 
 
 def pd_partial(label, name, data, judged):
