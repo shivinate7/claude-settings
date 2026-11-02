@@ -2801,8 +2801,8 @@ class PastRulingRelay(unittest.TestCase):
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
     """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
-    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (claude-settings
-    draft PR #1008)."""
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
 
     def hook(self, reply, landed=False, stop_hook_active=False):
         records = [human("ask the owner")]
@@ -2832,8 +2832,8 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     # Red: each case below fails until the verdict exists.
 
     def test_an_red_synthetic_f188_replay_blocks(self):
-        # Synthetic replay, not a copy. The real F188 line (docs/plans/owner-feedback-audit.md, claude-settings
-        # draft PR #1008) never used the word. This line stands in for a reply that did.
+        # Synthetic replay, not a copy. The real F188 line (docs/plans/owner-feedback-audit.md, decision
+        # answered-needs-source) never used the word. This line stands in for a reply that did.
         # Catches: a line that says "Answered" with no source passes.
         self.assert_blocked("Answered: no permission rule can lift it.", "Answered: no permission rule can lift it.")
 
