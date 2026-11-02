@@ -1933,7 +1933,7 @@ if not passed:
 """
 REPLAY_PROFILES = {
     "q_max": {
-        "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/",
+        "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
         "tests": r"^harness/tests/[^/]+\.test\.mjs$",
         "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
         "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -1950,7 +1950,8 @@ REPLAY_PROFILES = {
             "sparse_skip": ["demo-assets", "vendor"],
         },
         "py": {
-            "code": r"^(?!harness/tests/).*\.py$", "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
+            "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/[^/]*-selftest\.py$",
+            "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
             "suite_filter": {"paths": r"^harness/tests/t7/", "keep": "defines_checks"},
             "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
             "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
