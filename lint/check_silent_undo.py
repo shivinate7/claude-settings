@@ -23,7 +23,10 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
   lane undo   A non-merge commit of the branch (also one under a merge) undoes an earlier commit of
               the same branch, by the reversal rules with the branch's own earlier commits as the
               earlier work (a move, a rename, a re-wrap and a rewrite stay excused). Lines the
-              earlier commit only added count only on net loss: a one-line reword is an edit. Or a merge of main drops a line a
+              earlier commit only added count only on net loss: a one-line reword is an edit. Only lines
+              no earlier lane state held count as that commit's work, so a restore is no undo. On any
+              path it flags a reversal (the whole file, or a replaced hunk, put back); a net loss of
+              the commit's lines or a delete counts on a test path only (hooks/guard.py is_test_rel). Or a merge of main drops a line a
               branch commit added (a conflict taken main's side). Only while head still lacks the
               lines: a later commit that puts them back clears it. A branch of one commit has
               nothing to read. The FAIL names the path, the undoing commit and the earlier one.
@@ -498,7 +501,7 @@ def misses(small, big):
     return min(sum(x != y for x, y in zip(small, big[i:])) for i in range(len(big) - len(small) + 1))
 
 
-def undone(o, n, mine, lane=False):
+def undone(o, n, mine, lane=False, net=True):
     """True when a hunk of `mine` reverses the earlier hunk (o -> n). Exact. Or the earlier hunk,
     whole and line for line, inside a bigger hunk that holds other edits (a stale value put back
     beside an edited neighbour). Or, with 6 lines or more, on all but one line (a re-worded line).
@@ -506,6 +509,8 @@ def undone(o, n, mine, lane=False):
     beside them or not, unless the hunk re-wrote them. In the lane read (`lane`) those lines count only on net loss: the
     hunk removes more of them than it adds lines, so a one-line reword is an edit, and a changed value is a rewrite."""
     for big_o, big_n in mine:
+        if lane and not net and not o:
+            continue  # a removal of lines only added is a net loss, which the lane read counts on a test path only
         if (big_o, big_n) == (n, o):
             return True
         if not o:
@@ -529,6 +534,38 @@ def path_at(cwd, rev, head, path):
     return renamed(cwd, rev, head, raw_files(cwd, rev, head)).get(path, (path,))[0]
 
 
+_is_test = None
+
+
+def is_test(path):
+    """True for a test path, by the one rule of the guard (hooks/guard.py is_test_rel). A rule that cannot be read is Unknown."""
+    global _is_test
+    if _is_test is None:
+        try:
+            import guard
+            _is_test = guard.is_test_rel
+        except Exception as e:
+            raise Unknown("the test-path rule (hooks/guard.py is_test_rel) cannot be read: %s" % e)
+    return _is_test(path)
+
+
+def name_at(cwd, rev, later, path):
+    """The name `path` of later has at rev: the old name when git pairs it as renamed from rev to later."""
+    return next((old for old, (new, _, _) in renamed(cwd, rev, later, raw_files(cwd, rev, later)).items() if new == path), path)
+
+
+def held_lines(cwd, upstream, base, e_parent, path):
+    """The normalized lines `path` held in any lane state before the commit above e_parent: the fork base, e_parent, and
+    the parent of each lane commit under e_parent. A line there is no work of that commit, so a restore is no undo."""
+    revs = {base, e_parent}
+    for row in git(cwd, "rev-list", "--no-merges", "--parents", "%s..%s" % (upstream, e_parent))[1].splitlines():
+        revs.update(row.split()[1:2])
+    res = set()
+    for rev in revs:
+        res |= set(counts(blob(cwd, rev, name_at(cwd, rev, e_parent, path))))
+    return res
+
+
 def healed(cwd, old, new, path, dst, head, down):
     """True when head holds again the lines `down` that old->new of path removed (the earlier commit added them): each is at
     head as often as in old. A later commit that restores the work clears the undo (the lane undo read)."""
@@ -537,13 +574,15 @@ def healed(cwd, old, new, path, dst, head, down):
     return all(now[l] >= pre[l] for l in down)
 
 
-def reversals(cwd, old, new, files, earlier, head=None):
+def reversals(cwd, old, new, files, earlier, lane=None):
     """[(path, how, earlier commit)] where old->new undoes a change an earlier commit made.
     A change with no non-blank difference is no undo, and neither is a removal whose lines
     old->new adds to another file (a move). A file git pairs as renamed is judged on its edits across the
     rename, as it would be in place; the finding keeps the old path, the one earlier commits name.
-    With head (the lane undo read), only a net removal of lines the earlier commit added counts (see `undone`), and a
-    removal that head has since put back is excused."""
+    With lane = (head, upstream, fork base), the lane undo read: it counts only lines that no lane state held before the
+    earlier commit (a restore is no undo), and only when head still lacks them. A reversal counts on any path: the whole
+    file put back, or a hunk the earlier commit replaced. A net loss of the earlier commit's lines counts on a test path only."""
+    head = lane[0] if lane else None
     found = []
     elsewhere = None
     pairs = renamed(cwd, old, new, files)
@@ -555,9 +594,10 @@ def reversals(cwd, old, new, files, earlier, head=None):
         mine = (hunks(cwd, a, b) if dst else hunks(cwd, old, new, path)) if touched else []
         for e in touched if mine else []:
             ea, eb = e.files[path]
-            whole = ea == b and eb == a and a != b
+            test = bool(lane) and (is_test(path) or bool(dst and is_test(dst)))
+            whole = ea == b and eb == a and a != b and not (lane and not test and b == ZERO)  # a delete is a net loss
             theirs = hunks(cwd, e.parent, e.sha, path) if e.parent else []
-            if not whole and not any(undone(o, n, mine, head is not None) for o, n in theirs):
+            if not whole and not any(undone(o, n, mine, bool(lane), test) for o, n in theirs):
                 continue
             if elsewhere is None:
                 elsewhere = pool_of(cwd, old, new)
@@ -565,8 +605,10 @@ def reversals(cwd, old, new, files, earlier, head=None):
             gone = collections.Counter(l for o, _ in mine for l in o if any(l in n for _, n in theirs))
             if gone and all(avail[l] >= k for l, k in gone.items()):
                 continue
-            if head is not None and (not gone or healed(cwd, old, new, path, dst, head, set(gone))):
-                continue  # a lane undo needs lines the earlier commit added and this one removed, that head still lacks
+            if lane:  # a lane undo needs lines the earlier commit added and this one removed, that no lane state held before, and head still lacks
+                owned = set(gone) - held_lines(cwd, lane[1], lane[2], e.parent, path) if gone and e.parent else set()
+                if not owned or healed(cwd, old, new, path, dst, head, owned):
+                    continue
             how = "file deleted" if b == ZERO else "whole file restored" if whole else "hunk reversed"
             found.append((path, how + (" (renamed to %s)" % dst if dst else ""), e))
     return found
@@ -580,14 +622,21 @@ def fmt_lane(path, how, e, undo):
     return "lane undo, %s: %s by %s, undoing %s %s" % (path, how, undo.sha[:9], e.sha[:9], e.subject[:60])
 
 
-def lane_merge_items(cwd, m, own, head):
-    """[(path, FAIL line)] for the branch-only lines merge m dropped (own: lost_lines' own_out), that head still lacks.
-    One finding per path and adding commit, which the line names."""
+def lane_merge_items(cwd, m, own, lane):
+    """[(path, FAIL line)] for the branch-only lines merge m dropped (own: lost_lines' own_out), that head still lacks and that
+    no lane state held before their adding commit (lane = head, upstream, fork base). One finding per path and adding commit."""
     res = []
+    head, upstream, base = lane
     for path, dst, p, adders in own:
         pre = counts(blob(cwd, p, path))
         now = counts(blob(cwd, head, path_at(cwd, m, head, dst)))
-        lost = {l: s for l, s in adders.items() if now[l] < pre[l]}
+        lost, held = {}, {}
+        for l, s in adders.items():
+            if now[l] < pre[l]:
+                if s not in held:
+                    held[s] = held_lines(cwd, upstream, base, git(cwd, "rev-parse", s + "^")[1].strip(), path)
+                if l not in held[s]:
+                    lost[l] = s
         for sha in dict.fromkeys(lost.values()):
             lines = [l for l, s in lost.items() if s == sha]
             subject = git(cwd, "log", "-1", "--format=%s", sha)[1].strip()
@@ -661,21 +710,21 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items = []
+    base = git(cwd, "merge-base", upstream, h)[1].strip()
+    line = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
+    if line:  # the fork point is where the branch's line first-parent line left main, even after it merged main back in
+        rc, fork = git(cwd, "merge-base", upstream, line[-1] + "^", ok=(0, 1))
+        base = fork.strip() if rc == 0 and fork.strip() else base
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         own = []
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs, own)]
-        items += lane_merge_items(cwd, m, own, h)
+        items += lane_merge_items(cwd, m, own, (h, upstream, base))
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
     else:  # a conflict leaves no result to read: the branch's own diff off the merge base
         old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
     files = raw_files(cwd, old, new)
-    base = git(cwd, "merge-base", upstream, h)[1].strip()
-    own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
-    if own:  # the fork point is where the branch's own first-parent line left main, even after it merged main back in
-        rc, fork = git(cwd, "merge-base", upstream, own[-1] + "^", ok=(0, 1))
-        base = fork.strip() if rc == 0 and fork.strip() else base
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
@@ -688,7 +737,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
         anc = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())  # the ancestors of c in the lane
         before = [e for e in lane if e.sha in anc]
         if before:
-            items += [(x[0], fmt_lane(*x, c)) for x in reversals(cwd, c.parent, c.sha, c.files, before, h)]
+            items += [(x[0], fmt_lane(*x, c)) for x in reversals(cwd, c.parent, c.sha, c.files, before, (h, upstream, base))]
     page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
