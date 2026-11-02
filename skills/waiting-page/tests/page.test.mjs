@@ -55,6 +55,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  // Pushes one item through the items listener, as a session adding an item after the page loaded would.
+  window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
   const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
@@ -1291,8 +1293,8 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
 });
 
-// The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
-test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
+// The note box is open on every unseen open card, with no Add a note button. A sent card has no box; a card under Change is open.
+test("the note box is open on every unseen open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
   const FRESH = mk("fresh-decision", 29, { added: ASKED_AFTER_SEND });
   const page = await open(t, { items: [DECISION, FRESH, { ...TASK, added: ASKED_AFTER_SEND }], answers: SAVED_A }); if (!page) return;
   assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
@@ -1850,6 +1852,49 @@ test("a seen task's steps and command fold behind its unfold button, and unfold 
   assert.equal(await unfold.getAttribute("aria-expanded"), "true");
   assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
   assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+});
+
+test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+  const seen = mk("seen-answered", 1, { added: at(5) });
+  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const c = card(page, seen), unfold = c.locator("button.unfold");
+  assert.equal(await seenOf(page, seen), "true", "the card is not seen");
+  await unfold.click();
+  await choose(page, seen, "a");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
+  await unfold.click();
+  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+});
+
+test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
+  const a = mk("grp-a", 1, { group: "pair", added: at(5) }), b = mk("grp-b", 2, { group: "pair", added: at(5) });
+  const page = await open(t, { items: [a, b, mk("solo-seen", 3, { added: at(5) }), sentItem()] }); if (!page) return;
+  assert.equal(await seenOf(page, a), "true", "the group is not seen at load");
+  const late = mk("grp-c", 4, { group: "pair", added: at(20) });
+  await page.evaluate((it) => window.__putItem(it), late);
+  await card(page, late).waitFor();
+  for (const it of [a, b, late]) assert.notEqual(await seenOf(page, it), "true", `${it.id} is still seen after its group gained a new member`);
+  const ids = await page.evaluate(() => [...document.querySelectorAll("article.card, #seen-div")].map((e) => e.id));
+  const divider = ids.indexOf("seen-div");
+  assert.ok(divider >= 0, "no seen divider on the page");
+  for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
+});
+
+// Fold ids come from the number, so two open items that share a number must still get their own.
+test("two open items with the same number get unique fold ids", async (t) => {
+  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
+  for (const it of items) {
+    const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
+    const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
+    assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
+  }
 });
 
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
