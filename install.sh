@@ -332,6 +332,7 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
       # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
       git -C "$SRC" worktree lock --reason "claude-settings live pin" "$PIN" >/dev/null 2>&1
     fi
+    CLONE_DIR="$SRC"
     SRC="$PIN"
   else
     log "WARN: $SRC has no branch named main; the links follow the clone's checked-out branch"
@@ -548,11 +549,12 @@ shipped() {
 # A folder whose landing failed removes nothing this run.
 land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; }
 
-# note_landed SUB NAME: record what sits at the destination now.
+# note_landed SUB NAME SRC: record what this run landed at the destination: a link to SRC, a regular file,
+# or (skills only) a folder copy. Anything else there, such as a person's own folder at a file name, is not ours.
 note_landed() {
   nl_p="$1/$2"; nl_d="$CLAUDE_DIR/$nl_p"
-  if [ -L "$nl_d" ]; then nl_v="l$TAB$(readlink "$nl_d")"
-  elif [ -d "$nl_d" ]; then nl_v="d$TAB$(tree_hash "$nl_d")"
+  if [ -L "$nl_d" ]; then [ "$(readlink "$nl_d")" = "$3" ] || return 0; nl_v="l$TAB$3"
+  elif [ -d "$nl_d" ]; then [ "$1" = skills ] || return 0; nl_v="d$TAB$(tree_hash "$nl_d")"
   elif [ -f "$nl_d" ]; then nl_v="f$TAB$(sha256_of < "$nl_d")"
   else return 0; fi
   NEW_RECORD="$NEW_RECORD$nl_p$TAB$nl_v$NL"
@@ -572,11 +574,14 @@ remove_recorded() {
   case "$2" in
     l) [ -L "$rr_d" ] && [ "$(readlink "$rr_d")" = "$3" ] && rr_match=1 ;;
     f) [ -f "$rr_d" ] && [ ! -L "$rr_d" ] && [ "$(sha256_of < "$rr_d")" = "$3" ] && rr_match=1 ;;
-    d) [ -d "$rr_d" ] && [ ! -L "$rr_d" ] && [ "$(tree_hash "$rr_d")" = "$3" ] && rr_match=1 ;;
+    d) case "$1" in skills/*) [ -d "$rr_d" ] && [ ! -L "$rr_d" ] && [ "$(tree_hash "$rr_d")" = "$3" ] && rr_match=1 ;; esac ;;
   esac
   if [ "$rr_match" = 1 ]; then
-    rm -rf "$rr_d" && log "removed $rr_d (main no longer ships $1)"
-    case "$1" in skills/*) rm -f "$SKILL_COPY_DIR/${1#skills/}" ;; esac
+    # A folder is removed whole only under skills/. Every other folder holds files and links: rm -f, never -rf.
+    case "$2" in
+      d) rm -rf "$rr_d" && log "removed $rr_d (main no longer ships $1)"; rm -f "$SKILL_COPY_DIR/${1#skills/}" ;;
+      *) rm -f "$rr_d" && log "removed $rr_d (main no longer ships $1)" ;;
+    esac
   else
     log "kept $rr_d: it is not what the last install put there, so it is yours; main no longer ships $1"
   fi
@@ -603,7 +608,7 @@ retire_recorded() {
 }
 
 # retire_listed: first run, no manifest. Act only on names in retired-files.txt (the format of
-# landed-dirs.txt) that main does not ship. A link into $SRC is removed; anything else (a real file or folder,
+# landed-dirs.txt) that main does not ship. A link into $SRC or into the clone it is pinned from is removed; anything else (a real file or folder,
 # a link that points elsewhere or dangles) is moved to backups/retired, never deleted.
 # Prints PENDING when a name was held back, so the manifest is not written yet.
 retire_listed() {
@@ -616,7 +621,7 @@ retire_listed() {
     shipped "$lp" && continue
     if retire_blocked "${lp%/*}"; then echo PENDING; continue; fi
     ld="$CLAUDE_DIR/$lp"
-    if [ -L "$ld" ] && case "$(readlink "$ld")" in "$SRC"/*) true ;; *) false ;; esac; then
+    if [ -L "$ld" ] && case "$(readlink "$ld")" in "$SRC"/*|"${CLONE_DIR:-$SRC}"/*) true ;; *) false ;; esac; then
       rm -f "$ld" && log "removed $ld (main no longer ships $lp)" >&2
     elif [ -e "$ld" ] || [ -L "$ld" ]; then
       mkdir -p "$RETIRED_DIR" || { echo PENDING; continue; }
@@ -726,15 +731,21 @@ land_dir() {
       guard.py|guard_*.py)
         if [ "$GUARD_SET" = 1 ]; then
           [ "$GUARD_OK" = 1 ] || continue
-          LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")"; continue
+          LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")" "$f"; continue
         fi ;;
     esac
     DEST="$DEST_DIR/$(basename "$f")"
+    # A person's own folder at a file name is never replaced or removed: a failed landing for this folder.
+    # (A first local run backs it up below, as it does any file of the person's.)
+    if [ -d "$DEST" ] && [ ! -L "$DEST" ] && ! { [ "$CLOUD" != 1 ] && [ "$FIRST_LOCAL_RUN" = 1 ]; }; then
+      log "kept $DEST: a folder of yours sits where the file $sub/$(basename "$f") lands; nothing under $sub is removed this run"
+      land_failed "$sub"; continue
+    fi
     if [ "$CLOUD" = 1 ]; then
       put_file "$f" "$DEST" || { land_failed "$sub"; continue; }
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then
-        LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")"; continue
+        LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")" "$f"; continue
       fi
       # A real file at DEST (not a symlink): on the first local install ever, it is a
       # person's own file, backed up. After that, a real file here is this same
@@ -752,7 +763,7 @@ land_dir() {
       ln -sfn "$f" "$DEST" || { land_failed "$sub"; continue; }
     fi
     LANDED="$LANDED $(basename "$f")"
-    note_landed "$sub" "$(basename "$f")"
+    note_landed "$sub" "$(basename "$f")" "$f"
   done
   [ -n "$LANDED" ] && log "$sub in $DEST_DIR:$LANDED"
 }
@@ -836,7 +847,7 @@ land_skills_dir() {
       tree_hash "$DEST" > "$SKILL_COPY_DIR/$name"
     else
       if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then
-        LANDED="$LANDED $name"; note_landed skills "$name"; continue
+        LANDED="$LANDED $name"; note_landed skills "$name" "$d"; continue
       fi
       # A real directory at DEST (not a symlink): on the first local install ever, it is a
       # person's own hand-made skill, backed up. After that, a real directory here is this
@@ -852,7 +863,7 @@ land_skills_dir() {
       ln -sfn "$d" "$DEST" || { land_failed skills; continue; }
     fi
     LANDED="$LANDED $name"
-    note_landed skills "$name"
+    note_landed skills "$name" "$d"
   done
   [ -n "$LANDED" ] && log "skills in $DEST_DIR:$LANDED"
 }

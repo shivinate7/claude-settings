@@ -315,6 +315,8 @@ while IFS= read -r sub || [ -n "`$sub" ]; do
   if [ "`$sub" = "skills" ]; then
     for d in "`$repo/`$sub"/*; do
       [ -d "`$d" ] || continue
+      # A folder git lists no file in (retired, or only ignored leftovers) is not copied, as install.ps1 does.
+      [ -n "`$(git -C "`$repo" ls-files --cached --others --exclude-standard -- ":(literal)`$sub/`$(basename "`$d")" 2>/dev/null)" ] || continue
       dest="`$cfg/`$sub/`$(basename "`$d")"
       if [ -L "`$dest" ]; then continue; fi
       # A real directory here is this same installer's own earlier copy (no symlink
@@ -618,7 +620,12 @@ function Complete-Retire {
     $landed = @{}
     foreach ($e in $LandedList) {
         if ($StillFailed.Contains($e.Dest)) { continue }
-        $state = Get-LandedState $e.Rel
+        $eSub = $e.Rel.Substring(0, $e.Rel.LastIndexOf('/'))
+        # A failed read is a failed landing for the folder: nothing under it is removed, the run goes on.
+        try { $state = Get-LandedState $e.Rel }
+        catch { Log "could not read $($e.Dest) ($($_.Exception.Message)); nothing under $eSub is removed this run"; $FailedSubs[$eSub] = $true; continue }
+        # Only a skills folder is a landed folder. A folder at any other name is a person's own.
+        if ($state -and ($state.StartsWith("d`t") -and $eSub -ne 'skills')) { $FailedSubs[$eSub] = $true; Log "kept $($e.Dest): a folder of yours sits where the file $($e.Rel) lands; nothing under $eSub is removed this run"; continue }
         if ($state) { $landed[$e.Rel] = $true; $newLines.Add("$($e.Rel)`t$state") }
     }
     $pending = $false
@@ -628,10 +635,11 @@ function Complete-Retire {
             if ($f.Count -ne 3 -or -not $f[0] -or $landed.ContainsKey($f[0]) -or (Test-ProtectedName $f[0])) { continue }
             $rel = $f[0]; $sub = $rel.Substring(0, [Math]::Max($rel.LastIndexOf('/'), 0))
             if ((Test-Shipped $rel) -or (Test-RetireBlocked $sub)) { $newLines.Add($line); continue }
-            $cur = Get-LandedState $rel
+            try { $cur = Get-LandedState $rel }
+            catch { Log "could not read $(Join-Path $ClaudeDir $rel) ($($_.Exception.Message)); left in place"; $newLines.Add($line); continue }
             if ($null -eq $cur) { continue }
             $dest = Join-Path $ClaudeDir $rel
-            if ($cur -ceq "$($f[1])`t$($f[2])") {
+            if ($cur -ceq "$($f[1])`t$($f[2])" -and ($f[1] -ne 'd' -or $sub -eq 'skills')) {
                 try {
                     Remove-Leftover $dest
                     Log "removed $dest (main no longer ships $rel)"
@@ -653,7 +661,13 @@ function Complete-Retire {
                 if (-not $i) { continue }
                 try {
                     $tgt = if ($i.LinkType) { [string]@($i.Target)[0] } else { '' }
-                    if ($tgt -and ($tgt.StartsWith($RepoDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar) -or $tgt.StartsWith($RepoDir.TrimEnd('\', '/') + '/'))) {
+                    # Into the pinned checkout or the clone it is pinned from ($CloneDir): both are ours.
+                    $inClone = $false
+                    foreach ($root in @($RepoDir, $CloneDir)) {
+                        $r = $root.TrimEnd('\', '/')
+                        if ($tgt -and ($tgt.StartsWith($r + [IO.Path]::DirectorySeparatorChar) -or $tgt.StartsWith($r + '/'))) { $inClone = $true }
+                    }
+                    if ($inClone) {
                         Remove-Leftover $dest; Log "removed $dest (main no longer ships $rel)"
                     } else { Move-ToRetired $rel }
                 } catch { Log "could not retire $dest ($($_.Exception.Message)); left in place"; $pending = $true }
