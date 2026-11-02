@@ -38,8 +38,9 @@ from guard_core import (
 #           protects, and it is how a checkout left on a branch gets repaired. A deny there would
 #           wall off the only repair, which is the "fix the cause" failure in miniature.
 #   passes  `switch -C main origin/main` and `checkout -B main origin/main`, from any branch: the reset
-#           leaves HEAD on `main`. It passes only when local `main` is an ancestor of `origin/main`
-#           (one `git merge-base --is-ancestor` read), so it drops no local commit.
+#           leaves HEAD on `main`. It passes only when one `git merge-base --is-ancestor main
+#           origin/main` read exits 0 (local `main` is an ancestor), so it drops no local commit.
+#           Exit 1, exit 128 or an unread answer keeps the refusal.
 #   passes  a path operation: `--`, `--ours`, `--theirs`, `--patch`, `--pathspec-from-file`, or one
 #           plain argument shaped like a file. HEAD does not move, and rule 1 governs those calls
 #           unchanged.
@@ -233,15 +234,16 @@ def resets_main_to_remote(subcommand: str, args) -> bool:
     return list(args) == [flag, PROTECTED_BASE, PROTECTED_REMOTE]
 
 
-def reset_loses_commit(root: str) -> bool:
-    """True only when local `main` holds a commit that `origin/main` lacks, so a reset drops it.
+def reset_drops_nothing(root: str) -> bool:
+    """True only when local `main` is an ancestor of `origin/main`, so a reset drops no commit.
 
     One read: `git merge-base --is-ancestor main origin/main` answers 0 (an ancestor, nothing lost)
-    or 1 (a local-only commit). Any other answer (128: no local `main` yet, or no `origin/main`,
-    where git refuses the reset itself) loses nothing here and is not a verdict.
+    or 1 (a local-only commit). Only 0 is a pass. Exit 1, exit 128 (no local `main` yet, or no
+    `origin/main`) and a read that did not run keep main's verdict, the refusal: a failed read is
+    not proof that nothing is lost.
     """
     answer = guard_core._git(root, "merge-base", "--is-ancestor", PROTECTED_BASE, PROTECTED_REMOTE)
-    return answer is not None and answer.returncode == 1
+    return answer is not None and answer.returncode == 0
 
 
 def pointer_head_hit(segment: str, root: str) -> str:
@@ -255,9 +257,9 @@ def pointer_head_hit(segment: str, root: str) -> str:
         if not target:
             continue
         if in_pointer_checkout(root):
-            # A reset of `main` onto `origin/main` is a move to main (the recovery act), unless it
-            # would drop a local-only commit: then today's verdict stands.
-            if resets_main_to_remote(subcommand, args) and not reset_loses_commit(root):
+            # A reset of `main` onto `origin/main` is a move to main (the recovery act), but only
+            # when the read proves it drops no local commit: otherwise today's verdict stands.
+            if resets_main_to_remote(subcommand, args) and reset_drops_nothing(root):
                 continue
             return ("git " + subcommand + " " + target).strip()
     return ""
