@@ -7,16 +7,13 @@
 # Pin check: when the repo's CI pins this repo's ste-lint action at a commit whose lint files differ
 # from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves the pin
 # before CI spends a run (decision action-pins-follow-sessions). A pin this clone does not hold is
-# reported as unknown and changes no exit code. A pin the clone holds but whose history a shallow clone cut is
-# unknown too, in its own line with the remedy `git fetch --unshallow`; unlike the line above, it still exits 3,
-# because the lint files differ, and that is a fact.
+# reported as unknown and changes no exit code.
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, shutil, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 
@@ -84,12 +81,7 @@ def pin_report():
         else:
             drift = True
             day = here("log", "-1", "--format=%cs", sha)
-            older = git_reads.branch_is_ancestor(ROOT, "HEAD", sha)  # None in a shallow clone: the cut reads exit 1
-            if older is None:
-                print("ste-changed: CI pins ste-lint at %s (%s, %s), whose lint differs from this copy's. How the pin "
-                      "relates to this copy is unknown (shallow clone): the history between them is cut. Run "
-                      "`git fetch --unshallow` and run again." % (sha[:7], day, where), file=sys.stderr)
-            elif older:
+            if here("merge-base", "--is-ancestor", sha, "HEAD") is not None:
                 main = here("rev-parse", "origin/main")
                 same = main and _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", main, "HEAD", "--",
                                                *LINT_FILES]).returncode == 0

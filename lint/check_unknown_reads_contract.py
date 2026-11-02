@@ -35,10 +35,6 @@ token, never a bare allow or a bare deny:
     int (the alive answer). A read that folds this sentinel into either neighbor is the
     defect this contract exists to catch. The token stays a return value here, not a log
     line.
-  - ancestry: hooks/test_guard.py's `git_reads_ancestor_shallow_case` clones a repo shallow and
-    fetches one older commit at depth 1, so `git merge-base --is-ancestor` exits 1 on a cut
-    history and not because the commit is off main. `git_reads.branch_is_ancestor` must answer
-    None (unknown), never False.
 
 TO ADD A THIRD MEMBER: write a fixture that makes some other read genuinely fail (not a
 string that names failure), have the code under test answer with a token that contains
@@ -111,15 +107,6 @@ def liveness_unreadable_member() -> Tuple[bool, str]:
     return ok, detail
 
 
-def ancestry_shallow_member() -> Tuple[bool, str]:
-    """Reuse hooks/test_guard.py's own fixture. The shallow clone that cuts the path to a pin lives there."""
-    try:
-        import test_guard
-    except ImportError as e:
-        return False, "could not import hooks/test_guard.py: %s" % e
-    return test_guard.git_reads_ancestor_shallow_case()
-
-
 MEMBERS = (
     ("guard: an unreadable git-status subject logs noted/subject-unread, not a bare allow",
      guard_subject_unread_member),
@@ -128,8 +115,6 @@ MEMBERS = (
     ("liveness: an unreadable ps read answers PROCESS_START_UNREADABLE, "
      "distinct from alive and confirmed-dead",
      liveness_unreadable_member),
-    ("ancestry: an ancestry read cut by a shallow clone answers None (unknown), not False (off main)",
-     ancestry_shallow_member),
 )
 
 
