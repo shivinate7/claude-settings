@@ -249,8 +249,8 @@ Design A. A page save is not owner-attested today (Design C). So the page does n
 grant. It offers the grant line instead: an item whose answer grants an act shows its
 `grant` line, which the owner taps to copy and sends in the coordinator's
 chat. That send is an owner event, and Design A carries it. The page draws the line and the item
-prose from the same fields, which show the act, the PR and the length, so the owner reads what the line grants before sending. The grant is what the
-owner sends, whatever the item said.
+prose from the same fields: the act, the PR and the length. So the owner reads what the line
+grants before sending. The grant is what the owner sends, whatever the item said.
 
 One home holds both: the grant word, its catalogue and the gate. Step page-save-reaches-auto-mode
 then needs only the page's copy line. This matches the style rule that offers an override line for
