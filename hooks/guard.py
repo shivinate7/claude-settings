@@ -3757,6 +3757,20 @@ def _git_verb_called(command: str) -> bool:
         for segment in split_segments(command, []) for verb, _args in git_calls(segment))
 
 
+def _git_verb_may_hit(command: str, where: str) -> bool:
+    """True when a git verb of SESSION_HOME_GIT_VERBS in COMMAND can change another clone's files, so
+    it is worth the one `git worktree list`: the cwd is stranded in a separate clone of the
+    `CLAUDE_PROJECT_DIR` clone, or a `-C` or `cd` folder's nearest `.git` is not the cwd's. The folder
+    of each verb is read by session_home_git_hit, the one reader. Stat and small file reads; no git."""
+    own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
+    if not own_root:
+        return False
+    stranded = _clone_scope(None, own_root)[2]
+    return bool(session_home_git_hit(
+        command, where,
+        lambda folder, _at: stranded or _checkout_root_by_stat(os.path.realpath(folder)) != own_root))
+
+
 def _separate_clone(path: str, tops, common: str) -> bool:
     """True when PATH sits in a separate clone of the same repo as the checkouts TOPS, whose git
     common dir is COMMON: the nearest `.git` above it is not inside a top (a submodule), not above
@@ -3870,7 +3884,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         command = strip_heredoc_bodies(raw)
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
-        writes = writes or _git_verb_called(command)
+        # A git verb spends the list only when stat and file reads show it can reach another clone.
+        writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
     else:
         return ""
     if moves:
