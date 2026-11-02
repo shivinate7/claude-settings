@@ -462,7 +462,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/prose_judge.py, a PreToolUse command hook on Edit and Write that calls the model only for a path inside a decisions folder; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Partly checked: lint/stale_cites.py (in the ste-lint CI step) refuses a Markdown line that names a file or Python def the same PR removed. A claim wrong in meaning is judged only by hooks/prose_judge.py, inside a decisions folder."
       }
     },
     "output-write-in-ste": {
