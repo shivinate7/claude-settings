@@ -134,6 +134,11 @@ Other tools, in `judge` order:
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
+  lane-repo-tag        deny. A `create_session` call with a lane tag (as for lane-effort-pin) and no tag
+                       that equals `cs-repo:` plus the calling checkout's origin `owner/name`, casefolded.
+                       The repo is the last two segments of the origin's path, `.git` stripped; the host
+                       is never read. With no readable origin, any tag `cs-repo:<owner>/<name>` passes.
+                       Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -1729,6 +1734,13 @@ LANE_EFFORT_REASON = (
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
     % LANE_EFFORT
 )
+LANE_REPO_TAG_REASON = (
+    "A lane session carries the repo's full `cs-repo` tag: `cs-repo:<owner>/<name>` of the checkout that starts "
+    "it. Add that tag to the lane's tags. A roll-out lane carries this repo's tag beside its target's "
+    "(decision session-tiers, Tier tags)."
+)
+# A repo tag with no origin to compare to: the full form, one owner and one name.
+FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -1871,6 +1883,49 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
+def origin_repo(cwd: str) -> str:
+    """The casefolded `owner/name` of cwd's origin, or "" when it cannot be read. Parses the PATH of the
+    origin URL, never its host: the cloud proxy serves `http://local_proxy@127.0.0.1:<port>/git/<owner>/<name>`.
+    One config read."""
+    if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
+        return ""
+    done = guard_core._git(cwd, "remote", "get-url", "origin")
+    if done is None or done.returncode != 0:
+        return ""
+    url = done.stdout.strip()
+    # `scheme://host/path` keeps the path; scp form `user@host:path` keeps what follows the colon.
+    path = url.split("://", 1)[1].partition("/")[2] if "://" in url else url.partition(":")[2]
+    segments = [part for part in path.rstrip("/").split("/") if part]
+    if len(segments) < 2:
+        return ""
+    owner, name = segments[-2], segments[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return ("%s/%s" % (owner, name)).casefold() if owner and name else ""
+
+
+def lane_repo_tag_hit(tool: str, tool_input, cwd: str) -> str:
+    """The tags of a lane `create_session` call that carry no repo tag for the calling checkout's origin, or "".
+    A lane tag is judged as in lane_effort_hit. With no readable origin, any full `cs-repo:<owner>/<name>` tag passes."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return ""
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return ""
+    repo = origin_repo(cwd)
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        tag = tag.strip().casefold()
+        if repo and tag == REPO_TAG + repo:
+            return ""
+        if not repo and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
+            return ""
+    return ", ".join(str(t) for t in tags)
+
+
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
 # it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
@@ -1957,6 +2012,7 @@ ROLE_DEFAULT = "general-purpose"
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
 # Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+from shared_names import REPO_TAG  # noqa: E402  the one home of the tag name, shared with skills/roadmap/build.py
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -3245,6 +3301,12 @@ def judge(payload) -> None:
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
+    lane_tags = lane_repo_tag_hit(tool, tool_input, cwd)
+    if lane_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON, lane_tags)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.

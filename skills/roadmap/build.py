@@ -61,8 +61,6 @@ NOTE_WORDS = 250
 STALE_DAYS = 5
 # A live file older than this counts a dead lane as live, so the stale-step row reads unknown.
 STALE_LIVE_MINUTES = 60
-STEP_TAG = "cs-step:"
-REPO_TAG = "cs-repo:"
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
@@ -100,6 +98,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from shared_names import REPO_TAG, STEP_TAG  # noqa: E402  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
 def git(repo, *args, stdin=None):

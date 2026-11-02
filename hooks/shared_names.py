@@ -32,6 +32,11 @@ EXPLORE_AUDIT_MARKER = "Audit:"
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
 
+# The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
+# the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
+REPO_TAG = "cs-repo:"
+STEP_TAG = "cs-step:"
+
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
 

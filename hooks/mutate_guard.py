@@ -1773,6 +1773,28 @@ MUTATIONS = [
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60',
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 60',
      "calljudge", 'question: one model call, claude-opus-5-5'),
+
+    # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check.
+    ("lane-repo-tag: the rule never fires",
+     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
+    ("lane-repo-tag: a tag in other case no longer matches",
+     '        tag = tag.strip().casefold()\n        if repo and tag == REPO_TAG + repo:',
+     '        tag = tag.strip()\n        if repo and tag == REPO_TAG + repo:',
+     "guard", "lane-repo-tag: origin repo tag in other case is allowed"),
+    ("lane-repo-tag: the owner is the first path segment, so a proxy origin names the wrong repo",
+     '    owner, name = segments[-2], segments[-1]\n    if name.endswith(".git"):',
+     '    owner, name = segments[0], segments[-1]\n    if name.endswith(".git"):',
+     "guard", "lane-repo-tag: proxy-host origin, origin repo tag is allowed"),
+    ("lane-repo-tag: a .git suffix stays on the repo name",
+     '    if name.endswith(".git"):\n        name = name[:-4]\n    return ("%s/%s"',
+     '    if False:\n        name = name[:-4]\n    return ("%s/%s"',
+     "guard", "lane-repo-tag: origin with a .git suffix, origin repo tag is allowed"),
+    ("lane-repo-tag: the no-origin fallback also applies when the origin is read",
+     '        if not repo and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
+     '        if tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
+     "guard", "lane-repo-tag: origin with a .git suffix, another repo's tag is denied"),
 ]
 
 
