@@ -19401,6 +19401,61 @@ sh("other-checkout: a stranded cwd's cd into a checkout of the home clone, then 
 sh("other-checkout: a stranded cwd's shell read of its own clone is allowed",
    "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_SEP,
    env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+
+# Git writes from a stranded cwd, and into a separate clone from the own checkout. The verbs are
+# SESSION_HOME_GIT_VERBS. The stranded refusal's reason must not read as the own checkout's.
+sh("other-checkout: a git commit from a cwd stranded in a separate clone is refused when CLAUDE_PROJECT_DIR "
+   "names the home clone",
+   VCS + " commit -m x", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git reset --hard from a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone",
+   VCS + " reset --hard", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git checkout main from a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone",
+   VCS + " checkout main", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded refusal's reason does not name the checkout this session stands in",
+   VCS + " commit -m x", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+   lacks="the checkout this session stands in")
+sh("other-checkout: a git -C commit into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " commit -m x", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C reset --hard into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " reset --hard", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd's git status is allowed",
+   VCS + " status", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's git log is allowed",
+   VCS + " log --oneline -1", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's git fetch is allowed",
+   VCS + " fetch origin", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git -C log into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C commit into a clone of a different repo is allowed",
+   VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
+   VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+
+# Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
+# same-repo test must read the two clones as one repo by the bare path they share.
+XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
+XCL_BARE_A = os.path.join(ROOT, "xcl_bare_a")      # a clone whose origin is XCL_REMOTE
+XCL_BARE_B = os.path.join(ROOT, "xcl_bare_b")      # a second clone whose origin is XCL_REMOTE
+
+
+def _build_shared_bare_origin():
+    """A bare repository, and two clones each with it as origin."""
+    os.makedirs(XCL_REMOTE, exist_ok=True)
+    made = run_vcs(XCL_REMOTE, "init", "-q", "--bare", ".")
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the bare init at %r: %s" % (XCL_REMOTE, made.stderr.strip()))
+    _xcl_clone(XCL_BARE_A, XCL_REMOTE)
+    _xcl_clone(XCL_BARE_B, XCL_REMOTE)
+
+
+lazy_fixture((XCL_REMOTE, XCL_BARE_A, XCL_BARE_B), _build_shared_bare_origin)
+add("other-checkout: a Write into a clone that shares a local bare origin with this clone is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_BARE_A,
+    file_path=os.path.join(XCL_BARE_B, "note.txt"), content="x")
 TEMP_DIR = None  # back to the system temp for the sections below
 
 
