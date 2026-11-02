@@ -175,6 +175,9 @@ class Case(object):
     def state_path(self):
         return os.path.join(self.cfg, "state", "handoff", "%s.json" % self.session_id)
 
+    def nudge_path(self):
+        return os.path.join(self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+
     def prompt_path(self):
         return os.path.join(self.cfg, "hooks", "precompact_handoff_prompt.md")
 
@@ -593,8 +596,7 @@ def case_nudge_limit_checkpoints():
 def case_nudge_reads_messages_not_total():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # limit 200k: threshold 144k is under the 160k overhead, so room is -16k: checkpoints(-16000)
-    # = [-66000] (degenerate)
+    # margin = min(50k, room/2): room -16k puts the top below zero, so any message count blocks.
     c = Case("nmsg1")
     try:
         set_limit(c, 200000)
@@ -617,16 +619,18 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(284999)])
         check("messages: total 284,999 (messages 199,999) is silent at 85k overhead",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        # item 2 (75k drop): checkpoints(299000) = [249k]; the 200k floor is 49k under it, dropped.
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
-        check("messages: total 285,000 (messages 200,000) blocks at 85k overhead",
-              is_block(c, p), "out=%r" % p.stdout)
-        # threshold 384k: checkpoints(299000) = 200k, 249k (no 350k step fits): total 334k
+        check("messages: total 285,000 (messages 200,000) is silent: the 200k floor is dropped",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
-        check("messages: total 333,999 stays at bucket 0 (last checkpoint is total 334k)",
-              stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+        check("messages: total 333,999 is silent at bucket -1 (the one checkpoint is total 334k)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
-        check("messages: total 334,000 blocks at the last checkpoint (bucket 1)",
-              is_block(c, p) and stored_bucket(c) == 1,
+        check("messages: total 334,000 blocks at the one checkpoint (bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
             reason = json.loads(p.stdout).get("reason", "")
@@ -765,6 +769,44 @@ def case_nudge_top_checkpoint_at_threshold():
         check("top: 334,000 (threshold - 50k) reaches the top bucket",
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_checkpoint_ladder():
+    """checkpoints(room) on its own. The 200k floor goes when a step sits within 75k of the top
+    (item 2 of precompact-handoff), and the top sits margin = min(50k, room/2) under the room."""
+    for room, want in (
+            (299000, [249000]),  # item 2 (75k drop): the 200k floor is 49k under the top
+            (384000, [200000, 334000]),  # item 2: the floor is 134k under the top, so it stays
+            (44000, [22000]),  # margin = min(50k, room/2): room 44k, top 22k
+            (100000, [50000])):  # margin = min(50k, room/2): room 100k, the 50k cap
+        try:
+            got = under_test().checkpoints(room)
+        except Exception as e:
+            got = "%s: %s" % (type(e).__name__, e)
+        check("ladder: checkpoints(%d) is %r" % (room, want), got == want, "got %r" % (got,))
+
+
+def case_nudge_small_room_margin():
+    """100k window, 20k overhead: room 44k, so the one checkpoint is margin = min(50k, room/2) =
+    22k. The sizes are the last entry's total, so messages are 23k and 10k. size is unused when
+    lines is given."""
+    c = Case("nsmall43")
+    try:
+        set_limit(c, 100000)
+        p = nudge(c, 0, overhead=20000, lines=[usage_line(43000)])
+        check("small room: total 43k (messages 23k) blocks at the 22k top",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+    c = Case("nsmall30")
+    try:
+        set_limit(c, 100000)
+        p = nudge(c, 0, overhead=20000, lines=[usage_line(30000)])
+        check("small room: total 30k (messages 10k) is silent below the 22k top",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
     finally:
         c.cleanup()
 
@@ -1352,6 +1394,8 @@ def main() -> int:
     case_nudge_settings()
     case_compact_threshold()
     case_nudge_top_checkpoint_at_threshold()
+    case_checkpoint_ladder()
+    case_nudge_small_room_margin()
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
     case_handoff_path_not_frozen()
