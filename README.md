@@ -139,7 +139,7 @@ Run it from inside the repo, with `gh`, `git`, `node` and Python 3 on PATH:
 merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
-merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Reads no lock state.
+merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
