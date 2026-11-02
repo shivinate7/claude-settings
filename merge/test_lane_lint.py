@@ -6,9 +6,10 @@ The lint is bin/ci-job's `checks --lint`, reached through merge.CI_JOB. Each cas
 prints scripted step lines and exits with a scripted code, so no real lint runs. The stub logs each call, so a
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it.
+The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,8 +25,8 @@ PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 
-STUB = '''import json, os, subprocess, sys
-LOG, STEPS, RC = __LOG__, __STEPS__, __RC__
+STUB = '''import json, os, subprocess, sys, time
+LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
@@ -35,9 +36,24 @@ if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
     sys.exit(0)
-for state, name in STEPS:
-    print("%-15s %s: stub step" % (state, name))
+end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
+while time.time() < end and os.getppid() == PARENT:
+    time.sleep(0.05)
+lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+print("\\n".join(lines))
+if RC == 1:
+    with open(STEP_LOG, "w", encoding="utf-8") as f:
+        f.write("\\n".join(lines) + "\\n")
+    print("log=" + STEP_LOG)  # the last line: the refusal reads it as the failing run's log
 sys.exit(RC)
+'''
+
+# merge.py fixes CI_JOB at import, so a subprocess run names the stub here, before main runs. Same argv and exit code as merge.py's __main__.
+HARNESS = '''import sys
+sys.path.insert(0, __HERE__)
+import merge
+merge.CI_JOB = __STUB__
+sys.exit(merge.main(sys.argv[1:]))
 '''
 
 
@@ -69,10 +85,17 @@ class LaneLint(tm.CloudSession):
         self.lock = NoLock()
         self.log = os.path.join(self.t, "ci-calls.jsonl")
         self.stub = os.path.join(self.t, "ci-job-stub.py")
+        self.step_log = os.path.join(self.t, "ci-job-step.log")
+
+    def write_stub(self, steps, rc, sleep=0):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
+        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        return self.stub
 
     def use_ci_job(self, steps, rc):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        tm.put(self.stub, STUB.replace("__LOG__", repr(self.log)).replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)))
+        self.write_stub(steps, rc)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -227,6 +250,105 @@ class LaneLint(tm.CloudSession):
         self.assertFalse(os.path.exists(cwd), "the lint tree is still on disk after an exception")
         self.assertFalse(tm.tree_listed(self.co, cwd), "git still lists the lint tree after an exception")
         self.assertEqual(self.worktrees(), 1)
+
+    def stop_run(self, proc):
+        """Cleanup for a run this case started: it is ours, so a live one is killed. The stub ends by itself when its run is gone."""
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=30)
+
+    @unittest.skipIf(os.name == "nt", "SIGTERM is not delivered as a signal on Windows: a send ends the process at once")
+    def test_a_sigterm_during_the_lint_removes_the_lint_tree_and_its_temp_dir(self):
+        self.write_stub(PASSING, 0, sleep=120)
+        harness = os.path.join(self.t, "lane_lint_run.py")
+        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        tmp_root = tempfile.mkdtemp(dir=self.run_dir, prefix="sigterm-")  # the lint tree's temp dir lands here, not in the system temp dir
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp_root, "TMP": tmp_root, "TEMP": tmp_root}
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        text_path = os.path.join(self.t, "lane-lint-run.txt")
+        with open(text_path, "w", encoding="utf-8") as text:
+            proc = subprocess.Popen([sys.executable, harness, "--lane-lint", self.head("feat")], cwd=self.co, env=env,
+                                    stdout=text, stderr=subprocess.STDOUT)
+        self.addCleanup(self.stop_run, proc)
+
+        def run_text():
+            with open(text_path, encoding="utf-8") as f:
+                return f.read()
+
+        deadline = time.time() + 60
+        while not self.lint_calls() and proc.poll() is None and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertIsNone(proc.poll(), "the run ended before its lint started: " + run_text())
+        self.assertTrue(self.lint_calls(), "the lint did not start within 60 s: " + run_text())
+        lint_tree = self.lint_calls()[0]["cwd"]
+        temp_dir = os.path.dirname(lint_tree)
+        self.assertTrue(os.path.isdir(lint_tree), "the lint tree was not on disk while the lint ran")
+        self.assertEqual(self.worktrees(), 2, "git did not list the lint tree while the lint ran")
+
+        proc.send_signal(signal.SIGTERM)
+        try:
+            rc = proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail("the run did not exit within 60 s of SIGTERM: " + run_text())
+        out = run_text()
+        self.assertNotEqual(rc, 0, "SIGTERM read as a clean exit: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertEqual(self.worktrees(), 1, "git still lists the lint tree after SIGTERM: " + out)
+        self.assertFalse(tm.tree_listed(self.co, lint_tree), "git still lists the lint tree after SIGTERM")
+        self.assertFalse(os.path.exists(lint_tree), "the lint tree is still on disk after SIGTERM")
+        self.assertFalse(os.path.exists(temp_dir), "the lint tree's temp dir is still on disk after SIGTERM")
+        self.assertEqual([n for n in os.listdir(tmp_root) if n.startswith("merge-wt-")], [], "a merge temp dir is left after SIGTERM")
+
+    def has_local_branch(self, name):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", f"refs/heads/{name}"], capture_output=True).returncode == 0
+
+    def local_feat_one_past_origin(self):
+        """Make the lane checkout's local feat one commit past origin/feat. -> (local sha, origin sha)."""
+        tm.sh(self.co, "git", "checkout", "-q", "-b", "feat", "origin/feat")
+        tm.put(os.path.join(self.co, "local-only.txt"), "committed here, not pushed\n")
+        tm.sh(self.co, "git", "add", "-A")
+        tm.sh(self.co, "git", "commit", "-q", "-m", "local only")
+        return tm.sh(self.co, "git", "rev-parse", "feat"), tm.sh(self.co, "git", "rev-parse", "origin/feat")
+
+    def test_a_bare_branch_name_with_no_local_branch_lints_origin(self):
+        self.use_ci_job(PASSING, 0)
+        self.assertFalse(self.has_local_branch("feat"), "the case needs no local feat")
+        rc, out = self.lint_run("--lane-lint", "feat", head=self.head("feat"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_bare_branch_name_refuses_when_local_and_origin_differ_and_names_both_shas(self):
+        local, origin = self.local_feat_one_past_origin()
+        self.use_ci_job(PASSING, 0)
+        before = self.refs()
+        rc, out = self.run_lane("--lane-lint", "feat")
+        self.assertEqual(self.lint_calls(), [], "a bare name linted its local branch while origin/feat differs: " + out)
+        self.assertNotEqual(rc, 0, "a bare name whose local branch differs from origin/feat read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn(local[:7], out, "the refusal does not name the local sha")
+        self.assertIn(origin[:7], out, "the refusal does not name the origin sha")
+        self.assertEqual(self.refs(), before, "a refused lane pushed a ref")
+
+    def test_an_explicit_origin_ref_is_taken_as_given_while_the_local_branch_differs(self):
+        _, origin = self.local_feat_one_past_origin()
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "origin/feat", head=origin)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_full_sha_is_taken_as_given_while_the_local_branch_differs(self):
+        _, origin = self.local_feat_one_past_origin()
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", origin, head=origin)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_failed_lint_refusal_shows_the_ci_job_log_line(self):
+        self.use_ci_job(FAILING, 1)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(os.path.exists(self.step_log), "the stub wrote no step log")
+        self.assertIn("log=" + self.step_log, out.splitlines(), out)
 
     def test_a_cloud_lane_session_with_no_merge_role_may_run_lane_lint(self):
         self.use_ci_job(PASSING, 0)
