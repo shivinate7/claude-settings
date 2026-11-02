@@ -316,13 +316,11 @@ class Ratchet(Case):
         self.change({"gone.py": None, "trim.py": "x = 1\ny = 2\nz = 3\n"})
         self.assertClean()
 
-    def test_only_py_files_are_read(self):
+    def test_files_outside_the_comment_languages_are_not_read(self):
         self.base({"keep.py": "x = 1\n"})
         self.change({
-            "notes.md": "Fixed in round 2. Owner ruling 2026-10-18.\n",
-            "run.sh": "# fixed in round 2\n",
-            "app.js": "// owner ruling 2026-10-18\n",
-            "data.txt": "# MEASURED CORRECTED\n",
+            "a.rb": "# fixed in round 2\n",
+            "notes.txt": "# owner ruling 2026-10-18\n",
             "README": "# PR #509\n",
         })
         self.assertClean()
