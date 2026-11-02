@@ -50,6 +50,7 @@ import uuid
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -8157,7 +8158,9 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 
 # A record's own tier is allowed. Any other tier is refused, both ways round.
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
-role_allow("a coordinator records coordinator", MERGE_SHIM + " --role coordinator", role_path("coordinator"))
+# owner ruling 2026-11-01 21:34 CST: the coordinator never merges, so its own record does not allow the coordinator role.
+role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
+          role_path("coordinator"))
 role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
           role_path("runner"))
 role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
@@ -8182,10 +8185,12 @@ role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE
 # The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
 for _role_prefix in ("", "cd somewhere && "):
     for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
-        for _role_tier, _role_own in (("batch-runner", "runner"), ("coordinator", "coordinator")):
-            _role_cmd = _role_prefix + _role_form + " --role " + _role_tier
-            role_allow(_role_cmd + " allows its own record", _role_cmd, role_path(_role_own))
-            role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+        _role_cmd = _role_prefix + _role_form + " --role batch-runner"
+        role_allow(_role_cmd + " allows its own record", _role_cmd, role_path("runner"))
+        role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+        # owner ruling 2026-11-01 21:34 CST: the coordinator never merges, in any form, even on its own record
+        _coord_cmd = _role_prefix + _role_form + " --role coordinator"
+        role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
@@ -19709,6 +19714,9 @@ for _label, _check in (
 
 
 # =========================================================================== the machine-load brake
+# The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
+# suite drops it here, and a cloud case sets it for its own run (lb_add's `remote`). No other case reads the variable.
+os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
 # The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
@@ -20048,7 +20056,7 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
                 len(side["children"]), side["children"][:3])
         if got != want:
             return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
-        if called != reads:
+        if reads is not None and called != reads:
             return False, "%s as wanted, but the reader ran %s times, want %d" % (got, called, reads)
         if got == "allow" and side["files"]:
             return False, "an allowed lane call wrote %d file(s)" % len(side["files"])
@@ -20259,11 +20267,18 @@ def lb_neutral_default_check():
 LB_CHECKS = []   # the checks that reach the real reader: the Windows slice runs these too
 
 
-def lb_add(label, check, real=False):
-    LOG_CHECKS_EXTRA.append(("load-brake: " + label, check))
-    FIXTURELESS_CHECKS.add(check)
+def lb_add(label, check, real=False, remote=None):
+    """Register one load-brake check. `remote` runs it with CLAUDE_CODE_REMOTE set to that value (a cloud case);
+    None leaves the suite's local default in place."""
+    run = check
+    if remote is not None:
+        def run():
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": remote}):
+                return check()
+    LOG_CHECKS_EXTRA.append(("load-brake: " + label, run))
+    FIXTURELESS_CHECKS.add(run)
     if real:
-        LB_CHECKS.append(check)
+        LB_CHECKS.append(run)
 
 
 lb_add("probe control: a child process the probe starts is counted", lb_probe_child_check)
@@ -20488,6 +20503,75 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
        lb_no_read_check("mcp__ccd_session__list_start_targets", {}, agent=LB_AGENT))
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
+
+# CLOUD. Owner ruling 2026-11-01 21:34 CST: the load brake is local-only. With CLAUDE_CODE_REMOTE=true no reading refuses
+# a lane-start call, busy or full, and an agent's own shell or file write is allowed at full too. The verdict is the
+# proof: the reader may run or not (reads=None), and an allowed call writes no file, so nothing reaches guard.log.
+LB_CLOUD = "true"
+CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
+                ("false", False), (" true", False))
+for _short, _tool in LB_TOOLS:
+    for _bg, _say in (LB_BG if _tool in dict(LB_SPAWNS).values() else ((None, "no run_in_background"),)):
+        lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_short, _say),
+               lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None), remote=LB_CLOUD)
+for _short, _tool in LB_SPAWNS:
+    lb_add("cloud: %s, memory 91.7%%, run_in_background true: busy, allowed" % _short,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=True, reads=None), remote=LB_CLOUD)
+for _tool, _given in LB_WRITES:
+    lb_add("cloud: an agent's %s, memory 99%%, disk 1.0 GB free of 926 GB: allowed, nothing written" % _tool,
+           lb_decision_check(_tool, LB_ALL_HIGH, "allow", tool_input=_given, agent=LB_AGENT, reads=None), remote=LB_CLOUD)
+lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None), remote=LB_CLOUD)
+lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
+       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None),
+       remote=LB_CLOUD)
+lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
+       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None),
+       remote=LB_CLOUD)
+# Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
+for _remote in ("1", "TRUE", ""):
+    lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
+           lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=False),
+           remote=_remote)
+
+
+def cloud_name_check():
+    """guard_core.is_cloud exists and returns True only for exactly "true", read from the environment at each call."""
+    import importlib
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    core = importlib.import_module("guard_core")
+    helper = getattr(core, "is_cloud", None)
+    if not callable(helper):
+        return False, "guard_core has no is_cloud: the cloud check has no one home yet"
+    for value, want in CLOUD_VALUES:
+        with mock.patch.dict(os.environ):
+            if value is None:
+                os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            else:
+                os.environ["CLAUDE_CODE_REMOTE"] = value
+            got = helper()
+        if got is not want:
+            return False, "is_cloud() with CLAUDE_CODE_REMOTE=%r gave %r, want %r" % (value, got, want)
+    return True, 'True for exactly "true", False for the other values and when unset'
+
+
+def cloud_one_home_check():
+    """guard.py's brake gate holds guard_core's is_cloud: the cloud check has one home."""
+    import importlib
+    guard = _load_guard_module()
+    core = importlib.import_module("guard_core")
+    helper = getattr(core, "is_cloud", None)
+    if not callable(helper):
+        return False, "guard_core has no is_cloud: the cloud check has no one home yet"
+    got = getattr(guard, "is_cloud", None)
+    if got is not helper:
+        return False, "guard.py's brake gate does not hold guard_core.is_cloud (it holds %r)" % (got,)
+    return True, "guard.py holds guard_core.is_cloud"
+
+
+lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
+lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
