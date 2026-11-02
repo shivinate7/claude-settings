@@ -1,0 +1,9 @@
+{
+ "title": "In a cloud session, the brake pace number reads \"n/a (cloud)\", never 0",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21037,
+ "why": "Owner, Nov 1 21:34 CST: \"why would there be brake refusals when you are running on the cloud? that's specific to local sesions.\" Rule reports-batch-pace-numbers' fourth number reads only the local guard.log, and the load brake applies to local sessions only.",
+ "note": "Fix: the pace-number reader prints \"n/a (cloud)\" for the brake number in a cloud session, and the rule text says so. Red first: a cloud fixture reports n/a (cloud), not 0; a local fixture with load-brake lines reports their count. Port: yes, the rule loads everywhere. Ready.",
+ "updatedAt": "2026-11-02T03:47:00Z"
+}
