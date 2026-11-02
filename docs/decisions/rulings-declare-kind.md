@@ -27,10 +27,11 @@ task, because nothing linked the ruling to a plan. The line format is in `lint/c
 
 - CI lint. The opt-in composite action `actions/ruling-kind` runs the same lint on another repo's pull
   request, against its base. It is red when the base cannot be read.
-- Write judge. The Write prompt judge in `settings.json` fires on any `docs/decisions/` path. It refuses a
+- Write judge. The Write judge (`hooks/prose_judge.py`, a command hook in `settings.json`) fires on any `docs/decisions/` path. It refuses a
   record with no `Kind: build` (with Plan lines) or `Kind: process` (with a Home line). The Edit judge
-  sees only the changed text. It refuses an edit that deletes a `Kind:`, `Plan:` or `Home:` line, and an
-  edit that adds a ruling section with no `Kind:` line in the same text.
+  sees only the changed text. It refuses an edit that deletes a `Plan:` or `Home:` line, and an edit that
+  adds a second ruling section to a record, with the remedy "its own record". It never refuses for a
+  `Kind:` line: the lint counts them, and the lint is the one home for that count.
 
 Kind: process
 Home: lint/check_ruling_kind.py
