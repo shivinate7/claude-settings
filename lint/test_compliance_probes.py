@@ -1985,8 +1985,8 @@ def item_for(out, where):
 
 
 class Restates(unittest.TestCase):
-    """A unit that copies a run of record text is refused. A unit that names a record, with or without its ruling time, is a
-    citation and passes."""
+    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
+    included."""
 
     def child(self, *units, rel="CLAUDE.md"):
         """A child whose `rel` holds `units`, a blank line between each: each one is a unit of its own."""
@@ -2072,7 +2072,6 @@ class Restates(unittest.TestCase):
         repo = Repo(self).write("docs/decisions/own-rule.md", "# Own rule\n\n" + FILLER + "\n")
         self.assert_passes(repo.write("CLAUDE.md", "- " + FILLER + "\n"))
 
-    # A copy in quotes is still a copy, so no quote wrap passes.
     def test_a_copy_in_a_heading_kind_line_comment_or_code_span_passes(self):
         line = grant_line()
         for wrap in ("# %s", "Kind: %s", "<!-- %s -->", "`%s`"):
