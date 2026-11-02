@@ -187,9 +187,12 @@ The seven opt-in templates of that decision:
   is the last job. It sets `needs:` on every other job,
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
   `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
-- `ci-alarm`: opens or comments on one issue when the latest completed run of any workflow on a
-  branch (default `main`) is red. The caller is a scheduled workflow with
-  `permissions: {actions: read, issues: write}`. It needs no checkout. Not enabled in this repo.
+- `ci-alarm`: opens or comments on one issue when the latest completed run per workflow and per
+  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
+  other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
+  deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
+  job. The caller is a scheduled workflow with `permissions: {actions: read, issues: write}`. It
+  needs no checkout. Not enabled in this repo.
 - `readme-links`: checks the external https links in a markdown file (default `README.md`). Run it
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
