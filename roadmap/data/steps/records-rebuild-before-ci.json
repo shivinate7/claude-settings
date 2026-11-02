@@ -1,0 +1,9 @@
+{
+ "title": "The records page is rebuilt before a batch goes to CI, so the merge does not restart CI",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21032,
+ "why": "Batch 60 (PR #1009) went green at 20:48 CST after 25 minutes; the merge tool then pushed the records-page rebuild (d4171560), which restarted CI for about 25 to 30 more minutes. The owner said at 20:50 CST that page fixes take hours to land.",
+ "note": "Fix: the batch runner (or the merge tool's preview) rebuilds the records page and claims record numbers before the integration PR goes ready; the merge tool refuses to mark ready, or warns, when a rebuild would change the tree. Red first: replay batch 60's head with a stale records page. Source: coordinator Nov 1 20:58 CST. Port: yes, the merge tool is shared. Ready.",
+ "updatedAt": "2026-11-02T02:59:00Z"
+}
