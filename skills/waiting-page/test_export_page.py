@@ -24,12 +24,14 @@ sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+MARKER = ".complete"  # the session touches it in each collection folder after the last list page
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
 TAIL = "aB3" * 12  # 36 characters, the body of a GitHub token
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
+DEEP = "[" * 5000 + "]" * 5000  # nests past the interpreter's recursion limit: a crash, not a verdict
 RUN_FOLDER = None  # made in setUpModule
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
@@ -48,7 +50,11 @@ RED = [
     ("Anthropic key", "sk-ant-" + "aB3" * 12, "sk-ant-" + "aB3" * 12),
     ("OpenAI-style key", "sk-proj-" + "aB3" * 10, "sk-proj-" + "aB3" * 10),
     ("AWS key id", "AKIA" + "ABCDEFGHIJKLMNOP", "AKIA" + "ABCDEFGHIJKLMNOP"),
+    ("AWS session key id", "ASIA" + "ABCDEFGHIJKLMNOP", "ASIA" + "ABCDEFGHIJKLMNOP"),
     ("Slack token", "xoxb-" + "123456789012-abcdefABCDEF", "xoxb-" + "123456789012-abcdefABCDEF"),
+    ("Google API key", "AIzaSy" + "aB3" * 11, "AIzaSy" + "aB3" * 11),
+    ("Stripe live key", "sk_live_" + "aB3" * 8, "sk_live_" + "aB3" * 8),
+    ("GitLab token", "glpat-" + "aB3" * 6 + "Qz", "glpat-" + "aB3" * 6 + "Qz"),
     ("PEM private key header", "-----BEGIN " + "RSA " + "PRIVATE KEY-----", "-----BEGIN " + "RSA " + "PRIVATE KEY-----"),
     ("PEM OpenSSH key header", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"),
     ("JWT", "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl",
@@ -57,12 +63,23 @@ RED = [
     ("Authorization Basic header", "Authorization: Basic " + "dXNlcjpwYXNz", "dXNlcjpwYXNz"),
     ("Cookie header", "Cookie: session=" + "abc123XYZ", "abc123XYZ"),
     ("Set-Cookie header", "Set-Cookie: sid=" + "q9W8e7R6t5Y", "q9W8e7R6t5Y"),
+    ("session cookie in a value", "connect.sid=" + "s%3AabcDEF123.xyz456", "s%3AabcDEF123.xyz456"),
+    ("URL access_token query value", "https://x/y?access_token=" + "abc123def456", "abc123def456"),
+    ("URL key query value", "https://x/y?key=" + "AbC123dEf456", "AbC123dEf456"),
+    ("URL sig query value", "https://x/y?sig=" + "Zq9Lm2Vw8Rt4", "Zq9Lm2Vw8Rt4"),
     ("password assignment", "password=" + "hunter2", "hunter2"),
     ("passwd assignment", "passwd=" + "hunter2", "hunter2"),
     ("pwd assignment", "pwd=" + "hunter2", "hunter2"),
+    ("env-style password assignment", "DB_PASSWORD=" + "hunter2", "hunter2"),
+    ("password with a colon", "password: " + "hunter2", "hunter2"),
+    ("pwd with spaces around the sign", "pwd = " + "hunter2", "hunter2"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
     ("phone number with dots", "555" + "." + "010" + "." + "2345", "555.010.2345"),
+    ("phone number with a country code and groups", "+44 20 7946 0958", "+44 20 7946 0958"),
+    ("phone number in 3-3-4 with hyphens", "555-010-2345", "555-010-2345"),
+    ("phone number in 3-3-4 with spaces", "555 010 2345", "555 010 2345"),
+    ("phone as a JSON number", 5550102345, "5550102345"),
     ("token as a dict key", {"ghp_" + TAIL: "x"}, "ghp_" + TAIL),
     ("token nested in a list", ["fine", {"deep": "sk-ant-" + "aB3" * 12}], "sk-ant-" + "aB3" * 12),
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
@@ -81,6 +98,16 @@ GREEN = [
     ("artifact link", ARTIFACT),
     ("ISO time", "2026-11-02T11:04:00Z"),
     ("date", "2026-11-02"),
+    ("date and time in the space form", "2026-11-02 11:04"),
+    ("a risk- word with no space", "risk-based-approval-of-the-change"),
+    ("a CSS class with sk- in it", "btn-sk-primary-large-rounded"),
+    ("an SVG viewBox and points of single digits", '<svg viewBox="0 0 24 24"><polyline points="1 2 3 4 5 6 7 8 9 0 1 2"/></svg>'),
+    ("SVG points of three digits", 'points="100 200 300 400"'),
+    ("an ICR number with dashes", "ICR 2026-0412-0031"),
+    ("a PO number of ten digits", "PO 4500123456"),
+    ("an IPv4 address", "192.168.100.200"),
+    ("a messageId of thirteen digits", "messageId=1730000000000"),
+    ("a messageId as a JSON number", {"messageId": 1730000000000}),
     ("u_ id of 22 characters", "u_Qm4xT7bR2nKs9LfW0aZc"),
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
@@ -184,13 +211,15 @@ class Base(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None):
-        """A fetched folder: one folder per collection, each doc a JSON file. An empty collection is an empty folder."""
+        """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
+        collection is an empty folder with its marker."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
         docs = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta}
         for name in COLLECTIONS:
             os.makedirs(os.path.join(root, name))
             for doc_id, data in (docs[name] or {}).items():
                 write_text(os.path.join(root, name, doc_id + ".json"), canonical(data))
+            write_text(os.path.join(root, name, MARKER), "")
         return root
 
     def out(self, name="waiting"):
@@ -202,10 +231,12 @@ class Base(unittest.TestCase):
         env = env or dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=60, env=env)
 
-    def export(self, fetched, out, page=None):
+    def export(self, fetched, out, page=None, allow_empty=()):
         args = ["--fetched", fetched, "--out", out]
         if page:
             args += ["--page", page]
+        for name in allow_empty:
+            args += ["--allow-empty", name]
         return self.run_cmd(*args)
 
     def assertVerdict(self, r, want, secrets=()):
@@ -235,6 +266,20 @@ class Scan(Base):
         for label, note, secret in RED:
             with self.subTest(label=label):
                 self.assert_refused(label, note, secret)
+
+    def test_a_secret_as_a_doc_id_is_refused_and_never_printed(self):
+        # A doc's file name is its id, so a secret there is a find too. The find's line names the doc with the id redacted.
+        cases = (("email as a doc id", "person.name" + "@" + "example.com"), ("token as a doc id", "ghp_" + TAIL))
+        for index, (label, doc_id) in enumerate(cases):
+            with self.subTest(label=label):
+                fetched = self.fetch(items={doc_id: {"id": "x", "title": "Ok"}})
+                out = self.out("doc-id-%d" % index)
+                before = snapshot(out)
+                r = self.export(fetched, out)
+                self.assertVerdict(r, "refused", [doc_id])
+                self.assertEqual(r.returncode, 1, shown(r, [doc_id]))
+                self.assertNotIn(doc_id, r.stdout + r.stderr, "%s: the id was printed" % label)
+                self.assertEqual(snapshot(out), before, "%s: a refused run wrote into the copy" % label)
 
     def test_each_find_is_one_line_that_names_its_file_and_field(self):
         note = "ok " + "sk-ant-" + "aB3" * 12
@@ -294,16 +339,35 @@ class Mirror(Base):
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "n": 2}))
 
-    def test_an_emptied_collection_deletes_its_docs(self):
+    def test_an_emptied_collection_is_unknown_unless_the_session_allows_it(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}})
         out = self.out()
-        self.export(fetched, out)
+        self.assertChanged(self.export(fetched, out), 3)
         for name in ("a", "b", "c"):
             os.remove(os.path.join(fetched, "items", name + ".json"))
+        before = snapshot(out)
         r = self.export(fetched, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "an emptied collection was deleted without --allow-empty")
+        r = self.export(fetched, out, allow_empty=("asks",))
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(snapshot(out), before, "--allow-empty for another collection deleted docs")
+        r = self.export(fetched, out, allow_empty=("items",))
         self.assertChanged(r, 3)
         self.assertEqual(r.returncode, 0, shown(r))
-        self.assertEqual(glob.glob(os.path.join(out, "items", "*.json")), [], "the emptied collection kept docs")
+        self.assertEqual(glob.glob(os.path.join(out, "items", "*.json")), [], "the allowed empty collection kept docs")
+
+    def test_a_collection_without_its_completeness_marker_is_unknown_and_writes_nothing(self):
+        fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
+        os.remove(os.path.join(fetched, "asks", MARKER))
+        out = self.out()
+        write_text(os.path.join(out, "items", "old.json"), "{}\n")
+        before = snapshot(out)
+        r = self.export(fetched, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "a fetch with no completeness marker wrote into the copy")
 
     def test_all_empty_collections_into_an_empty_copy_are_same(self):
         fetched = self.fetch()
@@ -314,7 +378,7 @@ class Mirror(Base):
 
     def test_a_missing_collection_folder_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
-        os.rmdir(os.path.join(fetched, "asks"))
+        shutil.rmtree(os.path.join(fetched, "asks"))
         out = self.out()
         write_text(os.path.join(out, "items", "old.json"), "{}\n")
         before = snapshot(out)
@@ -333,6 +397,15 @@ class Mirror(Base):
         self.assertVerdict(r, "refused", [TAIL])
         self.assertEqual(r.returncode, 1, shown(r, [TAIL]))
         self.assertEqual(snapshot(out), before, "a refused fetch changed the old copy")
+
+    def test_a_crash_exits_3_with_one_unknown_line(self):
+        fetched = self.fetch(meta={"page": META})
+        write_text(os.path.join(fetched, "items", "deep.json"), DEEP)  # raw text: canonical() would crash the test too
+        r = self.export(fetched, self.out())
+        self.assertEqual(r.returncode, 3, "a crash must exit 3, not %d. Output:\n%s" % (r.returncode, shown(r)))
+        lines = verdict_lines(r)
+        self.assertEqual(len(lines), 1, "a crash must print one unknown line. Output:\n" + shown(r))
+        self.assertTrue(lines[0].startswith("unknown"), shown(r))
 
     def test_runs_with_no_git_on_the_path(self):
         fetched = self.fetch(items={"a": {"id": "a"}})
@@ -448,6 +521,42 @@ class Rebuild(Base):
         self.assertEqual(len(files), 2)
         self.assertTrue(all(size <= 50 for size in sizes), sizes)
         self.assertEqual(sorted(e["doc_id"] for e in entries), sorted("item-%03d" % n for n in range(1, 52)))
+
+    def test_a_batch_stays_under_900_kb(self):
+        # 100 docs of about 20 KB: 50 of them would be about 1 MB, so the size cap splits them too. 900 KB is read as 900,000 bytes.
+        big = {"item-%03d" % n: dict(item(n), context="word " * 4000) for n in range(1, 101)}
+        waiting = self.exported({"items": big}, page=False)
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches)
+        self.assertEqual(r.returncode, 0, shown(r))
+        files, entries, _ = self.batch_entries(batches)
+        self.assertGreaterEqual(len(files), 3, "2 MB of docs cannot fit in fewer than three 900 KB batches")
+        for path in files:
+            self.assertLessEqual(os.path.getsize(path), 900000, "%s is over 900 KB" % os.path.basename(path))
+        self.assertEqual(len(entries), 100)
+        self.assertBatches(r, len(files), 100)
+
+    def test_a_doc_over_900_kb_is_unknown(self):
+        waiting = self.exported({"items": {"item-001": dict(item(1), context="word " * 200000)}}, page=False)
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+
+    def test_a_folder_that_is_not_a_collection_is_refused(self):
+        waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
+        write_text(os.path.join(waiting, "stray", "x.json"), canonical({"id": "x"}))
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+
+    def test_a_crash_in_rebuild_exits_3_with_one_unknown_line(self):
+        waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
+        write_text(os.path.join(waiting, "items", "deep.json"), DEEP)
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertEqual(r.returncode, 3, "a crash must exit 3, not %d. Output:\n%s" % (r.returncode, shown(r)))
+        lines = verdict_lines(r)
+        self.assertEqual(len(lines), 1, "a crash must print one unknown line. Output:\n" + shown(r))
+        self.assertTrue(lines[0].startswith("unknown"), shown(r))
 
     def test_an_empty_waiting_dir_is_unknown(self):
         waiting = self.out()
