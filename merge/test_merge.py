@@ -9567,10 +9567,10 @@ def sha_of(id_):
     return f"{id_:040x}"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", head_sha=None):
-    """One run on main, as `GET actions/runs` lists it. Its commit is `sha_of(id_)` unless `head_sha` names one."""
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", head_sha=None, sha=None):
+    """One run on main, as `GET actions/runs` lists it. Its commit is `head_sha` (or `sha`, main's name for it), else `sha_of(id_)`."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": head_sha or sha_of(id_), "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
+            "head_sha": head_sha or sha or sha_of(id_), "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
 
 
 def main_job(name, conclusion, minutes=1):
@@ -9625,7 +9625,7 @@ CHECK_WORKFLOW = "\n".join([
     "name: check", "on: [push, workflow_dispatch, schedule]", "jobs:",
     "  ci-check:", "    runs-on: ubuntu-latest", "    timeout-minutes: 30", "    steps:", "      - run: echo ok",
 ]) + "\n"
-BANCHI_SHA = "471dc26879f2e3e814a40b7e8ec19f14acb7d372"  # both banchi #1003 runs ran on this commit (2026-11-02)
+BANCHI_SHA = "471dc26879f2e3e814a40b7e8ec19f14acb7d372"  # the commit both banchi #1003 runs ran on
 BANCHI_RED, BANCHI_GREEN = 41436198024, 41483723188  # the schedule run that failed, and the workflow_dispatch run that passed
 # The 28 jobs of each banchi run. 23 pass in both runs; the other five differ.
 BANCHI_PASSED = (["ci-check (ci-check-static)", "zizmor", "records", "browser-scope", "ci-check (ci-check-product-3)", "revert-guard",
@@ -9697,6 +9697,84 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
+    # The stale-cancel shape (decision no-merge-onto-red-main): main's schedule run R was cancelled on an old head with no red job.
+    # The push run N after it, on the new head, passed every job R ran; each case changes one thing of this shape.
+    INC_R, INC_N = 1110, 1111
+    OLD_HEAD, NEW_HEAD = "a" * 40, "b" * 40
+    R_JOBS = [main_job("scope", "success"), main_job("checks", "cancelled", 2), main_job("checks-macos", "success"),
+              main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]
+    N_JOBS = [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30),
+              main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]
+
+    def incident(self, r_jobs=None, n_jobs=None, r_sha=OLD_HEAD, n_sha=NEW_HEAD, n_status="completed"):
+        """-> (runs, jobs) of the incident, for `go`. A case passes one list or one head to change that one thing."""
+        runs = [main_run(self.INC_N, "success", status=n_status, sha=n_sha), main_run(self.INC_R, "cancelled", event="schedule", sha=r_sha)]
+        return runs, {self.INC_R: self.R_JOBS if r_jobs is None else r_jobs, self.INC_N: self.N_JOBS if n_jobs is None else n_jobs}
+
+    def test_a_cancelled_run_clears_for_a_newer_run_of_another_group_that_covers_its_jobs(self):
+        rc, out, _ = self.go(*self.incident())
+        self.assertEqual(rc, 0, "the cancelled schedule run still refuses, though a newer push run on a new head passed every job it ran\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertIn(f"actions/runs/{self.INC_N}/jobs", self.host.reads, "the covering run's jobs are read")
+
+    def test_a_cancelled_run_on_the_same_head_as_the_covering_run_is_refused(self):
+        rc, out, before = self.go(*self.incident(r_sha=self.NEW_HEAD))
+        self.refused(rc, out, before)
+        self.assertIn("cancelled", out)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_covering_run_that_lacks_a_job_the_cancelled_run_ran_does_not_clear_it(self):
+        rc, out, before = self.go(*self.incident(n_jobs=[j for j in self.N_JOBS if j["name"] != "checks-macos"]))
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_covering_run_that_skips_renames_or_repeats_a_job_the_cancelled_run_ran_does_not_clear_it(self):
+        base = self.N_JOBS
+        variants = {
+            "ran as skipped": [main_job("checks-macos", "skipped") if j["name"] == "checks-macos" else j for j in base],
+            "name differs in case": [dict(j, name="Checks-macos") if j["name"] == "checks-macos" else j for j in base],
+            "name has a trailing space": [dict(j, name="checks-macos ") if j["name"] == "checks-macos" else j for j in base],
+            "a second entry of a ran job is cancelled": base + [main_job("checks", "cancelled", 2)],
+        }
+        for variant, n_jobs in variants.items():
+            with self.subTest(variant=variant):
+                rc, out, before = self.go(*self.incident(n_jobs=n_jobs))
+                self.refused(rc, out, before)
+                self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_cancelled_run_is_not_cleared_while_the_newer_run_of_another_group_is_still_going(self):
+        rc, out, before = self.go(*self.incident(n_status="in_progress"))
+        self.assertNotIn(f"actions/runs/{self.INC_N}/jobs", self.host.reads, "a run still going is not judged, so it is not read")
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_cancelled_run_with_no_jobs_stays_unknown_even_with_a_covering_run(self):
+        rc, out, before = self.go(*self.incident(r_jobs=[]))
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_cancelled_run_with_a_red_job_is_refused_naming_it_when_no_run_covers_it(self):
+        r_jobs = [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "success")]
+        rc, out, before = self.go(*self.incident(r_jobs=r_jobs, n_jobs=[j for j in self.N_JOBS if j["name"] != "checks"]))
+        self.refused(rc, out, before)
+        self.assertIn("checks: fail", out)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_covering_run_that_lacks_a_job_the_cancelled_run_skipped_does_not_clear_it(self):
+        rc, out, before = self.go(*self.incident(n_jobs=[j for j in self.N_JOBS if j["name"] != "ci-done"]))
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
+    def test_a_full_job_set_is_refused_when_the_covering_run_misses_one_of_its_jobs(self):
+        # a full set of twelve ran jobs and one skipped job, on both runs: one missing name in the covering run still refuses
+        ran = [f"job-{i:02d}" for i in range(12)]
+        r_jobs = [main_job(n, "success") for n in ran[:-1]] + [main_job(ran[-1], "cancelled", 2), main_job("all-jobs-passed", "skipped")]
+        n_jobs = [main_job(n, "success", 20) for n in ran if n != ran[5]] + [main_job("all-jobs-passed", "skipped")]
+        rc, out, before = self.go(*self.incident(r_jobs=r_jobs, n_jobs=n_jobs))
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.INC_R} of checks", out)
+
     def test_a_failed_run_with_no_judged_job_is_red(self):
         # a broken workflow file: startup_failure and no job; or failure with every job passing
         for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "success", 20)])):
@@ -9756,8 +9834,8 @@ class RedMainBrake(Env):
         self.merged(rc, out)
 
     def test_a_green_run_that_lacks_a_job_that_passed_in_the_red_run_clears_it(self):
-        # ruling pending: no-merge-onto-red-main cover set, 2026-11-02
         # a job that passed in the red run needs no entry in the green run: only a job that failed or was cancelled there must be in it, as success
+        # the owner's ruling on the no-merge-onto-red-main cover set is pending
         rc, out, _ = self.go([main_run(951, "success", event="workflow_dispatch"), main_run(950, "failure", event="schedule")],
                              {950: [main_job("checks", "failure", 20), main_job("scope", "success")], 951: [main_job("checks", "success", 20)]})
         self.merged(rc, out)
@@ -9906,8 +9984,10 @@ class RedMainBrake(Env):
     def test_a_failed_run_whose_only_job_was_skipped_is_not_cleared_across_groups(self):
         self.failed_push_under_a_green_schedule(1103, [main_job("checks", "skipped")])
 
-    def test_an_unknown_run_is_not_cleared_by_a_green_run_of_another_group(self):
-        rc, out, before = self.go([main_run(1061, "success", event="workflow_dispatch"), main_run(1060, "cancelled", event="schedule")],
+    def test_an_unknown_run_on_mains_head_is_not_cleared_by_a_green_run_of_another_group(self):
+        # both runs on one head: the cancel is main's own, so no newer head clears it
+        head = "c" * 40
+        rc, out, before = self.go([main_run(1061, "success", event="workflow_dispatch", sha=head), main_run(1060, "cancelled", event="schedule", sha=head)],
                                   {1060: [main_job("checks", "cancelled", 2)], 1061: [main_job("checks", "success", 20)]})
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
