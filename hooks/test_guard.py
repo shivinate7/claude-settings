@@ -16536,10 +16536,18 @@ def worktree_home_scratchpad_case():
           primary, session=None, command="cd " + slash(own_w) + " && echo x > a.txt")
     check("no session id: Write into the own scratchpad worktree", "deny", "Write", primary,
           session=None, file_path=os.path.join(own_w, "notes", "a.md"), content="x")
+    # The worktree root itself is no pass: `rm -rf` of it is the by-hand removal other-checkout
+    # refuses, and its remedy names `git worktree remove`, never the path.
+    got, reason = _decide_full("Bash", primary, session=own_sid, command="rm -rf " + slash(own_w))
+    if got != "deny" or "other-checkout" not in reason or "git worktree remove" not in reason \
+            or ROOT in reason:
+        problems.append("rm -rf of the own scratchpad worktree root: want deny naming other-checkout "
+                        "and git worktree remove, and no path, got %s (%s)" % (got, reason[:160]))
 
     if problems:
         return False, "; ".join(problems)
-    return True, "own scratchpad worktree allowed for its own calls; other session's, symlink, climb, hop, agent and no-session calls refused"
+    return True, ("own scratchpad worktree allowed for its own calls; other session's, symlink, climb, "
+                  "hop, agent, no-session and worktree-root removal refused")
 
 
 def worktree_home_later_field_case():
