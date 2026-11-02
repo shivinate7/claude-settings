@@ -12609,6 +12609,25 @@ BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "
 for step in BACKTICK_PROSE:
     ci("a step with a known program alone in backticks is allowed: " + step, "allow", ci_task([step]))
 
+# A span or fence is a shell line only when it chains with an operator and starts with a program or cmdlet.
+# Text with an operator, a lone quote and a comment opener are no command, and must not hide a real one after them.
+ci("a step with a regex span, foo|bar, is allowed", "allow", ci_task(["Search for `foo|bar` in the page"]))
+ci("a step with a semicolon span that starts with no program is allowed", "allow",
+   ci_task(["Read the `title; subtitle` line on the page"]))
+ci("a step with a lone quote in text before a regex span is allowed", "allow",
+   ci_task(["Don't search for `foo|bar` in the page"]))
+ci("a step with a comment opener inside a span is allowed", "allow", ci_task(["Search for `// a | b` in the page"]))
+ci("a step with a markdown table in a multi-line fence is allowed", "allow",
+   ci_task(["Check the table:\n```\n| lane | state |\n| N1 | done |\n```"]))
+ci("a step with a git log pipe in backticks is denied", "deny", ci_task(["Check the log with `git log | head`"]))
+ci("a step with a Get-ChildItem pipe in backticks is denied", "deny",
+   ci_task(["Check the list with `Get-ChildItem | Select`"]))
+ci("a step with a cd and semicolon line in backticks is denied", "deny", ci_task(["Run `cd x; npm test`"]))
+ci("a step with a lone quote before a git log pipe in backticks is denied", "deny",
+   ci_task(["Don't run `git log | head` yet"]))
+ci("a comment opener span does not hide a git log pipe after it, so the step is denied", "deny",
+   ci_task(["Run `// note` then `git log | head`"]))
+
 
 # --------------------------------------------------------------------------- a gh command handed to the owner switches login first
 FAMILY = "gh-login-switch"

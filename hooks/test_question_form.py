@@ -132,6 +132,17 @@ def page_item(tail="", options=None, lines=None, **over):
     return item
 
 
+TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def task_item(steps, **over):
+    """A waiting-page task with these steps and the Why yours line in `context`, so only the rule a case
+    names judges it (task-names-check reads that line). `over` sets or replaces any field."""
+    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
+    item.update(over)
+    return item
+
+
 def chat_box(options=None, **over):
     """A chat box with the same form lines. Options default to test_call_judge.good_options()."""
     return tcj.good_box(options=options, **{k: v for k, v in over.items() if k in LINE_KEYS})
@@ -288,8 +299,7 @@ def case_older_rules_keep_their_ids():
          entry_of(page_item(options=press)), ("press-link", None))
     press[1]["links"] = [{"label": "the pull request", "url": "https://github.com/shivinate7/home/pull/374"}]
     page("a press in GitHub with a link to the page passes", "set", entry_of(page_item(options=press)), None)
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
-            "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
+    task = task_item(["Open Terminal"])
     page("a task with a Why yours line and no form lines is not judged by the form", "set", entry_of(task), None)
     page("a task with no Why yours line is refused as task-names-check", "set",
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
@@ -514,8 +524,7 @@ def case_page_reasons_are_one_table():
     if table is None:
         check("page reasons: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
         return
-    why = "Why yours: a session on your computer was asked first and none could reach the remote"
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"], "context": why}
+    task = task_item(["Open Terminal"])
     press = copy.deepcopy(ITEM92["options"])
     press[1].update(label="Press Merge in GitHub", how="Do it by hand.")
     for name, data in (
@@ -702,6 +711,33 @@ def case_gh_login_switch_on_the_page():
     page("gh login switch: a str_replace on command with no gh text is allowed", "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
           "new_str": "step two"}, None)
+
+# ------------------------------------------------------------------ a step's span or fence holds a shell line only as a command
+
+def case_command_in_item_spans():
+    # A span or fence is a shell line when it chains with an operator and starts with a program or cmdlet
+    # (question_form._shell_line). Text with an operator, a lone quote and a comment opener are no command,
+    # and must not hide a real command after them in the same step.
+    for name, steps, want in (
+            ("a regex in a span is no shell line", ["Search for `foo|bar` in the page"], None),
+            ("a span with a semicolon that starts with no program is no shell line",
+             ["Read the `title; subtitle` line on the page"], None),
+            ("a lone quote in text before a regex span is no shell line", ["Don't search for `foo|bar` in the page"], None),
+            ("a comment opener inside a span is text", ["Search for `// a | b` in the page"], None),
+            ("a markdown table in a fence over several lines is no shell line",
+             ["Check the table:\n```\n| lane | state |\n| N1 | done |\n```"], None),
+            ("a git log pipe in a span is a shell line", ["Check the log with `git log | head`"],
+             ("command-in-item", "shell line")),
+            ("a Get-ChildItem pipe in a span is a shell line", ["Check the list with `Get-ChildItem | Select`"],
+             ("command-in-item", "shell line")),
+            ("a cd and semicolon line in a span is a shell line", ["Run `cd x; npm test`"],
+             ("command-in-item", "shell line")),
+            ("a lone quote before a git log pipe is a shell line", ["Don't run `git log | head` yet"],
+             ("command-in-item", "shell line")),
+            ("a comment opener span does not hide a git log pipe after it",
+             ["Run `// note` then `git log | head`"], ("command-in-item", "shell line"))):
+        page(name, "set", entry_of(task_item(steps)), want)
+
 
 # ------------------------------------------------------------------ a question says how it departs from main
 #
@@ -998,7 +1034,7 @@ def main():
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
-                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page,
+                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
