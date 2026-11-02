@@ -1,0 +1,9 @@
+{
+ "title": "Sessions read the owner's words by meaning and answer in the glossary term",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.21005,
+ "why": "The owner writes in his own words. Sessions should match those words to the glossary term by meaning, not ask him to use the exact term, and then write the glossary term themselves.",
+ "note": "Prose rule plus a decision record; no check changes. Lane glossary-meets-owner-halfway (session_013NEJL3Kwr9fT2tiT9p7qQH), started under the coordinator Nov 1 18:49 CST. Port: yes, the rule loads in every repo.",
+ "updatedAt": "2026-11-02T00:50:00Z"
+}
