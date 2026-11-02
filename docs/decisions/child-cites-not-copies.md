@@ -18,8 +18,8 @@ Probe group `restates` in `lint/compliance_probes.py`: `python3 lint/compliance_
 - It reads the record text from the decisions folder of the claude-settings checkout it runs from, found through `lint/layout.py`. It keeps no copy (`building-allow-list-is-the-constant`).
 - Before it compares, it removes headings, `Kind:`, `Plan:` and `Home:` lines, HTML comments, code spans, quoted text, numbers and time zones, from both sides. So a quoted record name, a quote of the owner and a ruling time count for nothing in this test.
 - A unit is refused when runs of 5 or more words that it shares with records cover at least 12 of its words and at least half of its words.
-- A unit is also refused when it names a record by its slug and carries a ruling time (date, hour and minute) that the same record holds. That line copies the grant's source, not only its name.
 - Each refusal names the file, the line and the record, and gives the remedy: name the record, and keep only what applies to this repo.
+- It names the file as `CLAUDE.md` when `AGENTS.md` is a link to it.
 - In a claude-settings checkout it prints n/a and exits 0.
 
 Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: each of the two copied merge-grant lines had 33 covered words (80% and 73% of the line). The highest line with its own content had 16 (25%). The threshold sits between them.
@@ -30,7 +30,7 @@ Cost: one python start per child CI run, and one per run of skill `compliance-ch
 
 ## Not mechanized
 
-- A paraphrase. A line that says a ruling in other words passes the shared-words test. The second test catches it only when the line names the record and copies its time.
+- A paraphrase. A line that says a ruling in other words passes. A line that names a record and its ruling time is a citation, and passes too. An earlier draft of this check refused a 495-word repo-only rule in degen that cites a record with its time (measured 2026-11-02), so that test was dropped.
 - Copies of rule text from the root `CLAUDE.md`. The check reads decision records only. For example, a child line that repeats "A lone lane is its own integration PR" passes.
 - A shared run under 5 words.
 

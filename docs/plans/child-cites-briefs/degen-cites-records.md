@@ -22,4 +22,4 @@ In `.github/workflows/check.yml`, in the job that runs "STE lint", add one step:
 
 ## Done check
 
-The new step is green on the PR. Before the line fix, `python3 <claude-settings>/lint/compliance_probes.py restates .` refuses line 7.
+The new step is green on the PR. Line 7 is a paraphrase plus a citation, so the check does not refuse it. This brief is its only fix.
