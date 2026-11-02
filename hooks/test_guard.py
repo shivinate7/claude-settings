@@ -561,12 +561,10 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
-# PUSHAGENT is the linked worktree an isolated agent works in: branch `worktree-agent-<id>`, under its
-# primary's `.claude/worktrees/agent-<id>` (guard.py's worktree layout note). `_home_fixture` makes it and
-# records its home, so the agent's own calls from it pass rule 0 and the push rule is what refuses them.
-AGENT_PUSH_ID = "pushagent1"
-PUSHAGENT = os.path.join(ROOT, "wthome_" + AGENT_PUSH_ID + "_primary", ".claude", "worktrees",
-                         "agent-" + AGENT_PUSH_ID)
+# roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
+# and its extras file names that branch as the record branch, so `roadmap` is not its record.
+RECROADMAP = os.path.join(ROOT, "recroadmap")
+RECFORK = os.path.join(ROOT, "recfork")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -1743,6 +1741,14 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+# PUSHAGENT is the linked worktree an isolated agent works in: branch `worktree-agent-<id>`, under its
+# primary's `.claude/worktrees/agent-<id>` (guard.py's worktree layout note). `_home_fixture` makes it and
+# records its home, so the agent's own calls from it pass rule 0 and the push rule is what refuses them.
+AGENT_PUSH_ID = "pushagent1"
+PUSHAGENT = os.path.join(ROOT, "wthome_" + AGENT_PUSH_ID + "_primary", ".claude", "worktrees",
+                         "agent-" + AGENT_PUSH_ID)
+
+
 def _build_push_agent():
     """The worktree an agent works in: branch `worktree-agent-<id>`, with origin named as _build_push names it.
 
@@ -2063,9 +2069,10 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, 
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
-lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH], _build_push)
 lazy_fixture([PUSHAGENT], _build_push_agent)
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+             _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
