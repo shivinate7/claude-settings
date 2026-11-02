@@ -907,3 +907,8 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- lane-lint-digit-sha-refused: an all-digit short sha is read as a PR number by `merge --lane-lint` and refused, never a false pass (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
+- lane-lint-hex-branch-read-as-sha: a local-only branch named like hex (cafe123) is read as a sha by `merge --lane-lint` (merge/merge.py). Decision: lanes-run-no-full-ci-job.
+- lane-lint-sigterm-leaks-worktree: a SIGTERM between `git worktree add` and the try in lane_lint can leak a locked worktree (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
+- lane-lint-stale-origin-ref: after a branch is deleted on origin, a stale origin/<name> makes `merge --lane-lint` lint the old head (merge/merge.py). Decision: lanes-run-no-full-ci-job.
+- lane-lint-test-comment-not-name: the comment "the gate is live" in merge/test_lane_lint.py uses a glossary Not name for check (test file, test-author scope). Decision: lanes-run-no-full-ci-job.
