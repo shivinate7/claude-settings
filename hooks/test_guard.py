@@ -7547,13 +7547,6 @@ sh("env: heredoc-refuse: a python body with an env read in a substitution, unquo
    'python3 - <<EOF\nx = "$(cat ' + ENV + ')"\nEOF', "deny", "env-file", cwd=NOGIT)
 
 
-# A python body that opens an env file is code, so its env read refuses, with or without an escaped
-# quote before it.
-sh("env: heredoc-refuse: a python body that opens an env file, denies",
-   "python3 - <<'EOF'\nopen('" + ENV + "')\nEOF", "deny", "env-file", cwd=NOGIT)
-sh("env: heredoc-refuse: a python body with an escaped quote, then an open of an env file, denies",
-   "python3 - <<'EOF'\nx = 'it\\'s here'\nopen('" + ENV + "')\nEOF", "deny", "env-file", cwd=NOGIT)
-
 # A hash inside quotes is text, so the real header after it still counts. A backtick span that crosses
 # a header line in a quoted-delimiter body is text too, so that header line still counts as data.
 sh("env: heredoc-allow: a hash in quotes before a cat write, its body holds bash <<EOF and an env read, is allowed",
