@@ -33,7 +33,7 @@ import sys
 OPEN, CLOSE = "roadmap:data", "/roadmap:data"
 DESIGN = "designData"
 TITLE = "title"
-PAGE_NAME = "Cockpit"  # the one home of the page's name: its title is "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST)
+PAGE_NAME = "Cockpit"  # the one home of the page's name: its title is "<repo> Cockpit"
 # A live title of an old form: an optional "<X> " prefix, then Queue, Queue · Status or Roadmap.
 OLD_TITLE = re.compile("(?P<prefix>.* )?(?:Queue(?: \u00b7 Status)?|Roadmap)", re.S)
 SVG_OPEN, SVG_CLOSE = "svg-open", "svg-close"
