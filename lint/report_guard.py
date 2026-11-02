@@ -37,15 +37,33 @@ does not name in its Input Needed section blocks. A built-in tool counts only in
 tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
+
+An Input Needed pick must also reach the owner (decision questions-reach-page). The chat-first clause of
+the pick guard stays: it passes the turn that asks. Two checks enforce what it promises. A session is a
+lane when its own newest get_session record (hooks/guard_merge.py own_tier) has the tag cs-build:lane or a
+parent_session_id; with no record, no own id or a read error it is owner-facing.
+Owner-facing: each pick the reply offers with no box is kept in <handoffs>/<session_id>.open-picks.json
+(local_time.open_picks_path) with its ask time. A later owner message, a main-session box, a send to the
+page writer (or, with no writer known, a send naming the item id) or a write to the page's items clears it.
+A Stop 300 s or more after the ask blocks until it is sent. A repo with no waiting page never blocks: the
+check says once that it failed open and drops the item. A stop_hook_active Stop clears what was sent and
+never blocks or adds.
+Lane: a Stop whose Input Needed offers a pick blocks unless the same turn called the box or sent to the
+parent or the page writer. The page words and the page link pass nothing for a lane.
+Cost: no process, timer or log. One stat per Stop when no pick was ever open. One small JSON file per
+session, written only at a Stop that adds or clears an item. One transcript read, which this guard already
+makes. One get_session scan of that transcript per Stop whose reply offers a pick or whose state file exists.
 """
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
+from _transcript import is_last_human, last_reply, owner_text, parse_utc_timestamp, tool_uses  # noqa: E402
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -589,6 +607,333 @@ def refusal_reason(tools):
         "and a line in the repo's debt notes file (notes.md) that names it." % names)
 
 
+# questions-reach-page: an Input Needed pick has to reach the owner. The pick guard above passes the turn
+# that asks on a promise (the 5-minute wait and the waiting page); these checks enforce the promise.
+PICK_WAIT_SECONDS = 300
+LANE_TAG = "cs-build:lane"
+ID_TOKEN_EDGE = r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])"
+OPEN_PICK_REASON = (
+    "Open-pick guard: an Input Needed pick has waited 5 minutes or more and no send, owner reply or box "
+    "answered it: %s. Send each question to %s by send_message, with the item id in the message.")
+NO_PAGE_NOTICE = ("Open-pick guard: failed open. The repo has no waiting page, so the pick %s was dropped "
+                  "after 5 minutes and nothing was blocked.")
+LANE_REASON = (
+    "Lane pick guard: Input Needed offers a pick, and this turn sent it nowhere. A lane's own chat does "
+    "not reach the owner. Send the question to %s by send_message in this turn.")
+
+
+def now():
+    """The clock of the 5-minute wait. One home, so a test can patch it."""
+    return time.time()
+
+
+def _hooks():
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+
+
+def _load_records(path):
+    """The transcript's records, or None when it is missing or unreadable."""
+    if not path or not os.path.exists(path):
+        return None
+    records = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(rec, dict):
+                    records.append(rec)
+    except Exception:
+        return None
+    return records
+
+
+def _norm(text):
+    return " ".join((text or "").split()).casefold()
+
+
+def _blocks(rec):
+    content = (rec.get("message") or {}).get("content")
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _result_text(block):
+    body = block.get("content")
+    if isinstance(body, list):
+        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+    return body if isinstance(body, str) else ""
+
+
+def _find_writer(node, depth=0):
+    if isinstance(node, dict):
+        if isinstance(node.get("writer"), str) and node["writer"]:
+            return node["writer"]
+        children = node.values()
+    elif isinstance(node, list):
+        children = node
+    else:
+        return None
+    if depth >= 3:
+        return None
+    for child in children:
+        found = _find_writer(child, depth + 1)
+        if found:
+            return found
+    return None
+
+
+def _reads_meta_page(tool_input):
+    if not isinstance(tool_input, dict) or tool_input.get("action") != "get":
+        return False
+    doc = tool_input.get("doc_id") or tool_input.get("path")
+    return (tool_input.get("collection") == "meta" and doc == "page") or doc == "meta/page"
+
+
+def _strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for child in node.values():
+            yield from _strings(child)
+    elif isinstance(node, list):
+        for child in node:
+            yield from _strings(child)
+
+
+def _feedback_guard():
+    _hooks()
+    import feedback_guard
+    return feedback_guard
+
+
+def _writes_item(node, item_id, first):
+    """True when a set, update or batch write names the items collection and its text holds the item's id
+    as a whole token or the item's first line. The write shape is feedback_guard's (`_in_items`, `_is_write`)."""
+    fg = _feedback_guard()
+    if isinstance(node, dict):
+        if not fg._is_write(node):
+            return False
+        if fg._in_items(node):
+            for text in _strings(node):
+                if re.search(ID_TOKEN_EDGE % re.escape(item_id), text) or (first and first in _norm(text)):
+                    return True
+        return any(_writes_item(c, item_id, first) for c in node.values())
+    return isinstance(node, list) and any(_writes_item(c, item_id, first) for c in node)
+
+
+def _send_target(use):
+    inp = use.get("input") if isinstance(use.get("input"), dict) else {}
+    return inp.get("session_id") if str(use.get("name")).endswith("send_message") else inp.get("to")
+
+
+def _facts(records):
+    """The page writer and the events the open-pick checks read: (writer, events). An event is
+    (time or None, kind, tool_use or None), kind owner, box, send or write. A call made inside another
+    agent's run (isSidechain) and a call whose result is an error count for nothing."""
+    fg = _feedback_guard()
+    import shared_names
+    failed, reads, writer, events = set(), set(), None, []
+    for rec in records:
+        for b in _blocks(rec):
+            if b.get("type") == "tool_result" and b.get("is_error"):
+                failed.add(b.get("tool_use_id"))
+    for rec in records:
+        at = parse_utc_timestamp(rec.get("timestamp"))
+        if owner_text(rec, shared_names.MACHINE_TAGS) is not None:
+            events.append((at, "owner", None))
+        for b in _blocks(rec):
+            kind, name = b.get("type"), str(b.get("name") or "")
+            if kind == "tool_result" and b.get("tool_use_id") in reads and not b.get("is_error"):
+                try:
+                    writer = _find_writer(json.loads(_result_text(b))) or writer
+                except Exception:
+                    pass
+            elif kind == "tool_use" and not rec.get("isSidechain") and b.get("id") not in failed:
+                if name.startswith(fg.ARTIFACT_DATA):
+                    if _reads_meta_page(b.get("input")):
+                        reads.add(b.get("id"))
+                    else:
+                        events.append((at, "write", b))
+                elif name == ASK_TOOL:
+                    events.append((at, "box", None))
+                elif name in fg.SEND_TOOLS:
+                    events.append((at, "send", b))
+    return writer, events
+
+
+def _answered(item, writer, events):
+    """True when an event after the item was asked answered it (spec questions-reach-page, section 2a)."""
+    first = _norm((item.get("text") or "").splitlines()[0]) if item.get("text") else ""
+    for at, kind, use in events:
+        if at is None or at <= item["asked"]:
+            continue
+        if kind in ("owner", "box"):
+            return True
+        if kind == "send":
+            if writer is not None:
+                if _send_target(use) == writer:
+                    return True
+            else:
+                msg = (use.get("input") or {}).get("message")
+                if isinstance(msg, str) and re.search(ID_TOKEN_EDGE % re.escape(item["id"]), msg):
+                    return True
+        elif kind == "write" and _writes_item(use.get("input"), item["id"], first):
+            return True
+    return False
+
+
+def own_tier(hook):
+    """(tags, parent) of this session's own newest get_session record, (None, None) on any failure."""
+    try:
+        _hooks()
+        import guard_merge
+        import override
+        return guard_merge.own_tier(hook.get("transcript_path"), override.remote_session_id())
+    except Exception:
+        return None, None
+
+
+def lane_parent(hook):
+    """(is_lane, parent): a lane has the tag cs-build:lane or a parent session. Owner-facing otherwise."""
+    tags, parent = own_tier(hook)
+    return (LANE_TAG in (tags or []) or bool(parent)), parent
+
+
+def _turn_boundary(rec):
+    if rec.get("isSidechain"):
+        return False
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        return isinstance(att, dict) and att.get("type") == "queued_command"
+    if rec.get("type") != "user":
+        return False
+    if isinstance((rec.get("message") or {}).get("content"), str):
+        return True
+    blocks = _blocks(rec)
+    return (any(b.get("type") == "text" for b in blocks)
+            and not any(b.get("type") == "tool_result" for b in blocks))
+
+
+def lane_reason(records, parent):
+    """The lane check's refusal when this lane's turn sent its pick nowhere, else ''. The turn starts at
+    the last record that holds a message: an owner, peer or system-reminder text, or a queued command."""
+    start = max((i for i, rec in enumerate(records) if _turn_boundary(rec)), default=-1)
+    writer = _facts(records)[0]
+    ids = {x for x in (parent, writer) if x}
+    for _at, kind, use in _facts(records[start + 1:])[1]:
+        if kind == "box" or (kind == "send" and (not parent or _send_target(use) in ids)):
+            return ""
+    return LANE_REASON % ("your parent session (%s)" % parent if parent else
+                          "the page writer (read `ArtifactData get meta/page`) or your parent session")
+
+
+def _load_items(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            items = json.load(f)
+    except Exception:
+        return []
+    return [i for i in items if isinstance(i, dict) and isinstance(i.get("id"), str)
+            and isinstance(i.get("asked"), (int, float))] if isinstance(items, list) else []
+
+
+def _save_items(path, items):
+    try:
+        if items:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(items, f)
+        elif os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def _has_page(hook):
+    root = repo_root(hook.get("cwd"))
+    return bool(root) and layout.waiting_page(root) != "unknown"
+
+
+def open_picks_file(hook):
+    """The state file path of this session, or None."""
+    _hooks()
+    import local_time
+    return local_time.open_picks_path(hook.get("session_id"))
+
+
+def open_pick_check(hook, records, text, after, active):
+    """The owner-facing check (spec questions-reach-page, section 2): (reason, notice).
+
+    Step a clears each item the transcript shows sent or answered; step b keeps this reply's pick open;
+    step c blocks at 300 s unsent; step d writes the state when it changed. A rewrite Stop (`active`) runs
+    step a only. Fails open on any error."""
+    try:
+        path = open_picks_file(hook)
+        if path is None:
+            return "", ""
+        items = _load_items(path) if os.path.exists(path) else []
+        before = list(items)
+        writer = None
+        if items:
+            writer, events = _facts(records)
+            items = [i for i in items if not _answered(i, writer, events)]
+        reason = notice = ""
+        if not active:
+            boxed = any(not rec.get("isSidechain") and any(b.get("name") == ASK_TOOL for b in tool_uses(rec))
+                        for rec in after)
+            if offers_a_pick(text) and not boxed:
+                section = input_needed_section(text)
+                digest = hashlib.sha1(_norm(section).encode("utf-8")).hexdigest()
+                if not any(i.get("hash") == digest for i in items):
+                    items.append({"id": "ask-" + digest[:8], "hash": digest, "asked": now(),
+                                  "text": section[:200]})
+            late = [i for i in items if now() - i["asked"] >= PICK_WAIT_SECONDS]
+            if late:
+                names = ", ".join("%s (%s)" % (i["id"], ((i.get("text") or "").splitlines() or [""])[0][:160])
+                                  for i in late)
+                if _has_page(hook):
+                    writer = writer or _facts(records)[0]
+                    reason = OPEN_PICK_REASON % (
+                        names, "the page writer (%s)" % writer if writer else
+                        "the page writer: read `ArtifactData get meta/page`")
+                else:
+                    notice = NO_PAGE_NOTICE % ", ".join(i["id"] for i in late)
+                    items = [i for i in items if i not in late]
+        if items != before:
+            _save_items(path, items)
+        return reason, notice
+    except Exception:
+        return "", ""
+
+
+def open_pick_reasons(hook, records, text, after):
+    """(lane, reasons, notice) for a non-rewrite Stop: the lane and owner-facing checks. `lane` is None
+    when the reply offers no pick and no state file exists (no tier read is made then)."""
+    lane = parent = None
+    try:
+        path = open_picks_file(hook)
+        state = bool(path) and os.path.exists(path)
+        if offers_a_pick(text) or state:
+            lane, parent = lane_parent(hook)
+    except Exception:
+        return None, [], ""
+    if lane:
+        try:
+            reason = lane_reason(records, parent) if offers_a_pick(text) else ""
+        except Exception:
+            reason = ""
+        return lane, [reason] if reason else [], ""
+    if lane is None:
+        return None, [], ""
+    reason, notice = open_pick_check(hook, records, text, after, False)
+    return False, [reason] if reason else [], notice
+
+
 def _marker_path(hook):
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import local_time
@@ -645,6 +990,18 @@ def write_marker(hook, idx):
         pass
 
 
+def emit(old, new, tail, notice):
+    """Print the Stop answer: one block holding the old reasons (then `tail`) and the new ones, and the notice."""
+    out = {}
+    reasons = ([" ".join(old) + tail] if old else []) + new
+    if reasons:
+        out = {"decision": "block", "reason": " ".join(reasons)}
+    if notice:
+        out["systemMessage"] = notice
+    if out:
+        print(json.dumps(out))
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -656,6 +1013,12 @@ def main():
         return
     if hook.get("stop_hook_active"):
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
+        try:
+            path = open_picks_file(hook)
+            if path and os.path.exists(path):  # a rewrite Stop clears what was sent, and never blocks or adds
+                open_pick_check(hook, _load_records(hook.get("transcript_path")) or [], "", [], True)
+        except Exception:
+            pass
         reasons = rewrite_problems(hook)
         if reasons:
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
@@ -670,45 +1033,28 @@ def main():
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     refusal = refusal_reason(pending_refusals(hook, last_reply(hook)))
 
-    def stop_for_refusal():
-        if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal}))
-
-    path = hook.get("transcript_path")
-    if not path or not os.path.exists(path):
-        return stop_for_refusal()
-
-    records = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
-    except Exception:
-        return stop_for_refusal()
+    records = _load_records(hook.get("transcript_path"))
+    if records is None:
+        return emit([refusal] if refusal else [], [], "", "")
 
     last_human_idx = None
     for i, rec in enumerate(records):
         if is_last_human(rec):
             last_human_idx = i
-    if last_human_idx is None:
-        return stop_for_refusal()
-
-    after = records[last_human_idx + 1:]
+    after = records[last_human_idx + 1:] if last_human_idx is not None else []
     text = last_reply(hook)
+    # The lane and owner-facing pick checks. A lane's pick is judged by the lane check alone: the chat-first
+    # promise and the page link pass nothing for it, so the pick guard below skips it.
+    lane, new, notice = open_pick_reasons(hook, records, text, after)
+    if last_human_idx is None:
+        return emit([refusal] if refusal else [], new, "", notice)
+
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the pick refusal.
         pick = []
         try:
-            if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+            if not lane and offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
                 pick.append(PICK_REFUSAL)
         except Exception:
             pass
@@ -716,15 +1062,9 @@ def main():
             pick.append(departs_problem(text))
         except Exception:
             pass
-        try:
-            pick.append(refusal)
-            pick = [r for r in pick if r]
-            if pick:
-                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
-                print(json.dumps({"decision": "block", "reason": reason}))
-        except Exception:
-            pass
-        return
+        pick.append(refusal)
+        pick = [r for r in pick if r]
+        return emit(pick, new, CORRECTION_TAIL if report_shape_ok(text) else "", notice)
 
     shape_ok = report_shape_ok(text)
     reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]
@@ -740,7 +1080,7 @@ def main():
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
     try:
-        if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+        if not lane and offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
             reasons.append(PICK_REFUSAL)
     except Exception:
         pass
@@ -757,13 +1097,9 @@ def main():
             "plus a few words, like \"D12, short titles for records\".")
     if refusal:
         reasons.append(refusal)
-    if reasons:
-        reason = " ".join(reasons)
-        if shape_ok:
-            reason += CORRECTION_TAIL
-        else:
-            write_marker(hook, last_human_idx)
-        print(json.dumps({"decision": "block", "reason": reason}))
+    if reasons and not shape_ok:
+        write_marker(hook, last_human_idx)
+    emit(reasons, new, CORRECTION_TAIL if shape_ok else "", notice)
 
 
 if __name__ == "__main__":

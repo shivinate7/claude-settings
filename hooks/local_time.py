@@ -129,6 +129,13 @@ def report_marker_path(session_id):
     return None if base is None else base + ".report-block"
 
 
+def open_picks_path(session_id):
+    """The file report_guard.py keeps a session's unsent Input Needed picks in, or None. Same folder
+    as the inbox files."""
+    base = _session_base(session_id)
+    return None if base is None else base + ".open-picks.json"
+
+
 def repo_marker_path(session_id):
     """The sidecar that binds a session's inbox to the repo it worked in, or None. Beside the inbox:
     feedback_guard.py reads it to find other sessions' inboxes of the same repo."""

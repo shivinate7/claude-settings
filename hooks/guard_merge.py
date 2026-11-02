@@ -519,9 +519,10 @@ def role_call_of(segment: str):
 
 
 def _own_session_read(transcript: str, own_id: str):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
-    uses, newest, tagged_after = set(), None, False
+    """(tags, tagged_after, parent): the tags of the newest get_session result whose ccr.id is own_id, else
+    None, whether a set_session_tags call follows that result, and that result's ccr.parent_session_id
+    (None when the key is missing or empty)."""
+    uses, newest, tagged_after, parent = set(), None, False, None
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -545,15 +546,30 @@ def _own_session_read(transcript: str, own_id: str):
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
                             newest, tagged_after = ccr["tags"], False
+                            found = ccr.get("parent_session_id")
+                            parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest, tagged_after
+    return newest, tagged_after, parent
 
 
 def _own_get_session_tags(transcript: str, session_id: str):
     """The tags of the newest get_session result in this session's own transcript whose ccr.id is
     session_id (the session's own id, or a target's id for lane-closes-after-records), else None."""
     return _own_session_read(transcript, session_id)[0]
+
+
+def own_tier(transcript: str, own_id):
+    """(tags, parent) of the newest get_session result in `transcript` whose ccr.id is `own_id`; (None, None)
+    for no own id, no such record or any read error. The one home of the tier read: the report guard's
+    lane check calls it. Cost: one transcript scan."""
+    if not own_id:
+        return None, None
+    try:
+        tags, _tagged_after, parent = _own_session_read(transcript, own_id)
+    except Exception:
+        return None, None
+    return tags, parent
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -596,7 +612,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
+            tags, tagged_after, _parent = _own_session_read(transcript, own_id)
             if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
                 return ""
     except Exception:
