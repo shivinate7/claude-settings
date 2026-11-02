@@ -6,8 +6,10 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_report_guard.py -v
 """
+import contextlib
 import errno
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -27,6 +29,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import local_time  # noqa: E402  hooks/local_time.py: the open-picks state file's path
+import report_guard as rg  # noqa: E402  the Stop hook; its main() runs in-process for the open-picks cases
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
@@ -2708,6 +2712,521 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
+
+
+# ---- questions-reach-page: an Input Needed pick reaches the owner (spec questions-reach-page, sections 2-3) ----
+# The Stop hook runs in-process here, so the clock is report_guard.now, patched per Stop. Each Stop writes
+# the whole transcript first, as a real Stop reads it. A lane's own id comes from the env
+# (CLAUDE_CODE_REMOTE_SESSION_ID) and from its get_session record in the transcript.
+LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+OWN_ENV = "cse_ownlane01"            # the env value a lane carries (hooks/override.py LANE_ENV_PREFIX)
+OWN_RECORD = "session_ownlane01"     # the id that lane's own get_session record names (LANE_PREFIX)
+PARENT = "session_parent01"
+WRITER = "session_writer01"
+OTHER = "session_other01"
+LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+PAGE = PickGuardTests.PAGE
+DEPARTS = PickGuardTests.DEPARTS_LINE
+T0 = 1800000000                      # the clock at a case's first Stop, in epoch seconds
+PICK_OWNER_BLOCK_AT = 300            # seconds an unsent pick waits before the owner-facing check blocks
+ASK = "Which way for the pick check?"
+FIRST_LINE = ASK + " Ask in chat first; after 5 minutes unanswered it goes to the waiting page."
+REWORDED_FIRST = "which  way for the PICK check?   ask in chat first;  after 5 MINUTES unanswered it goes to the WAITING PAGE."
+PLAIN = "Waiting on the owner."
+
+# A pick that passes the chat-first clause (PAGE_WORDS_RE) for an owner-facing session.
+OWNER_PICK = ("> **Done** OTHER read the code\n"
+              "> **Input Needed** " + FIRST_LINE + "\n"
+              "> A (my pick): fold the guard\n> B: add a second hook\n"
+              "> " + DEPARTS + "\n> **Next** wait")
+OWNER_PICK_WITH_LINK = OWNER_PICK.replace("> **Next** wait", "> **Next** wait " + PAGE)
+OWNER_PICK_REWORDED = OWNER_PICK.replace(FIRST_LINE, REWORDED_FIRST)
+# The same pick with no page words: a lane's pick, which the chat-first clause never passes.
+LANE_PICK = ("> **Done** OTHER read the code\n> **Input Needed** " + ASK + "\n"
+             "> A (my pick): fold the guard\n> B: add a second hook\n> " + DEPARTS + "\n> **Next** wait")
+
+_CALL_IDS = iter(range(1, 10 ** 9))
+
+
+def op_stamp(records, at):
+    """Stamp each record with the transcript time `at` (epoch seconds, UTC)."""
+    text = datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    for rec in records:
+        rec["timestamp"] = text
+    return records
+
+
+def op_call(name, tool_input=None, result="ok", sidechain=False):
+    """A tool call and its result, as two records. The result is text, as a tool returns it."""
+    tid = "tu_op_%d" % next(_CALL_IDS)
+    use = {"type": "assistant", "isSidechain": sidechain, "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": tid, "name": name, "input": tool_input or {}}]}}
+    back = {"type": "user", "isSidechain": sidechain, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": result}]}}
+    return [use, back]
+
+
+def op_get_session(tags, parent=PARENT, session=OWN_RECORD, text=None):
+    """The own get_session record. `parent=None` leaves parent_session_id out; `text` replaces the JSON."""
+    body = {"ccr": {"id": session, "title": "a session", "tags": list(tags)}}
+    if parent is not None:
+        body["ccr"]["parent_session_id"] = parent
+    return op_call("mcp__claude-code-remote__get_session", {},
+                   result=text if text is not None else json.dumps(body))
+
+
+def op_writer(writer=WRITER):
+    """An ArtifactData read of the page's meta/page doc, whose result names the page writer."""
+    return op_call("ArtifactData", {"action": "get", "url": PAGE, "collection": "meta", "doc_id": "page"},
+                   result=json.dumps({"writer": writer, "doc_id": "page"}))
+
+
+def op_send(to, message, tool="mcp__claude-code-remote__send_message", sidechain=False):
+    """A send by send_message (`session_id`) or by SendMessage (`to`)."""
+    key = "session_id" if tool.endswith("send_message") else "to"
+    return op_call(tool, {key: to, "message": message}, sidechain=sidechain)
+
+
+def op_items_write(doc_id, text, collection="items", batch=False):
+    """An ArtifactData write of one row: a set, or a batch of writes."""
+    row = {"collection": collection, "doc_id": doc_id, "data": {"text": text}}
+    if batch:
+        return op_call("ArtifactData", {"action": "batch", "url": PAGE, "writes": [dict(row, op="set")]})
+    return op_call("ArtifactData", dict(row, action="set", url=PAGE))
+
+
+def op_box(sidechain=False):
+    """An AskUserQuestion call: the question box."""
+    return op_call("AskUserQuestion", {"questions": [{"question": "Which way?", "options": ["A", "B"]}]},
+                   sidechain=sidechain)
+
+
+class OpenSession:
+    """One session in the fixture: a repo (with a waiting page, or none), a config folder and a transcript.
+    Each Stop runs report_guard.main() in-process at the given clock, as the Stop hook runs it."""
+
+    def __init__(self, page=True):
+        self.root = tempfile.mkdtemp(prefix="sess-", dir=_ISOLATION["dir"])
+        self.sid = os.path.basename(self.root)
+        self.cfg = os.path.join(self.root, "config")
+        self.repo = os.path.join(self.root, "repo")
+        self.transcript = os.path.join(self.root, "transcript.jsonl")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        extras = {"kinds": {}}
+        if page:
+            extras["waiting-page"] = PAGE
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+            json.dump(extras, f)
+        self.records = []
+        self.lane_env = None
+
+    def own_identity(self):
+        """The env names this session as a lane. No get_session record is in the transcript."""
+        self.lane_env = OWN_ENV
+
+    def record(self, tags=LANE_TAGS, parent=PARENT, session=OWN_RECORD, text=None):
+        """Adds a get_session record of `session`, stamped at T0."""
+        self.records += op_stamp(op_get_session(tags, parent, session, text), T0)
+
+    def lane(self, tags=LANE_TAGS, parent=PARENT, session=OWN_RECORD):
+        """A lane: the env names it, and its own get_session record is in the transcript."""
+        self.own_identity()
+        self.record(tags, parent, session)
+
+    def turn(self, at, reply=PLAIN, owner=None, seq=(), active=False):
+        """One Stop at clock `at`. The turn's records (an owner message, then `seq`, then the reply) are
+        stamped at `at`, the transcript is written, and the hook runs."""
+        new = [human(owner)] if owner is not None else []
+        for item in seq:
+            new += list(item) if isinstance(item, list) else [item]
+        new.append(assistant_text(reply))
+        self.records += op_stamp(new, at)
+        write_transcript(self.records, self.root)
+        return self.stop(at, active)
+
+    def stop(self, at, active=False):
+        hook = {"hook_event_name": "Stop", "session_id": self.sid, "transcript_path": self.transcript,
+                "stop_hook_active": active, "cwd": self.repo}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(hook))), \
+                mock.patch.object(rg, "now", create=True, return_value=at), \
+                contextlib.redirect_stdout(out):
+            os.environ.pop(LANE_ENV, None)  # the test process may itself be a lane: each Stop sets its own
+            if self.lane_env:
+                os.environ[LANE_ENV] = self.lane_env
+            rg.main()
+        text = out.getvalue().strip()
+        return json.loads(text) if text else None
+
+    def state_path(self):
+        """The state file, as the spec names it: the session's base path plus .open-picks.json."""
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            return local_time._session_base(self.sid) + ".open-picks.json"
+
+    def items(self):
+        """The open items in the state file, [] when the file is gone."""
+        path = self.state_path()
+        if not path or not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def state_exists(self):
+        path = self.state_path()
+        return bool(path) and os.path.exists(path)
+
+
+class OpenPickCase(unittest.TestCase):
+    def only_item(self, s):
+        items = s.items()
+        self.assertEqual(len(items), 1, "the pick was not kept open: %r" % items)
+        return items[0]
+
+    def assertBlocked(self, out, why=""):
+        self.assertIsNotNone(out, "no block %s" % why)
+        self.assertEqual(out.get("decision"), "block", "not a block %s: %r" % (why, out))
+
+    def assertNotBlocked(self, out, why=""):
+        self.assertTrue(out is None or out.get("decision") != "block", "blocked %s: %r" % (why, out))
+
+
+class OwnerPickTests(OpenPickCase):
+    """questions-reach-page, owner-facing check: a pick kept open blocks 300 s after it was asked, until it is sent."""
+
+    def test_oq_red_unsent_pick_blocks_at_300_seconds_and_not_before(self):
+        s = OpenSession()
+        self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide"), "the chat-first pick blocked at once")
+        self.assertEqual([i["asked"] for i in s.items()], [T0], "the pick was not kept open at its ask time")
+        self.assertIsNone(s.turn(T0 + PICK_OWNER_BLOCK_AT - 1, PLAIN), "blocked at 299 s")
+        out = s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN)
+        self.assertBlocked(out, "at 300 s")
+        item_id = self.only_item(s)["id"]
+        self.assertIn(item_id, out["reason"], "the reason does not name the item id")
+        self.assertIn(ASK, out["reason"], "the reason does not name the item's first line")
+        self.assertIn("send_message", out["reason"], "the reason does not say to send the question")
+        self.assertIn("meta/page", out["reason"], "the writer is unknown: the reason must say where to read it")
+
+    def test_oq_block_repeats_until_the_question_is_sent(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "at 300 s")
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT + 10, PLAIN), "at 310 s, still unsent")
+
+    def test_oq_a_reply_that_names_a_past_pick_is_not_a_new_pick(self):
+        # "You picked A on Oct 26" is one marker, never a pick (offers_a_pick), so it opens no item.
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "the control: a real pick blocks")
+        past = ("> **Done** OTHER read the code; the owner picked A on Oct 26, so it stays.\n"
+                "> **Input Needed** You picked A on Oct 26. Nothing is open.\n"
+                "> **Next** wait")
+        s = OpenSession()
+        self.assertIsNone(s.turn(T0, past, owner="decide"), "a reply that names a past pick was refused")
+        self.assertIsNone(s.turn(T0 + PICK_OWNER_BLOCK_AT + 100, PLAIN), "a past pick blocked later")
+        self.assertFalse(s.state_exists(), "a past pick was kept as open")
+
+    def test_oq_item_has_the_spec_shape(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        items = s.items()
+        self.assertEqual(len(items), 1, "one pick, one item: %r" % items)
+        item = items[0]
+        self.assertTrue({"id", "hash", "asked", "text"} <= set(item), "keys: %r" % sorted(item))
+        self.assertRegex(item["hash"], r"^[0-9a-f]{40}$")
+        self.assertEqual(item["id"], "ask-" + item["hash"][:8], "the id is ask- and the first 8 hex of the hash")
+        self.assertEqual(item["asked"], T0)
+        section = rg.input_needed_section(OWNER_PICK)
+        self.assertEqual(item["text"].strip(), section[:200].strip(), "the text is the first 200 chars of the section")
+
+    def test_oq_a_re_asked_pick_keeps_its_oldest_time(self):
+        # The same question, reworded only in case and spacing, is one item: its normalized hash matches.
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertIsNone(s.turn(T0 + 200, OWNER_PICK_REWORDED), "the re-ask blocked at 200 s")
+        self.assertEqual([i["asked"] for i in s.items()], [T0], "a re-ask must keep one item, with its oldest time")
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "300 s after the first ask")
+
+    def test_oq_a_box_in_the_pick_turn_means_nothing_is_unsent(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "the control, with no box")
+        s = OpenSession()
+        self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide", seq=[op_box()]), "the box turn blocked")
+        self.assertFalse(s.state_exists(), "a pick that opened the box was kept as unsent")
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after a box turn")
+
+    def test_oq_a_subagent_box_does_not_answer_the_pick(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "the control")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_box(sidechain=True)]))
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "a subagent's box is not the owner's route")
+
+    def test_oq_an_owner_message_after_the_ask_answers_it(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, with no owner reply")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, owner="A, fold it."))
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after the owner answered")
+        self.assertFalse(s.state_exists(), "the answered item left the state file behind")
+
+    def test_oq_a_machine_notice_is_not_an_owner_message(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertIsNone(s.turn(T0 + 100, PLAIN,
+                                 owner="<system-reminder>\nA background task finished.\n</system-reminder>"))
+        self.assertBlocked(s.turn(T0 + 400, PLAIN), "a notice answered the pick")
+
+    def test_oq_a_send_to_the_writer_answers_it(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, with no send")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "Which way for the pick check?")]))
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after the writer got the question")
+        self.assertFalse(s.state_exists())
+        via_sendmessage = OpenSession()
+        via_sendmessage.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        via_sendmessage.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "Which way?", tool="SendMessage")])
+        self.assertNotBlocked(via_sendmessage.turn(T0 + 400, PLAIN), "after a SendMessage to the writer")
+
+    def test_oq_a_send_to_someone_else_does_not_answer_once_the_writer_is_known(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        s.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Which way for the pick check?")])
+        self.assertBlocked(s.turn(T0 + 400, PLAIN), "a send to a session that is not the writer")
+
+    def test_oq_a_send_naming_the_item_id_answers_it_when_no_writer_is_known(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, with no send")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        item_id = self.only_item(s)["id"]
+        s.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Pick %s: fold the guard or add a hook?" % item_id)])
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after a send that names the item id")
+        via_sendmessage = OpenSession()
+        via_sendmessage.turn(T0, OWNER_PICK, owner="decide")
+        via_sendmessage.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Pick %s: fold it?" % item_id, tool="SendMessage")])
+        self.assertNotBlocked(via_sendmessage.turn(T0 + 400, PLAIN), "after a SendMessage that names the id")
+
+    def test_oq_the_item_id_must_be_a_whole_token(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        item_id = self.only_item(s)["id"]
+        s.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Pick %sx: fold it?" % item_id)])
+        self.assertBlocked(s.turn(T0 + 400, PLAIN), "an id inside a longer token answered the pick")
+
+    def test_oq_an_items_write_naming_the_item_answers_it(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, with no write")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        item_id = self.only_item(s)["id"]
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_items_write(item_id, "fold the guard")]))
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after a set on the items collection")
+        self.assertFalse(s.state_exists())
+        batch = OpenSession()
+        batch.turn(T0, OWNER_PICK, owner="decide")
+        batch.turn(T0 + 100, PLAIN, seq=[op_items_write("ask-00000000", FIRST_LINE, batch=True)])
+        self.assertNotBlocked(batch.turn(T0 + 400, PLAIN), "a batch that carries the item's first line")
+
+    def test_oq_an_items_write_must_name_this_item_in_items(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        item_id = self.only_item(s)["id"]
+        s.turn(T0 + 100, PLAIN, seq=[op_items_write(item_id, "fold the guard", collection="notes")])
+        self.assertBlocked(s.turn(T0 + 400, PLAIN), "a write to another collection answered the pick")
+        other = OpenSession()
+        other.turn(T0, OWNER_PICK, owner="decide")
+        other.turn(T0 + 100, PLAIN, seq=[op_items_write("ask-00000000", "some other question")])
+        self.assertBlocked(other.turn(T0 + 400, PLAIN), "a write to another item answered the pick")
+
+    def test_oq_no_waiting_page_fails_open_once_and_drops_the_item(self):
+        s = OpenSession(page=False)
+        s.turn(T0, OWNER_PICK, owner="decide")  # the pick guard may refuse this turn; that is not this check
+        out = s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN)
+        self.assertIsNotNone(out, "no notice at 300 s: the check did not say it failed open")
+        self.assertNotEqual(out.get("decision"), "block", "a repo with no waiting page blocked: %r" % out)
+        self.assertRegex(out.get("systemMessage", ""), r"no waiting page",
+                         "the notice does not say why it failed open")
+        self.assertFalse(s.state_exists(), "the item was not dropped after the notice")
+        self.assertIsNone(s.turn(T0 + PICK_OWNER_BLOCK_AT + 10, PLAIN), "the notice repeated")
+
+    def test_oq_a_rewrite_stop_is_quiet_and_adds_nothing(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, a normal Stop")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertIsNone(s.turn(T0 + 400, PLAIN, active=True), "a rewrite Stop blocked or wrote")
+        fresh = OpenSession()
+        self.assertIsNone(fresh.turn(T0, OWNER_PICK, owner="decide", active=True), "a rewrite Stop blocked")
+        self.assertFalse(fresh.state_exists(), "a rewrite Stop added a pick")
+
+    def test_oq_a_rewrite_stop_clears_what_was_sent(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        control.turn(T0 + 100, PLAIN, active=True)
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control: a rewrite with no send")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        s.turn(T0 + 100, PLAIN, active=True, seq=[op_send(WRITER, "Which way for the pick check?")])
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "a rewrite Stop did not clear the sent question")
+
+    def test_oq_a_pick_free_stop_writes_no_state_and_reads_no_record(self):
+        import guard_merge  # hooks/guard_merge.py: the own-record read a Stop makes when a pick is offered
+        s = OpenSession()
+        s.own_identity()
+        with mock.patch.object(guard_merge, "_own_session_read",
+                               wraps=guard_merge._own_session_read) as read:
+            s.turn(T0, OWNER_PICK, owner="decide")
+        self.assertGreaterEqual(read.call_count, 1, "a Stop that offers a pick did not read the own record")
+        self.assertTrue(s.state_exists(), "the pick was not kept open")
+        quiet = OpenSession()
+        quiet.own_identity()
+        with mock.patch.object(guard_merge, "_own_session_read",
+                               wraps=guard_merge._own_session_read) as read_quiet:
+            self.assertIsNone(quiet.turn(T0, PLAIN, owner="decide"))
+        self.assertEqual(read_quiet.call_count, 0, "a Stop with no pick read the own record")
+        self.assertFalse(quiet.state_exists(), "a Stop with no pick wrote a state file")
+
+    def assert_owner_facing(self, setup):
+        s = OpenSession()
+        setup(s)
+        self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide"), "blocked at once: the lane path")
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "the owner-facing 300 s block")
+
+    def test_oq_no_own_id_is_owner_facing(self):
+        self.assert_owner_facing(lambda s: None)
+
+    def test_oq_own_id_with_no_get_session_record_is_owner_facing(self):
+        self.assert_owner_facing(lambda s: s.own_identity())
+
+    def test_oq_own_record_that_is_not_json_is_owner_facing(self):
+        self.assert_owner_facing(lambda s: (s.own_identity(), s.record(text="not json")))
+
+    def test_oq_only_another_sessions_lane_record_is_owner_facing(self):
+        self.assert_owner_facing(lambda s: s.lane(session=OTHER))
+
+
+class LanePickTests(OpenPickCase):
+    """questions-reach-page, lane check: a lane's pick reaches its parent or the writer in the same turn."""
+
+    def test_ln_red_the_chat_first_promise_and_the_page_link_do_not_answer_for_a_lane(self):
+        s = OpenSession()
+        s.lane()
+        out = s.turn(T0, OWNER_PICK_WITH_LINK, owner="decide")
+        self.assertBlocked(out, "a lane's promise and page link")
+        self.assertIn("Lane pick guard", out["reason"])
+        self.assertIn("send_message", out["reason"], "the reason does not name the send")
+        bare = OpenSession()
+        bare.lane()
+        out2 = bare.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(out2, "a lane's promise with no link")
+        self.assertIn("Lane pick guard", out2["reason"])
+
+    def assert_lane_answers(self, seq, label):
+        s = OpenSession()
+        s.lane()
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=seq), "blocked: " + label)
+
+    def test_ln_a_send_to_the_parent_in_the_same_turn_answers_it(self):
+        self.assert_lane_answers([op_send(PARENT, "Which way for the pick check?")], "send_message to the parent")
+
+    def test_ln_a_sendmessage_to_the_parent_in_the_same_turn_answers_it(self):
+        self.assert_lane_answers([op_send(PARENT, "Which way?", tool="SendMessage")], "SendMessage to the parent")
+
+    def test_ln_a_send_to_the_writer_in_the_same_turn_answers_it(self):
+        self.assert_lane_answers([op_writer(), op_send(WRITER, "Which way?")], "send_message to the writer")
+
+    def test_ln_only_the_main_session_box_answers_a_lane(self):
+        self.assert_lane_answers([op_box()], "the question box")
+        s = OpenSession()
+        s.lane()
+        out = s.turn(T0, LANE_PICK, owner="decide", seq=[op_box(sidechain=True)])
+        self.assertBlocked(out, "a subagent's box answered a lane")
+        self.assertIn("Lane pick guard", out["reason"])
+
+    def assert_send_must_follow_the_boundary(self, make, label):
+        after = OpenSession()
+        after.lane()
+        self.assertIsNone(after.turn(T0, LANE_PICK, owner="decide",
+                                     seq=[make(), op_send(PARENT, "Which way?")]),
+                          "a send after " + label + " is in the turn and must pass")
+        before = OpenSession()
+        before.lane()
+        out = before.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?"), make()])
+        self.assertBlocked(out, "a send before " + label)
+        self.assertIn("Lane pick guard", out["reason"])
+
+    def test_ln_a_peer_message_starts_a_new_turn(self):
+        self.assert_send_must_follow_the_boundary(
+            lambda: peer_msg("Which way for the pick check?"), "a peer message")
+
+    def test_ln_a_system_reminder_message_starts_a_new_turn(self):
+        self.assert_send_must_follow_the_boundary(
+            lambda: human("<system-reminder>\nThe session has a new task.\n</system-reminder>"),
+            "a system-reminder-wrapped message")
+
+    def test_ln_a_queued_command_starts_a_new_turn(self):
+        self.assert_send_must_follow_the_boundary(
+            lambda: {"type": "attachment", "attachment": {
+                "type": "queued_command", "prompt": "Also check the lint job."}},
+            "a queued command")
+
+    def test_ln_a_parent_without_the_lane_tag_is_a_lane(self):
+        s = OpenSession()
+        s.lane(tags=["cs-repo:o/r"], parent=PARENT)
+        out = s.turn(T0, OWNER_PICK_WITH_LINK, owner="decide")
+        self.assertBlocked(out, "a lane with a parent and no cs-build:lane tag")
+        self.assertIn("Lane pick guard", out["reason"])
+        ok = OpenSession()
+        ok.lane(tags=["cs-repo:o/r"], parent=PARENT)
+        self.assertIsNone(ok.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?")]))
+
+    def test_ln_a_tag_only_lane_passes_any_send_message_and_the_writer(self):
+        control = OpenSession()
+        control.lane(parent=None)
+        out = control.turn(T0, LANE_PICK, owner="decide")
+        self.assertBlocked(out, "the control: a tag-only lane with no send")
+        self.assertIn("Lane pick guard", out["reason"])
+        anyone = OpenSession()
+        anyone.lane(parent=None)
+        self.assertIsNone(anyone.turn(T0, LANE_PICK, owner="decide",
+                                      seq=[op_send("session_anyone01", "Which way?")]))
+        writer = OpenSession()
+        writer.lane(parent=None)
+        self.assertIsNone(writer.turn(T0, LANE_PICK, owner="decide",
+                                      seq=[op_writer(), op_send(WRITER, "Which way?")]))
+
+    def test_ln_the_lane_check_is_quiet_on_a_rewrite(self):
+        control = OpenSession()
+        control.lane()
+        out = control.turn(T0, LANE_PICK, owner="decide")
+        self.assertBlocked(out, "the control, a normal Stop")
+        self.assertIn("Lane pick guard", out["reason"], "the control blocked for another reason")
+        s = OpenSession()
+        s.lane()
+        self.assertNotBlocked(s.turn(T0, LANE_PICK, owner="decide", active=True), "a rewrite Stop blocked")
+
+    def test_ln_a_lane_never_takes_the_owner_five_minute_path(self):
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide")
+        self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control: an owner-facing session")
+        s = OpenSession()
+        s.lane()
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?")]))
+        self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "a lane blocked on the owner's 300 s rule")
+        self.assertFalse(s.state_exists(), "a lane wrote an open-picks state file")
 
 
 if __name__ == "__main__":

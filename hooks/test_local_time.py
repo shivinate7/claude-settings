@@ -611,6 +611,41 @@ def case_override_fail_open():
                                          proc and proc.stderr[-120:]))
 
 
+def case_open_picks_path():
+    # questions-reach-page: a session's open-picks state file is named for the session and sits beside its
+    # report marker. A bad id has no path, so a state file never lands outside the handoffs folder.
+    # Catches: a state file named off another base, and an id such as "../x" that reaches a path.
+    if LT is None:
+        check("open picks: the module loads", False, missing_note())
+        return
+    fn = getattr(LT, "open_picks_path", None)
+    if fn is None:
+        check("open picks: local_time.open_picks_path exists", False, "local_time has no open_picks_path")
+        return
+    prev = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(ROOT, "open-picks-config")
+    try:
+        sid = "session_picks01"
+        path = fn(sid)
+        check("open picks: the file is named for the session, .open-picks.json",
+              isinstance(path, str) and os.path.basename(path) == sid + ".open-picks.json", "got %r" % (path,))
+        marker = LT.report_marker_path(sid)
+        check("open picks: the file sits beside the report marker",
+              isinstance(path, str) and os.path.dirname(path) == os.path.dirname(marker),
+              "got %r, marker %r" % (path, marker))
+        for bad in ("", None, "../escape", ".hidden", "a/b", "has space"):
+            try:
+                got = fn(bad)
+            except Exception as e:  # a bad id must answer None, not raise
+                got = "raised %s: %s" % (type(e).__name__, e)
+            check("open picks: bad id %r has no path" % (bad,), got is None, "got %r" % (got,))
+    finally:
+        if prev is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prev
+
+
 def main():
     try:
         case_table_in_process()
@@ -632,6 +667,7 @@ def main():
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
+        case_open_picks_path()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:

@@ -8117,15 +8117,18 @@ def role_result(tool_id, text):
         {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
 
 
-def role_record(tags, session=ROLE_OWN, title="a lane session"):
-    """The text get_session returns: a JSON object whose ccr block holds the record."""
-    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
-                               "parent_session_id": "session_PARENT01"}})
+def role_record(tags, session=ROLE_OWN, title="a lane session", parent="session_PARENT01"):
+    """The text get_session returns: a JSON object whose ccr block holds the record. `parent=None` leaves
+    parent_session_id out of the record."""
+    ccr = {"id": session, "title": title, "tags": list(tags)}
+    if parent is not None:
+        ccr["parent_session_id"] = parent
+    return json.dumps({"ccr": ccr})
 
 
-def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
+def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session", parent="session_PARENT01"):
     """One paired get_session call whose record carries `tags`."""
-    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title, parent))]
 
 
 def role_tag_call(tool_id, session=ROLE_OWN):
@@ -22269,10 +22272,117 @@ def run_cases():
     return 0
 
 
+# ---- own_tier: the tags and parent of the own session's newest get_session record ----
+# questions-reach-page, spec section 1: hooks/guard_merge.py owns this read, and the report guard's lane check
+# calls it. No guard decides on the parent yet, so no CASES entry can see it: these checks run as their own
+# list, before run_cases removes ROOT.
+TIER_OWN = ROLE_OWN
+TIER_PARENT = "session_TIERPARENT01"
+TIER_DIR = os.path.join(ROOT, "tier-read")
+
+
+def tier_transcript(name, *calls):
+    """A transcript of paired get_session calls (role_call), written under this run's folder."""
+    os.makedirs(TIER_DIR, exist_ok=True)
+    path = os.path.join(TIER_DIR, name + ".jsonl")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(line for call in calls for line in call) + "\n")
+    return path
+
+
+def tier_check_newest_own_record(gm):
+    """The newest own record gives its tags and its parent. The older own record does not."""
+    if getattr(gm, "own_tier", None) is None:
+        return False, "hooks/guard_merge.py has no own_tier"
+    path = tier_transcript("newest", role_call("t1", ["cs-build:coordinator"], parent=None),
+                           role_call("t2", LANE_TAGS, parent=TIER_PARENT))
+    tags, parent = gm.own_tier(path, TIER_OWN)
+    if list(tags or []) != LANE_TAGS or parent != TIER_PARENT:
+        return False, "own_tier gave tags %r, parent %r" % (tags, parent)
+    # Keep the callers of _own_get_session_tags working: they still get the tags of the same record.
+    if list(gm._own_get_session_tags(path, TIER_OWN) or []) != LANE_TAGS:
+        return False, "_own_get_session_tags no longer gives the own record's tags"
+    return True, ""
+
+
+def tier_check_foreign_record_is_ignored(gm):
+    """A newer record of another session does not replace the own record."""
+    if getattr(gm, "own_tier", None) is None:
+        return False, "hooks/guard_merge.py has no own_tier"
+    path = tier_transcript("foreign", role_call("t1", LANE_TAGS, parent=TIER_PARENT),
+                           role_call("t2", ["cs-build:batch-runner"], session=ROLE_OTHER, parent="session_OTHER01"))
+    tags, parent = gm.own_tier(path, TIER_OWN)
+    if list(tags or []) != LANE_TAGS or parent != TIER_PARENT:
+        return False, "own_tier gave tags %r, parent %r" % (tags, parent)
+    return True, ""
+
+
+def tier_check_no_parent_key(gm):
+    """A record with no parent_session_id gives its tags, and no parent."""
+    if getattr(gm, "own_tier", None) is None:
+        return False, "hooks/guard_merge.py has no own_tier"
+    path = tier_transcript("noparent", role_call("t1", LANE_TAGS, parent=None))
+    tags, parent = gm.own_tier(path, TIER_OWN)
+    if list(tags or []) != LANE_TAGS or parent:
+        return False, "own_tier gave tags %r, parent %r" % (tags, parent)
+    return True, ""
+
+
+def tier_check_no_own_record(gm):
+    """No own record in the transcript gives no tags and no parent: the owner-facing path."""
+    if getattr(gm, "own_tier", None) is None:
+        return False, "hooks/guard_merge.py has no own_tier"
+    path = tier_transcript("others", role_call("t1", LANE_TAGS, session=ROLE_OTHER, parent=TIER_PARENT))
+    tags, parent = gm.own_tier(path, TIER_OWN)
+    if tags or parent:
+        return False, "own_tier gave tags %r, parent %r for no own record" % (tags, parent)
+    return True, ""
+
+
+def tier_check_unreadable_transcript(gm):
+    """A transcript that cannot be read is no error: the read gives no tags and no parent."""
+    if getattr(gm, "own_tier", None) is None:
+        return False, "hooks/guard_merge.py has no own_tier"
+    try:
+        tags, parent = gm.own_tier(os.path.join(TIER_DIR, "absent.jsonl"), TIER_OWN)
+    except Exception as error:
+        return False, "own_tier raised %s on an unreadable transcript" % type(error).__name__
+    if tags or parent:
+        return False, "own_tier gave tags %r, parent %r for an unreadable transcript" % (tags, parent)
+    return True, ""
+
+
+TIER_READ_CHECKS = [
+    ("tier read: the newest own record gives its tags and parent", tier_check_newest_own_record),
+    ("tier read: a newer record of another session is ignored", tier_check_foreign_record_is_ignored),
+    ("tier read: a record with no parent gives no parent", tier_check_no_parent_key),
+    ("tier read: no own record gives no tags and no parent", tier_check_no_own_record),
+    ("tier read: an unreadable transcript gives no tags and no parent", tier_check_unreadable_transcript),
+]
+
+
+def tier_read_checks():
+    """Runs TIER_READ_CHECKS against hooks/guard_merge.py, printing each as a case. Returns the failure count."""
+    import guard_merge
+    failed = 0
+    for label, check in TIER_READ_CHECKS:
+        try:
+            ok, note = check(guard_merge)
+        except Exception as error:  # an exception is a failed case, not a crash of the run
+            ok, note = False, "raised %s: %s" % (type(error).__name__, error)
+        print("%s  %s%s" % ("PASS" if ok else "FAIL", label, "" if ok else "  (%s)" % note))
+        failed += 0 if ok else 1
+    return failed
+
+
 def main():
     _mark("case registration (module code after the fixtures)")
+    tier_failed = tier_read_checks()
     rc = run_cases()
     _timing_report()
+    if tier_failed:
+        print("test_guard FAIL: %d tier read case(s) wrong" % tier_failed)
+        return 1
     return rc
 
 
