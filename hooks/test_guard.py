@@ -13928,6 +13928,22 @@ ol("a label that opens with the word I, I would pick the strip keyed a, is allow
 ol("a label Another option keyed c is allowed", "allow", ol_item(options=ol_opt(2, label="Another option")))
 ol("a label B2B export keyed a is allowed", "allow", ol_item(options=ol_opt(0, label="B2B export")))
 
+# A parenthesis after the letter, a dash of either width, and a design's label. A design names its option's key by
+# the option that carries its slug, so a design labelled Option B on option a is a mismatch.
+ol("a label B) strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="B) strip")))
+ol("a label b) strip keyed a is denied", "deny", ol_item(options=ol_opt(0, label="b) strip")))
+ol("a label Option B — strip, with an em dash, keyed a is denied", "deny",
+   ol_item(options=ol_opt(0, label="Option B — strip")))
+ol("a label B – strip, with an en dash, keyed a is denied", "deny", ol_item(options=ol_opt(0, label="B – strip")))
+ol("a label B) strip keyed b, which matches its tag, is allowed", "allow", ol_item(options=ol_opt(1, label="B) strip")))
+ol("a label A rail keyed b is allowed", "allow", ol_item(options=ol_opt(1, label="A rail")))
+ol("a design labelled Option B on option a is denied", "deny",
+   ol_item(options=ol_opt(0, design="pic"), designs=[{"slug": "pic", "label": "Option B"}]))
+ol("a design labelled B: a bottom strip on option a is denied", "deny",
+   ol_item(options=ol_opt(0, design="pic"), designs=[{"slug": "pic", "label": "B: a bottom strip"}]))
+ol("a design labelled a bottom strip on option a is allowed", "allow",
+   ol_item(options=ol_opt(0, design="pic"), designs=[{"slug": "pic", "label": "a bottom strip"}]))
+
 # The page's letters and none. The guard's copy must match them: the page's letterOf maps index i to
 # String.fromCharCode(65 + i % 26), and NONE is "none". Each check reads one line, anchored at a line start,
 # so a copy in a comment never stands for the page's line.
