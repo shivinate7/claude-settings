@@ -907,3 +907,6 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- new-feature-mutant-no-return-step: P3 has the test-author make a mutant after the build, but no line sends it back, and none says it goes on a scratch copy outside the repo. The guard refuses a test-author write to product files. Decision: test-strategy-reset.
+- owner-ruling-only-in-p11: the owner ruling of 2026-11-01 20:57 CST lives only in P11; decision no-merge-during-batch-ci still describes the stricter refusal, and roadmap step overlapping-batches owns the fix. Decision: test-strategy-reset.
+- reviewer-scratch-copy-outside-repo: the reviewer's P10 mutant on a scratch copy sits beside "never write a file through the shell"; the scratch copy must be outside the repo. Decision: test-strategy-reset.
