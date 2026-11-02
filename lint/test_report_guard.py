@@ -2575,6 +2575,11 @@ KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
 KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
 
 
+C153_MARK = "c153-5e7a"
+C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settings as is, because calling into a repo "
+                 "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
+
+
 class PastRulingRelay(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2659,7 +2664,7 @@ class PastRulingRelay(unittest.TestCase):
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True)
         self.assertEqual(out, {}, out)
-        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(len(self.model_calls()), 1)
 
     def test_question_keys_refuse_two_questions_with_the_same_keys(self):
         out, _ = self.stop(self.decided, KEYS_SAME, answer=tcj.ALLOW)
@@ -2689,6 +2694,49 @@ class PastRulingRelay(unittest.TestCase):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
         self.assertEqual(self.git_starts(), 1)
+
+    def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
+        out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_relay_exception_refuses_unvetted_with_a_stderr_line(self):
+        # relay_reasons catches an exception and fails open. A hook cwd that is not a path raises inside the relay
+        # check, and that must refuse with the Unvetted remedy and a stderr line (owner rulings, Nov 1 19:30 CST).
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": 12345}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("past-ruling", run.stderr)
+
+    def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True, "cwd": self.decided}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": REFUSE_APPS}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_earlier_blockquote_question_does_not_hide_the_input_needed_item(self):
+        # The c153 replay: an earlier blockquote line ends in "?", then the real Input Needed item asks the ruled question.
+        repo = tcj.make_repo("relay-c153", steps={"c153": C153_SENTENCE})
+        reply = "> Did the last audit finish?\n> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+        self.stop(repo, reply, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(C153_MARK, calls[0]["prompt"])
+
+    def test_a_question_mark_inside_a_prose_line_triggers_the_check(self):
+        self.stop(self.decided, "Ship the fix? Say go and I merge.", answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_question_in_an_earlier_assistant_text_block_triggers_the_check(self):
+        records = [human("decide"), assistant_text("Ship the fix?"), assistant_text(DONE_ONLY)]
+        self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
 
     def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
         records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]

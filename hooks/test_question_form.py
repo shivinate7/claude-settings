@@ -1060,6 +1060,24 @@ def case_key_overlap():
           "a lone question refused")
 
 
+RESEND_EARLIER = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                  "> a) keep\n> b) remove")
+RESEND_NOW = "> **Input Needed** Do the GitHub apps keep access to claude-settings?\n> a) keep\n> b) remove"
+FACTS_NOW = "> **Input Needed** Which fix ships? The run touched the files.\n> - a: 3 files\n> - b: 5 files"
+
+
+def case_key_overlap_resend_and_fact_lists():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "key_overlap", None)
+    check("key overlap: question_form.key_overlap exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    check("key overlap: a reworded re-send of one question does not clash with its earlier reply",
+          not fn(RESEND_NOW, [RESEND_EARLIER]), "a re-send of one question was refused")
+    check("key overlap: a - a: 3 files fact list does not clash with a question's keys",
+          not fn(FACTS_NOW, [KEY_EARLIER]), "a fact list was refused")
+
+
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -1073,7 +1091,8 @@ def main():
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
                  case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
-                 case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap):
+                 case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
+                 case_key_overlap_resend_and_fact_lists):
         try:
             case()
         except Exception as exc:

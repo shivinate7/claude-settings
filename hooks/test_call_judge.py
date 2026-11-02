@@ -1064,8 +1064,8 @@ def case_unvetted_marker():
     marked = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     marked["questions"][0]["question"] += "\n" + UNVETTED_LINE
     r = run_hook(question_input(box=marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
-    check("unvetted box: the same question with an Unvetted: line passes with no model call",
-          r.code == 0 and r.out == "" and r.calls == [] and "\tdeny\t" not in r.log, detail(r))
+    check("unvetted box: the same question with an Unvetted: line passes after one model attempt, the check always runs",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
 
 
 def case_unvetted_page_marker():
@@ -1076,8 +1076,8 @@ def case_unvetted_page_marker():
           and len(r.calls) == 1, detail(r))
     marked = good_page_item(context=item["context"] + "\n" + UNVETTED_LINE)
     r = run_hook(page_input("set", marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
-    check("unvetted page: the same item with an Unvetted: line in context passes with no model call",
-          r.code == 0 and r.out == "" and r.calls == [] and "\tdeny\t" not in r.log, detail(r))
+    check("unvetted page: the same item with an Unvetted: line in context passes after one model attempt",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
 
 
 def case_unvetted_not_for_closed_items():
@@ -1108,6 +1108,56 @@ def case_unshown_id_takes_the_unvetted_path():
           detail(r))
 
 
+def case_marker_does_not_skip_the_check():
+    # Owner rulings, Nov 1 19:30 CST: the Unvetted line never skips the check. A marker written ahead of time, with a
+    # working model, still runs the check, which refuses a ruled question.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    box["questions"][0]["question"] += "\n" + UNVETTED_LINE
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=refuse)
+    check("unvetted marker: a marker written ahead of time does not skip the check, which refuses the ruled question",
+          len(r.calls) == 1 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(),
+          detail(r))
+
+
+def case_unknown_names_the_claude_settings_records():
+    # Owner ruling (Nov 1 18:55 CST): the claude-settings checkout is guard_pointer.pointer_checkout(). This repo has
+    # its own docs/decisions and no pointer, so the claude-settings records are unread and the notice names them.
+    r = run_hook(question_input(box=good_box(), cwd=DECISIONS_REPO), answer=ALLOW)
+    notes = [line for line in r.err.splitlines() if PAST_UNKNOWN in line]
+    check("past ruling unknown: with its own decisions and no pointer, the notice names the claude-settings records",
+          len(notes) == 1 and "claude-settings" in notes[0], detail(r))
+
+
+def case_cite_of_a_shown_record_is_not_bogus():
+    # A reason citing a shown record with a .md suffix, with or without the docs/ prefix, is a real cite. It is a plain
+    # refusal, never the Unvetted path.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    for cite in ("decisions/%s.md" % APPS_SLUG, "docs/decisions/%s.md" % APPS_SLUG):
+        answer = json.dumps({"ok": False, "reason": "%s: already decided by the keep-the-apps ruling." % cite})
+        r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=answer)
+        check("cite: a refusal citing %s (a shown record) is a plain refusal, not Unvetted" % cite,
+              r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(),
+              detail(r))
+
+
+def case_page_task_gets_item_8_and_is_refused():
+    # Owner ruling (Nov 1 19:30 CST): tasks get item 8 too. A page task that asks a ruled question carries the ruling
+    # and item 8, and the judge refuses it. The item text never exempts a task.
+    import question_form  # the one form check (hooks/question_form.py)
+    task = good_task_item(step="Decide whether the GitHub apps keep their access to claude-settings, then say so in chat.")
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t8", "data": task})
+    check("page task fixture: the task passes item_hit, so the model judges it", got == ("", ""), got)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(page_input("set", task, doc_id="t8", cwd=DECISIONS_REPO), answer=refuse)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page task: the one model call carries item 8 and the ruling, and the item never exempts a task",
+          len(r.calls) == 1 and item_text(prompt, 8) != "" and "never applies to a task" not in item_text(prompt, 8).lower()
+          and APPS_RULING in without_call(prompt, task), detail(r))
+    check("page task: a ruled task is refused by the judge", (r.deny() or {}).get("permissionDecision") == "deny"
+          and "Unvetted:" not in r.reason(), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1121,7 +1171,9 @@ def main():
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
                  case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
-                 case_unshown_id_takes_the_unvetted_path):
+                 case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
+                 case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
+                 case_page_task_gets_item_8_and_is_refused):
         try:
             case()
         except Exception as exc:
