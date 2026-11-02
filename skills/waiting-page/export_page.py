@@ -74,8 +74,8 @@ class Stop(Exception):
 
 
 def is_phone(run, after):
-    """True when digit run `run`, followed by the text `after`, reads as a phone number. A date or a time ("2026-11-02 11:04"
-    is ten digits in one run), a run of single digits (a viewBox, points) and a run with no group of three digits do not."""
+    """True when digit run `run`, followed by the text `after`, reads as a phone number. A date and a time in the space
+    form ("YYYY-MM-DD hh:mm" is ten digits in one run), a run of single digits (a viewBox, points) and a run with no group of three digits do not."""
     groups = re.findall(r"\d+", run)
     if sum(len(g) for g in groups) < 10 or DATE_START.match(run) or re.match(r":\d", after):
         return False
