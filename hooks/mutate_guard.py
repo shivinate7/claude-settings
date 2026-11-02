@@ -1900,6 +1900,28 @@ MUTATIONS = [
      '        return layout.record_branch(root)',
      '        return DEFAULT_RECORD_BRANCH', "guard",
      "a lane's push of roadmap-fork is refused in the fork that names it its record branch"),
+    # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
+    # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
+    ("handoff-unread: the refusal is never printed",
+     '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
+     '        pass',
+     "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
+    ("handoff-unread: a failed import of reread_check no longer fails open",
+     '    except Exception:\n        unread_handoff = None\n',
+     '    except Exception:\n        raise\n',
+     "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
+    ("handoff-unread: an agent's call is judged like the main session's",
+     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
+     '        if ph is None or not isinstance(payload, dict):',
+     "guard", "handoff-unread: a payload that carries agent_id is allowed"),
+    ("handoff-unread: the flag is not read, so a set handoff alone refuses",
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
+     '        if not sid or not isinstance(sid, str):',
+     "guard", "handoff-unread: a call is allowed when the flag is absent"),
+    ("handoff-unread: a missing handoff still refuses",
+     '        return handoff if os.path.isfile(handoff) else ""',
+     '        return handoff',
+     "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
 ]
 
 

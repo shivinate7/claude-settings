@@ -2433,7 +2433,7 @@ case "\$dest" in
     case "\$(basename "\$dest")" in
       guard.py|guard_*.py)
         if [ -n "\${SWAP_INSTALL_LOG:-}" ]; then
-          printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S)" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
+          printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)\$/:\1/')" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
         fi ;;
     esac ;;
 esac
@@ -2693,6 +2693,46 @@ installlog1() {
   elif [ -z "$e" ]; then bad "$name" "no end line with exit=0 and a numeric id and pid: $(cat "$log")"
   elif [ "$s" != "$e" ]; then bad "$name" "start names [$s], end names [$e] (id pid)"
   else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# Install-log stamps carry the zone offset, so a reader in another zone sees the true time. stamp_problems
+# LOG PREFIX OFFSET prints one line per problem: each line of LOG that names PREFIX (e.g. "install.sh:") must
+# start with YYYY-MM-DDTHH:MM:SS, a sign, HH:MM and a space, and its offset must be OFFSET. No output means it
+# holds. merge/test_install_from_main.sh has the same step: each suite keeps its own copy, since they share no helper file.
+STAMP_RE='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9][+-][0-9][0-9]:[0-9][0-9] '
+stamp_problems() {
+  lines=$(grep -F "$2" "$1" 2>/dev/null)
+  [ -n "$lines" ] || { echo "no line of the install log names $2"; return; }
+  n=$(printf '%s\n' "$lines" | grep -v -E "$STAMP_RE" | grep -c .)
+  [ "$n" -eq 0 ] || echo "$n line(s) name $2 without an ISO 8601 stamp and offset, first: $(printf '%s\n' "$lines" | grep -v -E "$STAMP_RE" | head -n 1)"
+  n=$(printf '%s\n' "$lines" | cut -c20-25 | grep -v -x -F -e "$3" | grep -c .)
+  [ "$n" -eq 0 ] || echo "$n line(s) name $2 with an offset other than $3"
+}
+
+# ---- logoffset1: under TZ=America/Chicago every install.sh log line carries the zone offset ----
+# The offset is the one that zone has now: date +%z under the same TZ, with a colon added, never a fixed value.
+# The container runs UTC, where the offset is +00:00, so the precondition refuses that: a run that ignored TZ
+# fails here. The landed lines come from the mv shim (SWAP_INSTALL_LOG), so the fixture's own stamp is checked too.
+logoffset1() {
+  name="logoffset1: under TZ=America/Chicago every install.sh log line starts with ISO 8601 time and the zone offset"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/logoffset1-bin"
+  clone="$work/logoffset1-clone"
+  make_guard_clone "$clone" one
+  make_swap_bin "$swap_bin"
+  ev="$work/logoffset1-ev"; : > "$ev"
+  log="$cfg/claude-settings-install.log"
+  want=$(TZ=America/Chicago date +%z | sed 's/\(..\)$/:\1/')
+  ( cd "$clone" && env TZ=America/Chicago HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SWAP_EVENTS="$ev" SWAP_INSTALL_LOG="$log" \
+      PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud ) > "$work/logoffset1-run" 2>&1; rc=$?
+
+  if [ -z "$want" ] || [ "$want" = "+00:00" ]; then
+    bad "$name" "TZ=America/Chicago gave the offset [$want]; the check would prove nothing"
+  elif [ "$rc" -ne 0 ]; then bad "$name" "install exit $rc: $(tail -n 3 "$work/logoffset1-run")"
+  else
+    why=$(stamp_problems "$log" 'install.sh:' "$want")
+    if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
   fi
   rm -rf "$h"
 }
@@ -3632,14 +3672,16 @@ caseK11() {
 
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
-# allow_case NAME HAS: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
-# merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. Then one piped cloud install
-# from inside it. Sets h, co, rc and out.
+# allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
+# merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. SETTINGS=repo puts this repo's
+# settings.json in the checkout instead of `{}`, so the install carries the repo's own permissions too. Then one piped
+# cloud install from inside it. Sets h, co, rc and out.
 allow_case() {
   h=$(new_home); co="$work/$1-co"
   make_checkout "$co" "# $1 content"
-  if [ "$2" = 1 ]; then
-    mkdir -p "$co/merge"; cp "$REPO_ROOT/merge/cloud_allow.json" "$co/merge/cloud_allow.json"
+  if [ "$2" = 1 ] || [ "${3:-}" = repo ]; then
+    if [ "$2" = 1 ]; then mkdir -p "$co/merge"; cp "$REPO_ROOT/merge/cloud_allow.json" "$co/merge/cloud_allow.json"; fi
+    if [ "${3:-}" = repo ]; then cp "$REPO_ROOT/settings.json" "$co/settings.json"; fi
     git -C "$co" add -A; git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m rules
   fi
   allow_install
@@ -3650,7 +3692,7 @@ allow_install() {
         CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
-# Every allow rule in the written settings.json, sorted. The source settings.json is `{}`, so all of them were added.
+# Every allow rule in the written settings.json, sorted. In caseL1 and caseL2 the source settings.json is `{}`, so all of them were added.
 written_allow() { jq -r '.permissions.allow[]?' "$h/.claude-cfg/settings.json" 2>/dev/null | sort; }
 want_allow() { jq -r '.permissions.allow[]' "$REPO_ROOT/merge/cloud_allow.json" | sort; }
 settings_lines() { printf '%s\n' "$out" | grep settings.json; }
@@ -3706,6 +3748,29 @@ caseL3() {
     bad "$name" "no WARNING names the failed write: $(settings_lines)"
   elif [ -e "$h/.claude-cfg/settings.json.tmp" ]; then
     bad "$name" "the partial settings.json.tmp was left behind"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# caseL4: the owner's remote tools go in settings.json by exact name. The cloud install copies that file, so the
+# case reads the written copy. The server-level form would allow every remote tool, so it must not appear.
+caseL4() {
+  name="caseL4: a cloud install of this repo writes the remote add_repo and archive_session tools as exact allow names, never the server-level form"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  allow_case l4 1 repo
+  missing=""
+  for tool in mcp__claude-code-remote__add_repo mcp__claude-code-remote__archive_session; do
+    written_allow | grep -qxF "$tool" || missing="$missing $tool"
+  done
+  server=$(written_allow | grep -E '^mcp__claude-code-remote(__\*)?$')
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ -n "$missing" ]; then
+    bad "$name" "allow rules lack these exact names:$missing; written: $(written_allow | tr '\n' ' ')"
+  elif [ -n "$server" ]; then
+    bad "$name" "the server-level form is allowed: $server"
   else
     ok "$name"
   fi
@@ -4231,6 +4296,7 @@ run lock1sh
 run putfile_nogap1
 run putfile_prose1
 run installlog1
+run logoffset1
 run pinlive1
 run pinlive2
 run guardset1
@@ -4253,6 +4319,7 @@ run caseK11
 run caseL1
 run caseL2
 run caseL3
+run caseL4
 run caseM1
 run caseM2
 run caseM3
