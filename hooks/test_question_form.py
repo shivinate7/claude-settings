@@ -448,6 +448,33 @@ def case_line_order_and_prose():
         chat(name, box, want)
 
 
+# ------------------------------------------------------------------ a press the session makes needs no link
+
+def case_session_press_needs_no_link():
+    # Rule press-link covers a press the owner makes. An option whose how says the session makes the press, after
+    # the owner's pick, asks him for no press, so it needs no link (coordinator ruling, 2026-11-01 21:14 CST,
+    # process-only). An option that asks him to press, with no link, is still refused.
+    session = {"key": "a", "label": "Merge PR #374", "how": "The session merges PR #374 after your pick.",
+               "gain": "It lands at once.", "lose": "Nobody reads it first."}
+    owner = dict(session, how="Press Merge in GitHub.")
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    page("a press the session makes after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[session, keep])), None)
+    page("an owner press of Merge PR #374 in GitHub, with no link, is refused as press-link", "set",
+         entry_of(page_item(options=[owner, keep])), ("press-link", None))
+    chat("a press the session makes after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge PR #374", "description": "The session merges PR #374 after your pick. "
+                                                                    "Gain: it lands at once. Lose: nobody reads it first."},
+                           {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
+         None)
+    chat("an owner press of Merge PR #374 in GitHub, with no url, is refused as press-link",
+         chat_box(options=[{"label": "Merge PR #374", "description": "Press Merge in GitHub. Gain: it lands at once. "
+                                                                    "Lose: nobody reads it first."},
+                           {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]),
+         ("press-link", None))
+
+
 # ------------------------------------------------------------------ a press in the how-text only
 
 def case_chat_press_scan_skips_gain_and_lose():
@@ -1047,7 +1074,7 @@ def case_widens_words_in_the_reply_judge_prompt():
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
-                 case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
+                 case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
