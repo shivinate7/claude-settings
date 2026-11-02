@@ -14094,6 +14094,7 @@ WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer
 WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
 WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
 WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and both blocks empty
+WP_QUEUE_EMPTY = os.path.join(WP_DIR, "queue-empty.html")    # main's page titled with the old name Queue, both blocks empty
 WP_SPACED = os.path.join(WP_DIR, "spaced-empty.html")        # main's raw page with designData written as "{ }"
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
@@ -14152,6 +14153,7 @@ def wp_write_pages():
              (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
              (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)),
              (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Cockpit")),
+             (WP_QUEUE_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="Queue")),
              (WP_SPACED, wp_writer(template, roadmap=False, title=False, design_text="{ }")))
     for path, text in pages:
         wp_put(path, text)
@@ -14219,7 +14221,7 @@ def build_page_nomain():
 
 
 lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE, WP_TITLED_EMPTY,
-              WP_SPACED], build_page_checkout)
+              WP_QUEUE_EMPTY, WP_SPACED], build_page_checkout)
 lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
 
 
@@ -14247,6 +14249,10 @@ wp_publish("main's page with designData written as a space-padded empty object i
            rule="page-stale")
 wp_publish("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
 wp_publish("a page with its own title and empty blocks, as a --write builds it, is allowed", "allow", WP_TITLED_EMPTY)
+# Main's page with the old title and both blocks empty: its text matches main, so only its title differs. The
+# title text alone must not count as data, or the empty page passes the rule main applies to its own page.
+wp_publish("an untouched page titled Queue with empty blocks is refused, as main's page is", "deny", WP_QUEUE_EMPTY,
+           rule="page-stale")
 wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
 wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)

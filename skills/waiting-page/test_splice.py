@@ -359,8 +359,7 @@ class Carry(Folder):
 
 
 class PageName(unittest.TestCase):
-    """The page's name is splice.PAGE_NAME. page.html's static title, setTitle's literal and the roadmap
-    page's title must say it too."""
+    """The page's name is splice.PAGE_NAME. page.html's static title and setTitle's literal must say it too."""
 
     def test_the_static_title_is_the_page_name_and_the_page_name_is_cockpit(self):
         span = SPLICE.title_span(TEMPLATE)
@@ -380,14 +379,13 @@ class PageName(unittest.TestCase):
         self.assertIn(name, literals, "setTitle writes no PAGE_NAME literal")
         self.assertEqual([s for s in literals if "Status" in s], [], "setTitle still adds a Status suffix")
 
-    def test_the_roadmap_page_title_is_claude_settings_then_the_page_name(self):
+    def test_the_roadmap_page_keeps_its_main_title(self):
+        # The roadmap page is never published, so its title stays main's. Carry renames a live title, not this file's.
         with open(ROADMAP_PAGE, encoding="utf-8") as f:
             text = f.read()
         span = SPLICE.title_span(text)
         self.assertIsNotNone(span, "the roadmap page has no document title")
-        title = text[span[0]:span[1]]
-        self.assertNotEqual(title, "claude-settings Roadmap", "the roadmap page is still titled with the old name Roadmap")
-        self.assertEqual(title, "claude-settings " + page_name(self), "the roadmap page title is not the repo and PAGE_NAME")
+        self.assertEqual(text[span[0]:span[1]], "claude-settings Roadmap", "the roadmap page title is not main's")
 
     def test_the_setTitle_reader_skips_comment_openers_in_strings_and_a_template_literal(self):
         # building-scanner-respects-strings: the reader finds the statement and its literals past `/*`, `//`, `#`,

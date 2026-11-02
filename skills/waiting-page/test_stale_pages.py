@@ -3,6 +3,7 @@
 STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside this file), so the
 same cases run red against a checkout that lacks it.
 """
+import importlib.util
 import json
 import os
 import re
@@ -576,6 +577,32 @@ class Stale(unittest.TestCase):
             self.assert_only_new(before, {"behind.html", "current.html"})
         self.assertEqual(spy.call_count, 3)
         self.assertEqual({c.kwargs.get("timeout") for c in spy.call_args_list}, {30})
+
+
+def load_stale_pages():
+    """stale_pages.py as a module, loaded from CMD, so the unit checks run the function the script runs."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)  # the script imports splice from its own folder
+    spec = importlib.util.spec_from_file_location("stale_pages_under_test", CMD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CarriesData(unittest.TestCase):
+    """carries_data is False for a live page whose parts all match the template's. The title is one of those parts."""
+
+    def test_an_untouched_page_titled_with_the_old_name_carries_no_data(self):
+        stale = load_stale_pages()
+        untouched = with_title(PAGE, "Queue")
+        self.assertNotEqual(untouched, PAGE, "the fixture kept the template's title")
+        self.assertFalse(stale.carries_data(PAGE, untouched), "an untouched page titled Queue counts as carrying data")
+
+    def test_an_identical_page_carries_no_data(self):
+        self.assertFalse(load_stale_pages().carries_data(PAGE, PAGE), "the template counts as carrying data")
+
+    def test_a_changed_mockup_carries_data(self):
+        self.assertTrue(load_stale_pages().carries_data(PAGE, set_body(PAGE, MOCK_BODY)), "a live mockup is not counted as data")
 
 
 if __name__ == "__main__":
