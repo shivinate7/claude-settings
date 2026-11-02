@@ -239,8 +239,9 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
   `agent-model-floor`, `port-question`, `question-form`, `page-stale`.
 - **Fit the tool to the rule** (process-only, coordinator 2026-11-01 21:14 CST). The rule stays,
   and the tool moves to fit it:
-  - `agent-model-cap`: a fix step. A plain Explore on Opus asks, as for any spawn above its table
-    model. The `Audit:` marker adds no exception.
+  - `agent-model-cap`: a fix step (refusal-looser-fixes). The owner's waiting-page item 137, pick a
+    (2026-11-01 18:38 CST), rules it: an Explore whose brief carries `Audit:` may run Sonnet or Opus.
+    An Explore on Opus with no `Audit:` mark is refused, unless the owner's override lifts it.
   - `press-link`: a fix step. The rule covers a press the owner makes. The check stops asking for a
     link on a press the session makes.
   - `silent-write`: no step. The guard holds part of its rule, and CLAUDE.md holds the rest. See note
