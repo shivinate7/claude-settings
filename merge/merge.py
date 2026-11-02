@@ -2280,14 +2280,13 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
         return 0
     if c == 1:
-        body = "\n".join([f"the lint of {short} against {base} FAILs:", *(fails or [f"(no FAIL line read; ci-job exit {c})"]), *log])
-        raise Stop(body + "\n" + LANE_LINT_REMEDY)  # the remedy ends it, with the cite: the rule audit reads a `+` chain, not a join
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *(fails or [f"(no FAIL line read; ci-job exit {c})"]), *log, LANE_LINT_REMEDY]))
     if c == 2:
         if unknown_ok.strip():
             say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknown, *log)
             return 0
-        body = "\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log])
-        raise Liftable(body + '\nRun it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY)
+        raise Liftable("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
+                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 def ignore_checks(cfg):
