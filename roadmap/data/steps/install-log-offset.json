@@ -1,0 +1,9 @@
+{
+ "title": "install.sh and install.ps1 write log times with their UTC offset",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21004,
+ "why": "The install logs write local wall time with no offset. The owner's PC runs Eastern, so an 18:40 CST run logged 19:40 (PC session, Nov 1 18:40 CST). A reader cannot tell which zone a line is in. Same defect as guard.log (PR #974).",
+ "note": "Fix: install.sh (near line 282, date +%Y-%m-%dT%H:%M:%S) and install.ps1 (near line 73) write ISO time with offset: Linux date +%Y-%m-%dT%H:%M:%S%:z, macOS %z with a colon added, Windows Get-Date -Format o. Update any reader of these logs. Done when a test shows each writer emits an offset. Asked by the coordinator, Nov 1 18:42 CST. Ready. Port: yes, install runs on every machine.",
+ "updatedAt": "2026-11-02T00:46:00Z"
+}
