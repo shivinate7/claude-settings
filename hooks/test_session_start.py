@@ -40,6 +40,11 @@ def hook_tier_line():
     return found[0]
 
 
+def sentences(line):
+    """The line's sentences, cut at each ". " as merge_role_sentence cuts."""
+    return re.split(r"(?<=\.) ", line)
+
+
 def merge_role_sentence(line):
     """The sentence of the tier line that holds `merge --role`: from the ". " before it to the ". " after it, or to the line's ends."""
     at = line.index("merge --role")
@@ -323,9 +328,10 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 class SessionStartMergeRoleTests(unittest.TestCase):
-    """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the two tiers that may run
-    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES). It reads the hook's own text, so no repo fixture is built. The existing
-    SessionStartTierLineTests prove the line prints once and only in the cloud."""
+    """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the one tier that may run
+    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; owner ruling 2026-11-01 21:34 CST: the coordinator never merges).
+    It reads the hook's own text, so no repo fixture is built. The existing SessionStartTierLineTests prove the line prints
+    once and only in the cloud."""
 
     def test_the_tier_line_names_the_role_writer(self):
         self.assertIn("merge --role", hook_tier_line())
@@ -334,11 +340,17 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
         self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
 
-    def test_the_tier_line_names_both_merge_tiers(self):
-        line = hook_tier_line()
-        for tier in ("coordinator", "batch-runner"):
-            with self.subTest(tier=tier):
-                self.assertIn(tier, line)
+    # owner ruling 2026-11-01 21:34 CST: re-pointed from both tiers to the batch runner alone
+    def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
+        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        self.assertEqual(len(role), 1, role)
+        self.assertIn("cs-build:batch-runner", role[0])
+        self.assertNotIn("coordinator", role[0].lower(), role[0])
+
+    # owner ruling 2026-11-01 21:34 CST: no sentence of the tier line says a coordinator merges
+    def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
+        told = [s for s in sentences(hook_tier_line()) if re.search(r"\bmerge", s, re.IGNORECASE) and "coordinator" in s.lower()]
+        self.assertEqual(told, [], "the tier line says a coordinator merges")
 
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
