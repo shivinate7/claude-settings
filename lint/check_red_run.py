@@ -127,6 +127,9 @@ def main(args):
     if bad:
         print("check_red_run: add `Red-run: <command> -> <N> failed on <sha>` (N 1 or more), or "
               "`Red-run: none: <reason>` for a change that adds no new claim, to the commit message.")
+        print("check_red_run: a commit already pushed: reword it to add the trailer "
+              "(`git commit --amend` for the last commit, or `git rebase -i` for an older one), "
+              "then push with `git push --force-with-lease`.")
     return 1 if bad else 0
 
 
