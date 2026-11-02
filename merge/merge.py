@@ -37,6 +37,8 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+from clears import clears  # noqa: E402  when a newer run clears a red run (actions/ci-alarm/clears.py); one home, the CI alarm calls it too
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -953,32 +955,56 @@ class Host:
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
+        A red run R is cleared when the newest completed run of another group of the same file is newer than R (created_at), succeeded, and
+        ran every job R ran, each with conclusion success (`clears`: R's job set is its non-skipped jobs, an empty set clears nothing). A newer
+        run that is cancelled, red or still going clears nothing, and its jobs are never read.
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read; a red one costs one
+        more for each newer successful run of another group (read once per run). A failed read is unknown."""
         try:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
             done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
                     and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
-            red, unknown = [], []
-            for r in {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.values():
+            red, unknown, read = [], [], {}
+            latest = list({(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}.items())
+            for (path, group), r in latest:
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
-                got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
+                listed = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                read[r["id"]] = listed
+                got = self.buckets([self.run_row(j, j.get("html_url")) for j in listed], warn=False)
                 steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    red.append(f"{where}: " + "; ".join(jobs))
+                    why = f"{where}: " + "; ".join(jobs)
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
                     unknown.append(f"{where} was cancelled with no red job")
+                    continue
                 else:
-                    red.append(f"{where} ended {r['conclusion']} with no red job")
+                    why = f"{where} ended {r['conclusion']} with no red job"
+                if not self.cleared(r, path, group, latest, read):
+                    red.append(why)
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
+
+    def cleared(self, red_run, path, group, latest, read):
+        """True when a newer successful run of another event group of the same workflow file passed every job `red_run` ran (see base_state).
+        `latest` is base_state's newest run per (file, group); `read` caches each run's jobs by run id, so a run is read once. A failed read is a Stop."""
+        for (p, g), n in latest:
+            if p != path or g == group or n["conclusion"] != "success":
+                continue
+            if not (red_run.get("created_at") and n.get("created_at") and n["created_at"] > red_run["created_at"]):
+                continue
+            if n["id"] not in read:
+                read[n["id"]] = self.pages(f"actions/runs/{n['id']}/jobs", "jobs")
+            if clears(read[red_run["id"]], read[n["id"]]):
+                return True
+        return False
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
