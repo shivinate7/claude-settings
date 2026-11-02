@@ -120,6 +120,7 @@ a port counts, and a local path with no scheme counts by its path. With no reada
 `cs-repo:<owner>/<name>` tag passes. The deny reason names the tag to add. A roll-out lane carries this repo's
 tag beside its target's. The rule runs after `lane-effort-pin`, so a call that breaks both reads the pin
 first. An owner override lifts it.
+The roadmap build shares this read (`github_slug` and `blob_url` in `skills/roadmap/build.py`). For an ssh origin with a port, a non-GitHub https origin or a POSIX local path, the build links its last two path segments on github.com.
 Cost, per lane `create_session` only: one extras file read, and one `git remote get-url origin` process start
 when the extras name no repo. A deny writes one guard.log line. No other file, and no timer.
 Known gaps: a Windows drive path with backslashes reads as no origin. A `cwd` below the repo root reads no
