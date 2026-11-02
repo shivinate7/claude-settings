@@ -758,7 +758,7 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
     A caller that passes `kept_at` gets the line index of each kept line appended to it. A caller that
-    passes `keep_body(quote, header)` keeps the lines of each body it accepts, in place."""
+    passes `keep_body(quote, header, body)` keeps the lines of each body it accepts, in place."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -779,7 +779,7 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
-            if keep_body is not None and keep_body(quote, header_line):
+            if keep_body is not None and keep_body(quote, header_line, bodies[-1][1]):
                 kept.extend(lines[start:index])
                 if kept_at is not None:
                     kept_at.extend(range(start, index))
@@ -817,32 +817,73 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 
 
 # A quoted body that python or node reads holds strings bash never expands, so a backtick or a `$(` in it
-# is text. Perl and ruby run a backtick pair as a shell command, so they are left out: their body keeps
-# every substitution under judgement.
+# is text, unless the script hands a string to a shell. Perl and ruby run a backtick pair as a shell
+# command, so they are left out: their body keeps every substitution under judgement.
 _TEXT_STRINGS_FIRST = _interpreter_header("python[\\d.]*|node")
+# A call that runs a string in a shell, by the name the script spells it with.
+_SHELL_CALL = re.compile(
+    r"\b(?:system|popen\w*|subprocess|Popen|getoutput|getstatusoutput|check_output|check_call|"
+    r"child_process|shelljs|exec|execSync|execFile|execFileSync|spawn|spawnSync|"
+    r"create_subprocess_shell|posix_spawn\w*|exec[lv]p?e?)\b").search
+_RUNNER_WORDS = _SHELLS + "|python[\\d.]*|perl|ruby|node|source|\\."
+_REDIRECT_TARGET = re.compile(r"""(?:>>?|\btee(?:[ \t]+-\w+)*)[ \t]*['"]?([^\s;&|<>()'"]+)""")
+
+
+def _heredoc_commands(header: str) -> list:
+    """The command text that feeds each heredoc of one header line: the segment that holds `<<`, with
+    each segment piped onward from it (`cat <<EOF | sh`). Another command on the line (`echo python;`)
+    is no part of it."""
+    ends: list = []
+    pieces = split_segments(header, ends)
+    commands = []
+    for index, piece in enumerate(pieces):
+        if "<<" in piece:
+            end = index
+            while end + 1 < len(pieces) and ends[end] == "|":
+                end += 1
+            commands.append("|".join(pieces[index:end + 1]))
+    return commands or [header]
+
+
+def _written_then_run(commands: list, cmd: str) -> bool:
+    """True when a heredoc writes a file (`> x.sh`, `| tee x.sh`) that a shell or an interpreter, or the
+    shell itself (`./x.sh`), runs elsewhere in the command."""
+    for command in commands:
+        for target in _REDIRECT_TARGET.findall(command):
+            name = re.escape(target[2:] if target.startswith("./") else target)
+            if re.search(r"(?<![\w./-])(?:" + _RUNNER_WORDS + r")[ \t]+(?:-[\w-]+[ \t]+)*['\"]?(?:\./)?"
+                         + name + r"(?![\w.-])|(?:^|[\s;&|(])\./" + name + r"(?![\w.-])", cmd):
+                return True
+    return False
 
 
 def env_scan_view(cmd: str):
     """Return (text, plain bodies) for the environment layer.
 
-    A body stays in `text` only when ITS OWN header line feeds it to a shell or an interpreter, so
-    a quoted data body is never kept because another heredoc in the call is. A body that python or
-    node reads under a quoted delimiter goes in `plain bodies` instead: the layer judges its words
-    and opens no substitution in it. A body with no closer runs to the end of input, so the whole
-    command stays in `text`, as `strip_heredoc_bodies` keeps it."""
+    A body stays in `text` only when the command that feeds it (the segment that holds its `<<`)
+    hands it to a shell or an interpreter, or writes it to a file the call then runs. A quoted data
+    body is never kept because another heredoc, or another command on its line, is. A body that
+    python or node reads under a quoted delimiter, and that calls no shell, goes in `plain bodies`
+    instead: the layer judges its words and opens no substitution in it. A body with no closer runs
+    to the end of input, so the whole command stays in `text`, as `strip_heredoc_bodies` keeps it."""
     if "<<" not in cmd or _walk_heredocs(cmd)[2]:
         return cmd, []
 
     def runs(header: str) -> bool:
-        return INTERPRETER_HEREDOC(_without_message_values(header))
+        commands = _heredoc_commands(header)
+        return (any(INTERPRETER_HEREDOC(_without_message_values(c)) for c in commands)
+                or _written_then_run(commands, cmd))
 
-    def text_strings(quote: str, header: str) -> bool:
-        return bool(quote) and not SHELL_HEREDOC(header) and bool(_TEXT_STRINGS_FIRST(header))
+    def text_strings(quote: str, header: str, body: str) -> bool:
+        commands = _heredoc_commands(header)
+        return (bool(quote) and not any(SHELL_HEREDOC(c) for c in commands)
+                and any(_TEXT_STRINGS_FIRST(c) for c in commands)
+                and not _written_then_run(commands, cmd) and not _SHELL_CALL(body))
 
     text = _drop_heredoc_bodies(
-        cmd, keep_body=lambda quote, header: runs(header) and not text_strings(quote, header))
+        cmd, keep_body=lambda quote, header, body: runs(header) and not text_strings(quote, header, body))
     plain = [body for quote, body, header in _walk_heredocs(cmd)[1]
-             if runs(header) and text_strings(quote, header)]
+             if runs(header) and text_strings(quote, header, body)]
     return text, plain
 
 
