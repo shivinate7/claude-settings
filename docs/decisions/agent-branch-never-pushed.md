@@ -11,7 +11,7 @@ Owner, 2026-11-02: `worktree-agent-*` branches never reach origin. Guard rule `a
 - **The refusal** names the rule and the remedy, and never the branch (`git-remedy-never-names-target`). The matched push goes to the log.
 - **One constant.** `AGENT_BRANCH_PREFIX` in `hooks/guard_push_delete.py` is the only copy of the prefix. No prefix constant existed before this rule; the harness names the branch.
 - **An owner override** lifts it (`owner-override`).
-- **Cost.** No file written, no process started beyond the push call's own reads. A push with a named, non-`HEAD` destination spends no git call. A bare push, or a `HEAD` or `@` spec, spends the one or two git reads the force-push rule already spent on a forced push; an unforced one now spends them too.
+- **Cost.** No file written, no process started beyond the push call's own reads. A push with a named, non-`HEAD` destination spends no git call. A bare push, or a `HEAD` or `@` spec, spends one or two git reads. The force-push rule already spent them on a forced push. An unforced push now spends them too.
 - **Limits.** `--all` and `--mirror` push every local branch and are not read by this rule. A push from outside the agent's worktree that names the agent branch through a variable cannot be read.
 - **Protected by** the `push: ... worktree-agent` cases in `hooks/test_guard.py` (nine refusals, ten passes).
 

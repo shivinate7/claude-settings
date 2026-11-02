@@ -3070,7 +3070,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
             if verdict == AGENT_PUSH_RULE:
-                refuse(tool, "deny", AGENT_PUSH_RULE, AGENT_PUSH_REASON, "git push " + " ".join(args))
+                refuse(tool, "deny", "agent-branch-push", AGENT_PUSH_REASON, "git push " + " ".join(args))
             elif verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
