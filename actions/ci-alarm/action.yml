@@ -1,8 +1,10 @@
 name: CI alarm
 description: >
-  Opens (or comments on) one issue when the latest completed run of any workflow on a branch is
-  red. Call it from a scheduled workflow with `permissions: {actions: read, issues: write}`; it
-  needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
+  Opens (or comments on) one issue when the newest completed run of any workflow on a branch is
+  red, judged per workflow and per event group (events.json: push and dispatch together, schedule
+  apart), so a green push never hides a red nightly run. Runs of other events, and of deleted
+  workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
+  workflow with `permissions: {actions: read, issues: write}`; it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
 inputs:
   branch:
     description: Branch to watch.
