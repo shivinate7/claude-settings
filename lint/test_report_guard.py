@@ -2948,6 +2948,22 @@ class OwnerPickTests(OpenPickCase):
         self.assertEqual([i["asked"] for i in s.items()], [T0], "a re-ask must keep one item, with its oldest time")
         self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT, PLAIN), "300 s after the first ask")
 
+    def test_oq_a_sent_pick_re_asked_later_does_not_block(self):
+        # The send cleared the pick. Its re-ask at +360 s, in a turn of its own, is the same question, sent already.
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertIsNone(s.turn(T0 + 120, PLAIN, seq=[op_send(WRITER, FIRST_LINE)]), "the send blocked")
+        self.assertNotBlocked(s.turn(T0 + 360, OWNER_PICK, owner="Carry on."), "the re-ask blocked at once")
+        self.assertNotBlocked(s.turn(T0 + 660, PLAIN), "a sent pick, re-asked at +360 s, blocked at +660 s")
+
+    def test_oq_a_pick_the_owner_answered_is_opened_again_when_re_asked(self):
+        # Only a send, a box or an items write is remembered. An owner answer is not: the owner may ask again.
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertIsNone(s.turn(T0 + 120, PLAIN, owner="A, fold it."), "the owner's answer blocked")
+        self.assertNotBlocked(s.turn(T0 + 360, OWNER_PICK, owner="Carry on."), "the re-ask blocked at once")
+        self.assertBlocked(s.turn(T0 + 660, PLAIN), "the re-asked pick the owner answered was not kept open")
+
     def test_oq_a_box_in_the_pick_turn_means_nothing_is_unsent(self):
         control = OpenSession()
         control.turn(T0, OWNER_PICK, owner="decide")
@@ -2989,12 +3005,12 @@ class OwnerPickTests(OpenPickCase):
         self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control, with no send")
         s = OpenSession()
         s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
-        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "Which way for the pick check?")]))
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, FIRST_LINE)]))
         self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "after the writer got the question")
         self.assertFalse(s.state_exists())
         via_sendmessage = OpenSession()
         via_sendmessage.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
-        via_sendmessage.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "Which way?", tool="SendMessage")])
+        via_sendmessage.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, FIRST_LINE, tool="SendMessage")])
         self.assertNotBlocked(via_sendmessage.turn(T0 + 400, PLAIN), "after a SendMessage to the writer")
 
     def test_oq_a_send_to_someone_else_does_not_answer_once_the_writer_is_known(self):
@@ -3002,6 +3018,25 @@ class OwnerPickTests(OpenPickCase):
         s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
         s.turn(T0 + 100, PLAIN, seq=[op_send(OTHER, "Which way for the pick check?")])
         self.assertBlocked(s.turn(T0 + 400, PLAIN), "a send to a session that is not the writer")
+
+    def test_oq_an_unrelated_send_to_the_writer_does_not_answer_it(self):
+        # A send to the writer answers the pick only when its message carries the pick: the item id or its first line.
+        control = OpenSession()
+        control.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertBlocked(control.turn(T0 + PICK_OWNER_BLOCK_AT + 1, PLAIN), "the control, with no send")
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "PR 12 opened, tests green")]))
+        self.assertBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT + 1, PLAIN),
+                           "an unrelated send to the writer answered the pick")
+
+    def test_oq_a_send_to_the_writer_naming_the_item_id_answers_it(self):
+        s = OpenSession()
+        s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
+        item_id = self.only_item(s)["id"]
+        self.assertIsNone(s.turn(T0 + 100, PLAIN, seq=[op_send(WRITER, "Pick %s: fold the guard?" % item_id)]))
+        self.assertNotBlocked(s.turn(T0 + PICK_OWNER_BLOCK_AT + 1, PLAIN),
+                              "a send to the writer naming the item id did not answer it")
 
     def test_oq_a_send_naming_the_item_id_answers_it_when_no_writer_is_known(self):
         control = OpenSession()
@@ -3024,7 +3059,7 @@ class OwnerPickTests(OpenPickCase):
         self.assertBlocked(control.turn(T0 + 301, PLAIN), "the control, with no send")
         s = OpenSession()
         self.assertIsNone(s.turn(T0, OWNER_PICK, owner="decide",
-                                 seq=[op_writer(), op_send(WRITER, "Which way for the pick check?")]),
+                                 seq=[op_writer(), op_send(WRITER, FIRST_LINE)]),
                           "the pick turn with an earlier send blocked at its Stop")
         self.assertNotBlocked(s.turn(T0 + 301, PLAIN), "a send to the writer earlier in the pick's own turn was missed")
 
@@ -3103,7 +3138,7 @@ class OwnerPickTests(OpenPickCase):
         self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control: a rewrite with no send")
         s = OpenSession()
         s.turn(T0, OWNER_PICK, owner="decide", seq=[op_writer()])
-        s.turn(T0 + 100, PLAIN, active=True, seq=[op_send(WRITER, "Which way for the pick check?")])
+        s.turn(T0 + 100, PLAIN, active=True, seq=[op_send(WRITER, FIRST_LINE)])
         self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "a rewrite Stop did not clear the sent question")
 
     def test_oq_a_pick_free_stop_writes_no_state_and_reads_no_record(self):
@@ -3167,7 +3202,7 @@ class LanePickTests(OpenPickCase):
         self.assert_lane_answers([op_send(PARENT, "Which way for the pick check?")], "send_message to the parent")
 
     def test_ln_a_sendmessage_to_the_parent_in_the_same_turn_answers_it(self):
-        self.assert_lane_answers([op_send(PARENT, "Which way?", tool="SendMessage")], "SendMessage to the parent")
+        self.assert_lane_answers([op_send(PARENT, ASK, tool="SendMessage")], "SendMessage to the parent")
 
     def test_ln_a_send_to_the_writer_in_the_same_turn_answers_it(self):
         self.assert_lane_answers([op_writer(), op_send(WRITER, "Which way?")], "send_message to the writer")
@@ -3184,11 +3219,11 @@ class LanePickTests(OpenPickCase):
         after = OpenSession()
         after.lane()
         self.assertIsNone(after.turn(T0, LANE_PICK, owner="decide",
-                                     seq=[make(), op_send(PARENT, "Which way?")]),
+                                     seq=[make(), op_send(PARENT, ASK)]),
                           "a send after " + label + " is in the turn and must pass")
         before = OpenSession()
         before.lane()
-        out = before.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?"), make()])
+        out = before.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK), make()])
         self.assertBlocked(out, "a send before " + label)
         self.assertIn("Lane pick guard", out["reason"])
 
@@ -3207,6 +3242,56 @@ class LanePickTests(OpenPickCase):
                 "type": "queued_command", "prompt": "Also check the lint job."}},
             "a queued command")
 
+    def notice(self):
+        """A task-notification's text: the machine notice shared_names names."""
+        import shared_names  # hooks/shared_names.py: TASK_NOTIFICATION_TAG
+        return (shared_names.TASK_NOTIFICATION_TAG
+                + "\n<summary>A background task finished.</summary>\n</task-notification>")
+
+    def test_ln_a_task_notification_queued_command_does_not_start_a_new_turn(self):
+        queued = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": self.notice()}}
+        s = OpenSession()
+        s.lane()
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK), queued]),
+                          "a task-notification queued command reset the turn: the send before it was missed")
+
+    def test_ln_a_peer_message_after_a_task_notification_still_starts_a_new_turn(self):
+        queued = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": self.notice()}}
+        s = OpenSession()
+        s.lane()
+        out = s.turn(T0, LANE_PICK, owner="decide",
+                     seq=[op_send(PARENT, ASK), queued, peer_msg("Lint is green.")])
+        self.assertBlocked(out, "a peer message after the notice did not reset the turn")
+        self.assertIn("Lane pick guard", out["reason"])
+
+    def test_ln_a_task_notification_user_text_does_not_start_a_new_turn(self):
+        s = OpenSession()
+        s.lane()
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK), human(self.notice())]),
+                          "a task-notification user text record reset the turn: the send before it was missed")
+
+    def lane_item_id(self):
+        """The id of LANE_PICK's item. A probe Stop with no lane identity keeps the pick open under the same id."""
+        probe = OpenSession()
+        probe.turn(T0, LANE_PICK, owner="decide")
+        return self.only_item(probe)["id"]
+
+    def test_ln_an_unrelated_send_to_the_parent_does_not_answer_the_pick(self):
+        # A send to the parent answers the pick only when its message carries the pick: the item id or its first line.
+        s = OpenSession()
+        s.lane()
+        out = s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "PR 12 opened, tests green")])
+        self.assertBlocked(out, "an unrelated send to the parent answered the pick")
+        self.assertIn("Lane pick guard", out["reason"])
+
+    def test_ln_a_send_to_the_parent_naming_the_item_id_answers_the_pick(self):
+        item_id = self.lane_item_id()
+        s = OpenSession()
+        s.lane()
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide",
+                                 seq=[op_send(PARENT, "Pick %s: fold the guard or add a hook?" % item_id)]),
+                          "a send to the parent naming the item id did not answer the pick")
+
     def test_ln_a_parent_without_the_lane_tag_is_a_lane(self):
         s = OpenSession()
         s.lane(tags=["cs-repo:o/r"], parent=PARENT)
@@ -3215,7 +3300,7 @@ class LanePickTests(OpenPickCase):
         self.assertIn("Lane pick guard", out["reason"])
         ok = OpenSession()
         ok.lane(tags=["cs-repo:o/r"], parent=PARENT)
-        self.assertIsNone(ok.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?")]))
+        self.assertIsNone(ok.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK)]))
 
     def test_ln_a_tag_only_lane_passes_any_send_message_and_the_writer(self):
         control = OpenSession()
@@ -3248,7 +3333,7 @@ class LanePickTests(OpenPickCase):
         self.assertBlocked(control.turn(T0 + 400, PLAIN), "the control: an owner-facing session")
         s = OpenSession()
         s.lane()
-        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, "Which way?")]))
+        self.assertIsNone(s.turn(T0, LANE_PICK, owner="decide", seq=[op_send(PARENT, ASK)]))
         self.assertNotBlocked(s.turn(T0 + 400, PLAIN), "a lane blocked on the owner's 300 s rule")
         self.assertFalse(s.state_exists(), "a lane wrote an open-picks state file")
 
