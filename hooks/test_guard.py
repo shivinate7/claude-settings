@@ -20160,6 +20160,49 @@ role_model_allow("role-model: design-reviewer on opus is allowed (standing grant
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
 
+# ---- H: a Workflow agent() call is judged as a spawn (debt workflow-agent-model-unchecked, decision agent-model-cap).
+# The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
+# Opus ceiling (agent-model-cap) and the role row (agent-role-model). The Audit: marker counts on the brief's first line
+# only. Failure classes: a false allow (an above-row agent() call in a script passes); a false deny (a comment, a string
+# or a template literal hides the brief or the model, or the marker is read past line 1).
+def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=()):
+    """A Workflow script whose agent() call is above its role's row: denied under `rule`."""
+    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, script=script)
+
+
+def workflow_allow(name, script):
+    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, script=script)
+
+
+workflow_refuse("role-model: Workflow builder on opus with no round line is denied under agent-model-cap",
+                _step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with no marker is denied under agent-model-cap",
+                _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on sonnet with no marker is denied under agent-role-model",
+                _step_flow("'Find where X is defined.'", "agentType: 'Explore', model: 'sonnet'"),
+                rule=ROLE_RULE, carries=(ROLE_REMEDY, EXPLORE_MARKER), lacks=ROLE_LACKS)
+workflow_refuse("role-model: Workflow builder on opus as a prompt key is denied under agent-model-cap",
+                "await agent({prompt: 'Fix the failing case.', agentType: 'builder', model: 'opus'});")
+workflow_refuse("role-model: Workflow builder on opus with a lone quote in its brief is denied",
+                _step_flow("\"Don't touch the tests. Fix the case.\"", "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus with a comment opener inside its brief is denied",
+                _step_flow("'See https://example.test/a and /* keep going. Fix the case.'",
+                           "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow builder on opus in a multi-line template brief is denied",
+                _step_flow("`Fix the failing case.\n// keep the old API\nDon't stop.`",
+                           "agentType: 'builder', model: 'opus'"))
+workflow_refuse("role-model: Workflow Explore on opus with Audit: on line two of a template is denied (line one only counts)",
+                _step_flow("`Find where X is defined.\nAudit: check the glossary.`", "agentType: 'Explore', model: 'opus'"))
+# At its row: a builder on sonnet is allowed.
+workflow_allow("role-model: Workflow builder on sonnet is allowed (at its row)",
+               _step_flow("'Fix the failing case.'", "agentType: 'builder', model: 'sonnet'"))
+# Controls: the Audit: marker on line one is the Explore grant (item 137 pick a), and a commented-out call is not a spawn.
+workflow_allow("role-model: Workflow Explore on opus with Audit: on line one is allowed (item 137)",
+               _step_flow("'Audit: check the glossary for meaning drift.'", "agentType: 'Explore', model: 'opus'"))
+workflow_allow("role-model: a commented-out Workflow builder on opus is not a spawn and is allowed",
+               "// agent('Fix the failing case.', {agentType: 'builder', model: 'opus'})\n"
+               "await agent('Fix the failing case.', {agentType: 'builder', model: 'sonnet'});")
+
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
