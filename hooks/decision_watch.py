@@ -870,9 +870,9 @@ def run(hook, model_call=invoke_model, expect_key=None):
 # merge into main landed this turn (Decision 8), unless the reply's own report block already
 # names it, and each `noted`/`subject-unread` guard
 # line from this turn, because the guard allows a subject it could not read and that allow must
-# not be silent. The guard writes a LOCAL time and the transcript a UTC time, so the turn bound is
-# converted to local time, minus one second, because the guard truncates its stamp to whole
-# seconds. Fails open: any failure prints nothing, a missed report and never a wrong one.
+# not be silent. The guard writes its time with a UTC offset (an old line has none, so its time is
+# naive local) and the transcript a UTC time, so the turn bound is converted to naive local time,
+# minus one second, because the guard truncates its stamp to whole seconds. Fails open: any failure prints nothing, a missed report and never a wrong one.
 
 LINT_DIR = os.path.join(HERE, "..", "lint")
 
@@ -1055,8 +1055,9 @@ def last_human_stamp(records):
 def _turn_bound(stamp):
     """Return the last human message time as a naive LOCAL datetime, else None.
 
-    The transcript stamp is UTC and the guard's log stamp is local, so the bound is converted
-    rather than compared across zones. One second is taken off, because the guard truncates its
+    The transcript stamp is UTC, and the reader gives a guard.log line as naive local time (the
+    log stamp carries a UTC offset, or none on an old line), so the bound is converted rather than
+    compared across zones. One second is taken off, because the guard truncates its
     own stamp to whole seconds and a line written in the same second would otherwise be dropped.
     """
     text = (stamp or "").strip()
@@ -1114,7 +1115,10 @@ def collect_unread(stamp):
             # Fallback, a second parser on purpose: the first five tab fields, extras ignored.
             fields = line.split("\t")[:5]
             try:
-                parsed = (fields[3], datetime.fromisoformat(fields[0]), fields[4])
+                moment = datetime.fromisoformat(fields[0])
+                if moment.tzinfo is not None:  # an offset time: naive local, as parse_line gives `when`
+                    moment = moment.astimezone().replace(tzinfo=None)
+                parsed = (fields[3], moment, fields[4])
             except Exception:
                 parsed = None
         if parsed is None or parsed[0] != UNREAD_RULE or parsed[1] < bound:

@@ -10,6 +10,7 @@ import errno
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,20 +26,21 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
-# of os.environ). Point CLAUDE_CONFIG_DIR at a temporary folder for the whole module, so no test
-# appends to the user's guard.log. tearDownModule restores the value it found. A test that sets its
-# own folder (the config report) still wins.
+# of os.environ). Point CLAUDE_CONFIG_DIR at this run's folder for the whole module, so no test
+# appends to the user's guard.log. tearDownModule restores the value it found and removes the folder.
+# A test that sets its own folder (the config report) still wins.
 _ISOLATION = {}
 
 
 def setUpModule():
-    _ISOLATION["dir"] = tempfile.TemporaryDirectory()
+    _ISOLATION["dir"] = _test_temp.run_folder()
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
-    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
+    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
 
 
 def tearDownModule():
@@ -47,7 +49,7 @@ def tearDownModule():
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
     else:
         os.environ["CLAUDE_CONFIG_DIR"] = prev
-    _ISOLATION.pop("dir").cleanup()
+    shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
 
 
 def human(text):
@@ -2537,6 +2539,175 @@ class GuardLogAppendRaceTests(unittest.TestCase):
                                 "record() did not wait out a contended lock: %.2f s" % seconds)
         self.assertEqual(len(rows), 1, "the line was not kept: %r" % rows)
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
+
+
+class PendingRefusalTests(unittest.TestCase):
+    """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
+    Input Needed. The refusals file is written here by hand, so these cases do not depend on
+    hooks/refusal_note.py. Each case works in its own folder under this run's folder (test-temp-standard)."""
+
+    SID = "pd-sid-1"
+    ARCHIVE = "mcp__claude-code-remote__archive_session"
+    ADD_REPO = "mcp__claude-code-remote__add_repo"
+    PROSE = "Nothing landed. The state is unchanged."
+    LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
+                        "> **Input Needed** allow `mcp__github__update_pull_request`?\n> **Next** wait")
+    LANDED_CLEAN = ("> **Done** BUILT abc123\n> **Deviations** none\n"
+                    "> **Input Needed** none\n> **Next** ship it")
+
+    def setUp(self):
+        self.scratch = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.scratch, True)
+        self.cfg = os.path.join(self.scratch, "cfg")
+        os.makedirs(self.cfg)
+
+    def refusals_file(self, sid=SID):
+        return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
+
+    def write_refusals(self, tools, sid=SID):
+        os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
+        with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
+            for tool in tools:
+                handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool,
+                                         "reason": "refused"}) + "\n")
+
+    def pending_tools(self, sid=SID):
+        """The tool_name of each line still in the refusals file, [] when the file is gone."""
+        try:
+            with open(self.refusals_file(sid), encoding="utf-8") as handle:
+                return [json.loads(line)["tool_name"] for line in handle if line.strip()]
+        except FileNotFoundError:
+            return []
+
+    def stop(self, reply, landed=False, active=False, sid=SID):
+        records = [human("do the task")]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records += [tool_use_msg(self.ARCHIVE), tool_result_msg(), assistant_text(reply)]
+        path = write_transcript(records, self.scratch)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
+                "session_id": sid, "cwd": self.scratch}
+        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return run
+
+    @staticmethod
+    def blocked(run):
+        """The block decision the guard printed, or None when the Stop passed."""
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_d_pending_refusal_not_named_under_input_needed_blocks(self):
+        rows = (("unlanded prose reply", False, self.PROSE),
+                ("landed report that asks about another tool", True, self.LANDED_OTHER_ASK))
+        for label, landed, reply in rows:
+            with self.subTest(label):
+                self.write_refusals([self.ARCHIVE])
+                out = self.blocked(self.stop(reply, landed=landed))
+                self.assertIsNotNone(out, "the Stop passed with a pending refusal")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn(self.ARCHIVE, out["reason"])
+                self.assertIn("Input Needed", out["reason"])
+                self.assertIn("notes.md", out["reason"])
+                self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
+
+    def test_e_named_under_input_needed_passes_and_clears_the_entry(self):
+        styles = (("backticks", "> **Input Needed** allow `%s`?"),
+                  ("plain", "> **Input Needed** allow %s?"))
+        for label, line in styles:
+            with self.subTest(label):
+                self.write_refusals([self.ARCHIVE])
+                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait"
+                         % (line % self.ARCHIVE))
+                run = self.stop(reply)
+                self.assertEqual(run.stdout.strip(), "", "a named refusal still blocked: %s" % run.stdout)
+                self.assertNotIn(self.ARCHIVE, self.pending_tools(), "the passing reply did not clear the entry")
+
+    def test_e2_every_pending_tool_named_passes_and_clears_all(self):
+        self.write_refusals([self.ARCHIVE, self.ADD_REPO])
+        reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                 "> **Input Needed** allow `%s` and `%s`?\n> **Next** wait" % (self.ARCHIVE, self.ADD_REPO))
+        run = self.stop(reply)
+        self.assertEqual(run.stdout.strip(), "", "a reply that names both refusals still blocked: %s" % run.stdout)
+        self.assertEqual(self.pending_tools(), [], "the passing reply left an entry in the file")
+
+    def test_e3_a_name_outside_input_needed_is_no_answer(self):
+        self.write_refusals([self.ARCHIVE])
+        reply = ("> **Done** OTHER read `%s` in the refusal list\n> **Deviations** none\n"
+                 "> **Input Needed** none\n> **Next** wait" % self.ARCHIVE)
+        out = self.blocked(self.stop(reply))
+        self.assertIsNotNone(out, "a name in Done passed as the answer to the refusal")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertEqual(self.pending_tools(), [self.ARCHIVE])
+
+    def test_k_a_plain_word_in_input_needed_does_not_clear_a_built_in_tool(self):
+        # Edit and Bash are English words, so a bare mention of either does not name the tool.
+        rows = (("Edit", "Edit the record first?"), ("Bash", "Bash output was empty"))
+        for tool, text in rows:
+            with self.subTest(tool):
+                self.write_refusals([tool])
+                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                         "> **Input Needed** %s\n> **Next** wait" % text)
+                out = self.blocked(self.stop(reply))
+                self.assertIsNotNone(out, "a plain mention of %s cleared it" % tool)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % tool, out["reason"])
+                self.assertEqual(self.pending_tools(), [tool], "a plain mention cleared the entry")
+
+    def test_k2_a_backticked_built_in_tool_name_clears_it(self):
+        for tool in ("Edit", "Bash"):
+            with self.subTest(tool):
+                self.write_refusals([tool])
+                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                         "> **Input Needed** allow `%s`?\n> **Next** wait" % tool)
+                run = self.stop(reply)
+                self.assertEqual(run.stdout.strip(), "", "a backticked %s still blocked: %s" % (tool, run.stdout))
+                self.assertEqual(self.pending_tools(), [], "the passing reply left %s in the file" % tool)
+
+    def test_k3_a_short_mcp_name_does_not_clear_the_full_name(self):
+        self.write_refusals([self.ARCHIVE])
+        reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                 "> **Input Needed** allow `archive_session`?\n> **Next** wait")
+        out = self.blocked(self.stop(reply))
+        self.assertIsNotNone(out, "the short name cleared the full MCP name")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("`%s`" % self.ARCHIVE, out["reason"], "the block reason does not quote the full name")
+        self.assertEqual(self.pending_tools(), [self.ARCHIVE])
+        # The reason quotes the full name, so one rewrite that names it clears the entry.
+        reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                 "> **Input Needed** allow `%s`?\n> **Next** wait" % self.ARCHIVE)
+        run = self.stop(reply, active=True)
+        self.assertEqual(run.stdout.strip(), "", "the rewrite that names the full name blocked: %s" % run.stdout)
+        self.assertEqual(self.pending_tools(), [], "the rewrite left the entry in the file")
+
+    def test_f_stop_hook_active_does_not_block_on_a_refusal(self):
+        rows = (("unlanded", False, self.PROSE), ("landed", True, self.LANDED_OTHER_ASK))
+        for label, landed, reply in rows:
+            with self.subTest(label):
+                self.write_refusals([self.ARCHIVE])
+                run = self.stop(reply, landed=landed, active=True)
+                self.assertEqual(run.stdout.strip(), "", "a stop_hook_active Stop blocked on a refusal: %s" % run.stdout)
+
+    def test_g_no_refusals_file_is_a_no_op(self):
+        rows = (("unlanded", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for label, landed, reply in rows:
+            with self.subTest(label):
+                run = self.stop(reply, landed=landed)
+                self.assertEqual(run.stdout.strip(), "", run.stdout)
+                self.assertFalse(os.path.exists(self.refusals_file()), "the Stop wrote a refusals file")
+
+    def test_i_another_sessions_refusals_do_not_block(self):
+        self.write_refusals([self.ARCHIVE], sid="pd-other-sid")
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.stdout.strip(), "", "another session's refusal blocked this Stop: %s" % run.stdout)
+        self.assertEqual(self.pending_tools("pd-other-sid"), [self.ARCHIVE])
+
+    def test_j_unreadable_refusals_file_fails_open(self):
+        os.makedirs(os.path.dirname(self.refusals_file()), exist_ok=True)
+        with open(self.refusals_file(), "w", encoding="utf-8") as handle:
+            handle.write("not json\n")
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
 
 
 if __name__ == "__main__":
