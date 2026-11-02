@@ -894,18 +894,27 @@ def key_named_hit(texts) -> str:
     return ""
 
 
+def _design_keys(d, options) -> set:
+    """The keys a design belongs to, as the page's optionDesigns reads them. A design's own `option`, a
+    non-empty string, wins and is its only key, named in the write or not. A design with no `option`, or an
+    empty one, belongs to each option whose `design` is its slug. Any other `option` names no key."""
+    own = d.get("option")
+    if isinstance(own, str) and own:
+        return {own}
+    if own is None or own == "":
+        return {o["key"] for o in options if o.get("design") == d.get("slug")}
+    return set()
+
+
 def _design_label_hit(designs, options) -> str:
-    """The matched tag when a design's label opens with a letter tag naming none of the keys of the options
-    that carry the design (the page's optionDesigns: by slug, or by the design's own `option`). A design no
-    option carries has no key to judge."""
+    """The matched tag when a design's label opens with a letter tag naming none of the design's keys
+    (`_design_keys`). A design with no key has nothing to judge. `options` holds only checked options, or none."""
     if not isinstance(designs, list):
         return ""
     for d in designs:
         if not isinstance(d, dict):
             continue
-        keys = {o["key"] for o in options if o.get("design") == d.get("slug") and d.get("option") in (None, o["key"])}
-        if isinstance(d.get("option"), str):
-            keys.add(d["option"])
+        keys = _design_keys(d, options)
         if keys:
             hit = _label_tag_hit(d.get("label"), keys, "design label")
             if hit:
@@ -915,8 +924,9 @@ def _design_label_hit(designs, options) -> str:
 
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
-    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
-    closed item pass; an update that carries no `options` has no keys to judge."""
+    position's letter, opens an option or design label with another letter's tag, or names an option in
+    its text by a letter-and-digit key. A task, a note and a closed item pass. An update that carries no
+    `options` judges only its text and each design that names its own `option`."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     if data.get("status") == "closed":
@@ -938,9 +948,11 @@ def option_letter_hit(op: str, data) -> str:
             hit = _label_tag_hit(o.get("label"), {key}, "option label")
             if hit:
                 return hit
-        hit = _design_label_hit(data.get("designs"), options)
-        if hit:
-            return hit
+    else:
+        options = []
+    hit = _design_label_hit(data.get("designs"), options)
+    if hit:
+        return hit
     return key_named_hit(_item_text_fields(data))
 
 
