@@ -907,3 +907,6 @@
 - feel-trial-trailing-text: a device-trial line with text after the time (a trailing period, a device name) reads as no trial, and the FAIL text prints no accepted form (lint/check_record_slugs.py).
 - feel-debt-abandon-blocked: an abandoned feel debt (screen removed, owner drops it) cannot be deleted or have its Feel line dropped; only a false trial line gets past (lint/check_record_slugs.py).
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
+- cc-facts-word-in-string: cc_facts reads an env var name from `word.NAME` inside a string literal as a code read (hooks/precompact_handoff.py).
+- cc-facts-unbounded-decl: `_cc_assigned` finds a declaration at any distance, so a lost literal can resolve to an unrelated same-named number and miss a change (hooks/precompact_handoff.py). A bound of about 50 KB before and 2 KB after would close it.
+- cc-line-cut-tail: `_cc_line` cuts a 240-char line, so a one-fact change with a long list value loses the "Read:" pointer (hooks/precompact_handoff.py).
