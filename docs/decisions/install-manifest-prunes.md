@@ -15,5 +15,6 @@ Why: copy mode (cloud, and Windows with no link rights) left every removed file 
 
 Cost: per install, one `git ls-files` start per landed folder and one manifest file written, read once at the next install. No new long-lived process, no timer. A removal that fails keeps its manifest line, so the next install retries it.
 
-Kind: product
+Kind: build
 Home: install.sh
+Plan: docs/decisions/install-manifest-prunes.md#the-ruling (all)

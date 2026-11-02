@@ -549,7 +549,10 @@ ship_load() {
   eval "sl_have=\${ship_have_$sl_k:-}"
   if [ -z "$sl_have" ]; then
     sl_out=$( { git -C "$SRC" ls-files --cached --others --exclude-standard -z -- ":(literal)$1" 2>/dev/null; echo "rc=$?"; } | tr '\0' '\n')
-    sl_rc=${sl_out##*rc=}; sl_list=${sl_out%rc=*}
+    # shellcheck disable=SC2034  # read through the eval below
+    sl_rc=${sl_out##*rc=}
+    # shellcheck disable=SC2034  # read through the eval below
+    sl_list=${sl_out%rc=*}
     eval "ship_have_$sl_k=1; ship_rc_$sl_k=\$sl_rc; ship_list_$sl_k=\$sl_list"
   fi
   eval "SHIP_RC=\$ship_rc_$sl_k; SHIP_LIST=\$ship_list_$sl_k"
