@@ -727,24 +727,26 @@ class TempSweepTests(unittest.TestCase):
               json.dumps({"pid": pid, "startedAt": started_ms, "cwd": self.base}))
 
     def test_a_live_session_pid_keeps_its_idle_folder(self):
-        live_id, dead_id, control_id = temp_session_id(20), temp_session_id(21), temp_session_id(22)
+        live_id, mismatched_id, control_id = temp_session_id(20), temp_session_id(21), temp_session_id(22)
         live = self.make_session(live_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
-        dead = self.make_session(dead_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS)
+        mismatched = self.make_session(mismatched_id, transcript_hours=TEMP_IDLE_HOURS,
+                                       folder_hours=TEMP_IDLE_HOURS)
         control = self.make_session(control_id, transcript_hours=TEMP_IDLE_HOURS)
         self.write_session_record(live_id, os.getpid(), this_process_start_ms())
         # The pid is held by a live child, so no other process takes it. The start time is a day
-        # ahead of the real one: the reader then answers False on every OS. A start time of 0 reads
-        # a recycled pid as unknown, which keeps the folder.
+        # ahead of the real one, so the reader answers a confident False on every OS. A start time
+        # of 0 reads a live pid as unknown, which keeps the folder.
         held = held_sleeper(self)
         started = int(time.time() * 1000) + 86400000
-        self.write_session_record(dead_id, held.pid, started)
+        self.write_session_record(mismatched_id, held.pid, started)
         proc = self.run_step("--confirm")
         self.check_removed(control, "positive control: an idle 25-hour session with no sessions record "
                                     "must be removed in this run", proc)
         self.check_kept(live, "a session whose transcript is idle 25 hours but whose pid is live must "
                               "be kept", proc)
-        self.check_removed(dead, "a session whose transcript is idle 25 hours and whose record names a "
-                                 "recycled pid, a pid whose start time differs, must be removed", proc)
+        self.check_removed(mismatched, "a session whose transcript is idle 25 hours, whose record names "
+                                       "a live pid, and whose start time is a day ahead of the process's "
+                                       "real start, must be removed", proc)
         self.check_exit(proc)
 
     def test_a_link_inside_a_removed_folder_leaves_its_target_intact(self):
@@ -4246,8 +4248,7 @@ class _AgentEndFixture(unittest.TestCase):
 
     @staticmethod
     def stop(proc):
-        proc.kill()
-        proc.wait(timeout=10)
+        _stop_held(proc)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
@@ -4284,16 +4285,12 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_a_stale_lock_does_not_change_the_own_worktree_keep(self):
-        # A stale lock must not let the hook remove the own tree.
-        gone = subprocess.Popen([sys.executable, "-c", "pass"])
-        gone.wait()
-        dead_pid = gone.pid
-        # Windows reads an exited pid as live while this process still holds its handle, so drop it.
-        del gone
-        gc.collect()
+        # A stale lock must not let the hook remove the own tree. The pid is held by a live child, so
+        # no other process takes it. The start time is in 2000, far from the child's real start, so
+        # the verdict is stale on every OS. A start time near now would read a reused pid as live.
+        holder = held_sleeper(self)
         own = self.add("stalelock")
-        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime())
-        reason = "claude agent agent-stalelock (pid %d start %s)" % (dead_pid, stamp)
+        reason = "claude agent agent-stalelock (pid %d start Sat Jan 15 00:00:00 2000)" % holder.pid
         self.assertTrue(sweep.stale_agent_lock_verdict(reason), "the fixture lock is not stale: %r" % reason)
         self.lock(own, reason)
         self.fire("stalelock", own)
