@@ -172,8 +172,7 @@ to ask for. Six records is too few to rank either side with confidence.
 - Loss if added: about 1,570 new words per task. A push to parallelize that one case shows as
   harm. It also sets a second home for working rules.
 - What would change the verdict: a trial. Run the same briefs with and without the skill and
-  count owner corrections and unasked acts. That needs the owner's grant and transcripts from his
-  computer.
+  count owner corrections and unasked acts. The owner picked it: see the Trial section.
 
 ## Hypotize
 
@@ -213,4 +212,170 @@ experiments is unknown.
 ## Owner question
 
 The coordinator brings the three verdicts to the owner as one question. Adding any plugin needs
-his word.
+his grant.
+
+## Trial
+
+The owner picked the trial on 2026-11-01 22:44 CST. This section is the design only. No run has
+started. The coordinator starts each run, because a lane does not call `create_session`. A fresh
+Sonnet audit read the first draft for bias and found it tilted toward arm A and toward a null
+result. This design applies its fixes.
+
+**Question.** Does the Ambition Lenses text give a better lane outcome? Better means the owner
+would merge the diff as is, the checks pass, and the work is right, not only small.
+
+**A null result does not confirm skip.** It means the trial found no large effect.
+
+### Cases
+
+Three cases have a brief read word for word. Five more have a known base and PR, but their
+briefs sit at the start of transcripts too long to page (60K to 180K characters per page of user
+events). Their briefs are unknown. A case enters the trial only with its brief.
+
+| Case | PR | Base | Brief | Known outcome | Chance of an extra act |
+| --- | --- | --- | --- | --- | --- |
+| tracking-turn-report-clash | #966, merged | 4b8037d | Read (event ec68be2c) | Brief asked one sentence in the output style. The PR also changed `lint/rule_audit.py`, `lint/rule_mechanisms.json` and the debt notes. The lane's report says `rule_audit.py` was "not named". 3 review rounds | Whether the extra files were needed for checks to pass |
+| option-letters-match | #967, merged | 4b8037d | Read (event 536e545e) | Brief asked the check and its tests. The PR also changed `agents/designer.md` and a decision record. Skipped: naming the test-author's model (Stop hook, event 1428dea6) | Designer text and record fixes beside the check |
+| windows-live-lock-flake | #941, merged | ce80331 | Read (event 7463dd84) | 2 files, in scope. The cause it named is not yet judged. Skipped: no model named for the reviewer (event bd773626); a notes line failed lint | The round-1 reviewer's two small test adds |
+| guard-log-time-offset | #974, merged | 4b8037d | Unknown | Batch runner asked for a missed mod version bump and a dated comment (event 149159e0) | Version bump on a touched mod |
+| install-log-offset | #1000, merged | 17492e5 | Unknown | PR body only: 8 files, 2 rounds | Unknown |
+| playwright-cache-os-key | #970, merged | 4b8037d | Unknown | PR body only: 5 files, 4 review notes | Unknown |
+| none-with-note-is-direction | #980, merged | ea92b0c | Unknown | PR body only: 7 files, 3 decision records | Unknown |
+
+Event ids are transcript event uuids in each case's lane session.
+
+Each brief is in `docs/plans/trial-briefs/<slug>.md`, word for word as the coordinator sent it.
+A case's base commit is the `main` commit its lane started from.
+
+### Arms
+
+| | Arm A | Arm B |
+| --- | --- | --- |
+| Model and effort | Lane row of `agent-model-cap`: Opus, medium | Same |
+| Prompt | Trial preamble, then the case brief, then the frozen step | Same |
+| Base commit | The case's base | Same |
+| Added system prompt | None | The plugin text below, as `append_system_prompt` |
+
+**Arm B's text.** From `JamesFincher/ambition-lenses` at 6ecb9cc17be0a22e8de4b5c3e633bda5df791c7c,
+word for word: `skills/ambition-lenses/SKILL.md` (SHA-256 starts `ab838038e029acab`), then its two
+reference files, which `SKILL.md` names: `references/engineering-checklists.md` (`9fdd7386be35feee`)
+and `references/examples.md` (`61d46c1a24446bd8`). So arm B never reaches for a file it lacks. The
+coordinator fetches each from `raw.githubusercontent.com` at that commit at spawn time. A different
+hash stops the run.
+
+**What arm B differs in from a real install.**
+
+- The SessionStart hook's 30 words ("invoke the ambition-lenses skill ... for the whole task") are
+  left out. Arm B has the whole text from the first turn instead.
+- With a real install the model chooses to call the skill. Arm B always has it, and the
+  reference files load at once, not on demand.
+- A real install puts the text in a tool result. Arm B puts it in the system prompt, which may
+  weigh more.
+- The lane's agents never see arm B's text. A builder writes most of the diff. So arm B tests the
+  plugin's effect on the lane: how it briefs, what it asks for, what it accepts. The trial scores
+  those briefs too (measure 6). An effect through the lane is diluted, so a small effect may not
+  show.
+
+**Trial preamble.** Both arms get this text first. Each line settles a conflict with the brief,
+and the preamble wins.
+
+> Trial run. These lines override the brief below where they differ.
+> 1. Your agents branch from commit `<base>`, not from origin/main. Fetch no other branch and
+>    read no commit after `<base>`.
+> 2. Run the brief's review rounds as agents. Open no PR.
+> 3. Push only to `archive/trial-<run>`. Message no session.
+> 4. Skip each brief step that opens a PR, sends a message or writes the roadmap, and name it
+>    as skipped.
+> 5. The step file the brief names is below the brief. Do not fetch the roadmap branch.
+> 6. End with your report. After it, print one line `=== guard.log ===`, then this session's
+>    rows of `~/.claude/guard.log`, then one line with your count of tool calls.
+
+`<run>` is a random two-letter code from the spawn list. A branch name does not show its arm.
+Both arms of a case start at the same moment, so neither can fetch the other's branch before it
+ends.
+
+### Measures
+
+The primary measure and the win rule are fixed here, before any run.
+
+**Primary: accept as is.** A blind reviewer answers yes or no: would the owner merge this diff
+with no change? It answers after it sees the checks' verdict (measure 2). An arm wins a case when
+its diff gets yes and the other arm's gets no. Every other result is a tie. Arm B is better when
+it wins 7 or more of 8 cases with a winner; arm A, the same. Any other split is no result.
+
+| # | Measure | How it is read | Gold standard |
+| --- | --- | --- | --- |
+| 1 | Accept as is (primary) | Blind reviewer | Yes |
+| 2 | Checks pass | The coordinator runs `ste-changed <base>` and the tests the diff touches, on each branch | All pass |
+| 3 | Work is right | Blind reviewer: does the diff do what the brief asks? For a bug, is the cause named right, with evidence? | Yes |
+| 4 | Extra acts | Blind reviewer: each file or hunk the brief did not name, sorted as needed (a check fails without it), useful (the owner would keep it) or noise | No noise. Needed and useful acts count for the arm |
+| 5 | Skipped acts | Blind reviewer: each act the brief needs that the diff or the report lacks, such as naming each agent's model | 0 |
+| 6 | Agent briefs | Blind reviewer: the briefs the lane wrote to its agents, with arm words removed. Does each carry the task, the check and the report cap (rule `roles-brief-contents`)? | Each does |
+| 7 | Refusals per tool call | Rows after the `=== guard.log ===` line, over the printed tool-call count | Lower |
+| 8 | Report words | `wc -w` of the text before `=== guard.log ===` | The brief's cap or fewer |
+| 9 | Tokens | `get_session` `context_usage.used_tokens` at the end, minus arm B's text (about 2,700 for `SKILL.md` alone; the coordinator counts the full text). Agents' tokens are not in it, in either arm | Lower, at equal outcome |
+
+**Blind reviewer.** One Sonnet reviewer per diff, in a fresh context, so no diff is judged against
+another. Each case has three diffs: arm A, arm B, and the merged PR as a calibration diff. Each
+reviewer gets the brief, the frozen step, `git diff <base>..<branch>` with no commit messages, and
+the checks' verdict. Before it scores, the coordinator removes arm B's words from added prose
+("Altitude", "Depth", "Range", "Speed", "lens"). After it scores, the reviewer guesses the arm,
+and the coordinator logs how often it guesses right. A hit rate well above one in two means the
+blinding leaked.
+
+**Noise.** One case also runs arm A twice (an A-versus-A pair). If the two A runs differ on the
+primary measure, one run per arm cannot separate the arms, and the report says so.
+
+**Confounds.**
+
+- The global rules load from today's `main`, not from the case's date. That is the same in both
+  arms. Some faults in the case history are now rules or guards, so both arms may avoid them.
+- `main` holds each lane's merged fix. Preamble line 1 forbids reading past `<base>`, but nothing
+  enforces it. Arm B's "go to the rawest source" may push it to look. The coordinator checks each
+  run's transcript for a fetch or read past `<base>`, and drops that run's case.
+- The three ready cases come from one coordinator, and two share a base. All three are normal-size
+  fixes. The plugin's own table says "Trivial: answer directly", so very small cases would favour
+  a null result. None of the three is trivial.
+
+### Spawn list
+
+Three cases are ready now. Each run is a new session, Opus at medium effort. Its prompt is the
+preamble, the brief file, then the frozen step, with `<base>` and `<run>` filled in.
+
+| Run | Brief file | Base commit | Frozen step (roadmap commit) | Arm |
+| --- | --- | --- | --- | --- |
+| sx | `docs/plans/trial-briefs/tracking-turn-report-clash.md` | 4b8037d4145b27046ff7526238eead4aaa60529f | f122aabe41ed0183907ce7652939a59a12039458 | A |
+| lg | `docs/plans/trial-briefs/tracking-turn-report-clash.md` | 4b8037d4145b27046ff7526238eead4aaa60529f | f122aabe41ed0183907ce7652939a59a12039458 | B |
+| qm | `docs/plans/trial-briefs/option-letters-match.md` | 4b8037d4145b27046ff7526238eead4aaa60529f | 891446e4d2b60053a4f8962a3097a309e11ceba9 | A |
+| mf | `docs/plans/trial-briefs/option-letters-match.md` | 4b8037d4145b27046ff7526238eead4aaa60529f | 891446e4d2b60053a4f8962a3097a309e11ceba9 | B |
+| ct | `docs/plans/trial-briefs/windows-live-lock-flake.md` | ce80331615bda3181ff09628065666b4b766c12c | none | A |
+| ux | `docs/plans/trial-briefs/windows-live-lock-flake.md` | ce80331615bda3181ff09628065666b4b766c12c | none | B |
+| ka | `docs/plans/trial-briefs/option-letters-match.md` | 4b8037d4145b27046ff7526238eead4aaa60529f | 891446e4d2b60053a4f8962a3097a309e11ceba9 | A (the A-versus-A pair) |
+
+The frozen step is `roadmap/data/steps/<slug>.json` at that roadmap commit, the last before the
+brief was sent. The run codes came from a random draw. The arm column is for the coordinator only.
+
+Three cases cannot reach a result: the win rule needs 7 wins in 8. Two ways to reach 8:
+
+- **(a) Past briefs.** The coordinator gives the five unknown briefs from its notes, if it kept
+  them. Paging the transcripts costs about 4 to 15 pages per session.
+- **(b) Next lanes, both arms as shadows.** For each of the next five lanes with a normal-size
+  fix, two shadow sessions get the same brief and base, one per arm, under the same preamble. The
+  real lane runs as usual. Its merged diff is the calibration diff, not arm A. So both arms meet
+  the same preamble and the same limits, and briefs cost nothing to find.
+
+Recommended: (b). The arms stay equal, and the calibration diff shows what the real process
+gave.
+
+### Transcripts on the owner's computer (optional)
+
+The repo cases suffice for the trial. A session on the owner's computer adds the true outcome:
+what he typed back to a session.
+
+- `~/.claude/projects/*/*.jsonl` for the case sessions he ran on his computer: his messages after
+  each lane's report, to count corrections.
+- `~/.claude/guard.log` on that computer: refusals in the same sessions.
+- `~/.claude/handoffs/*.md`: rulings that name a correction.
+
+Why: the repo holds only corrections that became a record. A correction he typed and nobody
+recorded is missing here.
