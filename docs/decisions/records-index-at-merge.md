@@ -33,6 +33,9 @@ already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR r
 refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base. A merge of
 the base into the lane brings the base's page, so it is allowed. The guard needs no exception for the tool:
 it judges Claude's own Bash commands, and the tool's commit runs inside the tool.
+The guard runs before the generator, so it cannot tell whether a chained `generator && git add && git commit`
+will change the page. It refuses such a chain even when the page ends unchanged. The refusal is exact for what
+it can see.
 
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
