@@ -10774,7 +10774,10 @@ sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="P
 
 BT = "builder-test-edit"
 TA = "test-author-scope"
-B = dict(agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# Re-pointed in place (rule builders-cannot-edit-tests, refusal-vs-rule row builder-test-edit): a
+# test path OUTSIDE every repository is no test of this repo, so these refusals run in a real linked
+# worktree, as audit-high did for A below. The same shape checks then judge the same paths in-repo.
+B = dict(agent_id="bld1", agent_type="builder", cwd=GITWT)
 # audit-high (owner ruling 2026-10-13): product code is product code IN a repository. The cases
 # below used to run in NOGIT, which is a temp folder in no repository, so their refusals pinned the
 # outside-repo defect. Run in a real checkout, the same refusals hold on either reading of that rule.
@@ -10801,6 +10804,24 @@ for _path in ("src/app.py", "src/contest.py", "latest_results.md", "docs/attest.
     add("builder-test: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path,
         new_string="x = 1", **B)
 add("builder-test: Read of a test is allowed", "allow", tool="Read", file_path="tests/x.py", **B)
+# refusal-vs-rule (builder-test-edit): a builder may write outside every repository (its own scratchpad,
+# beside PRIVREPO) and a doc in a `spec` folder. A `spec` folder holds code too, so code there still
+# refuses, and so does a guard test in either checkout.
+PROBE = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "test_probe.py")
+add("builder-test: Write of a probe in its own scratchpad, outside every repository, is allowed",
+    "allow", tool="Write", file_path=PROBE, **B)
+add("builder-test: Write of a doc in a spec folder is allowed", "allow", tool="Write",
+    file_path=os.path.join(GITWT, "docs", "spec", "api.md"), **B)
+add("builder-test: Write of the guard's test file in its own worktree is refused", "deny", rule=BT,
+    tool="Write", file_path=os.path.join(GITWT, "hooks", "test_guard.py"), **B)
+# Rule 0, other-checkout, refuses this write before the builder rule runs. The pin names that rule.
+add("builder-test: Write of the guard's test file in the main checkout, from a worktree, is refused",
+    "deny", rule="other-checkout", tool="Write", file_path=os.path.join(GITMAIN, "hooks", "test_guard.py"),
+    **B)
+add("builder-test: Write of code in a spec folder is refused", "deny", rule=BT, tool="Write",
+    file_path=os.path.join(GITWT, "spec", "foo_spec.rb"), **B)
+add("builder-test: Write of a spec-named TypeScript file is refused", "deny", rule=BT, tool="Write",
+    file_path=os.path.join(GITWT, "src", "x.spec.ts"), **B)
 add("builder-test: a repo that lives under a tests folder is not all test files", "allow",
     tool="Edit", file_path=os.path.join(UNDERTESTS, "src", "app.py"), **B)
 add("builder-test: a test inside that repo is still refused", "deny", rule=BT, tool="Edit",
