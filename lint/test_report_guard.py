@@ -2583,10 +2583,21 @@ class PastRulingRelay(unittest.TestCase):
         self.reset_calls()
         self.decided = tcj.make_repo("relay-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
         self.bare = tcj.make_repo("relay-bare")
+        self.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
 
     def reset_calls(self):
-        if os.path.exists(self.record):
-            os.remove(self.record)
+        for name in ("calls.jsonl", "git.log"):
+            path = os.path.join(_ISOLATION["stub"].name, name)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def git_starts(self):
+        # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
+        path = os.path.join(_ISOLATION["stub"].name, "git.log")
+        if not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            return len(f.read().split())
 
     def model_calls(self):
         if not os.path.exists(self.record):
@@ -2626,8 +2637,9 @@ class PastRulingRelay(unittest.TestCase):
         self.assertEqual(len(self.model_calls()), 1)
 
     def test_reply_with_neither_input_needed_nor_a_question_makes_no_call(self):
-        out, _ = self.stop(self.decided, DONE_ONLY)
+        out, _ = self.stop(self.ci, DONE_ONLY)
         self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
         self.assertNotIn("past-ruling", self.reason(out))
 
     def test_prose_question_triggers_the_check(self):
@@ -2661,6 +2673,22 @@ class PastRulingRelay(unittest.TestCase):
         records = [human("decide"), assistant_text(KEYS_EARLIER), assistant_text(KEYS_NOW)]
         out, _ = self.stop(self.decided, records=records)
         self.assertIn("question-keys", self.reason(out), out)
+
+    def test_unshown_id_cite_takes_the_unvetted_path(self):
+        # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
+        bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
+        out, _ = self.stop(self.decided, RELAY, answer=bogus)
+        self.assertIn("Unvetted:", self.reason(out), out)
+
+    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
 
     def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
         records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
