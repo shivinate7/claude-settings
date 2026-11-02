@@ -38,8 +38,9 @@ Verdict count over 21 rows: same 14, local-nuance 7, unconfirmed 0. No row is dr
 
 ## Writer check against the claude-settings source
 
-Three cells above differ from the text at the pinned sha. They are reader misses, not drift. No lane follows from them.
+Four cells above differ from the text at the pinned sha. They are reader misses, not drift. No lane follows from them.
 
 - screenshot-names: `skills/ios-apps/SKILL.md:51` names `--display=LCD` for the outer screen and `--display=LCD-1` for the inner one. The cell says `absent`.
 - confirm-timeout: `skills/ios-apps/SKILL.md:50` says to read `posture` when `-t 6` times out. The cell cites `docs/debts/notes.md:371`, which says boot check timeouts are unmeasured. That is a different fact.
 - lock: the table cites `sim-test.lock` in `bin/sim-test:7`. The older fixture says claude-settings has no lock. Main has since added the lock.
+- after-boot: `skills/ios-apps/SKILL.md:52` says the outer screen may not update after the first `close`: open and close again. The row says the parent has `no home`, so the degen cell was read as a child addition.
