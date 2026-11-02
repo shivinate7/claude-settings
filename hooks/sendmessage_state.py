@@ -49,6 +49,8 @@ MODEL_TIMEOUT = 25
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
 WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/agent-model-cap.md)
 RULE = "parallelism-no-mid-task-talk"
+# The cite names the record, not the rule: the deny prefix already carries the rule id once.
+RULE_CITE = "(decision haiku-prompt-hooks, the SendMessage wording judge holds a peer message to what changes its work)"
 WORDING_PROMPT = (
     "Judge this SendMessage call: %s\nAnswer {\"ok\": true} at once for a resume, a status message, "
     "or an orchestrator instruction. Rule: parallelism-no-mid-task-talk (a lane messages a peer only "
@@ -150,17 +152,18 @@ def refuse(payload, to, reason):
     if reason.startswith(RULE):
         reason = reason[len(RULE):].lstrip(" :-")
     reason = reason or "the receiver must hear only what changes its work."
+    text = reason + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
         guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
         guard_core.set_override_veto(lambda: False)  # a SendMessage holds no act that no override lifts
-        guard_core.refuse("SendMessage", "deny", RULE, reason, to)
+        guard_core.refuse("SendMessage", "deny", RULE, text, to)
     except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
-                                             "permissionDecisionReason": RULE + ": " + reason}}))
+                                             "permissionDecisionReason": RULE + ": " + text}}))
     return 0
 
 

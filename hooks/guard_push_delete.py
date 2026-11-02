@@ -628,7 +628,8 @@ LINKED_NM_REASON = (
     "node_modules here is a link to another checkout's install, and this command would change that "
     "install through the link, for every checkout that shares it. "
     "Remedy: replace the link with a real folder first, for example with the repo's setup script "
-    "(npm run setup where it exists), then run the command again."
+    "(npm run setup where it exists), then run the command again. "
+    "(decision guard-linked-node-modules, a command that would change another checkout's install through a link is refused)"
 )
 
 

@@ -23,6 +23,7 @@ sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -1583,6 +1584,31 @@ class ForkRecord(Fixture):
         self.broken_extras("{not json")
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
+
+
+class SharedTagNames(unittest.TestCase):
+    """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
+    copied literal cannot drift from the guard's check. Identity, not equality: an equal copy fails."""
+
+    def test_repo_and_step_tags_are_the_shared_objects(self):
+        for name in ("REPO_TAG", "STEP_TAG"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(shared_names, name), "hooks/shared_names.py has no %s" % name)
+                self.assertIs(getattr(build, name), getattr(shared_names, name))
+
+    def test_repo_tag_names_is_the_shared_function(self):
+        self.assertTrue(hasattr(shared_names, "repo_tag_names"), "hooks/shared_names.py has no repo_tag_names")
+        self.assertIs(build.repo_tag_names, shared_names.repo_tag_names)
+
+    def test_repo_tag_names_reads_the_tag_strictly(self):
+        # The one reading of a repo tag: the exact `cs-repo:` prefix, no strip, owner/name without case.
+        slug = "shivinate7/claude-settings"
+        self.assertTrue(hasattr(build, "repo_tag_names"), "build has no repo_tag_names")
+        self.assertTrue(build.repo_tag_names("cs-repo:shivinate7/claude-settings", slug))
+        for tag in ("cs-repo:shivinate7/claude-settings ", " cs-repo:shivinate7/claude-settings",
+                    "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
+            with self.subTest(tag=tag):
+                self.assertFalse(build.repo_tag_names(tag, slug))
 
 
 if __name__ == "__main__":
