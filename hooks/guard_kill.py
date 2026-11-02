@@ -473,7 +473,8 @@ def detach_wrapper_hit(tokens) -> str:
     `setsid` starts its own session and returns at once, so the child outlives the call; `-w`
     (`--wait`) makes it wait for the child, which then runs in the foreground, so it passes.
     `nohup` only ignores the hangup signal and waits for its child: with no `&` it detaches
-    nothing. The `&` forms (`nohup cmd &`) are refused by `bare_background_hit`.
+    nothing. The `&` forms (`nohup cmd &`) are refused by `bare_background_hit`. A `setsid` that
+    `nohup` wraps detaches the same way, so the check reads past `nohup` to it.
     """
     index = _skip_assignments_and_keywords(tokens)
     if index >= len(tokens):
@@ -500,6 +501,8 @@ def disown_after_background_hit(tokens) -> str:
         return "disown"
     for i, tok in enumerate(tokens):
         if tok != "&":
+    while index < len(tokens) and basename(tokens[index]) == "nohup":
+        index = _skip_assignments_and_keywords(tokens, index + 1)   # nohup hands on to its child
             continue
         rest = tokens[i + 1:]
         j = _skip_assignments_and_keywords(rest)
