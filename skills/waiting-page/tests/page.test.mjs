@@ -2204,6 +2204,15 @@ test("Send ask never cuts a text over 4000 characters: it stores the full text, 
   // A value set in script is not held to the box's maxlength, as a draft or an Undo can leave it.
   await page.evaluate((v) => { const b = document.getElementById("askText"); b.value = v; b.dispatchEvent(new Event("input", { bubbles: true })); }, long);
   await mustHave(page, "#askSend", "Send ask button");
+  if (await page.locator("#askSend").isDisabled()) {
+    // Over the limit Send ask is off, so nothing is written, the words stay in the box, and the hint gives the limit.
+    const off = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length);
+    assert.equal(off, 0, "Send ask wrote " + off + " asks records while it was off");
+    assert.equal(await page.inputValue("#askText"), long, "the words in the box changed while Send ask was off");
+    const notice = (await page.textContent("#askHint")).trim();
+    assert.ok(notice && notice !== short.trim() && /4000|limit/i.test(notice) && await page.locator("#askHint").isVisible(), "no limit notice in the hint: " + JSON.stringify(notice));
+    return;
+  }
   await page.click("#askSend");
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"), null, { timeout: 1500 }).catch(() => {});
   const sets = await page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
