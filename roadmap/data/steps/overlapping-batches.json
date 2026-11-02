@@ -1,0 +1,9 @@
+{
+ "title": "A batch can run CI on top of the batch ahead of it",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.21033,
+ "why": "Owner, Nov 1 20:54 CST, on the coordinator's question about overlapping batches: \"where in this does my rule say that you can't have overlapping batches?\" Rule git-no-merge-during-batch-ci keeps main from moving under a running batch; a batch built on top of the one ahead is not invalidated when that one merges.",
+ "note": "Today merge/merge.py refuses a merge while another ready PR's CI runs (seen on joyous #63 and #65), which blocks overlap. Fix: the merge tool lets PR N merge while a ready PR whose head contains N's head runs CI; it still refuses when the running PR does not contain N. The batch runner then tests batch N+1 on top of N while N's CI runs. Red first: replay joyous #65 (contains #63) running while #63 merges. The coordinator's 21:05 CST question on this is withdrawn: the owner answered it. Port: yes, the merge tool is shared. Ready.",
+ "updatedAt": "2026-11-02T03:09:00Z"
+}
