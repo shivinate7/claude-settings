@@ -751,7 +751,6 @@ CITE_RE = re.compile(r"\b(decision|rule) ([a-z0-9][a-z0-9-]*)\b")
 HOME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 MAX_DEPTH = 12
 PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call sites are scanned
-CAUGHT_STOP = object()  # the local an `except <Stop class> as name` binds: its text was printed by its origin
 EXEMPT_REASON_WORDS = 6  # the least words an exempt entry's reason may have
 
 # Refusal id -> its home (a step slug or debt id), for an id that still prints no cite. An entry is the home
@@ -807,10 +806,6 @@ REFUSAL_UNCITED_EXEMPT = {
     # several identical sites gives their count as the third entry.
     "merge:Host.base_state: out": ("refusal-matches-rule", "the base state read failed, and the stop prints gh's output unchanged"),
     "merge:Host.gh: network error from `gh": ("refusal-matches-rule", "gh failed on a network error after its retries, and the stop prints gh's output"),
-    "merge:Host.merge: the merge of #": ("refusal-matches-rule", "the merge call's outcome is unknown or not this run's, and the stop names the pull request"),
-    "merge:Host.merge: # is merged at": ("refusal-matches-rule", "the pull request is merged at another head, so the stop names it and reverts nothing"),
-    "merge:Host.merge: network error on the merge call": ("refusal-matches-rule", "a network error hit the merge call, and the stop says to run again"),
-    "merge:Host.merge: the merge call of #": ("refusal-matches-rule", "the merge call exited 0 but the pull request still reads OPEN, so the stop names it"),
     "merge:Host.pages: reading from GitHub failed": ("refusal-matches-rule", "a repo file could not be read from GitHub, and the stop names the file and the error"),
     "merge:Host.pr: reading the pull request failed": ("refusal-matches-rule", "the pull request could not be read, and the stop prints gh's output"),
     "merge:Host.pr_number: no pull request is named": ("refusal-matches-rule", "no pull request is named and the branch cannot be read, so the stop prints git's output"),
@@ -882,10 +877,10 @@ def _bound_names(target):
     return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
 
 
-def _locals(fdef, stops=()):
+def _locals(fdef):
     """name -> [(value, slot)] for each binding in a function. A value of None is a binding made at
     run time (an argument, a loop target), so the name has no static text. A slot is the position
-    in a tuple value that the name unpacks. An `except` name of a class in `stops` is CAUGHT_STOP."""
+    in a tuple value that the name unpacks."""
     locs = {}
     args = fdef.args
     for arg in args.posonlyargs + args.args + args.kwonlyargs + [a for a in (args.vararg, args.kwarg) if a]:
@@ -913,13 +908,19 @@ def _locals(fdef, stops=()):
             for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [a for a in (node.args.vararg, node.args.kwarg) if a]:
                 locs.setdefault(arg.arg, []).append((None, None))
         elif isinstance(node, ast.ExceptHandler) and node.name:
-            caught = isinstance(node.type, ast.Name) and node.type.id in stops
-            locs.setdefault(node.name, []).append((CAUGHT_STOP if caught else None, None))
+            locs.setdefault(node.name, []).append((None, None))  # the caught exception is bound at run time
     return locs
 
 
-def _caught(name, locs):
-    return any(value is CAUGHT_STOP for value, _ in locs.get(name, []))
+def _caught_as_stop(node, name, mod):
+    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches a Stop class.
+    Another clause that binds the same name does not count: its exception is not a Stop."""
+    cur = mod.parents.get(id(node))
+    while cur is not None and not isinstance(cur, ast.FunctionDef):
+        if isinstance(cur, ast.ExceptHandler) and cur.name == name:
+            return isinstance(cur.type, ast.Name) and cur.type.id in mod.stops
+        cur = mod.parents.get(id(cur))
+    return False
 
 
 class _Fixed:
@@ -1009,7 +1010,7 @@ class _Reasons:
 
     def locals_of(self, fdef, mod):
         if id(fdef) not in self._locals:
-            self._locals[id(fdef)] = _locals(fdef, mod.stops)
+            self._locals[id(fdef)] = _locals(fdef)
         return self._locals[id(fdef)]
 
     def alts(self, expr, mod, locs, depth=0):
@@ -1018,8 +1019,6 @@ class _Reasons:
         d = depth + 1
         if isinstance(expr, _Fixed):  # a parameter, bound to the text of its call's argument
             return expr.texts
-        if expr is CAUGHT_STOP:
-            return None
         if isinstance(expr, ast.Constant):
             if expr.value is None or expr.value == "":  # a falsy branch: the caller tests it before refusing
                 return []
@@ -1072,7 +1071,7 @@ class _Reasons:
             if isinstance(expr.func, ast.Name) and expr.args and not expr.keywords:
                 if expr.func.id == "str" and len(expr.args) == 1:  # a refusal's text, read as its argument
                     arg = expr.args[0]
-                    if isinstance(arg, ast.Name) and _caught(arg.id, locs):
+                    if isinstance(arg, ast.Name) and _caught_as_stop(expr, arg.id, mod):
                         return []  # a Stop caught and printed again: its origin is a site of its own
                     return self.alts(arg, mod, locs, d)
                 if expr.func.id in mod.stops:  # `Stop(text)` as a value: the text it carries
@@ -1275,7 +1274,7 @@ def _refusals_of(call, locs, where, unattributed, mod, reasons):
 
 
 def _raw_refuse_reason(node):
-    """The `permissionDecisionReason` expression of a dict literal that prints a refusal (decision deny or ask), else None.
+    """The `permissionDecisionReason` expression of a dict literal that prints a refusal (`permissionDecision` "deny" or "ask"), else None.
     A dict whose decision is a variable is guard_core.refuse() itself, which the calls to it cover."""
     if not isinstance(node, ast.Dict):
         return None
@@ -1337,10 +1336,11 @@ def _qualified_names(tree):
     return names
 
 
-def _is_carried(expr, locs):
-    """`str(e)` where `e` is a Stop caught by an except clause: its text was printed by its origin, a site of its own."""
+def _is_carried(expr, mod):
+    """`str(e)` where `e` is a Stop caught by the except clause above it: its text was printed by its origin, a site of its own."""
     return (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "str"
-            and len(expr.args) == 1 and isinstance(expr.args[0], ast.Name) and _caught(expr.args[0].id, locs))
+            and len(expr.args) == 1 and isinstance(expr.args[0], ast.Name)
+            and _caught_as_stop(expr, expr.args[0].id, mod))
 
 
 def _data_names(expr):
@@ -1367,7 +1367,7 @@ def _params_reaching(expr, params, locs, seen=frozenset()):
             found.add(name)
         elif name in locs and name not in seen:
             for value, _ in locs[name]:
-                if value is not None and value is not CAUGHT_STOP:
+                if value is not None:
                     found |= _params_reaching(value, params, locs, seen | {name})
     return found
 
@@ -1387,16 +1387,19 @@ def _judge(texts, homes, fallback):
     return "no cite", [_norm(t) for t in bad]
 
 
-def _names_read_outside(world):
-    """Every name a module imports or reads as an attribute. A def with one of these may be called where the
-    reader does not look, so it is never a helper."""
+def _names_read_outside(world, owner):
+    """The names of module `owner` that another module of the world reads: `from owner import name`, and
+    `alias.name` where `alias` is `import owner`. A def with one of these may be called where the reader
+    does not look, so it is never a helper. An attribute of any other object is no read of the def."""
     names = set()
     for mod in world.values():
-        for node in ast.walk(mod.tree):
-            if isinstance(node, ast.Attribute):
-                names.add(node.attr)
-            elif isinstance(node, ast.ImportFrom):
-                names.update(alias.name for alias in node.names)
+        if mod.name == owner:
+            continue
+        names.update(orig for src, orig in mod.from_names.values() if src == owner)
+        aliases = {alias for alias, src in mod.module_alias.items() if src == owner}
+        if aliases:
+            names.update(n.attr for n in ast.walk(mod.tree)
+                         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in aliases)
     return names
 
 
@@ -1489,7 +1492,7 @@ class _Helpers:
 
     def site(self, expr, locs, homes):
         """(status, spellings) for a message read at its own site."""
-        if _is_carried(expr, locs):
+        if _is_carried(expr, self.mod):
             return "cited", []
         return _judge(self.reasons.alts(expr, self.mod, locs), homes, _unparse(expr))
 
@@ -1506,7 +1509,7 @@ class _Helpers:
             reach = _params_reaching(msg, params, hlocs)
             if not reach:
                 continue
-            if any(_is_carried(arg, locs) for name, arg in pairs if name in reach):
+            if any(_is_carried(arg, self.mod) for name, arg in pairs if name in reach):
                 rows.append(("cited", []))
                 continue
             flocs, unknown = dict(hlocs), []
@@ -1536,14 +1539,13 @@ def refusal_status(sources, homes, scope, guards=None):
     unattributed: the calls whose id the scan cannot read."""
     world = {name: _Module(name, text) for name, text in sources.items()}
     reasons = _Reasons(world)
-    unseen = _names_read_outside(world)
     statuses, unattributed = {}, []
     guards = scope if guards is None else guards
     for mod in world.values():
         if mod.name not in scope:
             continue
         qualified = _qualified_names(mod.tree)
-        helpers = _Helpers(mod, reasons, unseen)
+        helpers = _Helpers(mod, reasons, _names_read_outside(world, mod.name))
         scopes = [(mod.tree, {}, "<module>", None)] + [(n, reasons.locals_of(n, mod), qualified.get(id(n), n.name), n)
                                                        for n in ast.walk(mod.tree) if isinstance(n, ast.FunctionDef)]
         for node, locs, func, fdef in scopes:
