@@ -32,7 +32,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run replaces it. Give each default-branch run its own group. Put the PR draft state in the group,
    as `snippets.md`, section 4 shows. A draft run skips every job (step 11), so it must never cancel
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
-5. **Cap each job's time.** Caps are generous on purpose, as a stopgap, until the repo's time-pinned tests are gone (decision `ci-job-caps`). Decision `ci-job-caps`
+5. **Cap each job's time.** Caps are generous on purpose, as a stopgap, until the repo's time-pinned tests are gone. Decision `ci-job-caps`
    (each job's cap) holds the rule, the table and how to measure again. A new job's provisional cap
    is 60 min. Mark it `# provisional` until it has 5 green runs. The owner may set another
    provisional cap. Keep `merge.deadlineMinutes` in `.github/stamp.json` at least the largest cap
