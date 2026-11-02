@@ -63,9 +63,8 @@ except Exception as exc:  # the module does not exist yet: every case fails, non
 FAILED = []
 
 # The Edit rule text the hook sends, verbatim, after "Judge this edit to a file: $ARGUMENTS\n".
-# Ruling, lane orchestrator, process-only, 2026-11-01 22:10 CST, from rulings-declare-kind lines 10-11:
-# a second ruling section moves to its own record; the judge never asks for a Kind line, and the lint
-# counts Kind lines.
+# Decision rulings-declare-kind: a second ruling needs its own record. The lint, not the judge, counts
+# Kind lines.
 EDIT_RULE = (
     "Rule: speak-rewrite-superseded-in-place (superseded text is rewritten in place; no story, no old quote, "
     "and no superseded ruling kept beside the new one). A record may state a current fact with its history in "
@@ -441,7 +440,7 @@ def case_f_an_override_lifts_the_refusal():
 # (g) rulings-declare-kind: the judge refuses an edit that adds a second ruling section to a record, and
 # its remedy is that ruling's own record, never a Kind line. It does not refuse a fold that keeps the one
 # Kind line. The model is stubbed, so the rule text the judge is sent is the part a case can read.
-# Ruling: lane orchestrator, process-only, 2026-11-01 22:10 CST, from rulings-declare-kind lines 10-11.
+# Decision rulings-declare-kind: a second ruling needs its own record.
 ADD_OLD = "## How to write a test that earns its keep"
 ADD_NEW = ("## Where CI runs a suite\n\n- Each CI job runs only when a file that its suites read changes.\n\n"
            + ADD_OLD)
