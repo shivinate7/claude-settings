@@ -108,13 +108,15 @@ PAGE_PROMPT = (
     "Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
-# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is added to
-# PAGE_PROMPT only for such a call (skill waiting-page, "Route and close"). It has no `%`: it joins after `%` formatting.
+# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
+# the formatted PAGE_PROMPT, only for such a call (skill waiting-page, "Route and close"). It has no `%`, so it is
+# never formatted.
 NONE_DIRECTION_RULE = (
     "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
-    "the owner again after a \"none of these\" answer. If the note already names an act a session can take with no "
-    "further pick from the owner, block it: the item should close and the note be filed as a step. If the note asks for "
-    "other choices (cheaper, different, more), allow it. The reason names no target."
+    "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
+    "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
+    "further pick from the owner, block it: the item should close and the note be filed as a step. "
+    "The reason names no target."
 )
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
@@ -140,13 +142,15 @@ def writes_an_item(args):
 
 
 def is_reask(write):
-    """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with a note that is
-    a string, non-empty after strip."""
+    """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
+    choice "none", and a note that is a string, non-empty after strip."""
     data = write.get("data") if write.get("op") in ("set", "update") else None
     if not isinstance(data, dict) or not data.get("options"):
         return False
-    note = data.get("lastAnswer")
-    note = note.get("note") if isinstance(note, dict) else None
+    answer = data.get("lastAnswer")
+    if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
+        return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
+    note = answer.get("note")
     return isinstance(note, str) and bool(note.strip())
 
 

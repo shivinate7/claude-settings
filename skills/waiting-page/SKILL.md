@@ -280,7 +280,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" step 3 (new options, or a close when they are not ready) or step 4 (context) says. With no answer, there is no
+  Do it as "Route and close" says: steps 1 and 2 for a `none` note with a clear direction (close, and file the note as a step), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -325,14 +325,15 @@ item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
 turn it is filed. An answer whose lane is busy is filed at
 once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
-item and leaves it open until the lane takes the answer. Then it closes the item. A chat answer has no
+item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path: the note is filed at once on the step, and the item closes when the lane takes it, with no new options. A chat answer has no
 `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
-   direction becomes a step: a roadmap step, sent to triage if the repo has a roadmap, or else a task record
-   in the repo's task home (layout `todo` or `debts`).
+   direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
+   `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
+   (layout `todo` or `debts`).
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
