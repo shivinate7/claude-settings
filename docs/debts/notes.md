@@ -943,3 +943,6 @@
 - verdict-skip-other-runners: TAP `# skip`, go `--- SKIP:`, mocha `pending` and cargo `ignored` read PASS in `bin/verdict`; no runner in the repos uses them. Plan row S8.
 - verdict-skip-stray-text: any exit-0 output that reads `N skipped` or `skipped=N`, such as a sync log, shows SKIP. Display only; the exit code is unchanged. Plan row S8.
 - caution-line-missing: session start prints no caution line, not even the unknown line, when the claude-settings checkout ($d) is unset or has no lint/layout.py (hooks/session_start.sh).
+- ready-heal-second-run: a ready head may already hold its page. If the base gains a record during the wait, the page conflicts. prove() then heals and pushes a merge commit after green, so CI runs twice. The batch brake keeps the base still during a batch run (review round 1 of PR #1035, read from code). Decision: records-index-at-merge
+- ready-resumed-claim-page-push: a resumed claim head with a stale page still pushes a page-only commit to a ready PR, since the draft step refuses a claim head (merge/merge.py confirm; PR #1035). Decision: records-index-at-merge
+- claim-remedy-wording-narrow: the claim-head remedy says the base "claims nothing for" the claim; it also fires when the base has kinds but the claim made no numbers. The remedy is still right (review round 2 of PR #1035). Decision: records-index-at-merge
