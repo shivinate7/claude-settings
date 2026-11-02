@@ -12,10 +12,7 @@ import importlib.util
 import io
 import json
 import os
-<<<<<<< HEAD
 import runpy
-=======
->>>>>>> origin/main
 import shutil
 import subprocess
 import sys
@@ -32,12 +29,8 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
-<<<<<<< HEAD
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
-import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-=======
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
->>>>>>> origin/main
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
@@ -50,12 +43,11 @@ _ISOLATION = {}
 
 
 def setUpModule():
-<<<<<<< HEAD
     global RUN_FOLDER
-    RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard: one run folder per run
-    _ISOLATION["dir"] = tempfile.TemporaryDirectory()
+    _ISOLATION["dir"] = _test_temp.run_folder()  # test-temp-standard: one run folder per test run
+    RUN_FOLDER = _ISOLATION["dir"]
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
-    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"].name
+    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
     stub = tempfile.TemporaryDirectory()
     _ISOLATION["stub"] = stub
     with open(os.path.join(stub.name, "sitecustomize.py"), "w", encoding="utf-8") as f:
@@ -65,31 +57,21 @@ def setUpModule():
     os.environ.update(CJ_LOADED_DIR=stub.name, CJ_RECORD=os.path.join(stub.name, "calls.jsonl"),
                       CJ_ANSWER=tcj.ALLOW)
     os.environ.pop("CJ_MODEL_FAIL", None)
-=======
-    _ISOLATION["dir"] = _test_temp.run_folder()
-    _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
-    os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
->>>>>>> origin/main
 
 
 def tearDownModule():
-    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
     prev = _ISOLATION.pop("prev")
     if prev is None:
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
     else:
         os.environ["CLAUDE_CONFIG_DIR"] = prev
-<<<<<<< HEAD
     for key, value in _ISOLATION.pop("env").items():
         if value is None:
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
     _ISOLATION.pop("stub").cleanup()
-    _ISOLATION.pop("dir").cleanup()
-=======
-    shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
->>>>>>> origin/main
+    shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 def human(text):
@@ -2594,7 +2576,6 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
 
 
-<<<<<<< HEAD
 # ------------------------------------------------------------------ relayed questions and option keys
 #
 # A Stop whose reply holds Input Needed, or a prose line ending in `?` outside code fences, gets one past-ruling model
@@ -3104,7 +3085,8 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript})
-=======
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed. The refusals file is written here by hand, so these cases do not depend on
@@ -3272,7 +3254,6 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
->>>>>>> origin/main
 
 
 if __name__ == "__main__":
