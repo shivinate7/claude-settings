@@ -10,7 +10,7 @@ Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, opt
 
 - The merge tool reads the switch from the base branch on origin, never from the pull request's tree. A pull request cannot turn its own grant on.
 - Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out.
-- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the batch runner, the only merge role. The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
+- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for every merge role. The batch runner is the one role that merges by ruling. The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
 - A value that is not `true` or `false` stops the merge tool as a broken config.
 - Outside the cloud the switch changes nothing. There the tool cannot tell the owner from a session, and the owner must stay able to merge the pull request that turns the switch back on.
 - The owner withdraws the grant in a repo by setting the switch to `false` on main, or by telling a session to. A withdrawal in chat still binds every session. The switch makes the merge tool enforce it.
