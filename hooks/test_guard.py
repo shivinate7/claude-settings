@@ -3217,6 +3217,14 @@ sh("kill: listing signals kills nothing", "kill -l 1", "allow", cwd=NOGIT)
 # Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): `pkill -P`
 # names the children of ONE parent pid, so a parent this session owns passes, as `kill` does.
 sh("kill: pkill -P of the shell's own pid passes", "pkill -P $$", "allow", cwd=NOGIT)
+# Ruling (lane orchestrator, process-only, under shared-trees-no-machine-wide-kill, "Kill only yours"):
+# a parent that the guard cannot read is no pid this session holds, so only `$$` and `$!` pass.
+sh("kill: pkill -P of the last background job's pid passes", "pkill -P $!", "allow", cwd=NOGIT)
+sh("kill: pkill -P of a command substitution is refused", "pkill -P $(pgrep -f vite)", "deny",
+   "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill -P of PPID is refused", "pkill -P $PPID", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: pkill -P of a variable is refused", "pkill -P $SOME_VAR", "deny", "machine-wide-kill",
+   cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: pkill -P of a parent this session started passes", "pkill -P %d" % OWNED.pid,
        "allow", cwd=NOGIT)
