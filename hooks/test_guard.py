@@ -11016,6 +11016,87 @@ add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allo
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 
+# ---- a shell write to a test path. Incident 2026-11-01: a builder changed lint/test_rule_audit.py
+# through a python heredoc in Bash. The early warning above judges Edit and Write only, so each deny
+# row below is red until the guard reads the target of a shell write. BR is a builder in a checkout.
+BR = dict(B, cwd=GITMAIN)
+RULE_AUDIT_EDIT = ("python3 - <<'EOF'\np='lint/test_rule_audit.py'\ns=open(p).read()\n"
+                   "s = s.replace('a', 'b')\nopen(p,'w').write(s)\nEOF")
+PATHLIB_EDIT = ("python3 - <<'EOF'\nfrom pathlib import Path\np = Path('lint/test_rule_audit.py')\n"
+                "p.write_text(p.read_text().replace('a', 'b'))\nEOF")
+PY_C_WRITE = "python3 -c \"open('tests/x.py','w').write('x')\""
+SCAN_TAIL = "cat > /tmp/scan.py <<'EOF'\nprint(1)\nEOF\npython3 /tmp/scan.py"
+TEST_REDIRECTS = (
+    "echo x > src/test_app.py", "echo x >> tests/helper.py", "printf x | tee src/test_app.py",
+    "sed -i 's/a/b/' src/test_app.py", "cat > tests/x.py <<'EOF'\nx = 1\nEOF",
+)
+SHELL_TEST_WRITES = (
+    ("incident heredoc, quoted EOF, rewrites lint/test_rule_audit.py", RULE_AUDIT_EDIT),
+    ("incident heredoc, then a scan tail after EOF", RULE_AUDIT_EDIT + "\n" + SCAN_TAIL),
+    ("incident git show redirected onto lint/test_rule_audit.py",
+     "git show HEAD:lint/test_rule_audit.py > lint/test_rule_audit.py"),
+    ("pathlib heredoc, quoted EOF, write_text on lint/test_rule_audit.py", PATHLIB_EDIT),
+    ("heredoc, unquoted EOF, open-write of tests/x.py",
+     "python3 - <<EOF\nopen('tests/x.py', 'w').write('x')\nEOF"),
+    ("python -c open-write of tests/x.py", PY_C_WRITE),
+    ("node -e writeFileSync of web/a.test.js",
+     "node -e \"require('fs').writeFileSync('web/a.test.js','x')\""),
+    ("echo redirect onto src/test_app.py", TEST_REDIRECTS[0]),
+    ("echo append onto tests/helper.py", TEST_REDIRECTS[1]),
+    ("printf piped to tee on src/test_app.py", TEST_REDIRECTS[2]),
+    ("sed -i on src/test_app.py", TEST_REDIRECTS[3]),
+    ("cat heredoc onto tests/x.py", TEST_REDIRECTS[4]),
+    ("redirect after cd lint, onto test_rule_audit.py", "cd lint && echo x > test_rule_audit.py"),
+    # A lone quote in a heredoc body must not hide the write after it (the scanner respects strings).
+    ("heredoc with a lone quote line, then a write to tests/x.py",
+     "python3 - <<'EOF'\n'\nopen('tests/x.py', 'w').write('x')\nEOF"),
+    # A multi-line template literal must not hide the write after it.
+    ("node heredoc with a multi-line template literal, then a write to web/a.test.js",
+     "node - <<'EOF'\nconst s = `\nline one\nline two\n`;\nrequire('fs').writeFileSync('web/a.test.js', s)\nEOF"),
+    # A comment opener inside quotes is text, so the redirect after it still writes the test.
+    ("echo of a hash in quotes, redirected onto tests/x.py", "echo \"#\" > tests/x.py"),
+)
+for _name, _command in SHELL_TEST_WRITES:
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **BR)
+
+# The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
+SHELL_TEST_ALLOWS = (
+    ("cat of tests/x.py", "cat tests/x.py"),
+    ("grep of src/test_app.py", "grep -n foo src/test_app.py"),
+    ("python heredoc that prints tests/x.py", "python3 - <<'EOF'\nprint(open('tests/x.py').read())\nEOF"),
+    ("python heredoc that reads tests/x.py and writes src/app.py",
+     "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('tests/x.py')\n"
+     "Path('src/app.py').write_text(p.read_text())\nEOF"),
+    ("echo redirect onto src/app.py", "echo x > src/app.py"),
+    ("python heredoc writing src/app.py", "python3 - <<'EOF'\nopen('src/app.py', 'w').write('x')\nEOF"),
+    ("echo of a string that names tests/x.py", "echo \"edit tests/x.py > later\""),
+    ("printf of a string that holds open(tests/x.py)", "printf '%s\\n' 'open(\"tests/x.py\",\"w\")'"),
+    ("heredoc with a comment and a quote inside a string, naming tests/x.py",
+     "python3 - <<'EOF'\n# don't touch tests/x.py\nprint(\"it's # fine\")\nEOF"),
+    ("heredoc with a lone quote line, then a write to src/app.py",
+     "python3 - <<'EOF'\n'\nopen('src/app.py', 'w').write('x')\nEOF"),
+    ("product write with a comment naming a test path", "echo x > src/app.py # tests/x.py"),
+    ("recovery by git checkout of tests/x.py", "git checkout -- tests/x.py"),
+    ("recovery by git restore of tests/x.py", "git restore tests/x.py"),
+    ("scan tail alone: a heredoc to /tmp, then python3 runs it", SCAN_TAIL),
+)
+for _name, _command in SHELL_TEST_ALLOWS:
+    sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
+# The test-author writes tests, so the same shell writes stay allowed to it. A main session, and a
+# session run with --agent builder and no agent_id, is not judged.
+for _name, _command in (
+    ("incident heredoc", RULE_AUDIT_EDIT), ("pathlib heredoc", PATHLIB_EDIT),
+    ("python -c open-write", PY_C_WRITE), ("echo redirect", TEST_REDIRECTS[0]),
+    ("echo append", TEST_REDIRECTS[1]), ("printf piped to tee", TEST_REDIRECTS[2]),
+    ("sed -i", TEST_REDIRECTS[3]), ("cat heredoc", TEST_REDIRECTS[4]),
+):
+    sh("builder-test: test-author shell write, %s, is allowed" % _name, _command, "allow", **A)
+sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDIT, "allow",
+   cwd=GITMAIN)
+sh("builder-test: --agent builder with no agent_id shell write of a test is allowed",
+   RULE_AUDIT_EDIT, "allow", agent_type="builder", cwd=GITMAIN)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
