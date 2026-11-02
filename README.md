@@ -278,7 +278,7 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
 
 `bin/sim-test` runs `xcodebuild test` on one phone simulator. It runs on macOS only, under `/bin/bash` 3.2.
 Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
-It reuses the first booted iPhone. With none booted, it boots the shared iPhone 18 Pro, runs the tests, and shuts that simulator down, also on failure, INT and TERM.
+It runs on the shared iPhone Duo and first takes its lease (`bin/sim-lease`, decision `sim-lease`) as `SIM_LEASE_WHO`. With the Duo shut down, it boots it, runs the tests, and shuts it down, also on failure, INT and TERM. `SIM_TEST_ALSO_PRO=1` then runs the same tests on the iPhone 18 Pro.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
 It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
 
