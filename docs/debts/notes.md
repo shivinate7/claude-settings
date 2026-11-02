@@ -920,3 +920,5 @@
 - install-first-run-rm-no-retry: on the first run with no manifest, a failed delete of a listed link into the clone is not held back, so the manifest is written and the link is never retried (install.sh retire_listed). Decision: install-manifest-prunes
 - install-ps1-nonascii-names: the install.ps1 post-merge hook reads git without -z and the installer decodes -z output with the console encoding, so a non-ASCII shipped name could be skipped. No such name ships now. Decision: install-manifest-prunes
 - install-manifest-test-gaps: no test runs install.ps1's manifest code outside CI, none feeds git a failure mid-install, and none uses odd file names. Decision: install-manifest-prunes
+- handoff-unread: --post-compact in hooks/reread_check.py sets the flag with no agent_id check. Unmeasured whether PostCompact fires inside an agent; if it does, the main session is refused until it reads its handoff. Decision: precompact-handoff
+- handoff-unread: a session with no handoff at compaction writes one, then its next guarded call is refused until it reads that file. One Read. Decision: precompact-handoff

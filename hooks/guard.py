@@ -26,6 +26,13 @@ lifts it: then the call is allowed and no later rule runs, so `never_lifted` che
 override lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
+Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
+set_override_veto and session_home_keep):
+  handoff-unread       deny. After compaction, a call from the main session while its handoff is
+                       unread. The reason names the handoff and says to Read it. A payload with
+                       `agent_id` passes. An override lifts it. A failed import allows.
+                       (precompact-handoff, item 9)
+
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
@@ -856,6 +863,11 @@ WORKTREE_HOME_REASON = (
     "Rule (worktree home): this agent's own working tree is gone, or this call reaches outside "
     "it. "
     "Remedy: make no further change. Stop, and report this to your orchestrator."
+)
+
+HANDOFF_UNREAD_REASON = (
+    "Rule (handoff unread): context was compacted and this session has not read its handoff. "
+    "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
 
 OTHER_CHECKOUT_REASON = (
@@ -3334,6 +3346,15 @@ def judge(payload) -> None:
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
+    # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
+    # Not in never_lifted: the owner may mean the call. A failed import allows.
+    try:
+        from reread_check import unread_handoff
+    except Exception:
+        unread_handoff = None
+    unread = unread_handoff(payload) if unread_handoff else ""
+    if unread:
+        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
