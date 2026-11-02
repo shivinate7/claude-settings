@@ -6,7 +6,7 @@ Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a 
 
 - It called `AskUserQuestion`, the question box. The guard does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the guard does not repeat that.
 - The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
-- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page". It passes only while the pick is under 5 minutes old, in an owner-facing session. The pick-send check in the decision `questions-go-to-owner` (Chat first, then the page) then holds the session to its promise: an open pick over 5 minutes old, with no owner message and no send, blocks the Stop.
+- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page". It passes this guard in an owner-facing session, never in a lane. The pick-send check in the decision `questions-go-to-owner` (Chat first, then the page) then holds the session to its promise: an open pick over 5 minutes old, with no owner message and no send, blocks the Stop.
 
 For an owner-facing session, the box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
 
@@ -31,9 +31,15 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 **Failure.** The check fails open on any error, as the rest of the guard does. A rewrite turn (`stop_hook_active`) stays quiet.
 
-Known limit: a drive name such as "the A: drive and the B: drive" reads as two lettered markers.
+Known limits:
 
-Cost: no new process, timer or log. One layout read per turn whose Input Needed offers a pick and that opened no box. One JSON file per owner-facing session, `<handoffs dir>/<session_id>.picks`, written only at a Stop that records or clears a pick, and deleted when empty. One stat per Stop otherwise. No extra transcript read: the Stop guard reads it already. Test: a Stop whose reply has no pick writes no file.
+- A drive name such as "the A: drive and the B: drive" reads as two lettered markers.
+- An owner message clears every open pick asked before it, not only the one it answers. A pick the next report still lists is asked again, with a fresh clock.
+- Any send in the asking turn counts as the send of that pick. A lane's pick passes on any send in the turn, not only one to its parent.
+- A lane send made before a peer message in the same turn does not count: the peer message starts a new turn.
+- A lane with no get_session record of its own reads as owner-facing.
+
+Cost: no new process, timer or log. One layout read per turn whose Input Needed offers a pick and that opened no box. One JSON file per owner-facing session, `<handoffs dir>/<session_id>.picks`, written only at a Stop that records or clears a pick, and deleted when empty. It also keeps each sent pick's key for 24 hours, so a repeat of a sent pick is not asked again. One stat and one module import (`local_time`) per Stop otherwise. No extra transcript read: the Stop guard reads it already. Test: a Stop whose reply has no pick writes no file.
 
 Kind: process
 Home: lint/report_guard.py
