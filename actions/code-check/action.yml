@@ -10,7 +10,9 @@ description: >
   It also runs the comment check on lines the change adds (Python only), against base.
 inputs:
   base:
-    description: Base commit for the mypy list shrink check. Empty skips that check and says so.
+    description: >
+      Base commit for the mypy list shrink check, and the ref the comment check diffs against.
+      Empty skips both checks and says so.
     required: false
     default: ""
 runs:

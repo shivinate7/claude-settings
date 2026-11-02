@@ -44,12 +44,14 @@ def comment_check(root, base, exclude):
         return []
     rows = [r for r in p.stdout.splitlines() if r.strip()]
     err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
+    hits = ["comment check: %s" % r for r in rows]
+    if p.returncode == 2:  # an unread file ends the run, but hits found before it still fail
+        print("comment check: unknown, %s" % err)
+        return hits
     if p.returncode == 1 and rows:
-        return ["comment check: %s" % r for r in rows]
-    if p.returncode == 1:  # exit 1 with no hit row is a crash, never a clean diff
-        return ["comment check could not run: %s" % err]
-    print("comment check: unknown, %s" % err)
-    return []
+        return hits
+    # exit 1 with no hit row is a crash, and any other code is no verdict: never a clean diff
+    return hits + ["comment check could not run: %s" % err]
 
 
 def load_standard():
