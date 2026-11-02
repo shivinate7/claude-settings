@@ -270,6 +270,9 @@ jobs:
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
+      - name: Red-run trailer fixture suite
+        run: python3 lint/test_check_red_run.py
+
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
 
@@ -287,6 +290,13 @@ jobs:
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
+      - name: Red-run trailer
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 lint/check_red_run.py
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.

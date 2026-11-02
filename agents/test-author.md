@@ -14,8 +14,11 @@ Never write a refused path another way, such as with a shell command or a script
 needs a product change, report that change. The orchestrator assigns it to a builder.
 
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
-Run the tests you write, and show each one fails for the right reason before the build, or
-passes after it. Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+Run the tests you write. Each new case fails on the old code for the right reason. Record that run as a trailer on
+the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).
+Use `Red-run: none: <reason>` only for a change that adds no new claim, such as a re-pointed fixture.
+`lint/check_red_run.py` reads the trailer.
+Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
 Make a red-run checkout under `<repo>/.claude/worktrees/`, named `agent-<something>`. Leave it clean and pushed. A later agent end removes it after 30 idle minutes.
