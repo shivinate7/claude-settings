@@ -19,7 +19,7 @@ The owner said not to take the ask verbatim, but the gripe is real. The id `wait
 - The export script has an `--all` mode. It exports each registered artifact to its export path, with the same scan and mirror rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
 - A decision or a debt cites an artifact as `artifact:<id>`, never by its link. `lint/check_artifact_cites.py` refuses a bare link and an unregistered id. A roadmap step is refused too, unless the run says `--steps list`. That mode only lists a step's links, because lanes never write the roadmap and triage moves them. Briefs and handoffs are working files, outside the check.
 
-Cost: each run of the writer makes five list calls to the page and starts one python process. It makes one commit when a file changed. No timer and no watcher.
+Cost: each run of the writer makes one list call per page of each collection and starts one python process. It makes one commit when a file changed. No timer and no watcher.
 
 Known limits:
 

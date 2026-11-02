@@ -288,7 +288,7 @@ has that role.
 A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and
 the registry then needs one edit. `python3 lint/check_artifact_cites.py` refuses a bare link and an unregistered id
 in decisions and debts. A brief or a handoff is a working file, and the check does not read it. The roadmap steps
-of a repo may still hold links. Run it with `--steps list` to list them for triage to move.
+of a repo may still hold links. List them for triage to move with `python3 ~/.claude/lint/check_artifact_cites.py --root <repo root> --steps list`.
 
 ## Before you switch Claude accounts
 
