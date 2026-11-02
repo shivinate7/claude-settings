@@ -1158,6 +1158,20 @@ def case_page_task_gets_item_8_and_is_refused():
           and "Unvetted:" not in r.reason(), detail(r))
 
 
+def case_mid_reason_unlisted_id_is_a_plain_refusal():
+    # Review round 2: an item 1 to 7 refusal that names an unlisted id mid-reason is a plain refusal. A reason that opens
+    # with an unlisted id is still a bogus cite, and takes the Unvetted path.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    mid = json.dumps({"ok": False, "reason": "Item 5: explain decisions/zzz in plain words."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=mid)
+    check("unlisted id mid-reason: an item 5 refusal that names decisions/zzz stays a plain refusal, not Unvetted",
+          (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(), detail(r))
+    opens = json.dumps({"ok": False, "reason": "decisions/zzz: already decided."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=opens)
+    check("unlisted id opening the reason: still a bogus cite, takes the Unvetted path",
+          "Unvetted:" in r.reason(), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1173,7 +1187,7 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
         try:
             case()
         except Exception as exc:

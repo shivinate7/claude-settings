@@ -2738,6 +2738,38 @@ class PastRulingRelay(unittest.TestCase):
         self.stop(self.decided, records=records, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
 
+    def test_an_unvetted_line_beside_a_prose_question_passes_when_the_model_fails(self):
+        # Review round 2: a prose question with no Input Needed item. The Unvetted line beside the question passes it,
+        # whether it sits on its own line, in a blockquote, or on the question line.
+        beside = ("Should the GitHub apps keep their access to claude-settings?\n" + UNVETTED,
+                  "> Should the GitHub apps keep their access to claude-settings?\n> " + UNVETTED,
+                  "Should the GitHub apps keep their access to claude-settings? " + UNVETTED)
+        for reply in beside:
+            self.reset_calls()
+            out, _ = self.stop(self.decided, reply, model_fail=True)
+            self.assertEqual(out, {}, reply)
+
+    def test_a_second_stop_after_a_peer_message_makes_no_call_for_an_old_question(self):
+        # The question was asked on the first Stop. A plain reply after a peer message must not ask it again.
+        first = [human("decide"), assistant_text(PROSE_Q)]
+        self.stop(self.ci, records=first, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        second = first + [peer_msg("status: the lane ended"), assistant_text(DONE_ONLY)]
+        self.stop(self.ci, records=second, answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+
+    def test_question_keys_keep_their_window_across_a_peer_message(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), peer_msg("status: the lane ended"),
+                   assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_a_question_mark_only_inside_a_code_span_makes_no_call(self):
+        self.stop(self.decided, "Use `keep the apps?` as the probe.", answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+
     def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
         records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
         out, _ = self.stop(self.decided, records=records)

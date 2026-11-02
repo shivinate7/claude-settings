@@ -1078,6 +1078,40 @@ def case_key_overlap_resend_and_fact_lists():
           not fn(FACTS_NOW, [KEY_EARLIER]), "a fact list was refused")
 
 
+KEY_SIMILAR = ("> **Input Needed** Two questions.\n> Keep access to claude-settings?\n> a) keep it\n> b) remove it\n"
+               "> Keep access to other repos?\n> a) keep it on\n> b) turn it off")
+KEY_SIMILAR_EARLIER = "> **Input Needed** Keep access to claude-settings?\n> a) keep it\n> b) remove it"
+KEY_SIMILAR_NOW = "> **Input Needed** Keep access to other repos?\n> a) keep it on\n> b) turn it off"
+
+
+def case_key_overlap_similar_questions_clash():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "key_overlap", None)
+    check("key overlap similar: question_form.key_overlap exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    check("key overlap similar: two similar questions, each a and b with different option text, clash in one reply",
+          bool(fn(KEY_SIMILAR, [])), "two similar questions with a and b passed")
+    check("key overlap similar: a similar question with a and b clashes with an earlier reply's a and b",
+          bool(fn(KEY_SIMILAR_NOW, [KEY_SIMILAR_EARLIER])), "a similar question with a and b passed")
+
+
+def case_past_rulings_skips_the_debt_notes_file():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings notes: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    notes_mark = "notes-4b2c"
+    repo = tcj.make_repo("past-notes-file", debts={"notes": "a note line, not a debt. Marker " + notes_mark + ".",
+                                                   tcj.DEBT_SLUG: tcj.DEBT_WHAT})
+    candidates, _ = fn(tcj.APPS_GOAL, repo)
+    text = str(candidates)
+    check("past rulings notes: a real debt record still reaches the candidates", tcj.DEBT_WHAT in text, text[:200])
+    check("past rulings notes: docs/debts/notes.md is not a record and never reaches the candidates",
+          notes_mark not in text, text[:200])
+
+
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -1092,7 +1126,8 @@ def main():
                  case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
-                 case_key_overlap_resend_and_fact_lists):
+                 case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
+                 case_past_rulings_skips_the_debt_notes_file):
         try:
             case()
         except Exception as exc:
