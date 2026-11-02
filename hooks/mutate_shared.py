@@ -660,6 +660,9 @@ def format_report(rows, gold=None) -> str:
 # the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash with the
 # lockfile beside it in the deps folder (None for no install), "lockfile": its path in the repository,
 # "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
+# "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
+# test one product file (a changed suite is run on the mutants of that file only when its line is listed; a select
+# that fails, or is missing, runs every changed suite and adds a row note),
 # "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
 # each part and keeps the rows that hold something.
 
@@ -833,17 +836,23 @@ def _drop_checkout(repo: str, dest: str) -> None:
 def _replay_row(repo: str, sha: str) -> dict:
     number, title = _pr_of(repo, sha)
     return {"pr": number, "sha": sha, "title": title, "status": "UNKNOWN", "reason": "", "made": 0,
-            "killed": 0, "crashed": 0, "survived": 0, "survivors": [], "unusable": {}, "skipped": {}}
+            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "unusable": {},
+            "skipped": {}, "notes": []}
 
 
 def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
-              jobs=None, deps=None) -> dict:
+              jobs=None, deps=None, pr_budget=None, progress=None) -> dict:
     """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
     lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
-    survived, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why}.
+    survived, not_run, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why},
+    notes [text]. `made` counts every mutant, so killed + crashed + survived + not_run == made.
+    A mutant is not_run when no changed suite reaches its file (the profile's `select`), or when the
+    `pr_budget` seconds, counted from the start of this call, had passed before it started. It is never
+    a survivor. `progress(line)`, when given, gets one line as each mutant finishes.
     `deps` is a folder shared by many calls, for the installs; None makes one and removes it.
     A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer."""
+    started = time.time()
     row = _replay_row(repo, sha)
     code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
     not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
@@ -865,12 +874,32 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     own = tempfile.mkdtemp(prefix="mutate_replay_")
     try:
         return _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout,
-                          jobs or job_count(), deps or os.path.join(own, "deps"))
+                          jobs or job_count(), deps or os.path.join(own, "deps"),
+                          None if pr_budget is None else started + pr_budget, progress)
     finally:
         shutil.rmtree(own, ignore_errors=True)
 
 
-def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps):
+def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float):
+    """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
+    (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
+    for a failure. A suite name is a line of the output; any other line is ignored."""
+    select = profile.get("select")
+    if not select:
+        return None, ""
+    argv = [part.replace("{path}", path) for part in select]
+    try:
+        code, output, timed_out = run_in_group(argv, dest, timeout)
+    except OSError as error:
+        return None, "%s: select did not run (%s), every changed suite runs" % (path, error)
+    if timed_out or code != 0:
+        return None, "%s: select %s, every changed suite runs" % (path, "timed out" if timed_out else "exited %d" % code)
+    listed = {line.strip() for line in output.splitlines()}
+    return [suite for suite in suites if suite in listed], ""
+
+
+def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
+               deadline=None, progress=None):
     """The body of `replay_pr`, inside the temp folder `own`."""
     clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
     found, parse_errors = [], {}
@@ -955,19 +984,40 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         usable = [suite for _seconds, suite in sorted(usable)]  # the quickest first: the first assertion ends a mutant
         bound = min(suite_timeout, max(10.0, 5 * slowest))
 
+        # The suites to run on the mutants of each file: the usable changed suites that `select` lists for it, or
+        # all of them when there is no list. A file no usable changed suite reaches gets none: its mutants are not_run.
+        allowed = {}
+        for path in sorted({mutant[0] for mutant in mutants}):
+            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, suites, suite_timeout))
+            if note:
+                row["notes"].append(note)
+            if listed is None:
+                allowed[path] = list(usable)
+                continue
+            allowed[path] = [suite for suite in usable if suite in listed]
+            if not allowed[path]:
+                row["notes"].append("%s: %s" % (path, "no changed suite reaches it" if not listed else
+                                                "the changed suites that reach it are unusable"))
+
         def score(dest, mutant):
-            path, _label, text = mutant
+            path, label, text = mutant
+            if not allowed[path] or (deadline is not None and time.time() > deadline):
+                return None
             _write(os.path.join(dest, path), text)
             try:
                 kinds = set()
-                for suite in usable:
+                for suite in allowed[path]:
                     kind = run_one(dest, suite, bound)[0]
                     kinds.add(kind)
                     if kind == "assert":
                         break
-                return kinds
             finally:
                 _write(os.path.join(dest, path), clean[path])
+            if progress:
+                verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
+                           else "survived")
+                progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
+            return kinds
 
         with ThreadPoolExecutor(max_workers=count) as pool:
             outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
@@ -976,7 +1026,9 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             _drop_checkout(repo, dest)
 
     for (path, label, _text), kinds in zip(mutants, outcomes):
-        if "assert" in kinds:
+        if kinds is None:
+            row["not_run"] += 1
+        elif "assert" in kinds:
             row["killed"] += 1
         elif kinds & {"crash", "timeout"}:
             row["crashed"] += 1
@@ -984,6 +1036,9 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             row["survived"] += 1
             row["survivors"].append((path, _line_of(label), label))
     row["made"] = len(mutants)
+    if row["not_run"] == row["made"]:
+        row["reason"] = "no mutant ran (%d not run)" % row["not_run"]
+        return row
     row["status"] = "OK"
     return row
 
@@ -1000,7 +1055,7 @@ def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
             if _STOP.is_set():
                 raise
             row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
-                   "survived": 0, "survivors": [], "unusable": {}, "skipped": {},
+                   "survived": 0, "not_run": 0, "survivors": [], "unusable": {}, "skipped": {}, "notes": [],
                    "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
             try:
                 row["pr"], row["title"] = _pr_of(repo, sha)
@@ -1026,15 +1081,16 @@ def _row_line(row: dict) -> str:
     tag = " [%s]" % row["part"] if row.get("part") else ""
     head = "#%d%s %s" % (row["pr"], tag, row["status"])
     if row["status"] == "OK":
-        return "%s  made %d, killed %d, crashed %d, survived %d  %s" % (
-            head, row["made"], row["killed"], row["crashed"], row["survived"], row["title"])
+        not_run = ", not_run %d" % row["not_run"] if row.get("not_run") else ""
+        return "%s  made %d, killed %d, crashed %d, survived %d%s  %s" % (
+            head, row["made"], row["killed"], row["crashed"], row["survived"], not_run, row["title"])
     if row["status"] == "UNKNOWN":
         return "%s  %s  %s" % (head, row["reason"], row["title"])
     return "%s  %s" % (head, row["title"])
 
 
 def format_replay_row(row: dict) -> str:
-    """One pull request: its line, then each survivor, unusable suite and skipped file on a line of its own.
+    """One pull request: its line, then each survivor, unusable suite, skipped file and note on a line of its own.
     An UNKNOWN row shows its reason and no rate."""
     lines = [_row_line(row)]
     for path, line, label in row.get("survivors", []):
@@ -1043,6 +1099,8 @@ def format_replay_row(row: dict) -> str:
         lines.append("  unusable #%d %s (%s)" % (row["pr"], suite, why))
     for path, why in sorted(row.get("skipped", {}).items()):
         lines.append("  skipped #%d %s (%s)" % (row["pr"], path, why))
+    for note in row.get("notes", []):
+        lines.append("  note #%d %s" % (row["pr"], note))
     return "\n".join(lines)
 
 
@@ -1053,7 +1111,9 @@ def format_replay(rows) -> str:
     lines.extend(format_replay_row(row) for row in rows)
     scored = [row for row in rows if row["status"] == "OK"]
     if scored:
-        lines.append("scored %d: killed %d of %d mutants (%d crashed, %d survived)" % (
-            len(scored), sum(r["killed"] for r in scored), sum(r["made"] for r in scored),
-            sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored)))
+        not_run = sum(r.get("not_run", 0) for r in scored)
+        lines.append("scored %d: killed %d of %d mutants run (%d crashed, %d survived%s)" % (
+            len(scored), sum(r["killed"] for r in scored), sum(r["made"] - r.get("not_run", 0) for r in scored),
+            sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored),
+            ", %d not_run" % not_run if not_run else ""))
     return "\n".join(lines)

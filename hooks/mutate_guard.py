@@ -33,7 +33,7 @@ and prints, per file, mutants made, killed, kill rate and the suites that killed
 demand and refuses nothing: no timer, no CI job.
 
 REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
-[--suite-timeout S] [--jobs N]` scores the suites each recent merged pull request changed against mutants of the
+[--suite-timeout S] [--jobs N] [--pr-budget S]` scores the suites each recent merged pull request changed against mutants of the
 product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
 """
 
@@ -1859,6 +1859,7 @@ REPLAY_PROFILES = {
         "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
         "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
         "lockfile": "package-lock.json", "sparse_skip": [],
+        "select": ["node", "harness/tests-for.mjs", "{path}"],
     },
     "banchi": {"parts": {
         "ts": {
@@ -1892,6 +1893,8 @@ def replay_main(argv) -> int:
     parser.add_argument("--limit", type=int, default=20, help="mutants per pull request")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
     parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--pr-budget", type=float, default=None, metavar="SECONDS",
+                        help="mutants not started this long after a pull request began count as not_run")
     args = parser.parse_args(argv)
     repo = os.path.abspath(args.replay)
     try:
@@ -1919,7 +1922,9 @@ def replay_main(argv) -> int:
     try:
         for sha, _number, _title in prs:
             for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
-                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps):
+                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
+                                                    pr_budget=args.pr_budget,
+                                                    progress=lambda line: print(line, flush=True)):
                 rows.append(row)
                 print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
     finally:
