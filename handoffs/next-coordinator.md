@@ -49,15 +49,18 @@ Batch 1 is questions-reach-page-r (PR #1108, head `b0d8b100`) and page-filed-che
 
 ## Deep audit
 
-- The owner runs Run 1, the quote check and Run 2 from a session on the owner's Windows laptop, on branch `audit/deep-1102` (owner, 2026-11-02 17:40-17:42 CST).
-- The report lands at `docs/plans/deep-audit/report.md` on that branch. Private-repo findings land on `audit/deep-1102` in each private repo.
-- The coordinator adds the audit's lanes when that report lands.
+- The report landed: `audit/deep-1102` at `6b6a41f3`, `docs/plans/deep-audit/report.md`. Read it by section, never whole. 1,043 findings kept: 2 high, 192 medium, 849 low.
+- Each public repo has a section with its homes: lanes, debts, notes and owner questions (claude-settings 73 homes, banchi 63, mailaudit 35). The private repos (q_max 76, degen 12, joyous 3) hold theirs on `audit/deep-1102` in their own repo, in `docs/plans/deep-audit-1102.md`.
+- Start with the two high findings. Both were checked on main on 2026-11-03:
+  - banchi: `BLOCKED_SIGNATURE` ("answered HTTP 403", pipeline/pricearchive.py) never matches the text that pipeline/pricehistory.py raises on a 403. So the archive sweep's throttle never runs.
+  - mailaudit: the "Holds while" line of `native-files-are-frozen` says no native build has shipped. `native-ships-via-testflight` logs the first install at 2026-10-22 19:42 CDT, so the names are frozen now.
+- The 41 owner questions go to each repo's waiting page, through the page's writer.
+- Known limits: Run 2 ran Sonnet in chunks of 40, not Opus per topic (owner's pick). The committed run2.js still names Opus. 8 dropped findings may be false drops, because the harness rewrote `<` in quotes. Recheck them before a lane leans on the drop.
 - Owner asks: fb-1602-1, fb-1604-1, fb-1605-1, fb-1605-2, fb-1702-1.
-- Do not start Run 1 or Run 2 from this session.
 
 ## Goal
 
-"Restart the flywheel" from the freeze record, losing no work (owner, 2026-10-31 14:12 CDT). Now: restart the trio, run batch 1, run the lanes, and add the deep audit's lanes when its report lands.
+"Restart the flywheel" from the freeze record, losing no work (owner, 2026-10-31 14:12 CDT). Now: restart the trio, run batch 1, then run the lanes, the deep audit's lanes among them.
 
 ## Working premises
 
