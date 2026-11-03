@@ -27,7 +27,7 @@
   "rank": 15,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 3: mailaudit rows 7, 17, 18; banchi row 30; degen row 17",
   "short": "Promote one-repo guards",
-  "status": "open",
+  "status": "closed",
   "title": "Promote guards that only one repo has built now, or wait until a second repo needs them?",
-  "why": "Each row has an incident or a rule behind it, and the shared skills (screens, waiting page) already serve every repo."
+  "why": "Coordinator took pick a, Nov 3 16:58 CST: it can be undone and serves your 15:58 CST ask that child guards go up to claude-settings. Recorded in roadmap step child-guard-promotion. The five promotion lanes start as plan lanes free up."
 }

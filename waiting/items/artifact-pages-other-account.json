@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-03T23:39:00Z",
+  "context": "Goal: every page the roadmap links to opens for you, and its content is kept in git.\nProblem (goal): the artifact lane found that 8 of the 9 pages the roadmap links live in another Claude account, so this account cannot read or export them; only you can reach that account.\nBased on (read): artifact lane check, reported by the coordinator Nov 3 17:37 CST.\nBased on (read): the artifact lane's goal is git as every artifact's home (feedback fb-1456-1).\nDeparts from: the roadmap, which links the 8 pages as if this account holds them \u2014 each option changes how they are kept.",
+  "home": "artifact-lane",
+  "id": "artifact-pages-other-account",
+  "kind": "decision",
+  "n": 217,
+  "options": [
+    {
+      "gain": "No work for you; the links keep working where you are signed in.",
+      "how": "The artifact lane marks the 8 pages as living in another account, with no export; the links stay.",
+      "key": "a",
+      "label": "Register as other",
+      "lose": "Their content stays out of git."
+    },
+    {
+      "gain": "The roadmap links only pages this account holds.",
+      "how": "The lane removes the 8 links from the roadmap.",
+      "key": "b",
+      "label": "Drop the links",
+      "lose": "You lose the path to those pages from the roadmap."
+    },
+    {
+      "gain": "Every page's content is in git.",
+      "how": "You sign in to the other account and export each page; the lane commits the files.",
+      "key": "c",
+      "label": "Re-export into git",
+      "lose": "Your time in the other account, 8 pages."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 17,
+  "ref": "step artifact-pages-other-account; lane artifact-lane (session_013NEJL4UZnwcbTxUfsYRPJa)",
+  "short": "Pages in another account",
+  "status": "open",
+  "title": "8 of 9 roadmap-linked pages live in another Claude account: register them as other, drop the links, or re-export them into git?",
+  "why": "It costs you nothing now, and the pages stay reachable; an export can follow later."
+}

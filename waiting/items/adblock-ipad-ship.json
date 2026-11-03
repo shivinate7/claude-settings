@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-03T23:18:00Z",
+  "context": "Goal: every device the app ships to is tested before it ships.\nProblem (goal): ios-adblock builds for iPhone and iPad, but CI tests only iPhone, so an iPad break would ship unseen; only you know whether iPad is a target.\nBased on (read): ios-adblock XcodeGen device family 1,2 (iPhone and iPad), per the ios-adblock CI-hygiene lane, Nov 3.\nBased on (read): no iPad test destination runs in ios-adblock CI (same lane).\nDeparts from: ios-adblock main, which builds for iPad untested \u2014 option a drops iPad, option b adds an iPad test.",
+  "home": "tci-5-platform-tested",
+  "id": "adblock-ipad-ship",
+  "kind": "decision",
+  "n": 216,
+  "options": [
+    {
+      "gain": "What ships is exactly what CI tests.",
+      "how": "The ios-adblock lane drops device family 2, so the app builds for iPhone only.",
+      "key": "a",
+      "label": "iPhone only",
+      "lose": "The app no longer installs natively on iPad."
+    },
+    {
+      "gain": "iPad users get a tested app.",
+      "how": "The lane adds an iPad simulator test destination to CI.",
+      "key": "b",
+      "label": "Ship for iPad too",
+      "lose": "A longer CI run on every change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 16,
+  "ref": "ios-adblock CI-hygiene lane session_013NEJL485VByFJqzsMRBr5M; ios-adblock project.yml (XcodeGen device family 1,2)",
+  "short": "ios-adblock on iPad?",
+  "status": "open",
+  "title": "ios-adblock: does the app ship for iPad?",
+  "why": "No iPad test runs today, and the ios-apps standard tests what ships; dropping iPad closes the gap with no CI cost."
+}
