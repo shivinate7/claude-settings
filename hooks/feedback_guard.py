@@ -286,6 +286,12 @@ def home_path(rest):
     return word.rstrip(":,;.")
 
 
+def step_home(rest):
+    """The STEP_HOME match of the item's home, read as home_path reads a path (unwrapped, no trailing
+    punctuation), so a wrapped or punctuated `step:<slug>` is the step home it names; else None."""
+    return STEP_HOME.fullmatch(home_path(rest)) if home_word(rest) else None
+
+
 class Homes:
     """Checks ruling and task homes against the layout. `skip` holds the reason the check stood
     down, once, for the systemMessage line."""
@@ -330,7 +336,7 @@ class Homes:
         except ImportError as e:
             return self._stand_down(e)
         try:
-            step = STEP_HOME.fullmatch(home_word(rest)) if kind == "task" else None
+            step = step_home(rest) if kind == "task" else None
             if step:  # steps hold tasks, so only a task may name one; the step file is the proof
                 err, held = self._held(STEP_PATH % step.group(1))
                 if held:
@@ -366,7 +372,7 @@ class Homes:
             return None
         if ruling_home._unwrap(word) == ruling_home.PROCESS_ONLY:  # value_resolves accepts it; a close needs a file
             return self._closed_reason(item_id)
-        step = STEP_HOME.fullmatch(word)
+        step = step_home(rest)
         try:
             err, held = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True)
             if err:
