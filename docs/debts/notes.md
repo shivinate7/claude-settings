@@ -304,6 +304,7 @@
 - stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-tree-not-adopted: claude-settings does not set tree-cites; its tree run gives 70 STALE003, mostly other-repo and runtime paths (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
