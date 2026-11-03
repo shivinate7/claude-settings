@@ -85,6 +85,13 @@ RED = [
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token after a lone quote", "Don't paste " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token in a multi-line string", "first line\nsecond line " + "ghp_" + TAIL + "\nthird line", "ghp_" + TAIL),
+    # Over-widening guard: a placeholder or a tool value must not open these real-looking values.
+    ("password with a real-looking value", "password: " + "S3cr3t!x9", "S3cr3t!x9"),
+    ("pwd assignment with a real-looking value", "pwd=" + "hunter2x", "hunter2x"),
+    ("personal address with a dotted name", "jane.doe" + "@" + "example.com", "jane.doe@example.com"),
+    ("personal address on a personal host", "jane" + "@" + "myhost.example.com", "jane@myhost.example.com"),
+    ("personal ssh-form remote on a personal host", "jane" + "@" + "myhost.example.com:notes.git",
+     "jane@myhost.example.com:notes.git"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -112,6 +119,15 @@ GREEN = [
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
     ("a number with 14 digits, not a string", {"n": 20261102110400, "note": "budget"}),
+    # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
+    ("password word with optional", "password: " + "optional"),
+    ("shell working-dir variable", "PWD" + "=" + "/Users/x"),
+    ("ssh remote of a public host", "git" + "@" + "github.com:" + "owner/repo.git"),
+    ("no-reply address", "noreply" + "@" + "anthropic.com"),
+    ("password placeholder none", "password: " + "none"),
+    ("password mask", "password: " + "*" * 8),
+    ("password template placeholder", "Password: " + "<your-password>"),
+    ("env var from a template", "POSTGRES_" + "PASSWORD=" + "${DB_PASSWORD}"),
 ]
 
 
@@ -296,8 +312,8 @@ class Scan(Base):
                 doc = {"id": "ok", "title": "Ok", "note": value}
                 out = self.out("waiting-%d" % index)
                 r = self.export(self.fetch(items={"ok": doc}), out)
-                self.assertEqual(r.returncode, 0, "%s: a non-secret was refused or failed. Output:\n%s" % (label, shown(r)))
-                self.assertFalse(says(r, "refused"), label)
+                self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
 
