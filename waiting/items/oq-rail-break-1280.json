@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-03T22:00:00Z",
+  "context": "Goal: A session that builds or tests the shell reads the right screen widths.\nProblem (rule): The shell sets its default side rail break at 1280px (app/src/App.css:23), and no record says so. The records you ruled (D95, shell rail and palette sheet; D276, palette go-to lists screens) give 1024 and 640. Only the code holds the 1280 now, and a record change needs your word.\nBased on (read): banchi app/src/App.css:23 sets --bn-rail-break-px to 1280 (main 0657163). docs/DESIGN.md:587-588 puts the rail at 1024 and names 1280 only as 'the wide desk' step; no record names 1280 as the rail break.\nDeparts from: D95 says nothing about a 1280 rail break and the code uses it \u2014 D95 gets an AMENDED line that records 1280 as the default break.",
+  "group": "audit-1102-children",
+  "home": "banchi D95 (shell, rail, palette sheet)",
+  "id": "oq-rail-break-1280",
+  "kind": "decision",
+  "n": 184,
+  "options": [
+    {
+      "gain": "The records match the screen; a session reads one width.",
+      "how": "Add an AMENDED line to D95 that names the 1280 default rail break.",
+      "key": "a",
+      "label": "Record 1280 in D95",
+      "lose": "A width nobody ruled becomes a ruling."
+    },
+    {
+      "gain": "The shell follows the widths you ruled.",
+      "how": "Rule 1280 a defect and change the code to the recorded widths.",
+      "key": "b",
+      "label": "Call 1280 wrong",
+      "lose": "A code change on a screen, with a screen check, and a layout shift at 1024 to 1279."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 10,
+  "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-rail-break-1280",
+  "short": "Rail break at 1280",
+  "status": "open",
+  "title": "banchi: Record or reject the 1280px rail break?"
+}

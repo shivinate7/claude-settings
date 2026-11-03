@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-03T22:18:00Z",
+  "context": "Goal: every repo's main is protected the one shared way.\nProblem (rule): the shared form requires one check, all-jobs-passed, but the script that sets protection accepts any number of --check names, so a session can set a form the rule does not allow.\nBased on (read): docs/decisions/main-branch-protection.md:5 says main requires one check, all-jobs-passed.\nBased on (read): skills/project-ops/scripts/protect.py:36 takes --check as a repeatable flag (main da8d8073).\nDeparts from: main, where protect.py accepts several required checks \u2014 it refuses more than one.",
+  "home": "same-check-kinds",
+  "id": "protect-one-check",
+  "kind": "decision",
+  "n": 202,
+  "options": [
+    {
+      "gain": "No repo can be set up off the shared form by mistake.",
+      "how": "protect.py stops with a message when given a second --check; the shared form stays one check.",
+      "key": "a",
+      "label": "Refuse more than one",
+      "lose": "A repo that truly needs a second required check needs a code change and your word first."
+    },
+    {
+      "gain": "No change to the script.",
+      "how": "protect.py keeps taking any number of --check names, as today.",
+      "key": "b",
+      "label": "Allow several",
+      "lose": "A session can set protection the shared form does not allow, and nothing catches it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 8,
+  "ref": "lane protect-enforce-admins (PR #1113); skills/project-ops/scripts/protect.py; decision main-branch-protection",
+  "short": "protect.py one check",
+  "status": "closed",
+  "title": "Should the branch-protection script refuse more than one required check?",
+  "why": "It makes the script match the single all-jobs-passed check the protection record requires."
+}

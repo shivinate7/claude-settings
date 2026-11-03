@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-03T22:52:00Z",
+  "context": "Goal: every guard that runs protects work you actually do, with one home per guard.\nProblem (rule): banchi keeps Codex halves of four guards (shared-tree, silent-write, kill-by-name, and their tokenizer); claude-settings ships no Codex hooks, so these have no shared home and drift from the Claude Code copies.\nBased on (read): plan, banchi rows 1, 7, 8, 9: the Codex half has no cs runner (banchi D135); the tokenizer has drifted from hooks/guard_core.py.\nBased on (incident): banchi 2026-09-06 checkout lost about 240 lines; 2026-09-09 and 09-10 pkill -f hit port 8000 (rows 1, 8), caught today by the Claude Code copies.\nDeparts from: banchi main, which keeps the Codex halves \u2014 option a deletes them, option b adds Codex hooks to claude-settings.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "banchi-codex-guards",
+  "kind": "decision",
+  "n": 214,
+  "options": [
+    {
+      "gain": "One home per guard; no drifting copy.",
+      "how": "A banchi lane deletes the Codex-only parts of rows 1, 7, 8 and the tokenizer (row 9); the Claude Code guards stay in claude-settings.",
+      "key": "a",
+      "label": "Delete the Codex halves",
+      "lose": "A Codex session in banchi runs with no guard."
+    },
+    {
+      "gain": "Codex sessions get the same guards in every repo.",
+      "how": "claude-settings ships Codex hooks that call the shared guards; banchi then deletes its copies.",
+      "key": "b",
+      "label": "Port to claude-settings",
+      "lose": "A new Codex runner to build and keep."
+    },
+    {
+      "gain": "No work now.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Keep in banchi",
+      "lose": "The copies keep drifting from the shared guards."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 14,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 1, banchi rows 1, 7, 8, 9",
+  "short": "banchi Codex-only guards",
+  "status": "open",
+  "title": "banchi's guards that run only under Codex: delete them, or port them to claude-settings?",
+  "why": "Sessions run in Claude Code; a guard copy for a tool you do not use only drifts."
+}

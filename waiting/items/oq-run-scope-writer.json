@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-03T22:00:00Z",
+  "context": "Goal: The record for starting a run matches how a run starts.\nProblem (rule): D39 (run scope is the handed selection) says the source control writes the selection on every press, and says to reopen it if no run starts from a ticked selection. The writer was retired on your word and nothing writes the handoff now. Whether any path still starts a run from ticked cards is unmeasured.\nBased on (read): banchi app/src/runHandoff.ts:152-160 says carryScope was retired; only readers remain (main 0657163).\nBased on (notes): D180 says a press takes one selection; that no ticked-card run path remains is unmeasured.\nDeparts from: D39 says a press writes the handoff and nothing does \u2014 D39 is reopened and rewritten, or retired.",
+  "group": "audit-1102-children",
+  "home": "banchi D39 (run scope is the handed selection)",
+  "id": "oq-run-scope-writer",
+  "kind": "decision",
+  "n": 188,
+  "options": [
+    {
+      "gain": "The record states how a run really starts.",
+      "how": "Rewrite D39 to say what the readers do now.",
+      "key": "a",
+      "label": "Reopen and rewrite D39",
+      "lose": "More record work than a retire."
+    },
+    {
+      "gain": "A stale rule leaves the set.",
+      "how": "Mark D39 retired and point to the record that replaced it.",
+      "key": "b",
+      "label": "Retire D39",
+      "lose": "Any ticked-card run path that does exist loses its rule."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 14,
+  "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-run-scope-writer",
+  "short": "Run scope writer",
+  "status": "open",
+  "title": "banchi: Reopen D39 or retire it?"
+}

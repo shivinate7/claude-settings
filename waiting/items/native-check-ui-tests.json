@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:05:00Z",
+  "context": "Goal: A native pass record means the native code works.\nProblem (risk): CLAUDE.md says native-check is the full Swift suite, once per batch. The target builds the UI test bundle (80 files) but never runs it, so a pass proves less than it says. The cost of running it on the shared simulator Mac is unmeasured.\nBased on (read): degen CLAUDE.md:39; Makefile:130-135 runs swift test and two build-for-testing steps; native/project.yml:115 defines DegenUITests (main e9d14f5).\nBased on (notes): Cost of the UI bundle on the shared simulator Mac: unmeasured.\nDeparts from: native-check builds the UI tests and never runs them \u2014 it runs DegenUITests once per batch, after one timed run prices it.",
+  "group": "audit-1102-children",
+  "home": "degen CLAUDE.md",
+  "id": "native-check-ui-tests",
+  "kind": "decision",
+  "n": 200,
+  "options": [
+    {
+      "gain": "A pass means the UI works too.",
+      "how": "Add a test action for the UI bundle to native-check, after one timed run.",
+      "key": "a",
+      "label": "Run the UI tests",
+      "lose": "A longer batch gate on the shared Mac."
+    },
+    {
+      "gain": "No added time.",
+      "how": "Reword CLAUDE.md:39 and native.md to say UI tests are built, not run.",
+      "key": "b",
+      "label": "Reword to build-only",
+      "lose": "The UI goes unchecked at the gate."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 26,
+  "ref": "deep audit 1102, degen homes; coordinator message 2026-11-03 15:55 CST, native-check-ui-tests",
+  "short": "native-check UI tests",
+  "status": "open",
+  "title": "degen: Run the UI tests in native-check?",
+  "why": "Recommended in the audit report: (a), after one timed run."
+}

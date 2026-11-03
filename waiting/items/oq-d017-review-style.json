@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:05:00Z",
+  "context": "Goal: Review catches the failures this repo has.\nProblem (rule): D-017 rejects generic review for a solo workflow with no pull requests. q_max now works by pull request, so the stated reason is stale. Whether generic review would pay here is unmeasured. Harm is low and no work waits.\nBased on (read): q_max d-017 line 20; d-067 line 33 (main 5bbf10e).\nBased on (notes): Whether generic review would pay here: unmeasured.\nDeparts from: D-017 rejects generic review because there are no pull requests \u2014 D-017 is rewritten to reject it for the invariant-check reason.",
+  "group": "audit-1102-children",
+  "home": "q_max docs/decisions/d-017-review-style-targeted-invariant-regression-not-generic.md",
+  "id": "oq-d017-review-style",
+  "kind": "decision",
+  "n": 199,
+  "options": [
+    {
+      "gain": "No process change.",
+      "how": "Rewrite the stated reason in place; keep targeted invariant checks.",
+      "key": "a",
+      "label": "Reaffirm targeted review",
+      "lose": "Generic review is not tried."
+    },
+    {
+      "gain": "A reasoned choice for today.",
+      "how": "Re-argue generic review under the pull request workflow.",
+      "key": "b",
+      "label": "Re-argue it",
+      "lose": "Time spent on a measurement."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 25,
+  "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-d017-review-style",
+  "short": "Review style under PRs",
+  "status": "open",
+  "title": "q_max: Reaffirm targeted review, new reason?",
+  "why": "Recommended in the audit report (A)."
+}

@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:48:00Z",
+  "context": "Goal: every number mailaudit publishes is true.\nProblem (rule): the survey calls the check closest to delete, but it is the checked reader global rule verification-checked-reader-for-numbers asks for.\nBased on (incident): mailaudit, a count that went wrong by one, and a UTC date slip (plan, mailaudit row 12).\nBased on (read): CLAUDE.md rule verification-checked-reader-for-numbers: give every published number and path a checked reader.\nDeparts from: mailaudit main, which keeps check-docs.mjs claim 1 \u2014 option b deletes it.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "mailaudit-suite-count",
+  "kind": "decision",
+  "n": 211,
+  "options": [
+    {
+      "gain": "The published count stays checked, as the rule asks.",
+      "how": "No change.",
+      "key": "a",
+      "label": "Keep it",
+      "lose": "One more check to keep."
+    },
+    {
+      "gain": "Less to keep.",
+      "how": "A mailaudit lane deletes claim 1 and stops publishing the count.",
+      "key": "b",
+      "label": "Delete it",
+      "lose": "A wrong count can be published again."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 11,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 6, mailaudit row 12",
+  "short": "mailaudit suite count",
+  "status": "open",
+  "title": "Keep or delete mailaudit's check that its published test count is right?",
+  "why": "It already caught real errors and the rule asks for it."
+}

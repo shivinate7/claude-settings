@@ -8,7 +8,7 @@
   "lastAnswer": {
     "at": "2026-11-02T06:56:26.205Z",
     "choice": "b",
-    "note": ""
+    "note": "settled per handoff: pick b, no override; confirmed by coordinator Nov 3 15:47 CST"
   },
   "links": [
     {
@@ -54,7 +54,7 @@
   "ref": "joyous PR #68; joyous runs 41389182137 (build) and 40323547948 (readme links)",
   "reply": "Reopened 05:32 CST at the coordinator's request: the earlier pick b no longer fits, because the stale red is gone and only main's real build red blocks #68. Meanwhile the merging session holds #68.",
   "short": "joyous #68 merge (reopened)",
-  "status": "open",
+  "status": "closed",
   "title": "joyous #68: type the override now that only main's real build red blocks it?",
   "why": "You picked b at 00:56 because only the stale Oct 26 link-check red seemed to block joyous PR #68. The merge tool fix is now on claude-settings main and cleared that red. The merge tool now refuses #68 on main's real build red, and #68 is the fix for that red, so a plain merge can never land it."
 }

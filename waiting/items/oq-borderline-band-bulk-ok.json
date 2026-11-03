@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:05:00Z",
+  "context": "Goal: A bulk approve skips no row that deserves a look.\nProblem (risk): D-504 (your ruling) says a row at 80 to 83 is worth a look on both sides of 80. The arbiter's later D-530 sets the bulk guard at below Strong and does not cite D-504. The guard holds only on low confidence, so a line at 80 to 83 batches with no look.\nBased on (read): q_max src/utils/groupedReview.ts:214 holds on confidence only; D-504 line 45; D-530 line 60 (main 5bbf10e).\nBased on (read): a-band-around-eighty-outside-the-tier.md:73 says the icon reads getConfidenceTier, which is stale.\nDeparts from: The bulk guard holds only low-confidence rows and D-504 asks for a look at 80 to 83 \u2014 the guard reads isBorderlineAttention and D-530 cites D-504.",
+  "group": "audit-1102-children",
+  "home": "q_max docs/decisions/a-band-around-eighty-outside-the-tier.md",
+  "id": "oq-borderline-band-bulk-ok",
+  "kind": "decision",
+  "n": 198,
+  "options": [
+    {
+      "gain": "No borderline row batches unseen.",
+      "how": "The guard reads isBorderlineAttention, D-530 cites D-504, and line 73 is fixed.",
+      "key": "a",
+      "label": "Guard reads the band",
+      "lose": "More rows wait for a look."
+    },
+    {
+      "gain": "Bulk approve stays fast.",
+      "how": "Narrow D-504 to match the arbiter.",
+      "key": "b",
+      "label": "D-530 holds",
+      "lose": "A row at 80 to 83 batches with no look."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 24,
+  "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-borderline-band-bulk-ok",
+  "short": "Bulk approve at 80 to 83",
+  "status": "open",
+  "title": "q_max: Make bulk approve look at the 80-83 band?",
+  "why": "Recommended in the audit report (A)."
+}

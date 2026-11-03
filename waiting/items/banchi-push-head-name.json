@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:48:00Z",
+  "context": "Goal: a session never leaves a stray branch on origin by pushing to the wrong name.\nProblem (risk): banchi's own hook asks on this push, but the shared push guard lets every unforced push through, so other repos have no guard against it.\nBased on (incident): banchi 2026-09-12, a stray branch on origin (plan, banchi row 5).\nBased on (read): hooks/guard_push_delete.py push_verdict returns '' for any push that is not forced or deleting (main da8d8073).\nBased on (notes): the plan read the gap from code and did not run it; the lane confirms the case first.\nDeparts from: shared push guard, which allows any unforced push \u2014 it asks when HEAD goes to a name other than the upstream.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "banchi-push-head-name",
+  "kind": "decision",
+  "n": 206,
+  "options": [
+    {
+      "gain": "Every repo gets the guard banchi earned from its incident.",
+      "how": "Lane push-head-upstream-name adds the ask to the shared push guard after it confirms the case; banchi then removes its clause_push.",
+      "key": "a",
+      "label": "Promote to the shared guard",
+      "lose": "One more ask when a session pushes HEAD to a new name on purpose."
+    },
+    {
+      "gain": "No change to the shared guard.",
+      "how": "Drop the lane; banchi keeps clause_push.",
+      "key": "b",
+      "label": "Keep it in banchi only",
+      "lose": "Other repos can still leave stray branches."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 6,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 5; step push-head-upstream-name",
+  "short": "Push HEAD to another name",
+  "status": "open",
+  "title": "Should the shared push guard ask when git push origin HEAD lands on a branch other than the upstream?",
+  "why": "The incident is real and the mistake is not banchi-specific."
+}

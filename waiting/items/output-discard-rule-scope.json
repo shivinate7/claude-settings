@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T21:58:00Z",
+  "context": "Goal: a hidden failure never slips past you, and the guard never cries wolf.\nProblem (rule): rule git-never-discard-output (keep command output) says every command, but its guard checks only git writes, so the rule and its check disagree.\nBased on (read): CLAUDE.md rule git-never-discard-output: \"Keep command output. Discarded output hides failures from the reader.\"\nBased on (read): hooks/guard.py, refusal silent-write, reads only git writes silenced by a null redirect or -q; `npm test >/dev/null 2>&1` passes (docs/plans/refusal-vs-rule.md:46).\nBased on (read): rule tokens-run-through-verdict already keeps test output in a log through `verdict`.\nDeparts from: main, a rule wider than its guard \u2014 makes the rule and the guard say the same thing.",
+  "group": "audit-1102-rules",
+  "home": "git-never-discard-output",
+  "id": "output-discard-rule-scope",
+  "kind": "decision",
+  "n": 177,
+  "options": [
+    {
+      "gain": "The rule says exactly what is enforced; no false alarms on ordinary /dev/null use.",
+      "how": "Rewrite the rule text: never silence a git write's output. Test runs stay covered by the verdict rule.",
+      "key": "a",
+      "label": "Narrow the rule to git writes",
+      "lose": "A non-git command silenced to /dev/null is no longer against any rule."
+    },
+    {
+      "gain": "Every silenced command is caught, as the rule text says now.",
+      "how": "Extend silent-write to refuse any command whose output goes to /dev/null.",
+      "key": "b",
+      "label": "Widen the guard to every command",
+      "lose": "Many ordinary reads that discard noise get refused; the guard starts to cry wolf."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row output-discard-rule-scope",
+  "short": "discard-output scope",
+  "status": "open",
+  "title": "Should the keep-output rule cover only git writes, as the guard does, or should the guard grow to all commands?",
+  "why": "The verdict wrapper already covers test runs; a wider guard would refuse routine /dev/null use."
+}

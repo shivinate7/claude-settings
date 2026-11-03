@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:40:00Z",
+  "context": "Goal: filing your rulings never waits on a reviewer for no gain.\nProblem (rule): docs-only-prs-skip-review skips review for a PR that 'touches no rule', but a record that files your ruling may count as touching one, and degen's own merge rule asks a reviewer for every lane, so degen records PRs 370 and 378 waited.\nBased on (ruling): docs-only-prs-skip-review (owner, 2026-09-26): a PR that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. Asked again only because it does not say whether a record that files one of your rulings counts as touching a rule.\nBased on (incident): degen PRs 370 and 378 (degen page item 83).\nDeparts from: docs-only-prs-skip-review, unclear on ruling records \u2014 states when one counts as docs only.",
+  "group": "late-review-fixes",
+  "home": "late-review-fixes",
+  "id": "docs-only-ruling-records",
+  "kind": "decision",
+  "n": 205,
+  "options": [
+    {
+      "gain": "Ruling records merge on green; a record that changes a rule still gets a reviewer.",
+      "how": "A record that files your ruling counts as docs only when it changes no rule text, guard, check or code. A repo rule may still ask for a reviewer.",
+      "key": "a",
+      "label": "Docs only unless it changes rule text",
+      "lose": "A misfiled ruling in a record merges unread."
+    },
+    {
+      "gain": "Every filed ruling is checked against your words.",
+      "how": "Each ruling record gets a fix-check-size read that compares the filed text with your quote.",
+      "key": "b",
+      "label": "A short read of the quote",
+      "lose": "Each ruling record waits on one more read."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 5,
+  "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "short": "Docs-only and ruling records",
+  "status": "open",
+  "title": "Does a record that files one of your rulings count as docs only, and skip review?",
+  "why": "The record only files your words; rule text, guards and code still get review."
+}

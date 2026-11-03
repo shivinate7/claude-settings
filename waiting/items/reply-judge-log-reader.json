@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T21:58:00Z",
+  "context": "Goal: every log has someone who reads it, or it is not written.\nProblem (rule): rule outcomes-mechanize-rules says a log needs a named reader; the reply judge's reader is the advisor, which decides nothing.\nBased on (read): docs/decisions/reply-judge-samples-never-refuses.md:8 and hooks/reply_judge.py:31 name \"the advisor at each cull\" as the reader.\nBased on (read): CLAUDE.md rule questions-go-to-owner: the built-in advisor answers no question and decides nothing; docs/decisions/questions-go-to-owner.md:11 retires the terminal advisor session.\nBased on (read): no record names who runs the cull.\nDeparts from: main, with a log read by a role that cannot rule \u2014 names a reader, or stops the log.",
+  "group": "audit-1102-rules",
+  "home": "reply-judge-samples-never-refuses",
+  "id": "reply-judge-log-reader",
+  "kind": "decision",
+  "n": 182,
+  "options": [
+    {
+      "gain": "The judge's flags reach the one person who rules whether it stays.",
+      "how": "Name you as the reader, through lint/guard_log_report.py, at each cull. Rewrite the record and the hook comment.",
+      "key": "a",
+      "label": "You read it at each cull",
+      "lose": "One more thing for you to read at a cull."
+    },
+    {
+      "gain": "No log without a reader; less to keep.",
+      "how": "Remove the guard.log write from reply_judge.py and the record's reader sentence.",
+      "key": "b",
+      "label": "Stop writing the lines",
+      "lose": "No record of what the judge flagged, so no measure to rule on it later."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 6,
+  "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row reply-judge-log-reader",
+  "short": "reply judge log reader",
+  "status": "open",
+  "title": "The reply judge writes log lines whose named reader cannot rule: name a new reader, or stop the lines?",
+  "why": "The lines are the only measure for ruling whether the judge stays."
+}

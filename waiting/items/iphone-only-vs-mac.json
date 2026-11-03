@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:00:00Z",
+  "context": "Goal: The app you expect to ship is the one the records promise.\nProblem (goal): native-swift-rebuild rejects Swift on the iPhone only and promises one SwiftUI target for iOS and macOS. The project builds iOS only. Two later records call iPhone-only a default that swift-rebuild supports, which it does not. You rejected iPhone-only, so only you can reverse it.\nBased on (read): mailaudit docs/decisions/native-swift-rebuild.md:80 and native/project.yml (TARGETED_DEVICE_FAMILY 1, iOS only) (main cd3e12f).\nBased on (notes): No owner ruling reverses the rejection and no debt names the Mac app.\nDeparts from: native-swift-rebuild rejects iPhone-only and the build is iPhone-only \u2014 the record is rewritten to say iPhone-only ships and a debt names the Mac target.",
+  "group": "audit-1102-children",
+  "home": "mailaudit docs/decisions/native-swift-rebuild.md",
+  "id": "iphone-only-vs-mac",
+  "kind": "decision",
+  "n": 192,
+  "options": [
+    {
+      "gain": "The record matches what ships.",
+      "how": "Rewrite swift-rebuild in place to say iPhone-only, and open a debt for the Mac target.",
+      "key": "a",
+      "label": "Keep iPhone-only",
+      "lose": "The Mac app you ruled for is pushed to a debt."
+    },
+    {
+      "gain": "The Mac app ships as ruled.",
+      "how": "Keep the one-target promise and build the Mac target in a lane.",
+      "key": "b",
+      "label": "Hold the ruling",
+      "lose": "More native work; the records stay wrong until it lands."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 18,
+  "ref": "deep audit 1102, mailaudit homes; coordinator handoff/audit-child-questions 9d97c9b, iphone-only-vs-mac",
+  "short": "iPhone only or Mac too",
+  "status": "open",
+  "title": "mailaudit: Keep the app iPhone-only and open a Mac debt?",
+  "why": "Recommended in the audit report: only the iPhone app ships today."
+}

@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-03T22:40:00Z",
+  "context": "Goal: a lane that fixes its last review finding merges without hours of waiting.\nProblem (rule): the three-round review cap says nothing about a fix landed after round 3, and the merge grant still needs a fresh reviewer on the head that merges, so a lane that fixes its round-3 finding lands on a head no rule lets anyone read.\nBased on (incident): degen page item 83: five degen PRs held about 2 hours (degen D10, 14:56 CST).\nBased on (read): CLAUDE.md rule roles-review-cap-three: 'A change gets at most three review rounds'; decision standing-merge-grant needs a reviewer's approval of the merged head.\nDeparts from: roles-review-cap-three, silent on a fix after round 3 \u2014 adds a one-read fix check.",
+  "group": "late-review-fixes",
+  "home": "late-review-fixes",
+  "id": "fix-check-after-last-round",
+  "kind": "decision",
+  "n": 203,
+  "options": [
+    {
+      "gain": "Lanes that fix their last finding merge the same hour, in every repo.",
+      "how": "After the last round, any fix confined to that round's findings gets one fresh Sonnet read of the fix diff and the finding. Pass merges on green; fail holds for you. A plain merge of main needs no read.",
+      "key": "a",
+      "label": "Fix check in every repo",
+      "lose": "One extra short read per late fix."
+    },
+    {
+      "gain": "The narrowest change that clears degen's hold.",
+      "how": "Allow the fix check only for the two cases degen D10 named.",
+      "key": "b",
+      "label": "Only degen's two cases, made global",
+      "lose": "Other late fixes still wait for you."
+    },
+    {
+      "gain": "No new step in the review flow.",
+      "how": "Keep the rule as it is.",
+      "key": "c",
+      "label": "No change",
+      "lose": "Late fixes keep holding PRs for hours."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "short": "Fix check after round 3",
+  "status": "open",
+  "title": "After the last review round, does a small fix get one short read and then merge?",
+  "why": "A fix confined to the last findings is the outcome review asked for; one short read is enough to merge it."
+}

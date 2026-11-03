@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-03T22:00:00Z",
+  "context": "Goal: You read every box by its name, never a number.\nProblem (rule): D259 (boxes show names only) says a box is shown only by its name, everywhere. Home, the capture screen, a CLI refusal and the Codes screen still draw 'Box N' or 'Slot N'. D259 lists two exceptions only, and its check does not scan screen text, so nothing catches these.\nBased on (read): banchi app/src/Home.tsx:405, CaptureScreen.tsx:4555 and cli/cmd_emit.py:263-275 draw box numbers (main 0657163).\nBased on (read): D259 line 60 lists only two numbered refusals as exceptions.\nDeparts from: D259 shows boxes only by name and four places show numbers \u2014 those four places are named as exceptions, or fixed to names.",
+  "group": "audit-1102-children",
+  "home": "banchi D259 (boxes show names only)",
+  "id": "oq-box-name-only",
+  "kind": "decision",
+  "n": 186,
+  "options": [
+    {
+      "gain": "No screen work; records match the screens.",
+      "how": "Add these four places to D259 as named exceptions.",
+      "key": "a",
+      "label": "Name the exceptions",
+      "lose": "The box number stays visible where you ruled it hidden."
+    },
+    {
+      "gain": "The rule holds everywhere.",
+      "how": "A lane changes each place to show the name, and the check learns to scan screen text.",
+      "key": "b",
+      "label": "Fix the screens",
+      "lose": "Four screen changes and a screen check."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 12,
+  "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-box-name-only",
+  "short": "Box shown by name only",
+  "status": "open",
+  "title": "banchi: Add numbered-box exceptions or fix the screens?"
+}

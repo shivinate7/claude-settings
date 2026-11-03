@@ -1,0 +1,11 @@
+{
+  "answered": "2026-11-03T22:06:00Z",
+  "at": "2026-11-03T22:04:21.586Z",
+  "filed": "2026-11-03T22:06:00Z",
+  "home": "roadmap steps option-key-guard-gap, page-stale-asks-sink (done), page-answered-sink (new)",
+  "id": "ask-mw18jkyan1",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "read": "2026-11-03T22:06:00Z",
+  "reply": "1. The \"none\" key fix is roadmap step option-key-guard-gap. It is Ready, and the coordinator starts it after batch 1 merges, together with the report-guard fix.\n2. Already built (#997) and live on this page since today's republish. An item you saw and left unanswered at your last Send moves below the newer ones, and its options fold under \"Asked before\". It takes effect from your next Send and reload.\n3. New step page-answered-sink: answered but not yet filed items get their own folded section below the open ones, and the designer proposes the other sections you need (for example, by repo). Today the sections are Blocking, Upcoming, Whenever and Pick stands.",
+  "text": "1. Regarding how the triage is actually built/works on this repo and all others, I do think that we need the \"None\" protection fix (have that error come up often)\n2. I think questions that remain after I hit send answers that were unanswered need to fall lower in the order and have their options kinda collapsed\n3. Questions that are answered and green but aren't yet filed, need to also fall down and collapse (basically shits not really organized -- is there just whenever and blocked? there needs more sections i think)"
+}

@@ -3,6 +3,7 @@
   "context": "Goal: one page answer starts the lane it approves, with no second click, on the right branch.\nProblem (rule): two records disagree on what a lane is, and the Mac path cost you three clicks and two lanes on the wrong branch.\nBased on (record): lanes-start-as-agents says a lane is an agent the coordinator starts, which needs no click from you.\nBased on (read): in a cloud session, a coordinator starts a lane session on any turn with no card; this coordinator has started more than 30 since Nov 1.\nDeparts from: main lets the two records disagree \u2014 the place a run happens decides: on the Mac a lane is an agent started from the coordinator's own checkout; in the cloud it is a session.",
   "holds": "Any lane started from a page answer; no lane starts until you pick. A debt record for the second click is filed meanwhile.",
   "home": "session-tiers",
+  "id": "page-answer-starts-lane",
   "kind": "decision",
   "links": [
     {

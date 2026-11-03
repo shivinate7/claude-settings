@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:40:00Z",
+  "context": "Goal: design fixes get the normal review rounds instead of landing late.\nProblem (rule): decision design-agents puts the design reviewer after the build with no place against the code rounds; in degen it ran after code round 3 (PRs 385 and 386), so its code fixes always land late.\nBased on (read): docs/decisions/design-agents.md:12: 'The design reviewer runs after the build.'\nBased on (incident): degen PRs 385 and 386 (degen page item 83).\nDeparts from: design-agents, design reviewer after the build \u2014 it runs beside code review round 1 on the first built head.",
+  "group": "late-review-fixes",
+  "home": "late-review-fixes",
+  "id": "design-review-placement",
+  "kind": "decision",
+  "n": 204,
+  "options": [
+    {
+      "gain": "Design fixes ride the normal rounds and never land late.",
+      "how": "The design reviewer runs on the first built head, beside code round 1; its findings join that round's fix. A late design fix gets the fix check.",
+      "key": "a",
+      "label": "Beside code round 1",
+      "lose": "The design reviewer may judge a screen that changes again in round 2."
+    },
+    {
+      "gain": "No change to the agents or the skill.",
+      "how": "Leave design-agents as it is; late design fixes go through the fix check only. A bandaid.",
+      "key": "b",
+      "label": "Keep the order, rely on the fix check",
+      "lose": "Design fixes still land after round 3 every time."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "short": "Design reviewer timing",
+  "status": "open",
+  "title": "Should the design reviewer run beside the first code review round, not after the build?",
+  "why": "Running it beside round 1 fixes the cause; the fix check alone only shortens the wait."
+}

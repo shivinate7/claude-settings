@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:48:00Z",
+  "context": "Goal: degen's native (Swift) suite runs once, on the Mac, as you ruled.\nProblem (rule): the survey leans delete (no incident), but the check guards degen rule tests-once-per-batch, and global rule building-guard-needs-incident deletes a guard only when its false alarms cost more than the harm it stops.\nBased on (read): degen scripts/native_ci_check.py header: 'a likely risk, no incident. Landed 2026-10-29', guarding your 2026-10-21 rulings.\nBased on (read): plan, degen row 13: DELETE ?; false alarms unmeasured.\nDeparts from: degen main, which keeps native_ci_check.py \u2014 option b deletes it.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "degen-native-check",
+  "kind": "decision",
+  "n": 210,
+  "options": [
+    {
+      "gain": "Your native-suite ruling stays checked.",
+      "how": "No change; it stays in degen.",
+      "key": "a",
+      "label": "Keep it",
+      "lose": "One more check in degen's CI."
+    },
+    {
+      "gain": "Less to keep in degen.",
+      "how": "A degen lane deletes the script and its make target.",
+      "key": "b",
+      "label": "Delete it",
+      "lose": "A Swift job added to CI goes unseen."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 10,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 5, degen row 13",
+  "short": "degen native check",
+  "status": "open",
+  "title": "Keep or delete degen's check that CI never builds native code?",
+  "why": "No false alarm is recorded, so the rule's bar for a delete is not met."
+}

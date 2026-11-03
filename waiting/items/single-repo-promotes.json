@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:52:00Z",
+  "context": "Goal: a guard one repo earned protects every repo, without building shared tools no other repo uses.\nProblem (goal): five guards exist in only one child repo; promoting now costs a lane each, waiting leaves other repos open to the same mistake.\nBased on (read): plan rows: mailaudit 7 (milestone full-suite job), 17 (a decision's 'Holds while' line; 0 of 169 cs decisions carry it), 18 (screen overflow, a11y and 44 px target checks); banchi 30 (one browser fleet per machine); degen 17 (waiting-page export scan).\nBased on (incident): banchi 2026-09-07, 18 failures from two browser fleets (row 30); mailaudit, 3 unexplained screen reds (row 18).\nDeparts from: claude-settings main, which has none of these five \u2014 option a adds them now.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "single-repo-promotes",
+  "kind": "decision",
+  "n": 215,
+  "options": [
+    {
+      "gain": "Every repo gets the five guards before it repeats the mistake.",
+      "how": "Each row becomes a promotion lane in claude-settings, then the child removes its copy.",
+      "key": "a",
+      "label": "Promote now",
+      "lose": "Five more lanes now, some for repos that may never need them."
+    },
+    {
+      "gain": "No shared tool is built before it is needed twice.",
+      "how": "Each row stays in its repo until a second repo hits the same mistake.",
+      "key": "b",
+      "label": "Wait for a second repo",
+      "lose": "The second repo pays for the mistake first."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 15,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 3: mailaudit rows 7, 17, 18; banchi row 30; degen row 17",
+  "short": "Promote one-repo guards",
+  "status": "open",
+  "title": "Promote guards that only one repo has built now, or wait until a second repo needs them?",
+  "why": "Each row has an incident or a rule behind it, and the shared skills (screens, waiting page) already serve every repo."
+}

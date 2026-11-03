@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-03T22:47:00Z",
+  "context": "Goal: you find the item you need on the waiting page fast, with answered items out of the way.\nProblem (goal): the answered-sink lane adds tiers so answered items sink; the page needs your word on whether items inside a tier get sections.\nBased on (read): mockup docs/design/answered-sink.html on branch page-answered-sink (9d9f75f7).\nBased on (read): coordinator asked you in chat at 16:31 CST; no answer by 16:46 CST.\nDeparts from: page.html on main, four tiers only \u2014 adds a grouping inside each tier, or none.",
+  "group": "page-answered-sink",
+  "home": "page-answered-sink",
+  "id": "answered-sink-grouping",
+  "kind": "decision",
+  "n": 212,
+  "options": [
+    {
+      "gain": "Child-repo questions sit together, apart from claude-settings ones.",
+      "how": "Each tier splits into one section per repo; items get a new repo field.",
+      "key": "a",
+      "label": "By repo",
+      "lose": "One more field every writer must fill."
+    },
+    {
+      "gain": "Decisions you must pick stand apart from tasks.",
+      "how": "Each tier splits into decisions, tasks and notes.",
+      "key": "b",
+      "label": "By kind",
+      "lose": "Questions on one repo scatter across sections."
+    },
+    {
+      "gain": "The simplest page.",
+      "how": "Tiers only, as the mockup's base.",
+      "key": "c",
+      "label": "No more sections",
+      "lose": "Long tiers stay one flat list."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 12,
+  "ref": "step page-answered-sink; lane session_013NEJKzc5rhp8u7UZstdXCa; mockup docs/design/answered-sink.html on branch page-answered-sink (9d9f75f7)",
+  "short": "Group inside each tier",
+  "status": "open",
+  "title": "Inside each tier of the waiting page, should items be grouped by repo, by kind, or not at all?",
+  "why": "Most open items now come from child-repo audits; grouping by repo keeps each repo's calls together."
+}

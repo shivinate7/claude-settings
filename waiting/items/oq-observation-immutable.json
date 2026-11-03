@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:05:00Z",
+  "context": "Goal: Rate history stays auditable.\nProblem (risk): D-296 says an observation is never modified after insert and a correction is retire plus insert plus a link. Seven places in the code run UPDATE on observations, a later ruling says one row updates in place, and the link is not built. No check lists the update sites.\nBased on (read): q_max d-296 lines 29-32; UPDATE observations at approvalLedger.ts:910, observationStore.ts:464, awardStore.ts:175, bidChain.ts:213, :304, backfillPackageDates.ts:90, :99 (main 5bbf10e).\nBased on (ruling): an-award-files-its-lines-as-rates.md:27 (2026-10-01) says the row updates in place on codify.\nDeparts from: D-296 forbids any update of an observation and the code updates it in seven places \u2014 D-296 and the rules page name the permitted updates, and a check lists the update sites.",
+  "group": "audit-1102-children",
+  "home": "q_max docs/decisions/d-296-observations-are-retired-never-edited-in-place.md",
+  "id": "oq-observation-immutable",
+  "kind": "decision",
+  "n": 197,
+  "options": [
+    {
+      "gain": "Records match the code; new updates are caught.",
+      "how": "Name the permitted updates in D-296 and the rules page; add a check that lists the update sites.",
+      "key": "a",
+      "label": "Carve out and check",
+      "lose": "Immutability is no longer absolute."
+    },
+    {
+      "gain": "History stays untouched.",
+      "how": "Convert each update to retire plus insert.",
+      "key": "b",
+      "label": "Hold immutability",
+      "lose": "A larger change to seven write paths; a risk to stored rates."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 23,
+  "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-observation-immutable",
+  "short": "Observation update sites",
+  "status": "open",
+  "title": "q_max: Carve out the observation updates?",
+  "why": "Recommended in the audit report (A)."
+}

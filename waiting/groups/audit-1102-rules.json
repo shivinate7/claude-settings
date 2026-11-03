@@ -1,0 +1,4 @@
+{
+  "title": "Deep audit 1102: rules that disagree with their checks",
+  "why": "Each item is a claude-settings rule or record that says one thing while its code or check does another; one audit found them all."
+}

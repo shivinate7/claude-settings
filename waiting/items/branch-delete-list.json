@@ -7,6 +7,7 @@
   "context": "Goal: claude-settings keeps only live branches.\nProblem (rule): GitHub's proxy here refuses a branch delete, and the standing grant lets only a session on your computer do it.\nBased on (read): each of the 136 branches still sits at the tip the list names, and each archive copy exists at the same tip (checked 12:55 CST).\nBased on (read): one record on main names a listed branch: the debt on agent reports with a live watcher points to branch stop-blocks-live-tasks; its archive copy, archive/stop-blocks-live-tasks, holds the same tip, so the next lane that edits that debt re-points it. Searched every listed branch name in the records on main, 13:02 CST.\nWhy yours: only a session on your Mac can reach GitHub for a delete; none is connected (list of connected folders empty, 10:42 CST).\nDeparts from: main keeps 277 branches \u2014 deletes 136 that are on main or archived.",
   "holds": "Nothing waits on it.",
   "home": "branch-cleanup",
+  "id": "branch-delete-list",
   "kind": "task",
   "links": [
     {

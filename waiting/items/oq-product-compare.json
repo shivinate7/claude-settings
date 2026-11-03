@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-03T22:00:00Z",
+  "context": "Goal: A sale shows no misleading verdict.\nProblem (rule): D227 (product history is its own route) says it computes no comparison of a fill against its bucket. The product history screen draws a 'What You Got' block with a Difference row. No decision covers the block, and only the code protects the rule now.\nBased on (read): banchi D227 lines 79-83; app/src/ProductHistory.tsx:581-617 draws the Difference row (main 0657163).\nBased on (read): Debt 070 calls the panel a read-only diagnostic and does not rule on it.\nDeparts from: D227 says the view computes no comparison and the screen computes one \u2014 D227 allows the Difference as a plain number, or the row is removed.",
+  "group": "audit-1102-children",
+  "home": "banchi D227 (product history is its own route)",
+  "id": "oq-product-compare",
+  "kind": "decision",
+  "n": 187,
+  "options": [
+    {
+      "gain": "You keep the figure; the record is true.",
+      "how": "Amend D227 to allow the Difference row as a plain number with no verdict.",
+      "key": "a",
+      "label": "Allow the plain number",
+      "lose": "A comparison, which D227 kept out, is now allowed."
+    },
+    {
+      "gain": "D227 stays as ruled; no verdict can mislead.",
+      "how": "A lane deletes the Difference row.",
+      "key": "b",
+      "label": "Remove the row",
+      "lose": "You lose the figure on the screen."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 13,
+  "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-product-compare",
+  "short": "Product compare block",
+  "status": "open",
+  "title": "banchi: Allow the Difference row or remove it?"
+}

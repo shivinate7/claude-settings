@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T21:58:00Z",
+  "context": "Goal: builders and reviewers judge screens by one list.\nProblem (rule): the house-rules record lists 14 ids, while the design docs hold 34 ux headings, and no check compares them.\nBased on (read): docs/decisions/ux-house-rules.md:14-19 lists 14 ids as the house rules.\nBased on (read): docs/design/principles.md has 27 ux headings and docs/design/layout.md has 7.\nBased on (read): no lint or hook reads either list.\nDeparts from: main, with two lists that differ \u2014 makes one list and checks it.",
+  "group": "audit-1102-rules",
+  "home": "ux-house-rules",
+  "id": "ux-house-rule-ids",
+  "kind": "decision",
+  "n": 183,
+  "options": [
+    {
+      "gain": "One list; every ux heading binds builders and reviewers.",
+      "how": "The record cites the headings in principles.md and layout.md instead of listing ids. A check fails when a cited heading is missing.",
+      "key": "a",
+      "label": "All 34 are house rules",
+      "lose": "20 more rules bind every screen review."
+    },
+    {
+      "gain": "Fewer binding rules on each screen review.",
+      "how": "Keep the record's list. Mark the other 20 headings as guidance, and add a check that the 14 exist as headings.",
+      "key": "b",
+      "label": "Only the 14",
+      "lose": "Two kinds of ux heading for readers to tell apart."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 7,
+  "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row ux-house-rule-ids",
+  "short": "UX house rule list",
+  "status": "open",
+  "title": "Are all 34 UX headings house rules, or only the 14 the record lists?",
+  "why": "Builders already read the design docs whole; one list with a check ends the drift."
+}

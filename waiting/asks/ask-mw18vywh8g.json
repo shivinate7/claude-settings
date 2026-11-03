@@ -1,0 +1,11 @@
+{
+  "answered": "2026-11-03T22:16:00Z",
+  "at": "2026-11-03T22:13:59.537Z",
+  "filed": "2026-11-03T22:16:00Z",
+  "home": "roadmap step small-text-skips-designer (roadmap 91773487)",
+  "id": "ask-mw18vywh8g",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "read": "2026-11-03T22:16:00Z",
+  "reply": "The cause is the rule text, not a claude-settings guard. CLAUDE.md rule roles-one-role-per-agent says every lane that touches a screen gets a designer, with no exception, and no claude-settings hook checks it. A child repo's guard may enforce it; lane child-guard-promotion is surveying those. New step small-text-skips-designer: a lane that only changes text on an existing screen skips the designer, and the design reviewer still checks the result. The coordinator starts it.",
+  "text": "I have also received feedback that small text changes on existing screens currently can't skip a designer agent -- this is clearly a scenario where the guards are making unintentional outcomes from what i desire."
+}

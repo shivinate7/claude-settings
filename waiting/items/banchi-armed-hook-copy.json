@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-03T22:48:00Z",
+  "context": "Goal: a repo's git hooks are always the ones on main.\nProblem (risk): banchi checks that its armed hook copy matches main; the shared installer does not, so a stale copy can sit unnoticed in other repos.\nBased on (incident): banchi 2026-09-01, hooks unarmed for 4 days (plan, banchi row 21).\nBased on (read): the plan names githooks/main-ref/install.sh as the shared home; no lane yet.\nDeparts from: githooks/main-ref/install.sh, which does not check the armed copy \u2014 it refuses a copy behind main.",
+  "group": "child-guard-questions",
+  "home": "child-guard-promotion",
+  "id": "banchi-armed-hook-copy",
+  "kind": "decision",
+  "n": 208,
+  "options": [
+    {
+      "gain": "No repo runs stale hooks for days unseen.",
+      "how": "New lane: the shared installer's check refuses an armed copy that differs from main; banchi removes its zeroth rule.",
+      "key": "a",
+      "label": "Promote to the shared installer",
+      "lose": "One more lane to build."
+    },
+    {
+      "gain": "No new lane.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Keep it in banchi only",
+      "lose": "Other repos can run stale hooks unseen."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 8,
+  "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 21",
+  "short": "Stale armed hook copy",
+  "status": "open",
+  "title": "Should the shared main-ref hook installer refuse an armed hook copy that is behind main?",
+  "why": "The incident cost 4 days unguarded and every repo installs the same hooks."
+}

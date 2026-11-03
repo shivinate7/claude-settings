@@ -3,6 +3,7 @@
   "context": "Goal: stop builders undoing earlier lane work, with a check that does not cry wolf.\nProblem (rule): read word for word, your 10:41 CST ruling makes the check red on most batches; narrowing it departs from your words, so it needs your word.\nBased on (measured): a sweep of the 31 batches merged since Oct 31 by the lane building the check; both of this morning's undo incidents go red under either option.\nBased on (measured): option a, re-measured on the same 31 batches, is red on 9 batches with 10 findings (b: 22 batches, 84 findings): 4 real undos, 4 deliberate drops that need an excuse line, 2 rewordings.\nDeparts from: main checks only drops of main's own work \u2014 adds a check on drops of a lane's earlier work: (a) only a commit that puts a file or hunk back to a state the lane already had, and a net loss of lane-added lines in a test file; (b) any deleted line a lane added.",
   "holds": "How wide the check reads; the lane builds a meanwhile, which can be undone.",
   "home": "no-undo-lane-commits",
+  "id": "no-undo-check-scope",
   "kind": "decision",
   "links": [
     {
