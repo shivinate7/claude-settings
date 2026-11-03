@@ -4,7 +4,7 @@
     python3 protect.py --repo <owner>/<name> --check <name> [--check <name> ...] [--branch main] [--confirm]
 
 Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
-sets the required checks: a branch with no protection gets it (the checks, no review rule, no restriction);
+sets the required checks: a branch with no protection gets it (the checks, strict off, admins included, no review rule, no restriction);
 a protected branch with a check rule gets only its check list set (its strict setting stays), and an equal list is left alone.
 A branch protected without a check rule is refused, naming its rules: a PUT would replace them. merge/merge.py reads the
 required checks from this protection (merge.requiredChecks "protection"), so this is their one home.
@@ -70,7 +70,7 @@ def main(argv, gh=run_gh):
             print(f"protect: cannot read the protection of {a.branch}: {whole}", file=sys.stderr)
             return 1
         call = ["-X", "PUT", base]
-        body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": False,
+        body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": True,
                 "required_pull_request_reviews": None, "restrictions": None}
         what = f"protect {a.branch} with the required checks {', '.join(checks)}"
     else:

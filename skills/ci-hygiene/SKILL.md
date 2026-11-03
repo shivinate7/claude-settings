@@ -199,6 +199,8 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
+- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
+  claude-settings record text instead of naming the record. The caller needs checkout first.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally,
