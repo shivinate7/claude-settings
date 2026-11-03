@@ -1,0 +1,9 @@
+{
+ "title": "A pull request that edits actions/playwright-setup runs checks-guard",
+ "phase": "now",
+ "status": "doing",
+ "order": 487,
+ "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, table 'claude-settings: homes'): .github/scripts/ci-scope.sh:54-55 maps actions/playwright-setup to code and shoot, not checks_guard, while .github/workflows/checks.yml:578 uses it there. The break shows only on main.",
+ "note": "Files: .github/scripts/ci-scope.sh:54-55 and :93, .github/workflows/checks.yml:578 and :607, lint/test_ci_scope.py. Skill ci-hygiene. Done: a new case in lint/test_ci_scope.py is red on old code, then green; the comment at :54 names both callers. Lane live, started by the coordinator Nov 3. Ready.",
+ "updatedAt": "2026-11-03T21:50:00Z"
+}
