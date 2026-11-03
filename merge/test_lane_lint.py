@@ -73,7 +73,8 @@ class NoLock:
         raise AssertionError("merge --lane-lint unlocked a merge lock")
 
 
-class LaneLint(tm.CloudSession):
+class LaneLintFixture(tm.CloudSession):
+    """The lane-lint fixture: the stub ci-job, the run in the lane checkout, and the lint's calls. No test lives here."""
     @classmethod
     def setUpClass(cls):
         unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
@@ -118,6 +119,7 @@ class LaneLint(tm.CloudSession):
             self.fail("argparse refused the command line: " + last)
         return rc, out + err
 
+class LaneLint(LaneLintFixture):
     def lint_run(self, *argv, base="main", head=None, cloud=False):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
         `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
@@ -391,7 +393,7 @@ class RunFolderSweep(unittest.TestCase):
         self.assertTrue(os.path.isdir(own))
 
 
-class LaneLintRepoDir(tm.RepoDirRuns, LaneLint):
+class LaneLintRepoDir(tm.RepoDirRuns, LaneLintFixture):
     """`merge --lane-lint` with -C PATH or --repo-dir PATH lints the named checkout's pull request. Its worktree is cut from that checkout at
     its head, and the pull request is read through a host in that checkout. The stub logs the head it linted, so a case reads which head that was."""
 
