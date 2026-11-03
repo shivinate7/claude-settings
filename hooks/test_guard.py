@@ -25796,12 +25796,14 @@ def register_simulator_boot_cases():
     # device is not a boot, so it is allowed. The "one" fixture holds one booted device and one shut-down
     # device of another type, so neither the cap nor the twin rule judges these commands.
     generic = "generic/platform=iOS Simulator"
+    # The remedy is the phrase "Run `sim-test", not the bare word: the refusal's own text also names the
+    # sim-test lock, so the bare word would hold whatever remedy the refusal printed.
     sh("route: a test of a shut-down simulator by id names sim-test",
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
-       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="sim-test")
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a test with the action after its options, a shut-down simulator by name, names sim-test",
        "xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
-       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="sim-test")
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a build of a shut-down simulator names the generic destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
