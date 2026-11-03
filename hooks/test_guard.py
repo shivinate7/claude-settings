@@ -25871,6 +25871,11 @@ def register_simulator_boot_cases():
     stale_cfg = lock_config("nopid_stale", None, age=600)
     add("lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through",
         "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=stale_cfg)
+    # The partner of the allow above: the same stale folder, with two booted, so the cap refuses. An
+    # allow that a guard reaches by failing open would not show the cap, so this case shows the cap ran.
+    add("lock: a folder with no pid file, 10 minutes old, is not held: the cap still judges the launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=stale_cfg, carries=(SIM_UA, SIM_UB))
 
 
 def folder_path(name):
