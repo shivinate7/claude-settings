@@ -19168,6 +19168,58 @@ def worktree_home_cd_exempt_case():
     return True, "the recorded home, the own red-run folder and the session's recorded home pass"
 
 
+def worktree_home_red_write_case():
+    """Rule 0, other-checkout, the write act's exemption for the caller's own red-run folder: an
+    agent's writes into `agent-<its id>-red` pass from its home, as a `cd` chained to a write, a `cp`,
+    a Write and an Edit. The same four writes into a sibling agent's red-run folder, into a folder
+    whose name only starts with the agent's id, into the primary, or from a call with no agent_id are
+    refused. A test-author writes its tests in its red-run folder, so the write act must match the
+    cd act that worktree_home_cd_exempt_case already allows."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcored", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the agent's recording call wrote no home record")
+
+    def writes_into(folder):
+        """(tool, tool input) for the four writes into FOLDER: a chained cd, a cp, a Write and an Edit."""
+        return (
+            ("Bash", {"command": "cd %s && echo x > f" % slash(folder)}),
+            ("Bash", {"command": "cp t.py %s/" % slash(folder)}),
+            ("Write", {"file_path": os.path.join(folder, "f"), "content": "x"}),
+            ("Edit", {"file_path": os.path.join(folder, "f"), "old_string": "1", "new_string": "2"}),
+        )
+
+    def label(tool, tool_input):
+        return "%s %r" % (tool, tool_input.get("command") or tool_input["file_path"])
+
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s into the agent's own red-run folder: want allow, got %s (%s)"
+                            % (label(tool, tool_input), got, reason[:120]))
+    for target in (sibling_red, prefix_trap, primary):
+        for tool, tool_input in writes_into(target):
+            got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+            if got != "deny" or any(text in reason for text in (ROOT, slash(ROOT), target, slash(target))):
+                problems.append("%s: want deny naming no path, got %s (%s)"
+                                % (label(tool, tool_input), got, reason[:120]))
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, **tool_input)
+        problems += _other_checkout_problems("no agent_id: " + label(tool, tool_input), got, reason,
+                                             (ROOT, slash(ROOT), red, slash(red)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's writes into its own red-run folder pass; the same writes elsewhere are refused"
+
+
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
 # after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
 CD_TEXT_ALLOW = (
@@ -19784,6 +19836,9 @@ LOG_CHECKS = (
      "clone's .git passes", worktree_home_cd_allowed_case),
     ("worktree-home: the cd exemptions pass: an agent's recorded home from outside it, its own red-run "
      "folder, a session's recorded home", worktree_home_cd_exempt_case),
+    ("worktree-home: an agent's write into its own red-run folder, by a cd chained to it, a cp, a Write "
+     "or an Edit, is allowed; the same writes into a sibling's red-run folder, a prefix-named folder, "
+     "the primary, or with no agent_id are refused", worktree_home_red_write_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -26029,6 +26084,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
     ("worktree-home: the cd exemptions pass", "worktree-home"),
+    ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
