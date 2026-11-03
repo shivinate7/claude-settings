@@ -99,7 +99,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
-    "lane-one-step": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -8979,7 +8979,7 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False):
             role_result(tool_id, body)]
 
 
-# lane-one-step: a lane on topic icons, and an older lane with two steps and no topic.
+# lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 
@@ -9046,7 +9046,7 @@ ROLE_LINES = {
     "archive-own-lane": role_call("r0", LANE_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
-    # lane-one-step shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
+    # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
     # lane has no cs-topic, so its cs-step tags alone judge a brief. The create shapes read the start of the lane.
     "step-topic-lane": role_target_call("t1", STEP_TOPIC_TAGS),
     "step-old-lane": role_target_call("t1", STEP_OLD_TAGS),
@@ -9553,28 +9553,28 @@ archive_refuse("an open draft lane pull request whose containment read fails is 
 
 
 # =========================================================================== 5h. one lane, one topic
-FAMILY = "lane-one-step"
+FAMILY = "lane-one-topic"
 #
-# Rule lane-one-step. A lane is one topic: its cs-topic tag, set at create_session beside its cs-step tags. A
+# Rule lane-one-topic. A lane is one topic: its cs-topic tag, set at create_session beside its cs-step tags. A
 # send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest
 # record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
 # Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
 # Any other message passes, and so does a brief to a target that is no lane. A marker brief with no record of its
 # target is refused. Only a marker brief reads the transcript: a message without the marker passes unread.
-LANE_ONE_STEP = "lane-one-step"
+LANE_ONE_TOPIC = "lane-one-topic"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
 
 
 def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=()):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id."""
-    add("lane-one-step: " + name, "deny", rule=LANE_ONE_STEP, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
+    add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
         env=ROLE_ENV, session_id=target, message=message, carries=carries)
 
 
 def step_allow(name, transcript, message, target=ROLE_OTHER):
     """A send_message the guard lets through silently."""
-    add("lane-one-step: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
+    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
         env=ROLE_ENV, session_id=target, message=message)
 
 
