@@ -23,11 +23,12 @@ SGR = rb"\x1b\[[0-9;]*m"
 # A run of 10 or more digits before " skipped" matches only at its last 10 digits.
 SKIPPED = re.compile(rb"(?m)Executed \d{1,10} tests?, with (\d{1,10}) tests? skipped|\bskipped=(\d{1,10})|(\b\d{1,9}|\d{10}) {1,64}skipped\b"
                      rb"|^ {0,64}(?:#|\xe2\x84\xb9) {1,64}skipped {1,64}(\d{1,10})")
-TEST_OK = ("** TEST SUCCEEDED **", "** TEST EXECUTE SUCCEEDED **")  # not "** TEST BUILD SUCCEEDED **": a build runs no test
+TEST_OK = re.compile(rb"^(?:[ \t]|" + SGR + rb"){0,64}\*\* TEST (?:EXECUTE )?SUCCEEDED \*\*", re.M)  # only at a line start: a grep hit or source line that quotes it is no marker. Not "TEST BUILD SUCCEEDED": a build runs no test
+SWIFT_INFO = {"list", "--list-tests", "-l", "--help", "-h", "--show-codecov-path", "--show-bin-path"}  # `swift test` with one of these runs no test
 def test_argv(argv):  # read from the argv as typed, before which() rewrites argv[0]
     exe = re.split(r"[\\/]", argv[0])[-1].lower()
     if exe.endswith(".exe"): exe = exe[:-4]
-    return (exe == "xcodebuild" and any(a in ("test", "test-without-building") for a in argv[1:])) or (exe == "swift" and argv[1:2] == ["test"])
+    return (exe == "xcodebuild" and any(a in ("test", "test-without-building") for a in argv[1:])) or (exe == "swift" and argv[1:2] == ["test"] and not SWIFT_INFO.intersection(argv[2:]))
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED)", re.M)  # a runner may print one such line per skip, with or without a summary
@@ -111,7 +112,7 @@ def main(argv):
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
-                marked = marked or any(k in buf for k in TEST_OK)
+                if not marked: marked = any(pos == start or m.start() for m in TEST_OK.finditer(raw))  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
             f.seek(max(start, end - TAIL))
