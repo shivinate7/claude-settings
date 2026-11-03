@@ -502,6 +502,7 @@ ARCHDRAFT_AHEAD = os.path.join(ROOT, "archdraft-ahead")        # an open draft, 
 ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, head diverged from main: not landed
 ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
+ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -969,7 +970,8 @@ else:
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
-                       base={"ref": o.get("base", "main")}, state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
+                       base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
+                       state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
@@ -996,7 +998,7 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
-    elif re.fullmatch(r"compare/[^/]+", rel):  # the containment read of "<base>...<head sha>": a pair not listed is diverged
+    elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
@@ -1304,6 +1306,10 @@ def build_fixtures():
     # A ready pull request, not a draft: its head behind main does not release it, so the refusal stands.
     make_fake_gh(ARCHREADY_BEHIND, "main", need=["o/r"], others=[dict(slug_head)], compares={draft_pair: "behind"})
     make_fake_gh(ARCHDRAFT_READFAIL, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "server"})
+    # A draft based on integration/b1, whose head is behind both main and integration/b1. The rule refuses it, because
+    # its base is not the repo's default branch. A guard that compares against the base's name would release it here.
+    make_fake_gh(ARCHDRAFT_INTEG, "main", need=["o/r"], others=[dict(slug_head, draft=True, base="integration/b1")],
+                 compares={draft_pair: "behind", "integration/b1..." + slug_head["head"]: "behind"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8974,10 +8980,10 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False):
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
     """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
-    JSON {"id": ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
-    body = "Created session " + session + "." if plain else json.dumps({"id": session})
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
+    body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
 
@@ -8985,6 +8991,7 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False):
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
+STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -9057,6 +9064,13 @@ ROLE_LINES = {
     "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
     "step-create-json": role_create_call("c1", STEP_TOPIC_TAGS),
     "step-create-text": role_create_call("c1", STEP_TOPIC_TAGS, plain=True),
+    # A lane read, then the target's tags set after it: the record is stale until it is read again.
+    "step-topic-lane-retagged": role_target_call("t1", STEP_TOPIC_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
+    "step-old-lane-retagged": role_target_call("t1", STEP_OLD_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
+    # A create_session result that names the new id as {"session_id": ...}, not {"id": ...}.
+    "step-create-session-id": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id"),
+    # A lane on topic colors: the marker variants below are judged against it.
+    "step-colors-lane": role_target_call("t1", STEP_COLORS_TAGS),
     # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
     "step-topic-lane-wrapped": role_target_call("t1", STEP_TOPIC_TAGS, wrapped=True),
     "archive-wrapped-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS, wrapped=True),
@@ -9560,6 +9574,11 @@ archive_refuse("an open ready lane pull request whose head is behind main is ref
                role_path("archive-lane"), fake_gh_path(ARCHREADY_BEHIND), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 archive_refuse("an open draft lane pull request whose containment read fails is refused, and the reason says the read failed",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_READFAIL), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_OPEN_PIN)
+# A draft whose base is not the repo's default branch is not released, though its head is behind main. The default
+# branch is read from the row (base.repo.default_branch, main); the draft based on main above is the release case.
+# This refusal also holds on main, which refuses every open lane pull request. It pins the base check for the release.
+archive_refuse("an open draft lane pull request based on integration/b1, not the default branch, is refused though its head is behind main",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_INTEG), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -9576,10 +9595,11 @@ SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=()):
-    """A send_message the guard refuses. The reason names its rule, and the rule's own id."""
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
+    """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
+    the reason must not hold."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, carries=carries)
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
 def step_allow(name, transcript, message, target=ROLE_OTHER):
@@ -9648,6 +9668,28 @@ step_allow("a brief with topic colors to a target that is no lane (cs-build:tria
 # Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
 step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
            role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+# Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
+# with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
+step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
+            role_path("step-topic-lane-retagged"), "Lane brief: icon-b. Topic: icons.",
+            carries=("get_session",), lacks=("new lane",))
+step_refuse("a brief for topic icons, after set_session_tags on a lane with no topic, is refused: re-read with get_session",
+            role_path("step-old-lane-retagged"), "Lane brief: icon-b. Topic: icons.",
+            carries=("get_session",), lacks=("new lane",))
+# A create_session result shaped {"session_id": ...} is a record too: the brief is judged against the lane's topic.
+step_allow("a create_session result shaped session_id counts as the record: a brief for its own topic icons passes",
+           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+# The refusal must be the topic's, not the no-record one: a reader that misses the record refuses every brief here.
+step_refuse("a create_session result shaped session_id counts as the record: a brief for topic colors is refused",
+            role_path("step-create-session-id"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW,
+            lacks=("holds no get_session",))
+# Marker variants: bold, heading and lowercase all open a marker brief. Each names topic icons to a lane on colors.
+step_refuse("a bold marker, **Lane brief:** x. Topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "**Lane brief:** x. Topic: icons.")
+step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
+step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "lane brief: x. topic: icons.")
 
 
 # =========================================================================== 5d. cite by id
