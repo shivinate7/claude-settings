@@ -19,7 +19,7 @@ grant. Decision child-cites-not-copies (a child names the cs record and never co
 - **CONSUMER:** a child calls a cs action or uses a cs setting. The child keeps it.
 - **?:** the reader could not confirm the verdict.
 
-A guard is a hook rule that refuses an act. A check is a CI job or a test. The owner's word
+A guard is a hook rule that refuses an act. A check is a CI job or a test. The owner's ask
 "guards" covers both. The tables keep that word.
 
 | Repo | Visibility | Pinned head |
@@ -139,7 +139,7 @@ gloss here. The reader did not return the titles.
 | 42 | docs-audit repo map family. Checks map drift. | D17 | none | STAYS ? | docs/map.py against cs plain-english-map. Owner question 4 |
 | 43 | docs-audit slug length, number growth, ids. Slug over 32 characters; number on a branch; ids. | D16 | none | DUPLICATE (ids: STAYS ?) | cs lint/check_record_slugs.py (slug length); actions/stamp (number on a branch) |
 | 44 | docs-audit rule enforcement. Hard rule with no enforcer. | D173 | 2026-09-12 | STAYS ? | cs lint/rule_audit.py reads only cs rule files (RULE_FILES). No check reads child rule files. Not placed |
-| 45 | docs-audit subagent override. Opus override (a prompt that lifts the Opus refusal) left in settings.local.json. | D178 | 2026-09-19 | DUPLICATE | cs hooks/config_watch.py |
+| 45 | docs-audit agent model override. Opus override (a prompt that lifts the Opus refusal) left in settings.local.json. | D178 | 2026-09-19 | DUPLICATE | cs hooks/config_watch.py |
 | 46 | docs-audit all-jobs-passed. Checks needs against jobs. | cs same-check-kinds | none | PROMOTE ? | cs actions/all-jobs-passed or compliance_probes. Lane all-jobs-passed-wiring |
 | 47 | docs-audit fixed sleeps. waitForTimeout in specs. | no record | none | PROMOTE ? | cs lint/ for Playwright repos. No lane yet |
 | 48 | docs-audit design rows and css-var-check and similar. Design floor drift. | D118 and others | D118 | STAYS | Repo fact: docs/DESIGN.md |
@@ -523,7 +523,7 @@ Wording belongs to the lane that asks.
 
 ## Side findings
 
-- mailaudit check-records.mjs claim 8 cites a retired anchor, roles-holes-are-debts. The live anchor
+- mailaudit check-records.mjs claim 8 cites a retired anchor name. The live anchor
   is roles-findings-are-debts-or-notes (a finding becomes a debt or a note).
 - actions/claude-md-cites runs in no child CI. The deep audit says the same. actions/ruling-kind is
   wired in neither mailaudit nor joyous. The reader also says banchi, per the deep audit. Not
