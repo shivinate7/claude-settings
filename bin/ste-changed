@@ -129,7 +129,8 @@ def main(argv):
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
                PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
-               DECISIONS_DIR=default(text, "decisions-dir"))
+               DECISIONS_DIR=default(text, "decisions-dir"),
+               TREE_CITES=os.environ.get("TREE_CITES") or default(text, "tree-cites"))  # an opted-in repo runs the same here
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
     rc = subprocess.run([find_bash(), run], env=env).returncode

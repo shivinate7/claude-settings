@@ -36,8 +36,8 @@ Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no 
 A touched .py adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file
 --batch`, so 5 at most. Each tracked .md is read once, only when something was removed. It writes no file
 (no .pyc either) and leaves no process running.
-A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch (it reads each tracked .md
-and each file a line anchor names, once). It writes no file.
+A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
+once, and each file a line anchor names once more, even when that file is a .md. It writes no file.
 """
 import argparse
 import ast
