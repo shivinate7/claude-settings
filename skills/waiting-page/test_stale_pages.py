@@ -120,8 +120,8 @@ class Stale(unittest.TestCase):
             json.dump({"kinds": {}, "waiting-page": URL % page_id}, f)
         return root
 
-    def fetch(self, page_id, text=None, unreadable=False):
-        ext = ".unreadable" if unreadable else ".html"
+    def fetch(self, page_id, text=None, unreadable=False, notfound=False):
+        ext = ".notfound" if notfound else ".unreadable" if unreadable else ".html"
         with open(os.path.join(self.fetched, page_id + ext), "w", encoding="utf-8") as f:
             f.write(text or "")
 
@@ -133,9 +133,36 @@ class Stale(unittest.TestCase):
         return subprocess.run([sys.executable, script or CMD, *args], capture_output=True, text=True,
                               timeout=30, env=env)
 
-    def run_cmd(self, *roots):
-        r = self.run_script(self.fetched, *roots)
+    def run_cmd(self, *roots, script=None):
+        r = self.run_script(self.fetched, *roots, script=script)
         return r.returncode, r.stdout + r.stderr
+
+    def not_found_line(self, out, owner):
+        """The one output line that starts `not-found: <owner>`."""
+        lines = [line for line in out.splitlines() if line.startswith("not-found: %s" % owner)]
+        self.assertEqual(len(lines), 1, "want one not-found line for %s:\n%s" % (owner, out))
+        return lines[0]
+
+    def total_line(self, out):
+        """The one output line that starts `waiting pages:`."""
+        lines = [line for line in out.splitlines() if line.startswith("waiting pages: ")]
+        self.assertEqual(len(lines), 1, "want one total line:\n" + out)
+        return lines[0]
+
+    def hub_checkout(self, url=None):
+        """A claude-settings checkout for batch mode: a copy of the script with page.html and lint/ beside it, and an
+        extras file naming `url` as its waiting page (None: no waiting page). Returns the copy's path."""
+        hub = os.path.join(self.tmp.name, "hub")
+        skill = os.path.join(hub, "skills", "waiting-page")
+        write_text(os.path.join(skill, "page.html"), PAGE)
+        shutil.copy2(CMD, os.path.join(skill, "stale_pages.py"))
+        shutil.copy2(SPLICE, os.path.join(skill, "splice.py"))  # the script imports it from beside itself
+        os.symlink(LINT, os.path.join(hub, "lint"))
+        extras = {"kinds": {}}
+        if url:
+            extras["waiting-page"] = url
+        write_text(os.path.join(hub, ".claude", "layout-extras.json"), json.dumps(extras))
+        return os.path.join(skill, "stale_pages.py")
 
     def test_old_and_unreadable_are_named_and_current_passes(self):
         roots = [self.repo("fresh", "AAA"), self.repo("old", "BBB"), self.repo("other-account", "CCC")]
@@ -147,7 +174,7 @@ class Stale(unittest.TestCase):
         self.assertIn("current: fresh", out)
         self.assertIn("behind: old", out)
         self.assertIn("unknown: other-account", out)
-        self.assertIn("1 current, 1 behind, 1 unknown", out)
+        self.assertIn("1 current, 1 behind, 1 unknown, 0 not-found", out)
 
     def test_page_with_own_mockups_is_current(self):
         mock = PAGE.replace('id="designData">', 'id="designData">{"a": "\\u003cp>mockup\\u003c/p>"}', 1)
@@ -284,6 +311,55 @@ class Stale(unittest.TestCase):
         code, out = self.run_cmd(root)
         self.assertEqual(code, 1, out)
         self.assertIn("unknown: blank", out)
+
+    def test_a_notfound_marker_reads_not_found_not_unknown(self):
+        # Not found from this account proves nothing: the page may belong to another account.
+        root = self.repo("gone", "NNN")
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(root)
+        line = self.not_found_line(out, "gone")
+        self.assertRegex(line, r"not found from this account", "the not-found line does not say it was not found from this account")
+        self.assertRegex(line, r"another account", "the not-found line does not say the page may be another account's")
+        self.assertEqual(code, 1, out)
+
+    def test_a_notfound_line_names_the_live_page_of_the_hub_checkout(self):
+        # The live page is the waiting page of the checkout that holds the script, read from its extras file. This hub's
+        # URL is not the claude-settings page, so a URL copied into the script fails this case.
+        hub_url = URL % "HUBLIVE0123"
+        script = self.hub_checkout(hub_url)
+        root = self.repo("gone", "NNN")
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(root, script=script)
+        line = self.not_found_line(out, "gone")
+        self.assertIn(hub_url, line, "the not-found line does not name the hub checkout's live page")
+
+    def test_a_hub_with_no_waiting_page_says_the_live_page_is_unknown(self):
+        script = self.hub_checkout(None)
+        root = self.repo("gone", "NNN")
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(root, script=script)
+        line = self.not_found_line(out, "gone")
+        self.assertRegex(line, r"live page[^\n]*unknown", "the not-found line does not say the live page is unknown")
+
+    def test_the_total_line_counts_not_found_apart_from_unknown_and_exit_1(self):
+        # A page not found from this account is never counted current, and has its own count apart from unknown.
+        roots = [self.repo("fresh", "AAA"), self.repo("gone", "NNN"), self.repo("gone-too", "MMM")]
+        self.fetch("AAA", PAGE)
+        self.fetch("NNN", notfound=True)
+        self.fetch("MMM", notfound=True)
+        code, out = self.run_cmd(*roots)
+        self.assertEqual(self.total_line(out), "waiting pages: 1 current, 0 behind, 0 unknown, 2 not-found",
+                         "the total line does not count the not-found pages apart")
+        self.assertEqual(code, 1, out)
+
+    def test_a_batch_with_no_waiting_page_totals_zero_not_found(self):
+        # The empty state: a repo with no waiting page is left out, and the total line still carries a not-found count.
+        bare = os.path.join(self.tmp.name, "bare")
+        write_text(os.path.join(bare, ".claude", "layout-extras.json"), json.dumps({"kinds": {}}))
+        code, out = self.run_cmd(bare)
+        self.assertEqual(self.total_line(out), "waiting pages: 0 current, 0 behind, 0 unknown, 0 not-found",
+                         "the total line has no not-found count")
+        self.assertEqual(code, 0, out)
 
     # Single-page mode: stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
 
