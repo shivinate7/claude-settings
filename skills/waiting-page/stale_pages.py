@@ -16,9 +16,11 @@ Verdict, one line per page, then a total line:
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
   not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
-           The line says to re-file the repo's items on the hub's live page: the waiting page of the claude-settings
-           checkout that holds this script. That target reads "unknown" when the checkout has no page, its page
-           is this one, or its extras file cannot be read. The check never repoints a page.
+           The line says to re-file the repo's items on the claude-settings waiting page: the URL recorded in the
+           extras file of the claude-settings checkout that holds this script, not fetched. That target reads
+           "the claude-settings waiting page is unknown" when the checkout has no page, its extras file cannot be
+           read, or its page has a .notfound or .unreadable marker in <fetched-dir> (so a not-found page that is
+           the claude-settings page names no target). The check never repoints a page.
 The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
 Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
@@ -147,37 +149,46 @@ def carries_data(template, live):
     return False
 
 
-def page_id(url):
-    # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
-    return url.rstrip("/").rsplit("/", 1)[-1]
-
-
 def hub_clone():
     """The claude-settings checkout that holds this script: the one home of the clone that default_roots() starts from."""
     return os.path.abspath(os.path.join(HERE, "..", ".."))
 
 
-def live_page_of_hub():
-    """The waiting page URL of the hub checkout, or "unknown" when it has none or its extras file cannot be read."""
+def marker(url, fetched):
+    """"notfound" or "unreadable" when <fetched>/<artifact id> has that marker, else None. The file name is
+    layout.artifact_id(url), the one home of "same artifact", so a query string names the same file."""
+    import layout  # batch mode only
+    name = os.path.join(fetched, layout.artifact_id(url))
+    for kind in ("notfound", "unreadable"):
+        if os.path.isfile(name + "." + kind):
+            return kind
+    return None
+
+
+def refile_target(fetched):
+    """The claude-settings waiting page URL, as its extras file records it, or "unknown" when that checkout has
+    no page, its extras file cannot be read, or the page has a marker in `fetched`. A not-found page that is
+    the claude-settings page has its own marker, so it never names itself."""
     import layout  # batch mode only
     try:
-        return layout.waiting_page(hub_clone())
+        url = layout.waiting_page(hub_clone())
     except layout.LayoutError:
         return "unknown"
+    return "unknown" if url == "unknown" or marker(url, fetched) else url
 
 
 def verdict(url, fetched, template):
     """(word, why) for one page: current, behind, unknown or not-found."""
-    name = os.path.join(fetched, page_id(url))
-    if os.path.isfile(name + ".notfound"):
-        target = live_page_of_hub()
-        if target != "unknown" and page_id(target) == page_id(url):
-            target = "unknown"  # the hub's own page is the missing one: it is no place to re-file on
-        where = ("re-file its items on the hub's live page %s" % target if target != "unknown"
-                 else "the hub's live page, where to re-file its items, is unknown")
+    import layout  # batch mode only
+    found = marker(url, fetched)
+    if found == "notfound":
+        target = refile_target(fetched)
+        where = ("re-file its items on the claude-settings waiting page %s" % target if target != "unknown"
+                 else "no place to re-file its items: the claude-settings waiting page is unknown")
         return "not-found", "not found from this account (deleted, or another account's); %s" % where
-    if os.path.isfile(name + ".unreadable"):
+    if found == "unreadable":
         return "unknown", "the read failed"
+    name = os.path.join(fetched, layout.artifact_id(url))
     if not os.path.isfile(name + ".html"):
         return "unknown", "no fetched file"
     with open(name + ".html", encoding="utf-8", errors="replace") as f:

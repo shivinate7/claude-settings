@@ -634,9 +634,10 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    before an id counts as absent. Any other failed read stays `.unreadable`.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind`, `unknown` or `not-found` with its owner, and exits non-zero. An unread page is never
-   current. A `not-found` page is reported with the hub's live page, the waiting page of the claude-settings
-   checkout that holds the script, as the place to re-file that repo's items. The target reads `unknown` when
-   that checkout has no page, its page is the missing one, or its extras file cannot be read. The check
+   current. A `not-found` page is reported with the claude-settings waiting page as the place to re-file that
+   repo's items: the URL recorded in the extras file of the claude-settings checkout that holds the script, not
+   fetched. The target reads `the claude-settings waiting page is unknown` when that checkout has no page, its
+   extras file cannot be read, or its page has a `.notfound` or `.unreadable` marker in the folder. The check
    never repoints a page: the owner decides.
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`, as "Keep the page on main's code" step 2 says:
