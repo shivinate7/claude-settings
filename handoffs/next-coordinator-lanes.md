@@ -22,9 +22,9 @@ Rules for every lane:
 
 ### page-filed-check-r
 
-- Head `b4661d34`. Round 3 review by Sonnet: CLEAR, net value positive. No PR yet. Open a draft PR.
+- Head `b4661d34`. Round 3 review by Sonnet: CLEAR, net value positive. It goes into batch 1 with #1108. The batch runner opens its PR.
 - Serves fb-1312-1 (a writer's filing lands: page item `n` exists in the waiting store), fb-1313-1 (keep the check in `hooks/feedback_guard.py`), and fb-1311-3 (verify each filing on origin or by read-back).
-- Hold: fb-1312-1 says build the check after `waiting-data-in-repo` merges. That lane is on owner hold (11:00 CST). Ask the owner on the waiting page before you mark the PR ready. Merge waits on the answer.
+- Order: fb-1312-1 says build the check after `waiting-data-in-repo` merges. That lane merged in #1110 (main `da8d8073`). The owner lifted its hold at 2026-11-02 14:22 CST (ruling 2b). No hold applies here.
 - Notes to file, one line each in the notes file: `owner-feedback-inbox.md` lines 121-124 miss one `rev-parse` on a read-back. The word "blocks" is a glossary Not-name.
 
 ## Start after batch 1 lands, in this order
@@ -202,12 +202,11 @@ Rules for every lane:
 - plugin-assess-three: PR #1036, head `db760690`. Fix the title, which says "skip all three". Score the shadow pairs. Settle the Ambition Lenses verdict. The plugin trial has 8 scored cases.
 - Message lane test-practices-first-principles (draft PR #1028) the path `skills/shivpedia/testing/`. Then brief the build lanes from plan section 8, starting with glossary-to-shivpedia.
 
-### account switch (owner hold)
+### account switch
 
 - Goal: waiting-page data and mockups survive a Claude account switch.
-- Branches: `waiting-data-in-repo` (head `b655208f0`, no PR), and `mockup-homes` code (head `f2caab9f`, base `74be1279`).
-- Blocking owner item: owner hold, 2026-11-02 11:00 CST. Draft only. No merge and no batch until the owner says. The hold also blocks the page-item check in fb-1312-1.
-- Ask the owner one item: lift the hold for a draft PR, or keep it.
+- `waiting-data-in-repo` merged in #1110. `mockup-homes` code: head `f2caab9f`, base `74be1279`. Its merge status is not checked here.
+- The owner hold of 2026-11-02 11:00 CST is lifted at 14:22 CST (ruling 2b). No hold applies.
 - Meanwhile the test-author fixes the `item480-a` case (use `1item48-a`), adds two ruling cases, and runs `hooks/mutate_guard.py` for `mockup-home`.
 - `mockup-homes` lands first. Then `waiting-data-in-repo` rebases onto it. Both edit `skills/waiting-page/SKILL.md` and `lint/test_layout.py`.
 - Settled (12:50 CST): the roadmap build reads open steps only.
@@ -220,6 +219,7 @@ Rules for every lane:
 
 ### deep audit
 
-- Run 1 runs in the previous coordinator's session. Plan: `docs/plans/deep-audit.md` on branch `deep-audit-plan` (head `f0c1e4e6`).
-- Run 2 is not recorded as started. When Run 2 ends, Run 1's findings and its one-home lanes land in the handoff.
+- The owner runs Run 1, the quote check and Run 2 from a session on the owner's Windows laptop, on branch `audit/deep-1102` (owner, 2026-11-02 17:40-17:42 CST).
+- The report lands at `docs/plans/deep-audit/report.md` on that branch. Private-repo findings land on `audit/deep-1102` in each private repo.
+- The coordinator adds the audit's lanes when that report lands.
 - Owner asks: fb-1602-1, fb-1604-1, fb-1605-1, fb-1605-2 and fb-1702-1. `opus 24h` until 2026-11-03 16:05 CST.

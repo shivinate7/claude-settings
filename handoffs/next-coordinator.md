@@ -39,26 +39,25 @@ Triage's first tasks:
 - Claude-settings is the law in each child repo. A child may differ only with a cited known exemption and the owner's grant (owner, 2026-11-02 14:02 and 14:11 CST). The coordinator may run child-repo pointer and drift lanes in any child repo (fb-1543-1).
 - Write plainly. The repo dropped STE as a named standard (fb-1321-1, fb-1322-1).
 - Opus: the deep audit runs on `opus 24h`, until 2026-11-03 16:05 CST. Any other Opus agent needs the owner's grant (`agent-model-cap`).
-- The wind-down rulings fb-1231-1, fb-1232-1 and fb-1242-1 told the wind-down session to spawn no sessions. The restart replaces them. The owner has not confirmed this in writing.
+- Wind-down rulings fb-1231-1, fb-1232-1 and fb-1242-1 bind only the old coordinator session. They do not bind the new coordinator, which the owner starts.
 
 ## Batch 1
 
-Batch 1 is the first two lanes in the lane list: questions-reach-page-r (PR #1108, head `b0d8b100`) and page-filed-check-r (head `b4661d34`).
+Batch 1 is questions-reach-page-r (PR #1108, head `b0d8b100`) and page-filed-check-r (head `b4661d34`, round 3 Sonnet CLEAR, net value positive). page-filed-check-r goes into batch 1 with #1108. The batch runner opens its PR.
 
-- Open a draft PR for page-filed-check-r. It has none yet.
-- Check the hold on page-filed-check-r before you mark it ready. The lane list gives the detail.
 - Only the integration PR goes ready. Lane PRs stay draft until it merges.
 
 ## Deep audit
 
-- Run 1 runs in the previous coordinator's session. Plan: `docs/plans/deep-audit.md` on branch `deep-audit-plan` (head `f0c1e4e6`). The drift pilot script is the extractor base.
-- When Run 2 ends, Run 1's findings and its one-home lanes land in this handoff. Run 2 is not recorded as started. This handoff does not name who runs it.
+- The owner runs Run 1, the quote check and Run 2 from a session on the owner's Windows laptop, on branch `audit/deep-1102` (owner, 2026-11-02 17:40-17:42 CST).
+- The report lands at `docs/plans/deep-audit/report.md` on that branch. Private-repo findings land on `audit/deep-1102` in each private repo.
+- The coordinator adds the audit's lanes when that report lands.
 - Owner asks: fb-1602-1, fb-1604-1, fb-1605-1, fb-1605-2, fb-1702-1.
-- Do not take over Run 1. The succession rule above applies.
+- Do not start Run 1 or Run 2 from this session.
 
 ## Goal
 
-"Restart the flywheel" from the freeze record, losing no work (owner, 2026-10-31 14:12 CDT). Now: restart the trio, run batch 1, run the lanes, and land the deep audit's findings when Run 2 ends.
+"Restart the flywheel" from the freeze record, losing no work (owner, 2026-10-31 14:12 CDT). Now: restart the trio, run batch 1, run the lanes, and add the deep audit's lanes when its report lands.
 
 ## Working premises
 
