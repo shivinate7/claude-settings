@@ -50,9 +50,11 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job.
       bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
-      # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it. checks-shoot
-      # is the one caller of actions/playwright-setup in this repo, so it also proves that action.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*|actions/playwright-setup/*) on="$on code shoot " ;;
+      # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*) on="$on code shoot " ;;
+      # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). Set checks_guard
+      # directly: the guard flag would also start the guard suites, which this action does not touch.
+      actions/playwright-setup/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
