@@ -46,7 +46,7 @@ stop the same way (`designer-diff`). Risk: likely. A designer that writes produc
 second builder, unreviewed as one. Landed 2026-10-26.
 
 Reason: the owner wants each screen seen before it is built, and judged after against what was
-seen. Reopen when the owner rules on `/design`, or when a design agent's Opus cost shows in a cull.
+seen. A text-only change is the exception: no designer sees it first, and the design reviewer judges it against main's screenshots. Reopen when the owner rules on `/design`, or when a design agent's Opus cost shows in a cull.
 
 Kind: process
 Home: agents/designer.md
