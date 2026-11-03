@@ -99,6 +99,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -493,6 +494,14 @@ ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on p
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
+# The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
+# pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
+ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
+ARCHDRAFT_IDENT = os.path.join(ROOT, "archdraft-identical")    # an open draft, head identical to main: its commits landed
+ARCHDRAFT_AHEAD = os.path.join(ROOT, "archdraft-ahead")        # an open draft, head ahead of main: not landed
+ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, head diverged from main: not landed
+ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
+ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -987,8 +996,11 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
-    elif re.fullmatch(r"compare/[^/]+", rel):  # the containment read of "<base sha>...<head sha>": a pair not listed is diverged
-        print(json.dumps({"status": state.get("compares", {}).get(rel[len("compare/"):], "diverged")}))
+    elif re.fullmatch(r"compare/[^/]+", rel):  # the containment read of "<base>...<head sha>": a pair not listed is diverged
+        status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
+        if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
+            api_error(500, "compare read broke")
+        print(json.dumps({"status": status}))
     else:
         api_error(404, "Not Found")
 '''
@@ -1282,6 +1294,16 @@ def build_fixtures():
     make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
     make_fake_gh(ARCHNEAR_C10X, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/c10-x1")])
     make_fake_gh(ARCHNEAR_CI, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/fix-ci-retry-x1")])
+    # The containment read is keyed "main...<head sha>" (the base's name, then the head's sha, as the compare API takes them).
+    draft_pair = "main..." + slug_head["head"]
+    draft_rows = [dict(slug_head, draft=True)]
+    make_fake_gh(ARCHDRAFT_BEHIND, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "behind"})
+    make_fake_gh(ARCHDRAFT_IDENT, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "identical"})
+    make_fake_gh(ARCHDRAFT_AHEAD, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "ahead"})
+    make_fake_gh(ARCHDRAFT_DIVERGED, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "diverged"})
+    # A ready pull request, not a draft: its head behind main does not release it, so the refusal stands.
+    make_fake_gh(ARCHREADY_BEHIND, "main", need=["o/r"], others=[dict(slug_head)], compares={draft_pair: "behind"})
+    make_fake_gh(ARCHDRAFT_READFAIL, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "server"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8945,6 +8967,23 @@ def role_said(text):
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+CREATE_SESSION = "mcp__claude-code-remote__create_session"
+ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
+
+
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False):
+    """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
+    JSON {"id": ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
+    body = "Created session " + session + "." if plain else json.dumps({"id": session})
+    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
+            role_result(tool_id, body)]
+
+
+# lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
+STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
+STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
+
+
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
@@ -9007,6 +9046,14 @@ ROLE_LINES = {
     "archive-own-lane": role_call("r0", LANE_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
+    # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
+    # lane has no cs-topic, so its cs-step tags alone judge a brief. The create shapes read the start of the lane.
+    "step-topic-lane": role_target_call("t1", STEP_TOPIC_TAGS),
+    "step-old-lane": role_target_call("t1", STEP_OLD_TAGS),
+    "step-triage": role_target_call("t1", TRIAGE_TAGS),
+    "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
+    "step-create-json": role_create_call("c1", STEP_TOPIC_TAGS),
+    "step-create-text": role_create_call("c1", STEP_TOPIC_TAGS, plain=True),
 }
 
 
@@ -9433,10 +9480,12 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=()):
-    """An archive_session of the target the guard refuses. The reason names its rule, never the tool."""
+def archive_refuse(name, transcript, env_path, carries=(), lacks=()):
+    """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
+    adds fragments the reason must not hold, so a case can tell one refusal reason from another."""
+    more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
-        lacks=ARCHIVE_NAMED, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
+        lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
         session_id=ROLE_OTHER)
 
 
@@ -9483,6 +9532,109 @@ archive_refuse("a target read untagged, then tagged lane, is refused: the newest
                role_path("archive-stale-then-lane"), fake_gh_path(ARCHOPEN))
 # No transcript at all: no record can be read, so the target's tags are unknown, and the call is refused.
 archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
+# The containment read. An open draft lane pull request whose head is already in main has landed through the integration
+# pull request, so it no longer blocks the archive. Only a draft is released; a read that fails refuses, and says so.
+# The two refusal reasons are told apart by a fragment each: the open-pull-request reason says "still open", and the
+# read-failure reason says "could not be read". A case pins its own reason and not the other's.
+ARCHIVE_OPEN_PIN = ("still open",)
+ARCHIVE_READ_PIN = ("could not be read",)
+archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
+archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_IDENT))
+archive_refuse("an open draft lane pull request whose head is ahead of main is refused: its commits have not landed",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_AHEAD), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open draft lane pull request whose head diverged from main is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_DIVERGED), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open ready lane pull request whose head is behind main is refused: only a draft is released",
+               role_path("archive-lane"), fake_gh_path(ARCHREADY_BEHIND), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open draft lane pull request whose containment read fails is refused, and the reason says the read failed",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_READFAIL), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_OPEN_PIN)
+
+
+# =========================================================================== 5h. one lane, one topic
+FAMILY = "lane-one-topic"
+#
+# Rule lane-one-topic. A lane is one topic: its cs-topic tag, set at create_session beside its cs-step tags. A
+# send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest
+# record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
+# Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
+# Any other message passes, and so does a brief to a target that is no lane. A marker brief with no record of its
+# target is refused. Only a marker brief reads the transcript: a message without the marker passes unread.
+LANE_ONE_TOPIC = "lane-one-topic"
+SEND_MESSAGE = "mcp__claude-code-remote__send_message"
+TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
+
+
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=()):
+    """A send_message the guard refuses. The reason names its rule, and the rule's own id."""
+    add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message, carries=carries)
+
+
+def step_allow(name, transcript, message, target=ROLE_OTHER):
+    """A send_message the guard lets through silently."""
+    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message)
+
+
+# Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
+# alone cannot pass it.
+step_refuse("a brief for topic colors to a lane on topic icons is refused, though it names the lane's own step",
+            role_path("step-topic-lane"), "Lane brief: icon-a. Topic: colors.")
+# Refused: a lane with a topic gets a brief that names none. The steer names the topic, so the sender can fix it.
+step_refuse("a brief that names no topic, to a lane with a topic, is refused, and the steer names the topic",
+            role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_STEER)
+# Refused: the match is exact. Topic icons-v2 is not topic icons, though it holds it as a substring.
+step_refuse("a brief for topic icons-v2 to a lane on topic icons is refused: a substring is not the topic",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons-v2.")
+# Refused: the marker is the first non-blank line, so leading blank lines do not hide it from the judge.
+step_refuse("a brief after two blank lines is judged: the marker is the first non-blank line",
+            role_path("step-topic-lane"), "\n\nLane brief: icon-a. Topic: colors.")
+# Refused: an older lane with no cs-topic is judged by its cs-step tags, and icon-c is not one of them.
+step_refuse("a brief naming a step the older lane does not carry is refused",
+            role_path("step-old-lane"), "Lane brief: icon-c. Topic: icons.")
+# Refused: a lane that create_session started on topic icons, with its result as JSON, then as plain text. Each
+# result shape has its own fixture, so a reader that takes only one shape fails one case.
+step_refuse("a brief for topic colors to a lane that create_session started on topic icons (JSON result) is refused",
+            role_path("step-create-json"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
+step_refuse("a brief for topic colors to a lane that create_session started on topic icons (plain result) is refused",
+            role_path("step-create-text"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
+# Refused: no record of the target in the transcript, so the guard cannot tell the lane's topic.
+step_refuse("a marker brief to a target with no record in the transcript is refused",
+            role_path("no-record"), "Lane brief: icon-b. Topic: icons.")
+# Refused, and paired with the cost case below: the transcript cannot be read, so a marker brief is refused.
+step_refuse("a marker brief whose transcript cannot be read is refused",
+            role_path("unreadable"), "Lane brief: icon-b. Topic: icons.")
+# Passes, the cost pair of the refusal above: a message without the marker passes with the same unreadable
+# transcript, so it reads none. A guard that read the transcript for every message would refuse it here.
+step_allow("a message without the marker passes with an unreadable transcript, so it reads no transcript",
+           role_path("unreadable"), "Status: PR #12 merged for icon-a.")
+# Passes: a status message about the lane's step, with no marker.
+step_allow("a status message about the lane's step, with no marker, is allowed",
+           role_path("step-topic-lane"), "Status: PR #12 merged for icon-a.")
+# Passes: the marker is not the first line, so the brief is not judged, though its topic differs.
+step_allow("a marker on line two is not the first line, so the brief is not judged",
+           role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-a. Topic: colors.")
+# Passes: one lane, one topic, many steps. A new step on the lane's own topic is allowed.
+step_allow("a brief for a new step on the lane's own topic is allowed: one lane, one topic",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.")
+step_allow("a brief for the lane's own step on its own topic is allowed",
+           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.")
+# Passes: an older lane with two cs-step tags and no topic is judged by its steps: the second step is one of them.
+step_allow("an older lane with two cs-step tags: a brief naming its second step is allowed",
+           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.")
+# Passes: a lane that create_session started on topic icons, with a new step on that topic, in both result shapes.
+step_allow("a brief for a new step on topic icons to a lane that create_session started (JSON result) is allowed",
+           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
+           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+# Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
+step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
+           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
+# Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
+step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
+           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
 
 
 # =========================================================================== 5d. cite by id
