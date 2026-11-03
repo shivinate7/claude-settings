@@ -74,7 +74,7 @@
         "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
       }
     },
-    "roles-sonnet-is-the-default": {
+    "roles-model-per-role-table": {
       "mechanism": {
         "kind": "unmechanized",
         "reason": "No check reads whether a workflow agent takes its role through agentType or runs its model from the model-per-role table."
