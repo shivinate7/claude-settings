@@ -528,6 +528,13 @@ class Protect(unittest.TestCase):
         self.assertEqual(len(puts), 1, calls)
         self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["all-jobs-passed"])
 
+    def test_the_same_name_twice_is_one_check(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", " checks\t", "--confirm")
+        self.assertEqual(code, 0, "the same name twice is one check: exit 0 expected\n" + out)
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, "the same name twice: one PUT expected\n" + str(calls))
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks"], "the same name twice: contexts must hold the name once")
+
     def test_a_matrix_name_with_a_comma_stays_one_check(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "test (ubuntu, 3.11)", "--confirm")
         self.assertEqual(code, 0, out)
