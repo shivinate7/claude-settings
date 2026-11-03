@@ -1,0 +1,9 @@
+{
+ "title": "precompact_handoff finds claude on the PATH when CLAUDE_CODE_EXECPATH is missing",
+ "phase": "now",
+ "status": "doing",
+ "order": 492,
+ "why": "Owner ask, Nov 3 15:53 CST; decision precompact-handoff, item 12: with CLAUDE_CODE_EXECPATH unset, the handoff hook cannot find the claude binary.",
+ "note": "Fall back to `claude` on the PATH in hooks/precompact_handoff.py; red first with the variable unset. Lane session_013NEJL1cPzSjSedg2F37vFZ, started by the coordinator Nov 3. Ready.",
+ "updatedAt": "2026-11-03T22:05:00Z"
+}

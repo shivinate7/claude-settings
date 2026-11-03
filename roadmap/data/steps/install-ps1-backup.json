@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 490,
  "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, table 'claude-settings: homes'): install.ps1:985-1000 overwrites a plain settings.json with no backup; decision copy-mode-overwrites-no-backup:5 makes settings.json the exception, and install.sh:1004-1008 keeps one.",
- "note": "Carry install.sh's backup form (first .orig, later .bak.<time>.<pid>, newest kept) to install.ps1. Done: a test of install.ps1 with a tool-written plain settings.json keeps a backup, red on old code. Windows proof is unmeasured from the cloud. Lane live, started by the coordinator Nov 3. Ready.",
+ "note": "Carry install.sh's backup form (first .orig, later .bak.<time>.<pid>, newest kept) to install.ps1. Done: a test of install.ps1 with a tool-written plain settings.json keeps a backup, red on old code. Windows proof is unmeasured from the cloud. Lane session_013NEJL2KFeT8wgfxsZapdBV, started by the coordinator Nov 3. Ready.",
  "updatedAt": "2026-11-03T21:50:00Z"
 }
