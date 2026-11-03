@@ -1,0 +1,36 @@
+[
+    {
+        "id": "oq-ste-lint-shallow-base",
+        "kind": "decision",
+        "status": "open",
+        "title": "Should a shallow-clone base fail ste-lint, or stay unknown with exit 0?",
+        "short": "Shallow base in ste-lint",
+        "owner": "session_013NEJL1qigiKQJb7Z7QZ4WT",
+        "home": "decision stale-cites-at-merge (stale prose check at merge), line 14",
+        "context": "Goal: ste-lint never passes a PR it could not read.\nProblem (rule): On branch ste-lint-diff-fail-closed (head 9c43a817), run.sh stops with 'ste-lint: unknown' and exit 1 when its git diff cannot read the range. Your 2026-11-01 ruling in stale-cites-at-merge says a base that does not resolve (a shallow clone) is unknown and exits 0, so a child that pins the action and checks out shallow is not red at its pin move. The two rulings conflict, so this needs your word.\nBased on (measured): with the fix, lint/test_stale_cites.py test_step_with_an_unresolvable_base_exits_zero goes red (rc 1, 'no merge base'); the 6 new cases in actions/ste-lint/test_action.py go green.\nBased on (notes): Which children check out shallow is unmeasured. run.sh's own fallback fetch uses --depth=1, which also leaves no merge base.\nDeparts from: main exits 0 on an unreadable base — the step exits 1, and stale-cites-at-merge line 14 is rewritten to match.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Fail closed always (Recommended)",
+                "how": "Keep 9c43a817. Re-point the stale test to expect rc 1 and 'ste-lint: unknown'. Rewrite stale-cites-at-merge line 14. Each child's re-pin lane also sets fetch-depth 0.",
+                "gain": "No PR passes lint unread, whether it comes from a bad base or a shallow clone.",
+                "lose": "A child that re-pins without fetch-depth 0 goes red until it sets it."
+            },
+            {
+                "key": "b",
+                "label": "Shallow stays exit 0",
+                "how": "When git rev-parse --is-shallow-repository is true, print unknown and exit 0. Fail closed only in a full clone.",
+                "gain": "No child goes red at its re-pin.",
+                "lose": "A shallow child is never linted, and the log says unknown on every run."
+            },
+            {
+                "key": "c",
+                "label": "Deepen, then fail closed",
+                "how": "When the diff read fails in a shallow clone, the step runs git fetch --unshallow once and tries again. It fails closed if the read still fails.",
+                "gain": "Children stay green and get linted.",
+                "lose": "Each shallow run adds one full fetch, and the step does more."
+            }
+        ],
+        "repo": "shivinate7/claude-settings"
+    }
+]
