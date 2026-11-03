@@ -981,13 +981,29 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     Exit-Install $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
 }
 
-# A real file here: on the first local install ever, it is a person's own settings.json,
-# backed up. After that, it is this same installer's own earlier copy, from a
-# no-symlink-rights machine where the symlink attempt below fell back to Copy-Item:
-# replace it, no backup (D: copy-mode-overwrites-no-backup).
-if ($item -and -not $item.LinkType -and $FirstLocalRun) {
-    $bak = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-    Copy-Item $TargetJson $bak
+# A real file here is backed up before Install-File replaces it, whether it is a person's own
+# settings.json or this installer's earlier copy (a no-symlink-rights machine). On the first local
+# run, with no settings.json.orig yet, the backup is settings.json.orig: kept for good, never
+# pruned. Any other backup is settings.json.bak.<time>.<pid>, and only the newest of those stays;
+# a no-pid settings.json.bak.<time> from an older installer stays too. The backup is a copy, not a
+# move, so settings.json is never absent during the swap. If the copy fails, nothing is replaced.
+# This is the one exception to D: copy-mode-overwrites-no-backup.
+if ($item -and -not $item.LinkType) {
+    $keep = $false
+    $bak  = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss).$PID"
+    if ($FirstLocalRun -and -not (Test-Path -LiteralPath "$TargetJson.orig")) { $keep = $true; $bak = "$TargetJson.orig" }
+    try { Copy-Item -LiteralPath $TargetJson -Destination $bak -ErrorAction Stop }
+    catch {
+        Log "ERROR: cannot copy $TargetJson to ${bak}: $($_.Exception.Message); nothing replaced"
+        Exit-Install 1
+    }
+    if (-not $keep) {
+        # Match on Name, not a -Filter wildcard: in PS 5.1 `.*.*` can match an empty part, which would prune the no-pid backups.
+        foreach ($old in @(Get-ChildItem -LiteralPath (Split-Path $TargetJson -Parent) -Force | Where-Object { $_.Name -match '^settings\.json\.bak\.\d{14}\.\d+$' -and $_.FullName -ne $bak })) {
+            try { Remove-Item -LiteralPath $old.FullName -Force -ErrorAction Stop }
+            catch { Log "could not remove the older backup $($old.FullName) ($($_.Exception.Message)); left behind" }
+        }
+    }
     Log "existing $TargetJson backed up to $bak; merge any keys you want (permissions, etc.) into $SrcJson"
 }
 

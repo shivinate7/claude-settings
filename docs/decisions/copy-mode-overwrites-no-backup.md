@@ -17,4 +17,4 @@ Why the exception: each merge runs the install. A tool that writes `settings.jso
 Known cost: a hand edit to any other installed copy under `~/.claude` is lost at the next install.
 
 Kind: process
-Home: install.sh
+Home: install.sh, install.ps1
