@@ -995,7 +995,7 @@ if ($item -and -not $item.LinkType) {
     try { Copy-Item -LiteralPath $TargetJson -Destination $bak -ErrorAction Stop }
     catch {
         Log "ERROR: cannot copy $TargetJson to ${bak}: $($_.Exception.Message); nothing replaced"
-        Exit-Install 1
+        # mutant: carry on
     }
     if (-not $keep) {
         # Match on Name, not a -Filter wildcard: in PS 5.1 `.*.*` can match an empty part, which would prune the no-pid backups.
