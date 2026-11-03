@@ -25835,7 +25835,7 @@ def register_simulator_boot_cases():
        "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
-       "sh -lc \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "sh -lc 'xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
     sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
@@ -26099,16 +26099,14 @@ def sim_lock_eperm_check():
     lock = os.path.join(cfg, "state", "sim-test.lock")
     os.makedirs(lock, exist_ok=True)
     write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
-    saved = os.environ.get("CLAUDE_CONFIG_DIR")
-    os.environ["CLAUDE_CONFIG_DIR"] = cfg
-    try:
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+        # Scope first: with the real os.kill, the lock is read and this process is its live holder. Without
+        # this, a "" below could mean the lock was never read rather than that EPERM reads as free.
+        read = guard.sim_lock_holder()
+        if read != str(os.getpid()):
+            return False, "fixture not read: sim_lock_holder() returned %r before the patch, want this pid" % read
         with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
             got = guard.sim_lock_holder()
-    finally:
-        if saved is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = saved
     if got != "":
         return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
     return True, "a lock whose pid cannot be signalled reads as free"
