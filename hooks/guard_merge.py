@@ -522,10 +522,31 @@ def role_call_of(segment: str):
     return None
 
 
-def _own_session_read(transcript: str, own_id: str):
+_CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
+
+
+def _created_session_id(body):
+    """The id a create_session result names: the `id` of a JSON object, else the first `session_...` word of
+    plain text. None when the result names none."""
+    if not isinstance(body, str):
+        return None
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed["id"] if isinstance(parsed.get("id"), str) else None
+    found = _CREATED_ID.search(body)
+    return found.group(0) if found else None
+
+
+def _own_session_read(transcript: str, own_id: str, created: bool = False):
     """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
+    None, and whether a set_session_tags call follows that result. With `created`, a create_session call
+    whose result names own_id is a record too, its tags the call's input.tags: the newest record of either
+    kind decides. Without it, only get_session counts."""
     uses, newest, tagged_after = set(), None, False
+    creates = {}  # tool_use id -> the tags a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -539,16 +560,24 @@ def _own_session_read(transcript: str, own_id: str):
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
+                elif created and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("create_session"):
+                    given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
+                    if isinstance(given, list):
+                        creates[block.get("id")] = [str(t) for t in given]
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
                     # Only a call that names the own session changes the own tags. A call with no readable
                     # list of ids counts too: the safe reading is that it may have named this session.
                     ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
                     if not isinstance(ids, list) or own_id in ids:
                         tagged_after = True
-                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
+                elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
                     body = block.get("content")
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    if block.get("tool_use_id") in creates:
+                        if _created_session_id(body) == own_id:
+                            newest, tagged_after = creates[block.get("tool_use_id")], False
+                        continue
                     try:
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
@@ -716,10 +745,24 @@ ARCHIVE_READ_REASON = (
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
+def _head_landed(module, repo: str, base: str, sha: str) -> bool:
+    """True when the commit `sha` is already in `base`: GitHub's compare of base...sha reads behind or identical.
+    A failed read raises, and archive_hit refuses on it."""
+    with module.shared_deadline(MERGE_READ_TIMEOUT):
+        code, out = module.Host(repo=repo).api("compare/" + base + "..." + sha)
+    try:
+        if code:
+            raise ValueError(out)
+        return json.loads(out)["status"] in ("behind", "identical")
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError("the compare read failed: " + str(e))
+
+
 def archive_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
-    while any open pull request of its cs-repo has a head ref equal to its cs-step slug. Fails closed:
+    while any open pull request of its cs-repo has a head ref equal to its cs-step slug, except an open draft whose
+    head commit is already in its base (compare: behind or identical). Fails closed:
     any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if tool != ARCHIVE_TOOL:
         return None
@@ -747,10 +790,74 @@ def archive_hit(tool: str, tool_input, transcript: str):
             for row in rows:
                 ref = str(row["head"]["ref"])
                 slug = next((s for s in slugs if s == ref), None)
+                if slug and row.get("draft") is True and _head_landed(module, repo, str(row["base"]["ref"]), str(row["head"]["sha"])):
+                    continue
                 if slug:
                     return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
     except (Exception, SystemExit):
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+    return None
+
+
+# ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
+BRIEF_TOOL = "mcp__claude-code-remote__send_message"
+LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
+TOPIC_TAG_PREFIX = "cs-topic:"
+_BRIEF_LINE = re.compile(
+    re.escape(LANE_BRIEF_MARKER) + r"\s*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?")
+BRIEF_NO_RECORD_REASON = (
+    "this session's transcript holds no get_session or create_session record of the target, so the guard "
+    "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
+    "(decision session-tiers, a lane holds one topic)"
+)
+BRIEF_TOPIC_REASON = (
+    "this brief names a topic the lane does not hold. A lane holds one topic, and a brief's first line is "
+    "`Lane brief: <step>. Topic: <topic>.` with the lane's own cs-topic. Work on another topic goes to a new "
+    "lane: start one with create_session. (decision session-tiers, a lane holds one topic)"
+)
+BRIEF_STEP_REASON = (
+    "this brief names a step the lane does not carry, and the lane has no cs-topic tag to judge its Topic by. "
+    "Work on another step goes to a new lane: start one with create_session. "
+    "(decision session-tiers, a lane holds one topic)"
+)
+
+
+def brief_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
+    hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
+    transcript is read for that message alone. A target whose newest record (get_session, or the
+    create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
+    brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
+    error in the reads is a refusal, because the guard-wide crash path fails open."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
+    if not first.startswith(LANE_BRIEF_MARKER):
+        return None
+    target = tool_input.get("session_id")
+    try:  # cost: one transcript read per brief
+        tags, tagged_after = _own_session_read(transcript, target, created=True) \
+            if transcript and isinstance(target, str) and target else (None, False)
+    except Exception:
+        tags, tagged_after = None, False
+    if tags is None:
+        return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
+    if ARCHIVE_LANE_TAG not in tags:
+        return None
+    found = _BRIEF_LINE.match(first)
+    step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
+    topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
+    topics = [t for t in topics if t]
+    if topics:
+        if topic not in topics:
+            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
+        return None
+    if tagged_after:  # a later set_session_tags may have added the step this brief names, so the record is stale
+        return "lane brief to a target whose record is stale", BRIEF_NO_RECORD_REASON
+    steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
+    if step not in steps:
+        return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
 
 

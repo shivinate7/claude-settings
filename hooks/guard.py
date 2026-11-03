@@ -105,6 +105,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        equal to its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
                        and a read of the open list that fails (gh missing too) are refusals. A target with no lane
                        tag passes. An override lifts it.
+  lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
+                       `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
+                       record (get_session, or the create_session that made it, read from the transcript) is tagged
+                       cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
+                       with no cs-topic is judged by its cs-step tags: the brief's step must be one. A marker brief with
+                       no record of the target is a refusal. A message without the marker reads no transcript. An
+                       override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -328,7 +335,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4185,6 +4192,11 @@ def judge(payload) -> None:
     archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
