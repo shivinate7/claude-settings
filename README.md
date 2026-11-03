@@ -155,11 +155,11 @@ merge --dev ...         run the checkout's own tree, not origin main
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
 * **Another checkout.** A batch runner that merges in a second checkout runs
   `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. It runs
-  in the foreground (Bash timeout up to 600000), never with `run_in_background`: measured
-  2026-11-03 16:56 CST in a cloud auto-mode session, the foreground call matched the allow rule
-  and ran, and the same call in the background went to the auto-mode classifier and was refused. In a
-  cloud session the guard reads the checkout from the flag (else the `cd`, else the working
-  directory) and allows `--confirm` only when a `cs-repo` tag of the session's own `get_session`
+  in the foreground (Bash timeout up to 600000), never with `run_in_background`. Measured
+  2026-11-03 16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule
+  and ran. The same call in the background went to the auto-mode classifier, which refused it. In a
+  cloud session the guard reads the checkout from the flag, else the `cd`, else the working
+  directory. It allows `--confirm` only when a `cs-repo` tag of the session's own `get_session`
   record names that checkout's repo (guard rule `merge-confirm-repo`, claude-settings decision
   `merge-confirm-repo`). A path that is no checkout stops the merge tool before any read.
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
