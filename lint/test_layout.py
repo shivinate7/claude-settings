@@ -1259,10 +1259,11 @@ SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asse
 
 
 class MockupHomes(Tree):
-    """The mockup homes of a repo: the machine home ~/Developer/<repo name>-imports, with one item folder below it,
-    and the repo's design folder. Two readers: mockup_homes(root, home=None) gives the two folders, and
-    mockup_home_problem(root, file, home=None) gives None for a file in a home and a sentence for any other file.
-    The home is passed in, so no case reads or writes the real home. A missing name fails by name (not built yet)."""
+    """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
+    machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
+    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
+    the real home. A missing name fails by name (not built yet)."""
 
     def setUp(self):
         super().setUp()
@@ -1289,17 +1290,19 @@ class MockupHomes(Tree):
         self.assertIsInstance(problem, str, "the judge passed %r, want a refusal" % (file,))
         self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
 
-    def test_homes_name_the_machine_home_and_the_design_folder(self):
-        homes = self.fn("mockup_homes")(self.tree, home=self.home)
-        want = (os.path.join(self.home, "Developer", MACHINE),
-                os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/")))
-        self.assertEqual(tuple(str(h) for h in homes), want, "mockup_homes names the wrong two folders")
+    def test_the_only_home_is_the_design_folder(self):
+        homes = [str(h) for h in self.fn("mockup_homes")(self.tree, home=self.home) if h]
+        design = os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/"))
+        self.assertEqual(homes, [design], "mockup_homes names a home other than the design folder")
 
-    def test_item_file_under_the_machine_home_passes(self):
-        self.passes(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
+    def test_item_file_under_the_machine_home_is_refused(self):
+        self.refuses(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
 
-    def test_tilde_form_expands_to_the_machine_home(self):
-        self.passes("~/Developer/%s/item48/a.html" % MACHINE)
+    def test_tilde_machine_home_form_is_refused(self):
+        self.refuses("~/Developer/%s/item48/a.html" % MACHINE)
+
+    def test_windows_owner_machine_home_file_is_refused(self):
+        self.refuses("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
 
     def test_design_folder_file_passes_when_repo_relative(self):
         self.passes("docs/design/item48/a.html")
@@ -1307,23 +1310,14 @@ class MockupHomes(Tree):
     def test_design_folder_file_passes_when_absolute_in_the_checkout(self):
         self.passes(os.path.join(self.tree, "docs", "design", "item48", "a.html"))
 
-    def test_windows_owner_machine_home_file_passes(self):
-        self.passes("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
-
-    def test_windows_owner_path_passes_in_any_case_on_drive_and_folders(self):
-        self.passes("c:\\USERS\\X\\developer\\Fixture-Imports\\ITEM48\\A.HTML", home=WIN_HOME)
-
-    def test_windows_owner_path_passes_with_slash_separators(self):
-        self.passes("C:/Users/x/Developer/%s/item48/a.html" % MACHINE, home=WIN_HOME)
-
     def test_application_support_path_with_spaces_fails(self):
         self.refuses(APP_SUPPORT)
 
     def test_windows_appdata_mockup_fails(self):
         self.refuses("C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html", home=WIN_HOME)
 
-    def test_dotdot_escape_out_of_the_home_fails(self):
-        self.refuses("~/Developer/%s/item48/../../../escape/a.html" % MACHINE)
+    def test_dotdot_escape_out_of_the_design_folder_fails(self):
+        self.refuses("docs/design/../../escape/a.html")
 
     def test_http_url_fails(self):
         self.refuses("https://example.com/shot.png")
@@ -1345,6 +1339,11 @@ class MockupHomes(Tree):
 
     def test_relative_file_outside_the_design_folder_fails(self):
         self.refuses("scratch/a.html")
+
+    def test_the_refusal_names_the_design_folder_and_not_the_machine_home(self):
+        problem = self.judge(APP_SUPPORT)
+        self.assertIn(self.layout.path(self.tree, "design"), problem, "the refusal does not name the design folder")
+        self.assertNotIn(MACHINE, problem, "the refusal names the machine home, which no longer holds a mockup")
 
 
 if __name__ == "__main__":
