@@ -18,8 +18,9 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # the runs of the --status it is asked for, as gh does; unparsable runs are echoed raw. `api` routes
 # the jobs of a run to $JOBS/<run id> and records each such read in $READS; a run with no jobs fixture
 # fails the read, so an unexpected read is unknown. The dropped-start routes (pulls, check runs, issue
-# comments, and a POST of a comment) serve DROP_PULLS, DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each
-# api call to DROP_READS and each POST to DROP_LOG, and fail a read with no fixture.
+# comments, and a POST of a comment) serve DROP_PULLS/<page>, one JSON document per page (--paginate serves
+# every page, without it only page 1), DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each api call to
+# DROP_READS and each POST to DROP_LOG, and fail a read with no fixture.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 # classify: what one api call is, for the reads log: pulls, checks <route>, comments <pr>, post <pr>, other.
@@ -47,7 +48,16 @@ dropped_api() {
   done
   if [ "$2" = --method ]; then printf 'POST %s\n%s\n' "$route" "$body" >> "$DROP_LOG"; echo '{"id": 1}'; exit 0; fi
   case "$route" in
-    */pulls|*/pulls\?*) file="$DROP_PULLS" ;;
+    */pulls|*/pulls\?*)
+      [ -f "$DROP_PULLS/1" ] || { echo "gh: no fixture for $route (fake)" >&2; exit 1; }
+      paged=""; for a in "$@"; do [ "$a" = --paginate ] && paged=1; done
+      n=1
+      while [ -f "$DROP_PULLS/$n" ]; do
+        if [ -n "$jqf" ]; then jq -r "$jqf" "$DROP_PULLS/$n" || exit 1; else cat "$DROP_PULLS/$n"; fi
+        [ -n "$paged" ] || break
+        n=$((n + 1))
+      done
+      exit 0 ;;
     */check-runs*) sha="${route#*commits/}"; file="$DROP_CHECKS/${sha%%/*}" ;;
     */issues/*/comments*) n="${route#*issues/}"; file="$DROP_COMMENTS/${n%%/*}" ;;
   esac
@@ -269,6 +279,8 @@ dpr() {
   jq -cn --argjson n "$1" --arg sha "$2" --arg u "$3" --argjson d "${4:-false}" \
     '{number: $n, draft: $d, updated_at: $u, head: {sha: $sha, ref: ("branch-" + ($n | tostring))}}' >> "$dd/pulls.lines"
 }
+# dpage: the pull requests after this line are on the next page of the pulls list.
+dpage() { echo PAGE >> "$dd/pulls.lines"; }
 # dchecks <sha> <json array>: the check runs of one head commit, as the check-runs read gives them.
 dchecks() { jq -n --argjson r "$2" '{total_count: ($r | length), check_runs: $r}' > "$dd/checks/$1"; }
 # dcomments <pr> [body]: the comments of one PR; a PR given no body has none.
@@ -277,7 +289,13 @@ dcomments() {
 }
 # drun <FAIL glob or "">: one run of dropped.sh on $dd. Sets out, code, and the reads and log files.
 drun() {
-  jq -s . "$dd/pulls.lines" > "$dd/pulls"
+  rm -rf "$dd/pulls"; mkdir -p "$dd/pulls"
+  n=1; : > "$dd/page.lines"
+  while IFS= read -r ln; do
+    if [ "$ln" = PAGE ]; then jq -s . "$dd/page.lines" > "$dd/pulls/$n"; n=$((n + 1)); : > "$dd/page.lines"
+    else printf '%s\n' "$ln" >> "$dd/page.lines"; fi
+  done < "$dd/pulls.lines"
+  jq -s . "$dd/page.lines" > "$dd/pulls/$n"
   : > "$dd/reads"; : > "$dd/log"
   out="$(env -u CHECK PATH="$tmp/bin:$PATH" DROP_PULLS="$dd/pulls" DROP_CHECKS="$dd/checks" DROP_COMMENTS="$dd/comments" \
     DROP_READS="$dd/reads" DROP_LOG="$dd/log" FAIL="$1" GH_TOKEN=x GITHUB_REPOSITORY=o/r NOW="$DNOW" \
@@ -289,7 +307,7 @@ countok() { [ "$1" = '*' ] || [ "$1" = "$2" ]; }
 # td <verdict> <label> <FAIL glob or ""> <pulls> <check reads> <comment reads> <POST attempts> [text]...
 # Runs drun and names the first cause that fails: exit code, verdict, the ::warning:: line of unknown, the api
 # reads per route (`*` is any count), a read outside the routes, then each text, which must be in the log of
-# POST lines and bodies. A text with a leading `!` must not be there.
+# POST lines and bodies. A text with a leading `!` must not be there; `re:` makes the rest an extended regex.
 td() {
   local want="$1" label="$2" fail="$3" ep="$4" ek="$5" ec="$6" ew="$7" got gp gk gc gw why="" m shown
   shift 7
@@ -307,6 +325,7 @@ td() {
     for m in "$@"; do
       case "$m" in
         !*) if grep -qF -- "${m#!}" "$dd/log"; then why="log holds '${m#!}'"; break; fi ;;
+        re:*) if ! grep -qE -- "${m#re:}" "$dd/log"; then why="log lacks /${m#re:}/"; break; fi ;;
         *) if ! grep -qF -- "$m" "$dd/log"; then why="log lacks '$m'"; break; fi ;;
       esac
     done
@@ -404,5 +423,11 @@ dnew; dpr 1 "$SHA_A" "$OLD"
 td unknown dropped-pulls-read-fails-is-unknown "api *pulls*" 1 0 0 0 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
 td unknown dropped-comments-read-fails-is-unknown-with-no-post "api *issues/*/comments*" 1 1 1 0 "!POST repos/"
+
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td red dropped-comment-remedy-is-ready-and-undo-not-a-workflow-run "" 1 1 1 1 "POST repos/o/r/issues/1/comments" "gh pr ready 1 --undo" 're:gh pr ready 1([^0-9 ]|$)' "!gh workflow run"
+dnew; dpr 1 "$SHA_A" "$OLD"; dpage; dpr 2 "$SHA_B" "$OLD"
+dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'; dchecks "$SHA_B" '[]'; dcomments 2
+td red dropped-flagged-pr-on-page-two-is-found-from-one-pulls-read "" 1 2 1 1 "POST repos/o/r/issues/2/comments"
 
 exit $bad
