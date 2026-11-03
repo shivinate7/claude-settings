@@ -25,7 +25,7 @@ Why composite, not `workflow_call`:
 
 The main-ref hook lets local main move only to a commit origin already has. `gh pr merge` runs on GitHub and moves no local ref.
 
-The pre-commit hook reads the index. It refuses a staged environment file, which a wildcard stage (`git add -A`, `git add .`) takes in, and a symlink that is absolute or points outside the repo. The mistake: a wildcard stage commits secrets to a public repo, and an outside symlink lets a later write or delete reach past the repo (banchi, 2026-08-29: a symlink lost a 133 MB mirror). The env name test is `names_env_file` in `hooks/guard_env.py`, read from the installed hooks. `PRE_COMMIT_GUARD=off` lets one commit through.
+The pre-commit hook reads the index. It refuses a staged environment file, which a wildcard stage (`git add -A`, `git add .`) takes in, and a symlink that is absolute or points outside the repo. The mistake: a wildcard stage commits secrets to a public repo, and an outside symlink lets a later write or delete reach past the repo (banchi decision D47, 2026-08-29: a symlink lost a 133 MB mirror; source: the child-guard-promotion plan, banchi row 20, PR #1119). The env name test is `names_env_file` in `hooks/guard_env.py`, read from the installed hooks. `PRE_COMMIT_GUARD=off` lets one commit through.
 
 `checks.yml` runs the eight tests. It calls one template, `ci-done-comment`, because this repo's own sessions wait on its CI (decision ci-wait-reads-run-status, "The cloud wake"). CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
 
