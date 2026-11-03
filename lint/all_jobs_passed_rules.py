@@ -4,6 +4,8 @@
 The cs rules (all_problems) check .github/workflows/checks.yml. The child rules (child_problems) check a child
 repo's workflow that pins the shared action. They need no scope job, no ci-done and no checkout step.
 
+A child job's own if decides whether it gates a PR, so a push-only job stays out of needs.
+
 Stdlib only, no PyYAML. Check a child workflow with:
 python3 lint/all_jobs_passed_rules.py --workflow PATH
 It prints each problem. It exits 1 on any problem, 0 when clean, and 2 when the file cannot be read.
@@ -23,6 +25,7 @@ ALL_JOBS_PASSED_RUNS_ON = "ubuntu-latest"
 TO_JSON = "${{ toJSON(needs) }}"
 FAN_IN = "ci-done"  # comments on a red run; it needs all-jobs-passed, and all-jobs-passed never needs it
 CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
+STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green
 REMOTE_ACTION = "shivinate7/claude-settings/actions/all-jobs-passed"  # how a child repo names the shared action
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
@@ -34,8 +37,8 @@ def job_key(block, key):
 
 
 def steps_part(block):
-    """A job block from its `steps:` key on, so a block-list needs is never read as steps."""
-    m = re.search(r"^    steps:[ \t]*$", block or "", re.M)
+    """A job block from its `steps:` key (a trailing comment allowed) on, so a block-list needs is never read as steps."""
+    m = re.search(r"^    steps:[ \t]*(?:#.*)?$", block or "", re.M)
     return block[m.end():] if m else ""
 
 
@@ -46,21 +49,27 @@ def step_with(step, key):
 
 
 def needs_of(block):
-    """The job names a job block needs: a flow list, one scalar, or a block list. Comment lines are skipped.
-    None when the block has no needs key."""
+    """The job names a job block needs: a flow list (on one line or several), one scalar, or a block list whose items sit at
+    any indent deeper than the key. Comment lines are skipped. None when the block has no needs key."""
     m = re.search(r"^    needs:[ \t]*(.*?)[ \t]*$", block or "", re.M)
     if not m:
         return None
     inline = yaml_scalar(m.group(1))
     if inline.startswith("["):
-        return [yaml_scalar(n) for n in inline.strip("[]").split(",") if n.strip()]
+        flow = inline
+        if "]" not in flow:
+            for line in block[m.end():].split("\n")[1:]:
+                flow += " " + yaml_scalar(line)
+                if "]" in line:
+                    break
+        return [yaml_scalar(n) for n in flow.split("]")[0].lstrip("[").split(",") if n.strip()]
     if inline:
         return [inline]
     names = []
     for line in block[m.end():].split("\n"):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        item = re.match(r"^      - (.*)$", line)
+        item = re.match(r"^ {5,}- (.*)$", line)
         if not item:
             break
         names.append(yaml_scalar(item.group(1)))
@@ -124,6 +133,12 @@ def needs_problems(text):
     return problems
 
 
+def step_key_problems(step):
+    """The action step may not set its own if or continue-on-error: a failed needed job would otherwise read green."""
+    return [f"the action step sets {key}:, so a failed needed job could read green"
+            for key in STEP_KEYS_BARRED if step_key(step, key) is not None]
+
+
 def steps_problems(text):
     """all-jobs-passed's steps in order: a checkout pinned to a commit with persist-credentials false, then the action fed
     toJSON(needs)."""
@@ -144,6 +159,7 @@ def steps_problems(text):
         problems.append(f"the second step uses {step_key(fan, 'uses')}, want {ALL_JOBS_PASSED_USES}")
     if step_with(fan, "needs") != TO_JSON:
         problems.append(f"the action gets needs {step_with(fan, 'needs')!r}, want {TO_JSON}")
+    problems += step_key_problems(fan)
     return problems
 
 
@@ -230,11 +246,12 @@ def child_action_problems(block):
         problems.append(f"{REMOTE_ACTION} is pinned to {ref!r}, want a 40-hex commit: a tag or branch can move")
     if step_with(step, "needs") != TO_JSON:
         problems.append(f"the action gets needs {step_with(step, 'needs')!r}, want {TO_JSON}")
-    return problems
+    return problems + step_key_problems(step)
 
 
 def child_problems(text):
     """The generic rules for a child repo's workflow that pins the shared action."""
+    text = text.replace("\r\n", "\n")  # the readers match on LF line ends
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in the workflow"]
@@ -246,7 +263,7 @@ def check_workflow(path):
     try:
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-    except OSError as ex:
+    except (OSError, UnicodeDecodeError) as ex:
         print(f"cannot read {path}: {ex}")
         sys.exit(2)
     problems = child_problems(text)
