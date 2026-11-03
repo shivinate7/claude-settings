@@ -50,7 +50,8 @@ def step_with(step, key):
 
 def needs_of(block):
     """The job names a job block needs: a flow list (on one line or several), one scalar, or a block list whose items sit at
-    any indent deeper than the key. Comment lines are skipped. None when the block has no needs key."""
+    the key's indent or deeper. It stops at the first line that is not an item, such as the next key. Comment lines are
+    skipped. None when the block has no needs key."""
     m = re.search(r"^    needs:[ \t]*(.*?)[ \t]*$", block or "", re.M)
     if not m:
         return None
@@ -69,7 +70,7 @@ def needs_of(block):
     for line in block[m.end():].split("\n"):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        item = re.match(r"^ {5,}- (.*)$", line)
+        item = re.match(r"^ {4,}- (.*)$", line)
         if not item:
             break
         names.append(yaml_scalar(item.group(1)))
