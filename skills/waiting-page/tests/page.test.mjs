@@ -347,20 +347,21 @@ test("a saved answer from an earlier page shows as a receipt and nothing is writ
   assert.deepEqual(await page.evaluate(() => window.__log), []);
 });
 
-test("an answered card without a filing shows Answered, filing pending, never waited", async (t) => {
+test("an answered card without a filing shows Filing pending with its send time, never waited", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
   const c = card(page, DECISION);
   const ans = (await c.locator(".ans").textContent()).trim();
-  assert.match(ans, /^Answered, filing pending Oct \d+, \d\d:\d\d C[DS]T$/);
+  // In the Answered section the pill drops "Answered," (answered-sink notes, pick 2): the head says it.
+  assert.match(ans, /^Filing pending, sent Oct \d+, \d\d:\d\d C[DS]T$/);
   assert.doesNotMatch(await c.locator(".top").textContent(), /waited|Added/i);
   assert.equal(await c.locator(".ans.filed").count(), 0);
   assert.match(await page.locator("#c-" + DECISION.id).getAttribute("aria-label"), /answered, filing pending$/);
 });
 
-test("an answered card with receipts shows Answered, filed in the home with the filed time", async (t) => {
+test("an answered card with receipts shows Filed in the home with the filed time", async (t) => {
   const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
   const c = card(page, DECISION);
-  assert.match((await c.locator(".ans.filed").textContent()).trim(), /^Answered, filed in c1 Oct 25, 22:00 CDT$/);
+  assert.match((await c.locator(".ans.filed").textContent()).trim(), /^Filed in c1 Oct 25, 22:00 CDT$/);
   assert.equal(await c.locator(".trail").count(), 0);
   assert.doesNotMatch(await c.locator(".top").textContent(), /waited/i);
   assert.match(await page.locator("#c-" + DECISION.id).getAttribute("aria-label"), /answered, filed$/);
@@ -371,14 +372,14 @@ test("a read but unfiled answer shows Read by the owner beside Change", async (t
   const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } }); if (!page) return;
   const c = card(page, DECISION);
   assert.match(await c.locator(".receipt .read").textContent(), /^Read by test thread /);
-  assert.match((await c.locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  assert.match((await c.locator(".ans").textContent()).trim(), /^Filing pending, sent /);
 });
 
 test("a receipt older than the answer is ignored: a changed answer reads filing pending", async (t) => {
   const later = { [DECISION.id]: { ...SAVED_A[DECISION.id], at: "2026-10-26T04:00:00Z" } };
   const page = await open(t, { answers: later, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
   const c = card(page, DECISION);
-  assert.match((await c.locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  assert.match((await c.locator(".ans").textContent()).trim(), /^Filing pending, sent /);
   assert.equal(await c.locator(".ans.filed").count(), 0);
   assert.equal(await c.locator(".receipt .read").count(), 0);
   assert.doesNotMatch(await page.locator("#c-" + DECISION.id).getAttribute("class"), /filed/);
@@ -1342,7 +1343,10 @@ test("a saved none note does not ride along when the owner picks an option", asy
   const page = await open(t, { answers: { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:00:00Z", choice: "none", note: "Green" } } });
   if (!page) return;
   const c = card(page, DECISION);
-  assert.match(await c.locator(".receipt").textContent(), /Green/);
+  // The saved note sits in the fold, closed on load (answered-sink notes, pick 2): open it to read the note.
+  await need(c.locator("button.unfold"), "the saved note has no fold control");
+  await c.locator("button.unfold").click();
+  assert.match(await c.locator(".rnote").textContent(), /Green/);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "b");
   await send(page);
@@ -1386,7 +1390,10 @@ test("a saved note-only answer shows Not marked done with its note, and Change k
   const page = await open(t, { answers: NOTE_ONLY }); if (!page) return;
   const c = card(page, TASK);
   assert.match(await c.locator(".receipt").textContent(), /Not marked done/);
-  assert.match(await c.locator(".receipt .rnote").textContent(), /^Note: Which cable\?$/);
+  // The note sits in the fold, closed on load (answered-sink notes, pick 2): open it to read the note.
+  await need(c.locator("button.unfold"), "the saved note-only answer has no fold control");
+  await c.locator("button.unfold").click();
+  assert.match(await c.locator(".rnote").textContent(), /^Note: Which cable\?$/);
   await c.getByRole("button", { name: "Change" }).click();
   assert.equal(await page.inputValue(`#n-${TASK.id}`), "Which cable?");
   assert.equal(await c.locator(".ready").textContent(), "Ready to send: note, not done.");
@@ -3683,7 +3690,7 @@ const titleOf = async (page, want) => { await page.waitForFunction((w) => docume
 test("saved answers survive a rebuild and republish", async (t) => {
   const page = await open(t, { pageHtml: mergedPage(), items: [DECISION], answers: SAVED_A, dbExtra: LEAK }); if (!page) return;
   assert.match(await card(page, DECISION).locator(".receipt").textContent(), /You chose A: Red/);
-  assert.match((await card(page, DECISION).locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  assert.match((await card(page, DECISION).locator(".ans").textContent()).trim(), /^Filing pending, sent /);
   const usesBefore = await page.evaluate(() => window.__uses.length);
   const panel = await openStatus(page);
   assert.match(await panel.textContent(), /Baked roadmap step zebra/, "the status panel does not show the baked roadmap");
@@ -4659,7 +4666,7 @@ test("on an open card the panel sits after the stake lines, before the context, 
   assert.ok(Math.abs((await laBox(laPanel(page, it))).top - (await laBox(c)).top - rel) <= 1, "picking an option moved the panel");
 });
 
-test("a card with a saved answer keeps its receipt where it lands today, draws the thread below it, and shows the lane in the top row", async (t) => {
+test("a card with a saved answer keeps its receipt where it lands today, holds the thread in its fold below it, and shows the lane in the top row", async (t) => {
   const it = mk("rc-thread", 7, { lane: "ci-done-comment", lastAnswer: { choice: "b", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const plain = mk("rc-plain", 8);
   const page = await open(t, { items: [it, plain], answers: { ...laSaved(it, "a"), ...laSaved(plain, "a") } }); if (!page) return;
@@ -4668,6 +4675,10 @@ test("a card with a saved answer keeps its receipt where it lands today, draws t
   assert.match(await c.getAttribute("class"), /answered/);
   assert.match(flat(await rc.innerText()), /You chose A: Red\./);
   assert.doesNotMatch(flat(await rc.innerText()), /Blue|Reply:|Your last answer/, "the thread is inside the receipt");
+  // The thread sits in the fold, closed on load (answered-sink notes, pick 2): hidden until the owner unfolds the card.
+  assert.equal(await laPanel(page, it).isVisible(), false, "the thread shows before the owner unfolds the card");
+  await need(c.locator("button.unfold"), "the saved card with a thread has no fold control");
+  await c.locator("button.unfold").click();
   const p = await laText(page, it);
   assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
   assert.match(p, /You chose B: Blue\./);
@@ -4676,7 +4687,7 @@ test("a card with a saved answer keeps its receipt where it lands today, draws t
   assert.ok(th.top >= r.bottom - 1, `the thread starts at ${th.top}, above the receipt's end at ${r.bottom}`);
   const rp = await laBox(card(page, plain).locator(".receipt:has(.changebtn)")), at = (e, b) => b.top - e.top;
   assert.ok(Math.abs(at(await laBox(c), r) - at(await laBox(card(page, plain)), rp)) <= 1, "the thread moved the receipt from where it lands today");
-  assert.match((await c.locator(".top").innerText()).replace(/\s+/g, " "), /Answered, filing pending .*waits on lane ci-done-comment$/, "the lane is not in the top row after the Answered pill");
+  assert.match((await c.locator(".top").innerText()).replace(/\s+/g, " "), /Filing pending, sent .*waits on lane ci-done-comment$/, "the lane is not in the top row after the pill");
   assert.equal(await laPanel(page, plain).count(), 0, "a saved card with no thread fields drew a panel");
   assert.deepEqual(await card(page, plain).evaluate((e) => [...e.children].map((k) => k.tagName + "." + k.className)), ["DIV.top", "H3.title", "DIV.receipt"], "a saved card with no thread fields is not drawn as today");
 });
