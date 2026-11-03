@@ -199,7 +199,7 @@ class RepoHost(FakeHost):
 
 def second_checkout(t):
     """Make a second checkout in folder t, the way copy_repos builds one: its own origin, a main whose stamp config names MAILAUDIT_CHECK, and
-    a feat with one commit of its own, so its head differs from the first checkout's. -> (co, other)."""
+    a feat that holds main's tip and has one commit of its own, so its head differs from the first checkout's. -> (co, other)."""
     os.makedirs(t, exist_ok=True)
     if not copy_repos(t):
         build_repos(t)
@@ -208,7 +208,7 @@ def second_checkout(t):
     cfg["merge"]["requiredChecks"] = [MAILAUDIT_CHECK]
     put(os.path.join(co, ".github/stamp.json"), json.dumps(cfg))
     sh(co, "git", "add", "-A"); sh(co, "git", "commit", "-q", "-m", "mailaudit: stamp config"); sh(co, "git", "push", "-q", "origin", "main")
-    sh(co, "git", "checkout", "-q", "feat")
+    sh(co, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(co, "git", "merge", "-q", "--no-edit", "main")
     put(os.path.join(co, "docs/decisions/mail.md"), record("pending", "mail"))
     sh(co, "git", "add", "-A"); sh(co, "git", "commit", "-q", "-m", "mailaudit: feat"); sh(co, "git", "push", "-q", "origin", "feat")
     return co, other
@@ -10097,7 +10097,7 @@ class PinnedMismatchStopsMain(Env):
         def refuse():
             raise merge.Stop("merge.requiredChecks pins gates, but the branch protection of main requires checks.")
         fake.refuse_pinned_mismatch = refuse
-        with unittest.mock.patch.object(merge, "Host", lambda: fake):
+        with unittest.mock.patch.object(merge, "Host", lambda **kw: fake):
             out_buf, err = io.StringIO(), io.StringIO()
             cwd = os.getcwd()
             os.chdir(self.co)
