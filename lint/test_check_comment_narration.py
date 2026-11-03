@@ -42,7 +42,7 @@ with open(STANDARD, encoding="utf-8") as f:
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 
-# Text that one of the six patterns must flag, in a comment or in a docstring line.
+# Text the check must flag, in a comment or in a docstring line.
 FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
     "from PR #509", "PR 1234", "PR#4567",
@@ -50,6 +50,10 @@ FLAGGED = [
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
+    "Previously this returned None", "previously it was a list", "Changed from the old behaviour",
+    "changed from a dict to a list", "Added after review by billing", "added after review",
+    "formerly returned None", "the old behaviour dropped rows",
+    "round 2 of 3", "in round 2", "fixed 2026-10-30",
 ]
 
 # Near misses. No pattern may flag any of them.
@@ -58,6 +62,10 @@ CLEAN = [
     "measured in ms, corrected for drift", "token deadbeef is all letters", "id 12345678 is all digits",
     "effaced", "see PR #12 for nothing", "ADDED to the list", "the owner of this file", "the owner's name",
     "review the code first", "ask the reviewer", "the year 2026",
+    "round 2 decimals so the total matches the invoice", "Tax rule effective 2024-07-01",
+    "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
+    "changed files only", "the user changed the value", "added to the queue after review of the input",
+    "round 3 places", "used to compute the total",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
@@ -351,7 +359,17 @@ class Quiet(Case):
         files.update({"d%d.py" % i: 'def f():\n    """Does a thing.\n\n    %s\n    """\n' % text
                       for i, text in enumerate(CLEAN)})
         self.change(files)
-        self.assertClean()
+        rc, out = self.lint()
+        self.assertIn(rc, (0, 1), out)
+        self.assertNotIn("UNKNOWN", out)
+        self.assertNotIn("COULD NOT RUN", out)
+        self.assertNotIn("Traceback", out)
+        for i, text in enumerate(CLEAN):
+            with self.subTest(text):
+                self.assertNoHit(out, "c%d.py" % i, 2)
+                self.assertNoHit(out, "c%d.py" % i, 3)
+                self.assertNoHit(out, "d%d.py" % i, 4)
+        self.assertEqual(rc, 0, out)
 
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
