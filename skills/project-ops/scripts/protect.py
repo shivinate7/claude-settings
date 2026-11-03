@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Sets branch protection with the required checks on an adopting repo, so no repo starts with none.
+"""Sets branch protection with the one required check on an adopting repo, so no repo starts with none.
 
     python3 protect.py --repo <owner>/<name> --check <name> [--branch main] [--confirm]
 
 Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
-sets the required checks: a branch with no protection gets it (the checks, strict off, admins included, no review rule, no restriction);
-a protected branch with a check rule gets only its check list set (its strict setting stays), and an equal list is left alone.
+sets the required check: a branch with no protection gets it (the check, strict off, admins included, no review rule, no restriction);
+a protected branch with a check rule gets only its required check set (its strict setting stays), and an equal check is left alone.
 A branch protected without a check rule is refused, naming its rules: a PUT would replace them. merge/merge.py reads the
 required checks from this protection (merge.requiredChecks "protection"), so this is their one home.
 Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument.
