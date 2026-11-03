@@ -1,0 +1,9 @@
+{
+ "title": "Each child repo's guards get a verdict: promote to claude-settings, duplicate, stays, or delete",
+ "phase": "now",
+ "status": "doing",
+ "order": 494,
+ "why": "Owner ask, Nov 3 15:58 CST: guards built in child repos may belong in claude-settings, which is the law in every child repo.",
+ "note": "Survey only: a plan record gives each child-repo guard one verdict (promote, duplicate, stays, delete). Builds nothing; promotions become their own lanes. Lane session_013NEJL38qbqasnCHAbZCNnu, started by the coordinator Nov 3.",
+ "updatedAt": "2026-11-03T22:08:00Z"
+}
