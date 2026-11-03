@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. Exception, `settings.json`: a repeat install that finds a plain file there, not the link, moves it to a new `settings.json.bak.<time>` and removes each older `settings.json.bak.*`. Only the newest backup stays.
+Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. Exception, `settings.json`: a repeat install that finds a plain file there, not the link, backs it up to a new `settings.json.bak.<time>.<pid>` and removes each older backup of that form. Only the newest stays.
 
 - The first local install keeps the person's own file as `settings.json.orig`. It is never removed.
 - A backup from an older installer, named `settings.json.bak.<time>` with no pid, stays.
@@ -17,4 +17,4 @@ Why the exception: each merge runs the install. A tool that writes `settings.jso
 Known cost: a hand edit to any other installed copy under `~/.claude` is lost at the next install.
 
 Kind: process
-Home: install.sh, install.ps1
+Home: install.sh

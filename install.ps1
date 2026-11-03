@@ -999,7 +999,7 @@ if ($item -and -not $item.LinkType) {
     }
     if (-not $keep) {
         # Match on Name, not a -Filter wildcard: in PS 5.1 `.*.*` can match an empty part, which would prune the no-pid backups.
-        foreach ($old in @(Get-ChildItem -LiteralPath (Split-Path $TargetJson -Parent) -Force | Where-Object { $_.Name -match '^settings\.json\.bak\.\d{14}\.\d+$' -and $_.FullName -ne $bak })) {
+        foreach ($old in @(Get-ChildItem -LiteralPath (Split-Path $TargetJson -Parent) -Force | Where-Object { $_.Name -match '^settings\.json\.bak\.\d{14}\.\d+$' -and $_.Name -ne (Split-Path $bak -Leaf) })) {
             try { Remove-Item -LiteralPath $old.FullName -Force -ErrorAction Stop }
             catch { Log "could not remove the older backup $($old.FullName) ($($_.Exception.Message)); left behind" }
         }
