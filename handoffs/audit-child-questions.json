@@ -1,0 +1,278 @@
+[
+    {
+        "id": "oq-rail-break-1280",
+        "kind": "decision",
+        "status": "open",
+        "title": "Record or reject the 1280px rail break?",
+        "short": "Rail break at 1280",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D95 (shell, rail, palette sheet)",
+        "context": "Goal: A session that builds or tests the shell reads the right screen widths.\nProblem (rule): The shell sets its default side rail break at 1280px (app/src/App.css:23), and no record says so. The records you ruled (D95, shell rail and palette sheet; D276, palette go-to lists screens) give 1024 and 640. Only the code holds the 1280 now, and a record change needs your word.\nBased on (read): banchi app/src/App.css:23 sets --bn-rail-break-px to 1280; a search of docs/ finds no rail-break text (main 0657163).\nDeparts from: D95 says nothing about a 1280 rail break and the code uses it \u2014 D95 gets an AMENDED line that records 1280 as the default break.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Record 1280 in D95",
+                "how": "Add an AMENDED line to D95 that names the 1280 default rail break.",
+                "gain": "The records match the screen; a session reads one width.",
+                "lose": "A width nobody ruled becomes a ruling."
+            },
+            {
+                "key": "b",
+                "label": "Call 1280 wrong",
+                "how": "Rule 1280 a defect and change the code to the recorded widths.",
+                "gain": "The shell follows the widths you ruled.",
+                "lose": "A code change on a screen, with a screen check, and a layout shift at 1024 to 1279."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-publish-route",
+        "kind": "decision",
+        "status": "open",
+        "title": "Delete the old publish routes or record them?",
+        "short": "Listing publish routes",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D273 (one press sends listings live)",
+        "context": "Goal: No price change reaches buyers without a live read first.\nProblem (money): D273 (one press sends listings live) says the one press is the only route that publishes. Two older routes, /push and /publish, still move an upload live with only a confirm and no live reconcile. A price change can go live through them, so it needs your word.\nBased on (read): banchi server/capture_server.py:780-781 route both paths; pipeline_routes.py do_markdown_publish calls move_to_live (main 0657163).\nBased on (notes): Whether any script still calls them is unmeasured; the web app no longer calls publishMarkdown.\nDeparts from: D273 says one route publishes and the code has three \u2014 both old routes are deleted, or recorded as a second door with a live reconcile.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Delete both routes",
+                "how": "Remove /push and /publish and their handlers in a lane.",
+                "gain": "One door to the live price; D273 is true.",
+                "lose": "Any script that uses them breaks; unmeasured."
+            },
+            {
+                "key": "b",
+                "label": "Keep as second door",
+                "how": "Record them in D273 and add the live reconcile to each.",
+                "gain": "No caller breaks.",
+                "lose": "Two doors to guard; more code to keep right."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-box-name-only",
+        "kind": "decision",
+        "status": "open",
+        "title": "Add numbered-box exceptions or fix the screens?",
+        "short": "Box shown by name only",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D259 (boxes show names only)",
+        "context": "Goal: You read every box by its name, never a number.\nProblem (rule): D259 (boxes show names only) says a box is shown only by its name, everywhere. Home, the capture screen, a CLI refusal and the Codes screen still draw 'Box N' or 'Slot N'. D259 lists two exceptions only, and its check does not scan screen text, so nothing catches these.\nBased on (read): banchi app/src/Home.tsx:405, CaptureScreen.tsx:4555 and cli/cmd_emit.py:263-275 draw box numbers (main 0657163).\nBased on (read): D259 line 60 lists only two numbered refusals as exceptions.\nDeparts from: D259 shows boxes only by name and four places show numbers \u2014 those four places are named as exceptions, or fixed to names.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Name the exceptions",
+                "how": "Add these four places to D259 as named exceptions.",
+                "gain": "No screen work; records match the screens.",
+                "lose": "The box number stays visible where you ruled it hidden."
+            },
+            {
+                "key": "b",
+                "label": "Fix the screens",
+                "how": "A lane changes each place to show the name, and the check learns to scan screen text.",
+                "gain": "The rule holds everywhere.",
+                "lose": "Four screen changes and a screen check."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-product-compare",
+        "kind": "decision",
+        "status": "open",
+        "title": "Allow the Difference row or remove it?",
+        "short": "Product compare block",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D227 (product history is its own route)",
+        "context": "Goal: A sale shows no misleading verdict.\nProblem (rule): D227 (product history is its own route) says it computes no comparison of a fill against its bucket. The product history screen draws a 'What You Got' block with a Difference row. No decision covers the block, and only the code protects the rule now.\nBased on (read): banchi D227 lines 79-83; app/src/ProductHistory.tsx:581-617 draws the Difference row (main 0657163).\nBased on (read): Debt 070 calls the panel a read-only diagnostic and does not rule on it.\nDeparts from: D227 says the view computes no comparison and the screen computes one \u2014 D227 allows the Difference as a plain number, or the row is removed.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Allow the plain number",
+                "how": "Amend D227 to allow the Difference row as a plain number with no verdict.",
+                "gain": "You keep the figure; the record is true.",
+                "lose": "A comparison, which D227 kept out, is now allowed."
+            },
+            {
+                "key": "b",
+                "label": "Remove the row",
+                "how": "A lane deletes the Difference row.",
+                "gain": "D227 stays as ruled; no verdict can mislead.",
+                "lose": "You lose the figure on the screen."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-run-scope-writer",
+        "kind": "decision",
+        "status": "open",
+        "title": "Reopen D39 or retire it?",
+        "short": "Run scope writer",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D39 (run scope is the handed selection)",
+        "context": "Goal: The record for starting a run matches how a run starts.\nProblem (rule): D39 (run scope is the handed selection) says the source control writes the selection on every press, and says to reopen it if no run starts from a ticked selection. The writer was retired on your word and nothing writes the handoff now. Whether any path still starts a run from ticked cards is unmeasured.\nBased on (read): banchi app/src/runHandoff.ts:152-160 says carryScope was retired; only readers remain (main 0657163).\nBased on (notes): D180 says a press takes one selection; that no ticked-card run path remains is unmeasured.\nDeparts from: D39 says a press writes the handoff and nothing does \u2014 D39 is reopened and rewritten, or retired.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Reopen and rewrite D39",
+                "how": "Rewrite D39 to say what the readers do now.",
+                "gain": "The record states how a run really starts.",
+                "lose": "More record work than a retire."
+            },
+            {
+                "key": "b",
+                "label": "Retire D39",
+                "how": "Mark D39 retired and point to the record that replaced it.",
+                "gain": "A stale rule leaves the set.",
+                "lose": "Any ticked-card run path that does exist loses its rule."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-raw-machine-text",
+        "kind": "decision",
+        "status": "open",
+        "title": "Make D269's closed disclosure the rule everywhere?",
+        "short": "Machine text in details",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D210 (rescue is press in words)",
+        "context": "Goal: You never meet machine words on a screen.\nProblem (rule): D210 (rescue is press in words) says raw machine text is never visible, not even behind a disclosure. D269 (machine words in disclosure) later adopted a closed 'What the server said' disclosure as the rule, and amended only D196. D210 and three code comments still repeat the flat rule.\nBased on (read): banchi app/src/kit/index.tsx:746 draws the closed disclosure; D269 line 7 adopts it (main 0657163).\nBased on (read): The flat rule is repeated at app/src/server.ts, app/src/types.ts and server/pipeline_routes.py.\nDeparts from: D210 bans machine text even behind a disclosure and D269 allows it \u2014 D269's disclosure shape is the rule, and D210 and three comments are rewritten.",
+        "options": [
+            {
+                "key": "a",
+                "label": "D269 shape is the rule",
+                "how": "Record it, then rewrite D210 and the three comments.",
+                "gain": "One rule; the screens already follow it.",
+                "lose": "Machine words stay one click away."
+            },
+            {
+                "key": "b",
+                "label": "Keep the flat ban",
+                "how": "Remove the disclosure from the screens and overrule D269.",
+                "gain": "No machine words anywhere on a screen.",
+                "lose": "The disclosure stops helping when something fails."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "oq-finish-in-prompt",
+        "kind": "decision",
+        "status": "open",
+        "title": "Drop finish from the model prompt or rewrite D186?",
+        "short": "Finish field in prompt",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "banchi D186 (per-card cost by submitted)",
+        "context": "Goal: Per-card cost stays low and the finish is read right.\nProblem (money): D186 (per-card cost by submitted) says finish is no longer sent to the model. The identify prompt still asks for it, and the code reads it as the detected finish. The token cost of the field is unmeasured.\nBased on (read): banchi identify/prompt.py:102-113 requires finish in the schema; cli/cmd_identify.py reads it (main 0657163).\nBased on (notes): Token cost of the field: unmeasured.\nDeparts from: D186 says finish is not sent to the model and the prompt sends it \u2014 finish is removed from the prompt, or D186 is rewritten to say it is sent.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Remove from prompt",
+                "how": "A code lane drops finish from the schema and instructions.",
+                "gain": "Lower per-card cost; D186 is true.",
+                "lose": "The finish read loses its model signal; needs a test."
+            },
+            {
+                "key": "b",
+                "label": "Rewrite D186",
+                "how": "State that finish is sent and drop the claim.",
+                "gain": "No code change; the finish read stays.",
+                "lose": "Per-card cost stays higher by an unmeasured amount."
+            }
+        ],
+        "repo": "shivinate7/banchi"
+    },
+    {
+        "id": "github-era-records-retire",
+        "kind": "decision",
+        "status": "open",
+        "title": "Retire the GitHub-token records, one dated line?",
+        "short": "Retire GitHub-era record",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "mailaudit docs/records.md",
+        "context": "Goal: No record tells a session to mint a credential the app ignores, and you can still recover the ledger from a backup.\nProblem (rule): About fifteen records and CLAUDE.md still tell a reader to put a GitHub token on each device. The app no longer writes to GitHub and no device holds a token. Retiring them needs a ruling on one form: a dated Retired line, or none.\nBased on (read): mailaudit docs/decisions/live-verification.md:13 says no device holds a token; src/entry.jsx has no token screen (main cd3e12f).\nBased on (notes): Not run live; unmeasured at runtime. Worker snapshots protect recovery; web History still reads GitHub.\nDeparts from: These records say a token goes on every device and the app has none \u2014 each is marked retired and its first sentence rewritten, with one dated Retired line allowed.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Retire, dated line allowed",
+                "how": "Mark each retired in docs/records.md, rewrite its first sentence, keep older-versions-come-off-branch live, allow one dated Retired line and reword CLAUDE.md:167.",
+                "gain": "No session mints a token; one clear retirement form.",
+                "lose": "A dated line stays in retired records, which a stricter rule would delete."
+            },
+            {
+                "key": "b",
+                "label": "Retire, no Retired line",
+                "how": "Same retirement, and delete any Retired line.",
+                "gain": "Retired records carry no history text.",
+                "lose": "The reader loses the date; more edits to the records."
+            }
+        ],
+        "pick": "a",
+        "why": "Recommended in the audit report: retire, one dated line allowed.",
+        "repo": "shivinate7/mailaudit"
+    },
+    {
+        "id": "iphone-only-vs-mac",
+        "kind": "decision",
+        "status": "open",
+        "title": "Keep the app iPhone-only and open a Mac debt?",
+        "short": "iPhone only or Mac too",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "mailaudit docs/decisions/native-swift-rebuild.md",
+        "context": "Goal: The app you expect to ship is the one the records promise.\nProblem (goal): native-swift-rebuild rejects Swift on the iPhone only and promises one SwiftUI target for iOS and macOS. The project builds iOS only. Two later records call iPhone-only a default that swift-rebuild supports, which it does not. You rejected iPhone-only, so only you can reverse it.\nBased on (read): mailaudit docs/decisions/native-swift-rebuild.md:80 and native/project.yml (TARGETED_DEVICE_FAMILY 1, iOS only) (main cd3e12f).\nBased on (notes): No owner ruling reverses the rejection and no debt names the Mac app.\nDeparts from: native-swift-rebuild rejects iPhone-only and the build is iPhone-only \u2014 the record is rewritten to say iPhone-only ships and a debt names the Mac target.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Keep iPhone-only",
+                "how": "Rewrite swift-rebuild in place to say iPhone-only, and open a debt for the Mac target.",
+                "gain": "The record matches what ships.",
+                "lose": "The Mac app you ruled for is pushed to a debt."
+            },
+            {
+                "key": "b",
+                "label": "Hold the ruling",
+                "how": "Keep the one-target promise and build the Mac target in a lane.",
+                "gain": "The Mac app ships as ruled.",
+                "lose": "More native work; the records stay wrong until it lands."
+            }
+        ],
+        "pick": "a",
+        "why": "Recommended in the audit report: only the iPhone app ships today.",
+        "repo": "shivinate7/mailaudit"
+    },
+    {
+        "id": "recent-cell-gate",
+        "kind": "decision",
+        "status": "open",
+        "title": "Show the Recent cell on every ledger?",
+        "short": "Recent cell gate",
+        "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
+        "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
+        "context": "Goal: An undo stays reachable when the ledger is empty.\nProblem (rule): recent-checks-can-be-undone says the Recent cell shows only when the ledger holds data, as Reset does. Reset shows on every ledger, so the cell would hide right after a Reset empties it. The same record states a paper fill as settled, and another record calls it an unbuilt default.\nBased on (read): mailaudit src/app.jsx:6573-6576 says Reset shows on an empty ledger; recent-checks-can-be-undone.md:145 (main cd3e12f).\nBased on (ruling): recovery-control-not-state-gated: a recovery control must not depend on the state it recovers.\nDeparts from: The Recent cell shows only when the ledger holds data \u2014 the record is rewritten so it shows on every ledger, and the paper fill is called an unbuilt default.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Show on every ledger",
+                "how": "Rewrite :145 to show the cell always and :56 to call the fill unbuilt. No code moves.",
+                "gain": "Undo stays reachable; the record matches Reset.",
+                "lose": "The cell shows on an empty ledger, where it does nothing."
+            },
+            {
+                "key": "b",
+                "label": "Keep the data gate",
+                "how": "Leave :145 as written.",
+                "gain": "The cell hides when there is nothing to undo.",
+                "lose": "The undo hides after Reset empties the ledger, the day it is needed."
+            }
+        ],
+        "pick": "a",
+        "why": "Recommended in the audit report: yes.",
+        "repo": "shivinate7/mailaudit"
+    }
+]
