@@ -16,8 +16,9 @@ Verdict, one line per page, then a total line:
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
   not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
-           The line names the live page that holds the repo's items: the waiting page of the claude-settings
-           checkout that holds this script, or "unknown" when that checkout has none. The check never repoints a page.
+           The line says to re-file the repo's items on the hub's live page: the waiting page of the claude-settings
+           checkout that holds this script. That target reads "unknown" when the checkout has no page, its page
+           is this one, or its extras file cannot be read. The check never repoints a page.
 The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
 Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
@@ -157,19 +158,26 @@ def hub_clone():
 
 
 def live_page_of_hub():
-    """The waiting page URL of the hub checkout, or "unknown" when it has none."""
+    """The waiting page URL of the hub checkout, or "unknown" when it has none or its extras file cannot be read."""
     import layout  # batch mode only
-    return layout.waiting_page(hub_clone())
+    try:
+        return layout.waiting_page(hub_clone())
+    except layout.LayoutError:
+        return "unknown"
 
 
 def verdict(url, fetched, template):
     """(word, why) for one page: current, behind, unknown or not-found."""
     name = os.path.join(fetched, page_id(url))
     if os.path.isfile(name + ".notfound"):
-        return "not-found", ("not found from this account (deleted, or another account's); the live page "
-                             "that holds this repo's items is %s" % live_page_of_hub())
+        target = live_page_of_hub()
+        if target != "unknown" and page_id(target) == page_id(url):
+            target = "unknown"  # the hub's own page is the missing one: it is no place to re-file on
+        where = ("re-file its items on the hub's live page %s" % target if target != "unknown"
+                 else "the hub's live page, where to re-file its items, is unknown")
+        return "not-found", "not found from this account (deleted, or another account's); %s" % where
     if os.path.isfile(name + ".unreadable"):
-        return "unknown", "the read failed (another account or not found)"
+        return "unknown", "the read failed"
     if not os.path.isfile(name + ".html"):
         return "unknown", "no fetched file"
     with open(name + ".html", encoding="utf-8", errors="replace") as f:
