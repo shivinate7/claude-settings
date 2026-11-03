@@ -98,7 +98,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
   - Step homes. A task item, open or closed, may instead name `step:<slug>`: it passes when
     roadmap/data/steps/<slug>.json is a blob on some ref, read as a closed note's step home is. A step
     home with no such blob blocks, and the reason names the item. A ruling never names a step: steps
-    hold tasks, not rulings, so `[ruling] -> step:<slug>` blocks even when the step file exists.
+    hold tasks, not rulings, so `[ruling] -> step:<slug>` blocks even when the step file exists. The home
+    is cleaned as a ruling home is: one pair of backticks or quotes comes off, and a trailing `:,;.` strips.
   - A ruling whose tracked file sits outside the ruling homes is blocked with the reason
     `<path> is not a tracked ruling home`, and the reason names the repo's ruling homes.
   - Fail open: when the cwd is not in a git repo, or the layout or the repo's extras file cannot
@@ -1602,14 +1603,18 @@ def grant_repo():
         "grant-homes", tracked=("settings.json", ".claude/CLAUDE.md", "decisions/a-ruling.md")))
 
 
-def step_repo():
-    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. It
-    tracks a debt, so the repo has a task home of its own: a task's refusal then comes from its step home."""
+def step_repo(debts=True):
+    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. With
+    `debts` it tracks a debt, so the repo has a task home of its own, and a task's refusal then comes from its
+    step home. Without it, the repo has no todo, debts or debt-notes home at all."""
+    key = "steps" if debts else "steps-bare"
+
     def build():
-        root = make_repo("steps", tracked=("decisions/a-ruling.md", "debts/a-task.md"))
+        tracked = ("decisions/a-ruling.md",) + (("debts/a-task.md",) if debts else ())
+        root = make_repo(key, tracked=tracked)
         lane_file(root, "roadmap/data/steps/%s.json" % STEP_SLUG)
         return root
-    return shared_repo("steps", build)
+    return shared_repo(key, build)
 
 
 def names_number(reason, n):
@@ -1914,6 +1919,53 @@ def case_ruling_step_home_still_blocks():
     expect_block("ruling step home: an open ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
     p = homed(new_cfg(), "ruling-step-closed", ("- fb-0958-8 [ruling] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
     expect_block("ruling step home: a closed ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
+
+
+def case_task_backtick_step_home_passes():
+    """A task whose home is a backticked step, `step:<slug>`, passes when the step file is a blob on a lane
+    branch. Red today: the task check reads the raw first word, so the backticks stay on and the step home is
+    refused as not a tracked task home."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick task step home", repo)
+    p = homed(new_cfg(), "task-step-ticks", ("- fb-0958-7 [task] -> `step:%s`" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_trailing_dot_step_home_passes():
+    """A task whose home is a step with a sentence period after it, `step:<slug>.`, passes when the step file is
+    a blob on a lane branch. Red today: the raw first word keeps the period, so the step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("trailing-dot task step home", repo)
+    p = homed(new_cfg(), "task-step-dot", ("- fb-0958-7 [task] -> step:%s." % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step with a trailing period passes", p)
+
+
+def case_closed_note_backtick_step_home_passes():
+    """A closed note whose home is a backticked step, `step:<slug>` [closed], passes when the step file is a blob
+    on a lane branch. Red today: the closed note check reads the raw first word, so the backticks stay on and the
+    step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick closed note step home", repo)
+    p = homed(new_cfg(), "close-step-ticks", ("- fb-0958-4 [note] -> `step:%s` [closed]" % STEP_SLUG,), cwd=repo)
+    expect_silent("close home: a closed note homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_step_home_without_a_task_layout_passes():
+    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or debt-notes home, when the step
+    file is a blob on a lane branch. Green control: the step file is read before the layout's task homes."""
+    repo = step_repo(debts=False)
+    expect_step_on_lane_only("bare task step home", repo)
+    p = homed(new_cfg(), "task-step-bare", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step passes in a repo with no task layout home", p)
+
+
+def case_task_malformed_step_homes_refuse():
+    """`step:..`, `step:a/../b` and a bare `step:` name no step file, so a task homed to one blocks and the reason
+    names the item. Green control: each is refused today, and must stay refused."""
+    repo = step_repo()
+    for home in ("step:..", "step:a/../b", "step:"):
+        p = homed(new_cfg(), "task-step-bad", ("- fb-0958-7 [task] -> %s" % home,), cwd=repo)
+        expect_block("task step home: a task homed to %r blocks" % home, p, named=("fb-0958-7",))
 
 
 # Cost: the transcript is read only for a pick block in a repo with a waiting page, or for an open page item.
@@ -3304,6 +3356,11 @@ CASES = (
     case_task_closed_step_home_passes,
     case_task_missing_step_home_blocks,
     case_ruling_step_home_still_blocks,
+    case_task_backtick_step_home_passes,
+    case_task_trailing_dot_step_home_passes,
+    case_closed_note_backtick_step_home_passes,
+    case_task_step_home_without_a_task_layout_passes,
+    case_task_malformed_step_homes_refuse,
     case_page_check_reads_no_transcript_for_other_blocks,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
