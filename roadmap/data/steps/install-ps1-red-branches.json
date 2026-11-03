@@ -1,0 +1,9 @@
+{
+ "title": "Delete throwaway branches red/install-ps1-backup and red/install-ps1-backup-mut on origin",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 513,
+ "why": "Lane install-ps1-backup made them for its red runs (coordinator, Nov 3 17:06 CST).",
+ "note": "Start once PR #1120 merges. If the cloud refuses the delete, a session on the owner's computer does it under the standing grant 'Acts the cloud refuses' (.claude/CLAUDE.md, owner 2026-10-30), which covers deleting merged branches; these are throwaway red-run branches, so name them to that session as such.",
+ "updatedAt": "2026-11-03T23:07:00Z"
+}
