@@ -2,12 +2,13 @@
 # Alarm on an open pull request whose head commit has no real CHECK run: a dropped `pull_request` event
 # leaves the required check never started, and nothing says so. Lists open pull requests (one read per 100), skips
 # drafts and any updated 300 s ago or less, reads the check runs of the head sha for CHECK (a skipped run
-# counts as absent, since a draft's run skips every job), then reads the PR's comments for the marker
+# counts as absent, since a draft's run skips every job), then reads the PR's comments (one read per 100) for the marker
 # `<!-- dropped-start-alarm:<sha> -->`. With no run and no marker it posts one comment holding the marker and
 # the remedy. Nothing is cancelled, re-run or pushed, and no empty commit is suggested. Env: GH_TOKEN,
 # GITHUB_REPOSITORY, CHECK (default all-jobs-passed, DRAFT_SKIP_CHECK in merge/merge.py), NOW (epoch
 # seconds, default the clock). Exit 0 always. Prints "green" (nothing posted), "red" (a comment posted) or
-# "unknown"; a failed read or write is unknown, never red, and nothing is posted after it.
+# "unknown"; a failed read or write is unknown, never red, and nothing is posted after it. It starts no
+# long-lived process and writes no file.
 set -o pipefail
 repo="${GITHUB_REPOSITORY:?}"
 # The default equals DRAFT_SKIP_CHECK in merge/merge.py; test_action.sh pins the two equal.

@@ -12,8 +12,11 @@ description: >
   It posts one comment per head sha, with the remedy: `gh pr ready N --undo`, then
   `gh pr ready N`; never an empty commit. It needs `issues: write` (comments), `pull-requests: read` and
   `checks: read` besides the above. Cost per call: one pulls read per 100 open PRs; per ready, settled PR one check-runs read;
-  per PR with no run, one comments read and at most one comment write. It starts no process and writes no
-  file or timer of its own: it runs inside the caller's existing scheduled workflow.
+  per PR with no run, one comments read per 100 comments and at most one comment write. It starts no long-lived
+  process and writes no file or timer of its own: it runs inside the caller's existing scheduled workflow.
+  The caller's `pull_request` trigger must include the `ready_for_review` type, or the remedy starts no run.
+  The caller sets a `concurrency` group, so that two overlapping runs do not both post. Banchi's workflow uses
+  `concurrency: {group: dropped-start-alarm, cancel-in-progress: false}`.
 inputs:
   branch:
     description: Branch to watch.
