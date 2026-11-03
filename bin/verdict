@@ -3,7 +3,7 @@
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
-# Exit 0 is FAIL if the output holds a runner marker or no test ran, else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
+# Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP ` or `SKIPPED`. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
@@ -23,6 +23,11 @@ SGR = rb"\x1b\[[0-9;]*m"
 # A run of 10 or more digits before " skipped" matches only at its last 10 digits.
 SKIPPED = re.compile(rb"(?m)Executed \d{1,10} tests?, with (\d{1,10}) tests? skipped|\bskipped=(\d{1,10})|(\b\d{1,9}|\d{10}) {1,64}skipped\b"
                      rb"|^ {0,64}(?:#|\xe2\x84\xb9) {1,64}skipped {1,64}(\d{1,10})")
+TEST_OK = ("** TEST SUCCEEDED **", "** TEST EXECUTE SUCCEEDED **")  # not "** TEST BUILD SUCCEEDED **": a build runs no test
+def test_argv(argv):  # read from the argv as typed, before which() rewrites argv[0]
+    exe = re.split(r"[\\/]", argv[0])[-1].lower()
+    if exe.endswith(".exe"): exe = exe[:-4]
+    return (exe == "xcodebuild" and any(a in ("test", "test-without-building") for a in argv[1:])) or (exe == "swift" and argv[1:2] == ["test"])
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED)", re.M)  # a runner may print one such line per skip, with or without a summary
@@ -43,6 +48,7 @@ def main(argv):
     for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")  # a cp1252 pipe cannot print the excerpt
     if not argv: sys.exit("usage: verdict <cmd...>")
     name = " ".join(argv)
+    by_argv = test_argv(argv)
     argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows
     log = os.environ.get("VERDICT_LOG")
     if not log:
@@ -84,7 +90,7 @@ def main(argv):
         f.flush(); end = f.tell()
     secs = f"{time.time() - t:.1f}s"
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
-    fail = zero = ran = False; lines = []
+    fail = zero = ran = marked = False; lines = []
     summaries, xct, marks = {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
@@ -105,6 +111,7 @@ def main(argv):
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
                 fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
+                marked = marked or any(k in buf for k in TEST_OK)
                 for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
             f.seek(max(start, end - TAIL))
@@ -115,6 +122,7 @@ def main(argv):
     if rc == 0:
         if fail: rc, note = 1, " runner failure marker"
         elif zero and not ran: rc, note = 1, " no tests ran"
+        elif not (zero or ran) and (marked or by_argv): rc, note = 1, " no test count"
         else:
             skips = max(sum(summaries.values()) + max(xct.values(), default=0), len(marks))
             if skips: print(f"SKIP {name}, {skips} skipped ({secs})")
