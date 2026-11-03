@@ -104,12 +104,14 @@ function New-SettingsFixture {
 }
 
 # Runs the clone's install.ps1 in copy mode, with CLAUDE_CONFIG_DIR set to $CfgEnv (the path as
-# given, so a caller can pass forward slashes). Returns the child's exit code.
-function Invoke-CopyModeInstall([string]$CloneDir, [string]$CfgEnv) {
+# given, so a caller can pass forward slashes). Returns the child's exit code. The child's output
+# goes to $OutFile when a caller gives one.
+function Invoke-CopyModeInstall([string]$CloneDir, [string]$CfgEnv, [string]$OutFile = '') {
     $env:CLAUDE_CONFIG_DIR = $CfgEnv
     $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
     try {
-        & $PsHost -NoProfile -File (Join-Path $CloneDir 'install.ps1') *> $null
+        if ($OutFile) { & $PsHost -NoProfile -File (Join-Path $CloneDir 'install.ps1') *> $OutFile }
+        else { & $PsHost -NoProfile -File (Join-Path $CloneDir 'install.ps1') *> $null }
         return $LASTEXITCODE
     } finally {
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
@@ -281,10 +283,9 @@ try {
     Remove-Item -Recurse -Force $Tmp6 -ErrorAction SilentlyContinue
 }
 
-# ---- copy-mode case: a forward-slash config dir still keeps the repeat run's backup (slash1) ------
-# install.ps1 prunes the older pid-form backups by comparing FullName with the backup path it built.
-# With CLAUDE_CONFIG_DIR given with forward slashes, the built path keeps the slashes and FullName
-# does not, so the backup the run has just made would be pruned. Same shape as settingsrepeat1.
+# ---- copy-mode case: a forward-slash config dir keeps the newest backup (slash1) -----------------
+# install.ps1 prunes the older pid-form backups by leaf name, not by path. A CLAUDE_CONFIG_DIR given
+# with forward slashes still keeps the backup the run has just made. Same shape as settingsrepeat1.
 $F7 = New-SettingsFixture
 try {
     $CfgEnv7 = $F7.Cfg -replace '\\', '/'
@@ -325,26 +326,37 @@ try {
 }
 
 # ---- copy-mode case: a settings.json another process holds open is not replaced (lockfail1) -----
-# Run 1 succeeds. Then a handle with FileShare.None holds settings.json while run 2 runs. The backup
-# copy cannot read the file, so run 2 must stop before it replaces anything: a non-zero exit, the file
-# unchanged, and no new pid-form backup. The handle is closed before the file is read.
+# Run 1 succeeds. Then a handle opened with FileShare.Delete holds settings.json while run 2 runs. The
+# share denies the backup copy's read but lets a delete or rename open through, which FileShare.None
+# does not, so a run that carried on would reach the swap. Run 2 must stop at the backup error: a
+# non-zero exit, the file unchanged, no new pid-form backup, and install.ps1's ERROR line with nothing
+# printed after it. The handle is closed in finally, before the file is read.
 $F9 = New-SettingsFixture
 $Lock9 = $null
 try {
     $rc9a = Invoke-CopyModeInstall $F9.Co $F9.Cfg
     if ($rc9a -ne 0) { Write-Host "FAIL: lockfail1 run 1 exited $rc9a"; $Failed++ }
     $Live9 = Join-Path $F9.Cfg 'settings.json'
+    $Out9 = Join-Path $F9.Tmp 'lockfail1-run2.txt'
     $Baks9Before = @(Find-ByName $F9.Cfg $PidBakRe).Count
     Set-Content -Path (Join-Path $F9.Co 'settings.json') -Value '{"v":2}' -Encoding utf8
 
-    try { $Lock9 = [IO.File]::Open($Live9, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None) }
-    catch { Write-Host "FAIL: lockfail1 could not hold settings.json open: $($_.Exception.Message)"; $Failed++ }
-    $rc9b = Invoke-CopyModeInstall $F9.Co $F9.Cfg
-    if ($Lock9) { $Lock9.Close(); $Lock9 = $null }
+    $rc9b = $null
+    try {
+        $Lock9 = [IO.File]::Open($Live9, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Delete)
+        $rc9b = Invoke-CopyModeInstall $F9.Co $F9.Cfg $Out9
+    } catch { Write-Host "FAIL: lockfail1 could not hold settings.json open: $($_.Exception.Message)"; $Failed++ }
+    finally { if ($Lock9) { $Lock9.Close(); $Lock9 = $null } }
 
-    Check "lockfail1: run 2 exits non-zero while settings.json is held open" ($rc9b -ne 0)
-    Check "lockfail1: settings.json still holds run 1's content (v 1)" ((Get-JsonField $Live9 'v') -eq 1)
-    Check "lockfail1: run 2 adds no settings.json.bak.<time>.<pid>" (@(Find-ByName $F9.Cfg $PidBakRe).Count -eq $Baks9Before)
+    if ($null -ne $rc9b) {
+        $Text9 = if (Test-Path -LiteralPath $Out9 -PathType Leaf) { [IO.File]::ReadAllText($Out9) } else { '' }
+        $Err9  = [regex]::Match($Text9, '(?m)^claude-settings: ERROR: cannot copy .*settings\.json to .*settings\.json\.bak\.\d{14}\.\d+: .*; nothing replaced\r?$')
+        Check "lockfail1: run 2 exits non-zero while settings.json is held open" ($rc9b -ne 0)
+        Check "lockfail1: run 2 prints install.ps1's ERROR line for the failed backup" $Err9.Success
+        Check "lockfail1: run 2 prints nothing after that ERROR line (no carry-on to the swap)" ($Err9.Success -and $Text9.Substring($Err9.Index + $Err9.Length).Trim() -eq '')
+        Check "lockfail1: settings.json still holds run 1's content (v 1)" ((Get-JsonField $Live9 'v') -eq 1)
+        Check "lockfail1: run 2 adds no settings.json.bak.<time>.<pid>" (@(Find-ByName $F9.Cfg $PidBakRe).Count -eq $Baks9Before)
+    }
 } finally {
     if ($Lock9) { $Lock9.Close() }
     Remove-Item -Recurse -Force $F9.Tmp -ErrorAction SilentlyContinue
