@@ -5,6 +5,7 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
+A .mjs file's broken relative import is red, its builtin, bare, JSON, .cjs and type-error imports are not, a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
@@ -319,6 +320,59 @@ class CodeCheck(unittest.TestCase):
         std = json.load(open(STANDARD, encoding="utf-8"))
         for name, row in std["languages"].items():
             self.assertNotIn("run", row["format"], name)
+
+    @NEEDS_TSC
+    def test_mjs_import_of_missing_relative_file_is_red(self):
+        rc, out = check({".code-check.json": config([]),
+                         "app.mjs": 'import { x } from "./gone.mjs";\nexport default x;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("gone.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_named_import_the_sibling_does_not_export_is_red(self):
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n",
+                         "app.mjs": 'import { b } from "./lib.mjs";\nexport default b;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("lib.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_side_effect_import_of_missing_file_is_red(self):
+        rc, out = check({".code-check.json": config([]), "app.mjs": 'import "./gone.mjs";\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("gone.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_imports_that_resolve_or_are_out_of_scope_are_green(self):
+        # Node builtins, a bare package that is not installed, a JSON file with an import attribute, a .cjs file by
+        # default import, and a type error: none is a broken relative import, and checkJs is not adopted.
+        rc, out = check({".code-check.json": config([]), "d.json": '{"a": 1}\n',
+                         "c.cjs": "module.exports = { a: 1 };\n",
+                         "app.mjs": ('import fs from "node:fs";\n'
+                                     'import x from "somepkg";\n'
+                                     'import data from "./d.json" with { type: "json" };\n'
+                                     'import c from "./c.cjs";\n'
+                                     'const n = 1;\nn.foo;\n'
+                                     'export { fs, x, data, c };\n')})
+        self.assertIn("javascript typecheck", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_TSC
+    def test_broken_import_in_js_or_cjs_is_not_checked(self):
+        rc, out = check({".code-check.json": config([]),
+                         "app.js": 'import { x } from "./gone.js";\nexport default x;\n',
+                         "app.cjs": 'const { y } = require("./gone.cjs");\nmodule.exports = y;\n'})
+        self.assertIn("javascript typecheck", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_mjs_import_check_fails_closed_when_tsc_cannot_start(self):
+        # No tsc on PATH: a clean .mjs must still be red, since the import check cannot say that it is clean.
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n",
+                         "app.mjs": 'import { a } from "./lib.mjs";\nexport default a;\n'}, PATH=path_with("git"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not", out)
 
 
 NARRATED = "# fixed on 2026-10-28\n"
