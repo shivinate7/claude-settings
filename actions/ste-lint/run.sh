@@ -49,12 +49,23 @@ else
   else
     RANGE="origin/$BASE...HEAD"
   fi
+  # A diff read in a process substitution drops git's exit status and turns a failed read into an empty
+  # list. Read into a variable in this shell and stop: a read that failed is unknown, not clear.
+  DIFF_ERR="$(mktemp)"
+  diff_names() {
+    if ! DIFF_OUT="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$@" 2>"$DIFF_ERR")"; then
+      echo "ste-lint: unknown, could not read the diff of $RANGE: $(tr '\n' ' ' < "$DIFF_ERR")"
+      exit 1
+    fi
+  }
+  diff_names "$CHANGED_PATHS_GLOB"
   while IFS= read -r f; do
     [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
+  done <<< "$DIFF_OUT"
+  diff_names "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
   while IFS= read -r f; do
     [ -n "$f" ] && FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  done <<< "$DIFF_OUT"
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
