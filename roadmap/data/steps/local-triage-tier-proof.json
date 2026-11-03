@@ -1,0 +1,9 @@
+{
+ "title": "A local triage session can push to its record branch: the roadmap-one-writer guard accepts its tier proof",
+ "phase": "now",
+ "status": "doing",
+ "order": 499,
+ "why": "Debt local-triage-no-tier-proof (docs/debts/local-triage-no-tier-proof.md, commit d221ebb6, from home triage): guard rule roadmap-one-writer refuses a local triage session's push to its record branch, because a local session has no cloud tags to prove its tier.",
+ "note": "Changes a guard's verdict: net-value test after round 3. Lane session_013NEJL14PQN4dF1YxDt4yEQ, started by the coordinator Nov 3 on an owner ask at 16:30 CST.",
+ "updatedAt": "2026-11-03T22:38:00Z"
+}

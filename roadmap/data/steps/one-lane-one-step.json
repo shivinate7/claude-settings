@@ -1,0 +1,9 @@
+{
+ "title": "A coordinator starts a new lane for new work, and finished lanes get archived",
+ "phase": "now",
+ "status": "todo",
+ "order": 498,
+ "why": "Owner ask ask-mw19oqeg4w, Nov 3 16:36 CST: 'repo coordinators assigning totally different work to lane sessions that were on a different topic and then currently have nothing going on, rather than spawning a new lane. Coordinators are also weak on archiving their kids.'",
+ "note": "Read on main da8d8073: decision session-tiers:61 gives the batch runner 'archiving finished lanes'; no rule says a lane session takes one line of work only, and no check finds an idle lane left unarchived. Change: session-tiers says a lane session holds one step; new work starts a new lane (the guard on send_message can refuse a brief to a lane whose cs-step tag names another step). The coordinator's wake report lists idle lanes whose PR merged, and the batch runner archives them. Find first: is any archive guard (lane-closes-after-records) blocking archives today. Port: yes, every repo. Ready.",
+ "updatedAt": "2026-11-03T22:38:00Z"
+}
