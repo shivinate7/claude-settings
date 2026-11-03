@@ -46,6 +46,8 @@ In a Mockup set check (skill `design-review`), your brief names a set of mockups
 of the same job. Give each mockup one structure verdict, `same` or `new`, as that section defines, and
 name the parts that decide it. Build no verdict table of sizes and themes for it.
 
+Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, the first line is PASS, FAIL, or PARTIAL. Then give the verdict table, then each finding with
 the screen, size, theme, what is wrong and what proves it. Under Input Needed, list each clash with
