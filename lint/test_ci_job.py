@@ -787,6 +787,44 @@ class CodeCheckFromCopiedInstall(Job):
         self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the good copy's code_check never ran
 
 
+class ZizmorBranches(Job):
+    """bin/ci-job's zizmor branch. A local $/actions/zizmor uses runs the repo under test's own run.sh, and with none
+    there it FAILs, never PASS or unknown. A remote uses finds no run.sh beside a copied install or in its pointer
+    checkout, so it reads unknown and names the paths it looked at. The copied install is CodeCheckFromCopiedInstall's."""
+
+    install = CodeCheckFromCopiedInstall.install  # one home of the copied install: this class calls it, it does not copy it
+    LOCAL_DOLLAR = step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}})
+    REMOTE = step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@main", **{"with": {"paths": ".github/ actions/"}})
+    LINT = ("--lint",)
+
+    def pipx_env(self):
+        """PATH with a stub pipx first. The zizmor branch reads a missing tool as unknown, so the stub keeps the
+        missing run.sh the only reason in play."""
+        bin_dir = tempfile.mkdtemp(prefix="pipx-", dir=RUN_FOLDER)
+        stub = os.path.join(bin_dir, "pipx")
+        with open(stub, "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(stub, 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+
+    def test_a_local_zizmor_uses_with_no_run_sh_fails(self):
+        # The fixture repo has no actions/zizmor: the local form names the repo's own run.sh, which is missing.
+        rc, lines, out = self.run_job(self.LOCAL_DOLLAR, args=self.LINT, env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertIn("no run.sh at", log, out + log)  # the step's own check named the missing file
+
+    def test_a_remote_zizmor_uses_with_no_run_sh_reads_unknown_and_names_the_paths(self):
+        empty = os.path.join(self.root, "empty-checkout")
+        os.makedirs(empty)
+        ci_job, cfg = self.install(empty)  # no actions/ beside the copy, and the rules file names an empty checkout
+        env = {**self.pipx_env(), "CLAUDE_CONFIG_DIR": cfg}
+        rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("no run.sh: looked for", lines[0], out)
+
+
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
 class QuietStepKeepsTheStallWatchFed(Job):
     """A step quiet past the stall limit must not strand its job. verdict's heartbeat has to reach ci-job's own
