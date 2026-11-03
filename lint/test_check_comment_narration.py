@@ -73,6 +73,8 @@ CLEAN = [
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
+    "Keep the old behaviour expected by legacy clients", "Keep the old behaviour required by billing",
+    "Preserve the old behaviour relied on by v1 callers",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
