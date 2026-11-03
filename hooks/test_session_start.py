@@ -333,6 +333,33 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     It reads the hook's own text, so no repo fixture is built. The existing SessionStartTierLineTests prove the line prints
     once and only in the cloud."""
 
+    @staticmethod
+    def merge_is_negated(sentence):
+        """True when the sentence negates a merge: `never merges`, `not merge`, `no merges`."""
+        return re.search(r"\b(?:never|not|no)\s+merges?\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def says_coordinator_merges(sentence):
+        """True when the sentence names a coordinator and a merge the sentence does not negate."""
+        return ("coordinator" in sentence.lower() and re.search(r"\bmerges?\b", sentence, re.IGNORECASE) is not None
+                and not SessionStartMergeRoleTests.merge_is_negated(sentence))
+
+    @staticmethod
+    def says_coordinator_never_merges(sentence):
+        """True when the sentence names a coordinator and says `never merges`."""
+        return "coordinator" in sentence.lower() and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def is_no_parent_merge(sentence):
+        """True when a session with no parent, or one the owner started, merges its own PR under the merge grant, not negated."""
+        return (re.search(r"no parent|owner started", sentence, re.IGNORECASE) is not None and "own PR" in sentence
+                and "merge grant" in sentence and not SessionStartMergeRoleTests.merge_is_negated(sentence))
+
+    @staticmethod
+    def names_a_lane(sentence):
+        """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
+        return "cs-build:lane" in sentence or "lane session" in sentence
+
     def test_the_tier_line_names_the_role_writer(self):
         self.assertIn("merge --role", hook_tier_line())
 
@@ -347,16 +374,27 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
-    # decision session-tiers: no sentence of the tier line says a coordinator merges
+    # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
-        told = [s for s in sentences(hook_tier_line()) if re.search(r"\bmerge", s, re.IGNORECASE) and "coordinator" in s.lower()]
-        self.assertEqual(told, [], "the tier line says a coordinator merges")
+        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
+        self.assertEqual(told, [], "the tier line says a coordinator merges: %r" % told)
 
-    # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant
+    # decision session-tiers: the coordinator never merges, so one sentence of the tier line says so
+    def test_some_sentence_of_the_tier_line_says_the_coordinator_never_merges(self):
+        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_never_merges(s)]
+        self.assertTrue(told, "no sentence of the tier line says the coordinator never merges")
+
+    # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant, affirmatively
     def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):
-        told = [s for s in sentences(hook_tier_line())
-                if re.search(r"no parent|owner started", s, re.IGNORECASE) and "own PR" in s and "merge grant" in s]
-        self.assertTrue(told, "no sentence says a session with no parent merges its own PR under the merge grant")
+        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+
+    # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
+    def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
+        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+        for sentence in told:
+            self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
@@ -368,7 +406,12 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def test_the_hand_off_sentence_names_a_parent_session_id(self):
         self.assertIn("parent_session_id", self.hand_off_sentence(), "the hand-off sentence names no parent_session_id")
 
-    # decision session-tiers: only a lane (a session with a parent_session_id) hands its branch to the batch runner
+    # decision session-tiers: only a lane session hands its branch to the batch runner; a parent_session_id alone is not one
+    def test_the_hand_off_sentence_names_the_lane_session(self):
+        sentence = self.hand_off_sentence()
+        self.assertTrue(self.names_a_lane(sentence), "the hand-off sentence names no cs-build:lane tag and no lane session: %r" % sentence)
+
+    # decision session-tiers: only a lane session hands its branch to the batch runner
     def test_the_hand_off_sentence_does_not_say_any_other_session(self):
         self.assertNotIn("any other session", self.hand_off_sentence().lower(), "the hand-off sentence says any other session hands off")
 
@@ -385,6 +428,30 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertEqual(merge_role_sentence("A one. B runs `merge --role x` now. C two."), "B runs `merge --role x` now.")
         self.assertEqual(merge_role_sentence("merge --role x. C two."), "merge --role x.")
         self.assertEqual(merge_role_sentence("A one. B runs merge --role x"), "B runs merge --role x")
+
+    # decision session-tiers: the coordinator predicate flags a merging coordinator and passes a negated one (green control)
+    def test_the_coordinator_merge_predicate_flags_a_merge_and_passes_a_negated_one(self):
+        self.assertTrue(self.says_coordinator_merges("The coordinator merges its own PR."))
+        self.assertFalse(self.says_coordinator_merges("The coordinator never merges."))
+
+    # decision session-tiers: the never-merges predicate takes only "never merges" with a coordinator (green control)
+    def test_the_coordinator_never_merges_predicate_takes_only_the_negated_coordinator(self):
+        self.assertTrue(self.says_coordinator_never_merges("The coordinator never merges."))
+        self.assertFalse(self.says_coordinator_never_merges("The coordinator merges its own PR."))
+        self.assertFalse(self.says_coordinator_never_merges("A lane session never merges its own PR."))
+
+    # decision session-tiers: the no-parent predicate takes only an affirmative merge, so a negated one never satisfies it (green control)
+    def test_the_no_parent_merge_predicate_rejects_a_negated_merge(self):
+        self.assertTrue(self.is_no_parent_merge("A solo or one-lane session with no parent_session_id merges its own PR under the repo merge grant."))
+        self.assertFalse(self.is_no_parent_merge("A session with no parent_session_id never merges its own PR under the merge grant."))
+        self.assertFalse(self.is_no_parent_merge("A session with a parent_session_id merges its own PR under the merge grant."))
+
+    # decision session-tiers: a hand-off that names no lane session does not scope to the lane (green control)
+    def test_the_lane_predicate_rejects_a_hand_off_that_names_no_lane(self):
+        self.assertFalse(self.names_a_lane("A session with a parent_session_id hands its reviewed branch, head and PR to the batch "
+                                           "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
+        self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
+                                          "runner and never merges."))
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
