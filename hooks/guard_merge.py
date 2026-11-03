@@ -528,8 +528,8 @@ _CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
 
 
 def _created_session_id(body):
-    """The id a create_session result names: the `id` of a JSON object, else the first `session_...` word of
-    plain text. None when the result names none."""
+    """The id a create_session result names: the `id` or `session_id` of a JSON object, else the first
+    `session_...` word of the body. None when the result names none."""
     if not isinstance(body, str):
         return None
     try:
@@ -537,7 +537,9 @@ def _created_session_id(body):
     except ValueError:
         parsed = None
     if isinstance(parsed, dict):
-        return parsed["id"] if isinstance(parsed.get("id"), str) else None
+        for key in ("id", "session_id"):
+            if isinstance(parsed.get(key), str):
+                return parsed[key]
     found = _CREATED_ID.search(body)
     return found.group(0) if found else None
 
@@ -750,9 +752,13 @@ ARCHIVE_READ_REASON = (
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
-def _head_landed(module, repo: str, base: str, sha: str) -> bool:
-    """True when the commit `sha` is already in `base`: GitHub's compare of base...sha reads behind or identical.
-    A failed read raises, and archive_hit refuses on it."""
+def _head_landed(module, repo: str, row) -> bool:
+    """True when the head commit of the pull request `row` is already in the repo's default branch: the row's
+    base is that branch (base.repo.default_branch, so a draft stacked on another branch is not released), and
+    GitHub's compare of default...sha reads behind or identical. A failed read raises, and archive_hit refuses on it."""
+    base, sha = str(row["base"]["ref"]), str(row["head"]["sha"])
+    if base != str(row["base"]["repo"]["default_branch"]):
+        return False
     with module.shared_deadline(MERGE_READ_TIMEOUT):
         code, out = module.Host(repo=repo).api("compare/" + base + "..." + sha)
     try:
@@ -795,7 +801,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
             for row in rows:
                 ref = str(row["head"]["ref"])
                 slug = next((s for s in slugs if s == ref), None)
-                if slug and row.get("draft") is True and _head_landed(module, repo, str(row["base"]["ref"]), str(row["head"]["sha"])):
+                if slug and row.get("draft") is True and _head_landed(module, repo, row):
                     continue
                 if slug:
                     return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
@@ -808,11 +814,19 @@ def archive_hit(tool: str, tool_input, transcript: str):
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
 LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
 TOPIC_TAG_PREFIX = "cs-topic:"
+_MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
+_BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
 _BRIEF_LINE = re.compile(
-    re.escape(LANE_BRIEF_MARKER) + r"\s*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?")
+    _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
+    re.IGNORECASE)
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
+    "(decision session-tiers, a lane holds one topic)"
+)
+BRIEF_STALE_REASON = (
+    "a set_session_tags call on the target followed this session's newest record of it, so the guard cannot tell "
+    "which topic or steps the lane holds now. Run get_session on the target alone, in its own turn, then retry. "
     "(decision session-tiers, a lane holds one topic)"
 )
 BRIEF_TOPIC_REASON = (
@@ -838,7 +852,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return None
     message = tool_input.get("message")
     first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
-    if not first.startswith(LANE_BRIEF_MARKER):
+    if not _BRIEF_MARKER_LINE.match(first):
         return None
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
@@ -850,16 +864,16 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
     if ARCHIVE_LANE_TAG not in tags:
         return None
+    if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
+        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
     topics = [t for t in topics if t]
     if topics:
-        if topic not in topics:
+        if (topic or "").lower() not in [t.lower() for t in topics]:
             return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
         return None
-    if tagged_after:  # a later set_session_tags may have added the step this brief names, so the record is stale
-        return "lane brief to a target whose record is stale", BRIEF_NO_RECORD_REASON
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
