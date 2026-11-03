@@ -256,12 +256,12 @@ def child_check(text):
 
 
 class ChildWorkflow(unittest.TestCase):
-    """The child cases call the script's CLI and assert its exit code first. On a script without the flag the exit is 2
-    (usage), so each case fails there before it reaches an in-process check."""
+    """The child cases call the rules CLI and assert its exit code first, so a wrong exit fails the case before any
+    in-process check runs."""
 
     def test_the_cs_rules_reject_a_valid_child(self):
-        # Green control, and the gap this lane closes: the cs rules flag a child that passes the generic rules.
-        self.assertTrue(all_problems(CHILD_GOOD), "the cs rules pass a valid child: the gap is closed or the cs rules changed")
+        # The cs rules reject a child that passes the generic rules, which is why the child rules exist.
+        self.assertTrue(all_problems(CHILD_GOOD), "the cs rules pass a valid child: they no longer reject a child's shape")
 
     def test_the_child_fixture_keeps_its_scanner_cases(self):
         for case in ('"Lint # quoted', "# a comment line in a block body", "if: not a key", "Don't stop here", "Mac's step",
@@ -322,8 +322,9 @@ class ChildWorkflow(unittest.TestCase):
         self.assertIn("test-mac", out, "the printed problem does not name test-mac: " + out)
 
 
-# Round 2: the action step's own keys, layouts a valid child may use that the rules must not flag, and input that is not
-# UTF-8. Each false alarm is a valid child with one layout changed. The ones the rules flag are red until the rules read them.
+# The action step must carry neither continue-on-error nor its own if: either lets the required check pass while the
+# action is skipped or fails. Each false alarm is a valid child with one layout changed, and the rules must pass it.
+# Input that is not UTF-8 must exit 2 with a message, not with a traceback.
 CHILD_ACTION_DEFECTS = [
     ("the action step continues on error", "# v1.2.0\n", "# v1.2.0\n        continue-on-error: true\n"),
     ("the action step has its own if", "# v1.2.0\n", "# v1.2.0\n        if: ${{ github.event_name == 'pull_request' }}\n"),
@@ -338,7 +339,7 @@ CHILD_FALSE_ALARMS = [
 ]
 
 
-class ChildRound2(unittest.TestCase):
+class ChildActionAndLayouts(unittest.TestCase):
     def test_the_action_step_with_continue_on_error_or_its_own_if_exits_1(self):
         for label, old, new in CHILD_ACTION_DEFECTS:
             with self.subTest(defect=label):
