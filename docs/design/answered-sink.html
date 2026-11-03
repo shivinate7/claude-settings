@@ -1062,12 +1062,12 @@ const ANS_TASK = {
   steps: ["Open the cloud environment menu.", "Add the store host under Network.", "Save."], choice: true, waited: "waited 1 day",
 };
 const ANS_FILED = {
-  n: 38, kind: "decision", k: "holds", owner: "triage", home: "the batch-ci decision", added: "2026-11-02T15:00:00Z", at: "2026-11-03T19:30:00Z", filed: "2026-11-03T19:45:00Z", lane: "ci-cap-raise",
+  n: 38, kind: "decision", k: "holds", owner: "triage", home: "the batch-ci decision", added: "2026-11-02T15:00:00Z", at: "2026-11-03T19:30:00Z", filed: "2026-11-03T19:45:00Z",
   title: "Run CI once per batch, not once per lane", choice: "once",
   ctx: "Your stake: each lane's own run doubles CI minutes.",
   options: [{ key: "once", label: "Once per batch", how: "The integration PR runs CI.", gain: "Half the CI minutes.", lose: "A red run drops a lane." },
     { key: "each", label: "Once per lane", how: "As today.", gain: "Each lane proves itself.", lose: "Double the CI minutes." }], waited: "waited 1 day",
-  reply: "Filed. The lane takes it when its CI run ends.",
+  reply: "Filed on the step. Closing this item next.",
 };
 const G_DONE = { title: "Answer these together", why: "The second only matters if you keep the first." };
 const ANS_G1 = {

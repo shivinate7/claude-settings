@@ -49,15 +49,25 @@ member is answered, and the section reuses the seen fold and the `rulingsEl()` s
   line. Gain: the owner can re-read the question before a Change. Loss: it draws parts today's answered card
   does not, and Change already shows them.
 - Top-row pill in the section: "Filing pending, sent <time>" (ring) or "Filed in <home> <time>" (tick).
-  It drops "Answered, " because the section head says it (ux-label-once). An item answered in place keeps
-  today's pill.
+  It drops "Answered, " because the section head says it. An item answered in place keeps today's pill.
+  Loss: "Filing pending" still shows on every card in the section. `label_once.py` passes it only because
+  the comma stops the word match; the design reviewer will see the repeat. Today's page repeats
+  "Answered, filing pending" on every answered card the same way.
+- Alternative, not drawn: the pill shows the ring or tick and the time only, its words in a `.sr` span,
+  and `p.rsub` adds "A ring: filing pending. A tick: filed." Gain: the words show once. Loss: a shape to learn.
 
 ## 3. Answered and filed, still on the page
 
+- When it happens: SKILL.md "Route and close" files (step 1) and closes (step 2) a clear answer in one
+  turn, so a filed item with its answer record still on the page lives for that gap only. For a busy
+  lane the writer sets `lane` and `lastAnswer` and leaves the item open; SKILL.md does not say whether
+  `answers/<id>` is kept. If it is deleted, that item is not `isSaved`: it shows in its tier as an open
+  card with "waits on lane" and "Your last answer", and never reaches this section. The builder reads
+  which; this design does not depend on it.
 - Pick: same section, newest-first with the rest, its pill filled with the tick (`#s=page`, No. 38).
-  Why: a filed item still open (it waits on a lane, `lane`) needs nothing from the owner either, and one
-  section for "done by me" is one place to look. Gain: the open tiers hold only open work. Loss: the
-  section mixes two states; the ring and the tick carry the difference.
+  Why: it needs nothing from the owner, and it is about to close, so it should not jump back into a tier
+  for that gap. Gain: the open tiers hold only open work, with no special case. Loss: the section mixes
+  two states; the ring and the tick carry the difference. The case is short-lived, so the pick weighs little.
 - Alternative "Filed items stay in their tier" (`#s=filed-stays`). Gain: the section is only "filing
   pending". Loss: a done item keeps its place among open work, the thing the owner asked to stop.
 
@@ -110,6 +120,7 @@ Each draws the same six asked-before audit items in Whenever. Picture ids: `#pic
 - Playwright, Chromium: all 13 states at 390, 800 and 1280, light and dark (78 runs). No script error,
   no sideways scroll in the page or the frame.
 - `label_once.py` on each state at 390: the remaining hits are today's "Asked before" (the seen divider's
-  screen-reader words) and the repo name as data in "By repo".
+  screen-reader words) and the repo name as data in "By repo". It does not flag the "Filing pending"
+  repeat (point 2 names it).
 - In a frame (the waiting page's picture), the mockup draws the state as the screen itself, so `focus`
   finds a real box; `#pics` holds static anchors because `pictureProblem` parses the HTML string.
