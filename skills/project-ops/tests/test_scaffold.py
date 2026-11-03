@@ -470,10 +470,11 @@ class Protect(unittest.TestCase):
                     return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
                 return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
             return 0, "{}"
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = protect.main(list(argv), gh=gh)
-        return code, out.getvalue(), calls
+        self.last_stderr = err.getvalue()  # what a refusal printed to stderr, alone
+        return code, out.getvalue() + err.getvalue(), calls
 
     def test_preview_changes_nothing_and_names_the_call(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks")
@@ -511,6 +512,21 @@ class Protect(unittest.TestCase):
             code, out, calls = self.run_protect("--repo", "acme/widgets", *checks, "--confirm")
             self.assertEqual(code, 2, out)
             self.assertEqual(calls, [])
+
+    def test_two_checks_are_refused_before_any_gh_call(self):
+        for confirm in ([], ["--confirm"]):
+            with self.subTest(confirm=confirm):
+                code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint", *confirm)
+                self.assertEqual(code, 2, "two --check names: exit 2 expected\n" + out)
+                self.assertEqual(calls, [], "two --check names: no gh call expected, not even a GET")
+                self.assertRegex(self.last_stderr, r"(?i)only one (--)?check", "two --check names: stderr must say only one check is allowed")
+
+    def test_an_empty_check_name_is_not_counted(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "", "--check", "all-jobs-passed", "--confirm")
+        self.assertEqual(code, 0, out)
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, calls)
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["all-jobs-passed"])
 
     def test_a_matrix_name_with_a_comma_stays_one_check(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "test (ubuntu, 3.11)", "--confirm")
