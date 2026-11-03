@@ -675,6 +675,18 @@ class Registry(Tree):
         return dict({"id": "queue02", "url": self.QUEUE, "role": "queue-page", "account": "work",
                      "collections": ["items"]}, **changes)
 
+    def external_entry(self, entry_id="ext001", **changes):
+        """An artifact the repo holds and does not export (`export` false): a page in an account this one cannot read."""
+        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
+                     "account": "other-account", "export": False}, **changes)
+
+    def read_registry(self, what):
+        """layout.artifacts() of the fixture repo. A refusal fails the case with its cause, never as a crash."""
+        try:
+            return self.artifacts()
+        except self.layout.LayoutError as err:
+            self.fail("%s was refused: %s" % (what, err))
+
     def artifacts(self):
         self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
         return self.layout.artifacts(self.tree)
@@ -741,6 +753,56 @@ class Registry(Tree):
             data = json.load(handle)
         self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
         self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
+
+    def test_an_export_false_entry_is_read_with_no_export_path(self):
+        self.registry([self.external_entry()])
+        found = self.read_registry("an entry with export false")
+        self.assertEqual([e["id"] for e in found], ["ext001"], "the export false entry was not read")
+        self.assertFalse(found[0].get("export"), "the export false entry was given an export path")
+
+    def test_a_full_registry_of_nine_reads_in_order_and_the_waiting_page_stays_readable(self):
+        ids = ["ext%03d" % n for n in range(1, 9)]
+        self.registry([self.page_entry()] + [self.external_entry(i) for i in ids])
+        found = self.read_registry("a registry of nine entries, eight with export false")
+        self.assertEqual([e["id"] for e in found], ["page01"] + ids, "the nine registry entries were not read in order")
+        try:
+            page = self.layout.waiting_page(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("the waiting page was refused beside the export false entries: %s" % err)
+        self.assertEqual(page, self.PAGE, "the waiting page was not read beside the export false entries")
+
+    def test_an_export_false_entry_still_refuses_a_bad_url_and_an_email_as_account(self):
+        """Control: export false skips only the collections and the export path. The other checks still refuse."""
+        for label, changes in (("a url that is not an artifact link", {"url": "https://example.com/x"}),
+                               ("an email as account", {"account": "someone@example.com"})):
+            with self.subTest(check=label):
+                self.registry([self.external_entry(**changes)])
+                self.assertReported("ext001", label)
+
+    def test_an_export_that_is_true_or_empty_is_still_refused_and_names_its_entry(self):
+        """Control: export is false or a path. True and an empty value stay refused, and the refusal names the entry."""
+        for value in (True, ""):
+            with self.subTest(export=value):
+                self.registry([self.external_entry(export=value, collections=["items"])])
+                with self.assertRaises(self.layout.LayoutError, msg="export %r was not refused" % (value,)) as caught:
+                    self.artifacts()
+                self.assertIn("export", str(caught.exception), "the refusal of export %r does not name export" % (value,))
+                self.assertIn("ext001", str(caught.exception), "the refusal of export %r does not name its entry" % (value,))
+
+    def test_an_entry_with_no_export_key_still_needs_collections(self):
+        """Control: export false is opt-in. An entry with neither collections nor export is still refused."""
+        self.registry([{"id": "ext001", "url": "https://claude.ai/artifact/ext001", "role": "page", "account": "other-account"}])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry with no collections and no export was not refused") as caught:
+            self.artifacts()
+        self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
+        self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
+
+    def test_an_export_path_entry_keeps_its_path(self):
+        """Control: an entry with a path exports to that path, as it does today."""
+        self.registry([self.queue_entry(export="artifacts/custom")])
+        found = self.artifacts()
+        self.assertEqual(len(found), 1, "the entry with a path was not read")
+        self.assertEqual(found[0]["export"], "artifacts/custom", "an entry's export path was not kept")
 
 
 class WaitingPageBranding(Tree):
