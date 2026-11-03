@@ -8,18 +8,25 @@
         "pr": 1121,
         "head": "6a8362f",
         "checks": "merge --lane-lint 1121 PASS; actions/ci-alarm/test_action.sh PASS; round 3 review MERGE, net safety value zero",
-        "child_removals": ["banchi row 28: .github/workflows/dropped-start-alarm.yml, removed after banchi pins actions/ci-alarm with dropped-start: 'true'"],
-        "notes": ["dropped-start-same-sha-silent", "dropped-start-fork-approval", "dropped-start-check-name-copy"],
+        "child_removals": [
+            "banchi row 28: .github/workflows/dropped-start-alarm.yml, removed after banchi pins actions/ci-alarm with dropped-start: 'true'"
+        ],
+        "notes": [
+            "dropped-start-same-sha-silent",
+            "dropped-start-fork-approval",
+            "dropped-start-check-name-copy"
+        ],
         "repo": "shivinate7/claude-settings"
     },
     {
         "id": "oq-child-alarm-schedule",
         "kind": "decision",
-        "status": "open",
+        "status": "answered",
         "title": "Does a child's 10-minute schedule for the dropped-start step count as a timer?",
         "owner": "session_013NEJL2hB1pLZPDpzas7VgB",
         "home": "rule outcomes-mechanize-rules (no timer for tracking)",
         "context": "Goal: a dropped PR start is seen in minutes, not hours.\nProblem (rule): the shared step adds no schedule. It runs in the caller's workflow. Banchi ran its own copy every 10 minutes, and its waits were 1,309 s and 4,141 s, so a nightly caller would barely help.\nBased on (read): banchi .github/workflows/dropped-start-alarm.yml at 0657163 runs on cron */10.\nDeparts from: main has no dropped-start check — adds an opt-in step whose cadence the child picks.",
-        "repo": "shivinate7/claude-settings"
+        "repo": "shivinate7/claude-settings",
+        "answer": "Coordinator, 2026-11-03 17:31 CST: answered by rule outcomes-mechanize-rules, no owner question. A 10-minute cron is a timer. The banchi removal lane calls the shared step from an event that already runs (the PR's own events or main's CI), or keeps banchi's copy and says why."
     }
 ]
