@@ -133,11 +133,11 @@ class Scaffold(TempDest):
         text = tree(SKILL)["templates/operating-model.md"]
         bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
         flat = " ".join(bullet.split())  # a line wrap must not split a phrase
-        # The roadmap is a block of the repo's one page, which the waiting-page writer publishes (skill roadmap).
+        # The roadmap is a block of the repo's one page, which the page writer publishes (skill roadmap).
         self.assertRegex(flat, r"builds? the roadmap block", "triage must build the roadmap block")
         self.assertIn("--block", flat)
         self.assertIn("--live", flat)
-        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the waiting-page writer publishes it")
+        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the page writer publishes it")
 
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]

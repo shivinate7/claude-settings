@@ -1437,7 +1437,7 @@ def baked(text, key):
 
 
 class BlockOnly(Fixture):
-    """--block writes only the roadmap data block, for the waiting-page writer to splice in
+    """--block writes only the roadmap data block, for the page writer to splice in
     (one-page notes, "Build constraints": the build never publishes and never writes ROADMAP_DB)."""
 
     def block_from_main(self):
