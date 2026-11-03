@@ -40,6 +40,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 TEMPLATE = os.path.join(HERE, "..", "skills", "design-explore", "blind-brief.md")
 RULE = "blind-brief"
+RULE_CITE = "(decision blind-briefs-use-a-template, a blind design brief is built from the template)"
 SPAWN_TOOLS = ("Agent", "Task")
 FREE = ("Job", "Device")
 FIXED = ("House rules", "Deliver")
@@ -385,18 +386,19 @@ REFUSE_COUNT = ("an informed or directed designer brief must carry a line `Blind
 
 def refuse(payload, tool, reason, matched):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
+    text = reason + " " + RULE_CITE  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
         guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
         guard_core.set_override_veto(lambda: False)  # a spawn holds no act that no override lifts
-        guard_core.refuse(tool, "deny", RULE, reason, matched)
+        guard_core.refuse(tool, "deny", RULE, text, matched)
     except SystemExit:
         raise
     except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": RULE + ": " + reason}}))
+                                             "permissionDecisionReason": RULE + ": " + text}}))
     sys.exit(0)
 
 

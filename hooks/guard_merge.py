@@ -12,6 +12,7 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from guard_pointer import (
     pointer_checkout,
 )
@@ -247,7 +248,8 @@ def pinned_required(where: str):
 BARE_MERGE_REASON = (
     "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
     "leaves the local main behind origin. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call."
+    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
+    "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
 )
 
 
@@ -522,39 +524,8 @@ def role_call_of(segment: str):
 
 
 def _own_session_read(transcript: str, own_id: str):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
-    uses, newest, tagged_after = set(), None, False
-    with open(transcript, encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                content = json.loads(line)["message"]["content"]
-            except (ValueError, KeyError, TypeError):
-                continue
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
-                    uses.add(block.get("id"))
-                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    # Only a call that names the own session changes the own tags. A call with no readable
-                    # list of ids counts too: the safe reading is that it may have named this session.
-                    ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
-                    if not isinstance(ids, list) or own_id in ids:
-                        tagged_after = True
-                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
-                    body = block.get("content")
-                    if isinstance(body, list):
-                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
-                    try:
-                        ccr = json.loads(body)["ccr"]
-                        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
-                    except (ValueError, KeyError, TypeError):
-                        continue
-    return newest, tagged_after
+    """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
+    return own_session.own_session_read(transcript, own_id)[:2]
 
 
 def _own_get_session_tags(transcript: str, session_id: str):

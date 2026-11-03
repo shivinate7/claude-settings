@@ -117,15 +117,19 @@ def matches(template, live):
 
 
 def carries_data(template, live):
-    """True when the live page is not main's untouched template: its title text, its designData block or
-    its roadmap block differs from the template's own (all white space ignored). A page that --write built
+    """True when the live page is not main's untouched template: its title text (read as splice.carry would
+    rename it), its designData block or its roadmap block differs from the template's own (all white space ignored). A page that --write built
     from a live page has its own title, and carries the live blocks, so it is not untouched. Fails toward
     True: a page whose parts cannot be found is not judged untouched. A live page with no roadmap marker
     predates the block and counts as empty there, as splice.carry reads it."""
-    def part(text, span):
-        return "".join(text[span[0]:span[1]].split()) if span else None
+    def part(text, span, rename=False):
+        if not span:
+            return None
+        text = text[span[0]:span[1]]
+        return "".join((splice.renamed_title(text) if rename else text).split())
     try:
-        if part(template, splice.title_span(template)) != part(live, splice.title_span(live)):
+        # A live title of an old form carries as the page name, so it reads as that name here (splice.carry).
+        if part(template, splice.title_span(template)) != part(live, splice.title_span(live), rename=True):
             return True
         if part(template, splice.design_span(template, "the template")) != part(live, splice.design_span(live, "the live page")):
             return True

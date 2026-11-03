@@ -116,8 +116,6 @@ MOCKUP_UNREAD_LINE = "mockup file unread"
 MOCKUP_ID = re.compile(r"(?<![A-Za-z0-9_-])item\d+-[a-z](?![A-Za-z0-9_-])", re.I)
 MOCKUP_TEXT = ("note", "why", "ask")
 READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
-STEP_TAG = "cs-step:"
-REPO_TAG = "cs-repo:"
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
@@ -142,7 +140,6 @@ NEWEST = 5
 # The extras: {"map": "<path of the repo map>", "github": "<owner>/<repo>"}. The rolled-out layout
 # extras file holds them under "roadmap"; else the record branch holds them in EXTRAS.
 EXTRAS = "roadmap/extras.json"
-GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
 COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
 BOARD_WHY = ("unknown (session-board's store lives on one machine, so a cloud build cannot read it; "
              "Live work reads project threads and GitHub instead)")
@@ -155,6 +152,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
+from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
 def git(repo, *args, stdin=None):
@@ -413,11 +412,8 @@ def extras(repo, source):
 
 
 def github_slug(repo, extra):
-    if isinstance(extra.get("github"), str):
-        return extra["github"]
-    url = (git(repo, "remote", "get-url", "origin") or "").strip()
-    hit = GITHUB.search(url)
-    return (hit.group(1) or hit.group(2)) if hit else None
+    """The repo's `owner/name`: the extras' "github" key, else the origin (git_reads.github_repo, shared with the guard)."""
+    return git_reads.github_repo(repo, extra)
 
 
 def shallow_edge(repo):
@@ -604,7 +600,7 @@ def live_work(path, steps, slug=None):
                         and (r.get("tags") is None or isinstance(r["tags"], list)))
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
-        ours = lambda t: isinstance(t, str) and t.startswith(REPO_TAG) and t[len(REPO_TAG):].lower() == slug.lower()
+        ours = lambda t: repo_tag_names(t, slug)
         session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED_SESSION
                                 and any(map(ours, r.get("tags") or []))
                                 for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})

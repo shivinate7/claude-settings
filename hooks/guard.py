@@ -171,6 +171,15 @@ Other tools, in `judge` order:
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
+  lane-repo-tag        deny. A `create_session` call with a lane tag (as for lane-effort-pin) and no tag
+                       that names the calling checkout's GitHub `owner/name` as the roadmap reads a repo tag
+                       (`repo_tag_names`): exact `cs-repo:` prefix, no strip, owner/name without case.
+                       The repo is `git_reads.github_repo`, shared with the roadmap build: the "github"
+                       key of the layout extras file's "roadmap" object first, else the last two
+                       segments of the origin's path (a scheme-less local path too), `.git` stripped;
+                       the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
+                       passes. The deny reason names the tag to add.
+                       Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -404,7 +413,8 @@ while True:
                     "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
                     "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
                     "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts.")}}))
+                    "the acts that no override lifts. "
+                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
         sys.exit(0)
 
 
@@ -992,7 +1002,8 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project."
+    "Approve it only when a model above Sonnet is wanted for this project. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
 
@@ -1208,7 +1219,8 @@ CITE_REASON = (
     "short gloss, like \"D12, short titles for records\". "
     "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
     "and leave the folder and the file extension out. Only a commit's last-paragraph trailer "
-    "`Drops-lines: <path> -- <reason>` may name a path."
+    "`Drops-lines: <path> -- <reason>` may name a path. "
+    "(rule git-cite-by-id, cite a record by its id, never by its path)"
 )
 
 
@@ -1284,7 +1296,8 @@ UNREAD_MARK = "\0unread:"
 UNREAD_REASON = (
     "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
     "record by its path. "
-    "Remedy: pass the message inline, or name a file this directory can read."
+    "Remedy: pass the message inline, or name a file this directory can read. "
+    "(decision cite-by-id-refuses-unread-file, an unread message file is refused, not passed)"
 )
 
 
@@ -1410,7 +1423,8 @@ LANE_REASON = (
     "Rule (Git): this message names a lane by a session number. That number is handed out in one "
     "chat and means nothing outside it. "
     "Remedy: name the lane by its branch slug, like \"lane-number-cite\". A number inside a "
-    "backtick code span or a fenced block is quoted text and stays allowed."
+    "backtick code span or a fenced block is quoted text and stays allowed. "
+    "(decision lane-by-slug, a lane is named by its branch slug, never by a session number)"
 )
 
 
@@ -1488,6 +1502,7 @@ BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
     " A merge conflict in a test file takes the same route."
+    " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
@@ -1987,6 +2002,14 @@ LANE_EFFORT_REASON = (
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
     % LANE_EFFORT
 )
+# A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
+# when no repo reads.
+LANE_REPO_TAG_REASON = (
+    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
+)
+# A repo tag with no origin to compare to: the full form, one owner and one name.
+FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -2129,6 +2152,28 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
+def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
+    """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo, or
+    ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
+    key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
+    `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return "", None
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return "", None
+    repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
+    # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
+    for tag in tags:
+        if repo and repo_tag_names(tag, repo):
+            return "", None
+        if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
+            return "", None
+    return ", ".join(str(t) for t in tags), repo
+
+
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
@@ -2235,6 +2280,7 @@ ROLE_DEFAULT = "general-purpose"
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
@@ -2516,10 +2562,12 @@ LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_BUSY_REASON = "the machine is busy (%s). %s"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
+LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2626,7 +2674,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk.
 RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop.")
+                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
 def running_lane_hit(payload, tool: str) -> tuple:
@@ -2705,7 +2753,8 @@ def opus_without_grant(tool_input) -> bool:
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
-                    "other commands. Run that command alone, in its own call, or drop it.")
+                    "other commands. Run that command alone, in its own call, or drop it. "
+                    "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
 def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
@@ -3205,12 +3254,14 @@ def data_tool_hit(tool_input, cwd=""):
 PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
-                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
 PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
                      "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
                      "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
-                     "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Queue\" "
-                     "and publish it to the same url.")
+                     "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Cockpit\" "
+                     "and publish it to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
 
 
 def _waiting_page_folder(name):
@@ -4102,6 +4153,12 @@ def judge(payload) -> None:
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
+    lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if lane_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).

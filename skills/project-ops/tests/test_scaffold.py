@@ -489,6 +489,9 @@ class Protect(unittest.TestCase):
         self.assertEqual(len(puts), 1, calls)
         self.assertIn("repos/acme/widgets/branches/main/protection", puts[0][0])
         self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks", "lint"])
+        body = puts[0][1]
+        self.assertIs(body["required_status_checks"]["strict"], False, "the PUT must set strict to False")
+        self.assertIs(body["enforce_admins"], True, "the PUT must set enforce_admins to True (admins are included)")
 
     def test_a_protected_branch_gets_its_checks_set_in_place(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", existing=["old"])

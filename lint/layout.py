@@ -6,8 +6,10 @@ extra kind may not replace a layout kind. The mark that the repo has rolled out 
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
-"devices", "shared-resources", "roadmap", "record-branch") read whenever the file exists (`has_extras()`). The
-"waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page);
+"devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
+"artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
+The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
+the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
 branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
@@ -231,11 +233,76 @@ def is_waiting_page_url(root, url):
     return page != "unknown" and bool(artifact_id(page)) and artifact_id(page) == artifact_id(url)
 
 
+ARTIFACTS = "artifacts"  # the extras key: the registry, a list of {id, url, role, account, collections, export}
+WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo's waiting page
+ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
+ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
+COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+
+
+def artifacts(root):
+    """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
+    for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
+    the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
+    `collections` and exports to `artifacts/<id>/`. LayoutError, naming the entry by its id, for an email as account, a
+    repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
+    found = _repo_keys(root).get(ARTIFACTS)
+    if found is None:
+        return []
+    where = _extras(root)
+    if not isinstance(found, list):
+        raise LayoutError("%s: %s is not a list" % (where, ARTIFACTS))
+    seen, out = set(), []
+    for number, item in enumerate(found, 1):
+        label = "%s entry %d (%s)" % (ARTIFACTS, number, item.get("id") if isinstance(item, dict) else item)
+        if not isinstance(item, dict):
+            raise LayoutError("%s: %s is not an object" % (where, label))
+        entry_id = item.get("id")
+        if not isinstance(entry_id, str) or not ARTIFACT_ID.fullmatch(entry_id):
+            raise LayoutError("%s: %s id is not 1 to 32 characters of A-Z a-z 0-9 _ -" % (where, label))
+        if entry_id in seen:
+            raise LayoutError("%s: %s id %s appears twice" % (where, label, entry_id))
+        seen.add(entry_id)
+        if not isinstance(item.get("url"), str) or not item["url"].startswith(ARTIFACT_LINK) or not artifact_id(item["url"]):
+            raise LayoutError("%s: %s (id %s) url is not a claude.ai artifact link with an id" % (where, label, entry_id))
+        role = item.get("role")
+        if not isinstance(role, str) or not ROLE.fullmatch(role):
+            raise LayoutError("%s: %s (id %s) role is not a lowercase slug" % (where, label, entry_id))
+        account = item.get("account")
+        if not isinstance(account, str) or not account.strip() or account != account.strip() or "@" in account:
+            raise LayoutError("%s: %s (id %s) account is not a plain label, and never an email" % (where, label, entry_id))
+        if "collections" in item:
+            names = item["collections"]
+            if not isinstance(names, list) or not names or len(set(names)) != len(names) \
+                    or not all(isinstance(n, str) and COLLECTION.fullmatch(n) for n in names):
+                raise LayoutError("%s: %s (id %s) collections is not a list of distinct collection names" % (where, label, entry_id))
+        elif role == WAITING_ROLE:
+            names = list(WAITING_COLLECTIONS)
+        else:
+            raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
+        if "export" in item:
+            target = item["export"]
+            if not isinstance(target, str) or not target.strip("/") or target != target.strip():
+                raise LayoutError("%s: %s (id %s) export is not a path" % (where, label, entry_id))
+            target = _safe(target, "%s: %s (id %s) export" % (where, label, entry_id)).strip("/")
+        else:
+            target = path(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
+        out.append(dict(item, collections=list(names), export=target))
+    if sum(1 for e in out if e["role"] == WAITING_ROLE) > 1:
+        raise LayoutError("%s: %s holds more than one entry with the role %s" % (where, ARTIFACTS, WAITING_ROLE))
+    return out
+
+
 def waiting_page(root):
-    """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
-    "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
+    """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
+    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not.
+    "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
     if not has_extras(root):
         return "unknown"
+    for entry in artifacts(root):
+        if entry["role"] == WAITING_ROLE:
+            return entry["url"]
     found = _read(_extras(root)).get(WAITING_PAGE)
     if found is None:
         return "unknown"
@@ -243,20 +310,27 @@ def waiting_page(root):
 
 
 def set_waiting_page(root, url):
-    """Write the "waiting-page" key of `root`'s extras file, creating the file when missing. True when it
-    wrote; False when the key is already set (a null value is unset), with the file left byte-identical.
-    LayoutError when `url` is not an artifact link with an id. No other key is written, "rolled-out" least
-    of all."""
+    """Write the waiting page URL into `root`'s extras file, creating the file when missing. A registry entry with the
+    role "waiting-page" gets its url updated: True when that changed it, False when it names the same artifact. With no
+    such entry, the old "waiting-page" key is written once: True when it wrote; False when the key is already set (a
+    null value is unset), with the file left byte-identical. LayoutError when `url` is not an artifact link with an
+    id. No other key is written, "rolled-out" least of all."""
     _artifact_link(url, _extras(root))
     if not ARTIFACT_URL.fullmatch(url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
         data = _read(_extras(root))
-        if data.get(WAITING_PAGE) is not None:
+        held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
+        if held is not None:
+            if artifact_id(held["url"]) == artifact_id(url):
+                return False
+            data[ARTIFACTS][[e["id"] for e in artifacts(root)].index(held["id"])]["url"] = url
+        elif data.get(WAITING_PAGE) is not None:
             return False
+        else:
+            data[WAITING_PAGE] = url
     else:
-        data = {"kinds": {}}
-    data[WAITING_PAGE] = url
+        data = {"kinds": {}, WAITING_PAGE: url}
     os.makedirs(os.path.dirname(_extras(root)), exist_ok=True)
     with open(_extras(root), "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
@@ -555,9 +629,10 @@ if __name__ == "__main__":
     # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
     # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
+    # python3 lint/layout.py artifacts <root>: the repo's artifact registry as JSON, [] when none.
     # python3 lint/layout.py set-waiting-page <root> <url>: write the key once into the extras file of
     # <root>. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL or unreadable or unwritable file.
-    ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES)
+    ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES, ARTIFACTS)
     if len(sys.argv) == 4 and sys.argv[1] == "set-waiting-page":
         try:
             here = os.path.abspath(sys.argv[2])
@@ -569,7 +644,7 @@ if __name__ == "__main__":
             print("layout: %s" % err, file=sys.stderr)
             sys.exit(2)
     if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root> | layout.py set-waiting-page <root> <url>")
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources|artifacts <root> | layout.py set-waiting-page <root> <url>")
     try:
         here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:
@@ -580,6 +655,8 @@ if __name__ == "__main__":
             print(describe_caution(here))
         elif sys.argv[1] == SHARED_RESOURCES:
             print(json.dumps(shared_resources(here)))
+        elif sys.argv[1] == ARTIFACTS:
+            print(json.dumps(artifacts(here)))
         else:
             print(path(here, sys.argv[3]))
     except (LayoutError, KeyError) as err:
