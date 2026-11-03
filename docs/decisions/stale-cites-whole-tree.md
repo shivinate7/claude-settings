@@ -37,5 +37,5 @@ The plan promotes these child rows to this lane for their path and anchor parts.
 - The hook catalog records list: the degen repo's row 8a in the plan.
 
 Kind: build
-Plan: docs/plans/child-guard-promotion.md (lane prose-path-check-whole-tree)
+Plan: docs/plans/child-guard-promotion.md#1-prose-path-check-whole-tree (all)
 Home: lint/stale_cites.py
