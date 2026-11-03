@@ -42,7 +42,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   in-flight notes, so they are never the home of a ruling or a task (owner, 2026-10-26, "re-point it").
   The homes come from `lint/layout.json` and the repo's extras file: layout keys `decisions`, `rules`,
   `claude-md`, `agents-md` for a ruling, and `todo` (a repo's extras key), `debts`, `debt-notes` for a
-  task. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
+  task. A task may instead name `step:<slug>`, when a branch holds roadmap/data/steps/<slug>.json; a ruling
+  never does. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
   `not-a-grant` when the message holds a grant word that is no grant. `standing` (a session-only process):
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   `repo` (feedback about another repo): home `repo:<owner>/<name>`. The session sends the owner's
