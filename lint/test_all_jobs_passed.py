@@ -244,11 +244,12 @@ def full_size_child(count=40):
 
 
 def child_check(text):
-    """(exit code, output) of `--workflow` on one child workflow. The file is written into this run's folder."""
+    """(exit code, output) of `--workflow` on one child workflow. The file is written into this run's folder. `text` is
+    str, written as UTF-8, or bytes, written as given."""
     folder = tempfile.mkdtemp(prefix="allpassed-", dir=RUN_FOLDER)
     path = os.path.join(folder, "checks.yml")
-    with open(path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
+    with open(path, "wb") as handle:
+        handle.write(text if isinstance(text, bytes) else text.encode("utf-8"))
     done = subprocess.run([sys.executable, RULES_CLI, "--workflow", path], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=120)
     return done.returncode, done.stdout + done.stderr
@@ -319,6 +320,56 @@ class ChildWorkflow(unittest.TestCase):
         for problem in problems:
             self.assertIn(problem, out, "the problem is not printed: " + problem)
         self.assertIn("test-mac", out, "the printed problem does not name test-mac: " + out)
+
+
+# Round 2: the action step's own keys, layouts a valid child may use that the rules must not flag, and input that is not
+# UTF-8. Each false alarm is a valid child with one layout changed. The ones the rules flag are red until the rules read them.
+CHILD_ACTION_DEFECTS = [
+    ("the action step continues on error", "# v1.2.0\n", "# v1.2.0\n        continue-on-error: true\n"),
+    ("the action step has its own if", "# v1.2.0\n", "# v1.2.0\n        if: ${{ github.event_name == 'pull_request' }}\n"),
+]
+NEEDS_BLOCK = "    needs:\n      - lint\n      # - retired-job\n" + NEEDED_JOB
+CHILD_FALSE_ALARMS = [
+    ("needs as a multi-line flow list", NEEDS_BLOCK, "    needs: [\n      lint,\n      test-mac ]\n"),
+    ("block-list needs items indented 8 spaces", NEEDS_BLOCK,
+     "    needs:\n        - lint\n        # - retired-job\n        - test-mac # the mac job\n"),
+    ("a comment after steps:", "    steps:\n      - uses: shivinate7", "    steps: # note\n      - uses: shivinate7"),
+    ("CRLF line endings", "\n", "\r\n"),
+]
+
+
+class ChildRound2(unittest.TestCase):
+    def test_the_action_step_with_continue_on_error_or_its_own_if_exits_1(self):
+        for label, old, new in CHILD_ACTION_DEFECTS:
+            with self.subTest(defect=label):
+                self.assertIn(old, CHILD_GOOD, label)  # a mutation that matches nothing proves nothing
+                text = CHILD_GOOD.replace(old, new, 1)
+                code, out = child_check(text)
+                self.assertEqual(code, 1, "%s: exit %d, want 1" % (label, code))
+                self.assertNotIn("Traceback", out, "%s: a crash also exits 1" % label)
+                self.assertTrue(child_problems(text), "%s: no problem under child_problems" % label)
+
+    def test_the_child_false_alarms_pass(self):
+        for label, old, new in CHILD_FALSE_ALARMS:
+            with self.subTest(false_alarm=label):
+                self.assertIn(old, CHILD_GOOD, label)
+                text = CHILD_GOOD.replace(old, new)
+                code, out = child_check(text)
+                self.assertEqual(code, 0, "%s: exit %d, want 0: %s" % (label, code, out))
+                self.assertEqual(child_problems(text), [], "%s: a valid child has problems under child_problems" % label)
+
+    def test_a_non_utf8_file_exits_2_without_a_traceback(self):
+        code, out = child_check(b"\xff\xfe" + CHILD_GOOD.encode("utf-8"))
+        self.assertEqual(code, 2, "a non-UTF-8 file: exit %d, want 2: %s" % (code, out))
+        self.assertNotIn("Traceback", out, "a non-UTF-8 file crashes the reader")
+
+    def test_a_push_only_job_left_out_of_needs_passes(self):
+        old = "    if: ${{ github.event_name != 'pull_request' }}\n"  # the push-only job's if
+        self.assertIn(old, CHILD_GOOD, "the push-only job's if")
+        text = CHILD_GOOD.replace(old, "    if: ${{ github.event_name == 'push' }}\n", 1)
+        code, out = child_check(text)
+        self.assertEqual(code, 0, "a push-only job left out of needs: exit %d, want 0: %s" % (code, out))
+        self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
 
 
 if __name__ == "__main__":
