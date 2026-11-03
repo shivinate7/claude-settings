@@ -5,6 +5,22 @@ cases run red against a checkout that lacks it.
 
 Secret-shaped values are joined at run time from parts. No token-shaped literal sits in this source, so a
 secret scanner that reads the committed text finds none.
+
+Contract the page cases assume (the builder builds to it):
+  --page FILE, one export. The page's bytes land at <out>/page/page.html, byte-identical (CRLF and non-ASCII
+    kept). designData still lands at page/designData.json. The page is scanned as text with the same shapes as
+    the docs, before any write. A find refuses the whole export: `refused - N find(s)`, exit 1, nothing written.
+    A CDN script tag such as react@18.3.1 is not a find; an email address in the text is.
+    A second run with the same page prints `same` and rewrites no file (the mtime stays).
+    A page changed outside designData, with the same designData, prints `changed 1`.
+    A mockup change writes two files, designData.json and page.html, so it prints `changed 2`.
+    A page with no designData block, or two, stays `unknown`, exit 2.
+  --all. Each entry folder's page.html, for any role, lands at <export path>/page/page.html. Its files/<path>
+    land byte-identical at <export path>/page/files/<path>. The waiting page exports to waiting/, any other
+    artifact to artifacts/<id>/. Each file written counts one in `changed N`. A find in an artifact's page
+    refuses only that artifact: exit 1, its copy unchanged, and the other artifacts still export.
+  Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
+  Not pinned here: whether supporting files are scanned, and whether a supporting file no longer fetched is deleted.
 """
 import collections
 import glob
@@ -33,11 +49,22 @@ DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
 DEEP = "[" * 5000 + "]" * 5000  # nests past the interpreter's recursion limit: a crash, not a verdict
 RUN_FOLDER = None  # made in setUpModule
+TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
 assert len(DESIGN.findall(PAGE)) == 1, "page.html must hold one designData block: the fixture's shape"
 DESIGN_ELEMENT = DESIGN.search(PAGE).group(0)
+# The fixture page as bytes with a CRLF line and non-ASCII text, so a copy that normalizes either goes red.
+PAGE_BYTES = PAGE.replace("<style>", "<!-- café — über -->\r\n<style>", 1).encode("utf-8")
+REVISED_PAGE = PAGE.replace("<style>", "<!-- revised note -->\n<style>", 1).encode("utf-8")  # changed outside designData
+QUEUE_PAGE = ("<!doctype html>\r\n<html><head><meta charset=\"utf-8\"><title>Queue café</title></head>\r\n"
+              "<body><p>Queue page</p></body></html>\r\n").encode("utf-8")  # a page with no designData block
+BIG_PAGE = (PAGE + "".join("<p>Row %d of the synthetic page.</p>\n" % n for n in range(1, 25001))).encode("utf-8")  # about 1.2 MB
+CDN_SNIPPET = ('<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>\n'
+               '<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>\n')
+PROSE_SNIPPET = ("<p>Don't use /* or // or # here.</p>\n<!-- a note for the reader -->\n"
+                 "<script>\nconst s = `line one\nline two`;\n</script>\n")
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -130,6 +157,38 @@ def write_text(path, text):
 def read_text(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+def read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def page_with(snippet):
+    """The fixture page with `snippet` before its designData block, so the snippet's text sits outside the block."""
+    return PAGE.replace(DESIGN_ELEMENT, snippet + DESIGN_ELEMENT, 1)
+
+
+def page_snippets():
+    """(label, snippet, secret): a secret-shaped value in page text outside designData, at each shape of text a scanner
+    could misread: a comment opener inside a string, a multi-line template literal, a lone quote, and an email."""
+    mail = "person.name" + "@" + "example.com"
+    return (
+        ("token in a paragraph", "<p>Token: %s</p>\n" % TOKEN, TOKEN),
+        ("token after a comment opener in a CSS string", '<style>.x::before { content: "/* %s"; }</style>\n' % TOKEN, TOKEN),
+        ("token after // in a JS string", '<script>const a = "// %s";</script>\n' % TOKEN, TOKEN),
+        ("token in a multi-line template literal", "<script>\nconst t = `first line\nsecond line %s\nthird line`;\n</script>\n" % TOKEN,
+         TOKEN),
+        ("token after a lone quote in text", "<p>Don't paste %s</p>\n" % TOKEN, TOKEN),
+        ("email address in text", "<p>Contact %s</p>\n" % mail, mail),
+    )
 
 
 def snapshot(folder):
@@ -461,7 +520,8 @@ class Page(Base):
         self.assertNotIn(TAIL, r.stdout + r.stderr, "the matched value was printed")
         self.assertEqual(snapshot(out), before, "a refused page changed the copy")
 
-    def test_a_mockup_change_alone_counts_one(self):
+    def test_a_mockup_change_counts_designdata_and_the_page_html(self):
+        # designData.json and page.html both hold the mockup, so one mockup change writes two files.
         first = write_text(os.path.join(self.tmp.name, "page-first.html"), DESIGN.sub(lambda m: m.group(1) + DESIGN_BODY + m.group(3), PAGE, count=1))
         second = write_text(os.path.join(self.tmp.name, "page-second.html"),
                             DESIGN.sub(lambda m: m.group(1) + '{"a": "changed mockup"}' + m.group(3), PAGE, count=1))
@@ -469,8 +529,103 @@ class Page(Base):
         out = self.out()
         self.assertEqual(self.export(fetched, out, page=first).returncode, 0)
         r = self.export(fetched, out, page=second)
+        self.assertChanged(r, 2)
+        self.assertEqual(r.returncode, 0, shown(r))
+
+    def test_the_page_lands_at_page_html_byte_identical(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), PAGE_BYTES, "page/page.html is not byte-identical to the page (CRLF or non-ASCII changed)")
+
+    def test_a_full_size_page_lands_byte_identical_with_its_full_database(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), BIG_PAGE)
+        out = self.out()
+        r = self.export(self.fetch(**full_size()), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written for the full-size page")
+        self.assertEqual(read_bytes(landed), BIG_PAGE, "the full-size page/page.html is not byte-identical")
+
+    def test_an_empty_database_still_lands_its_page(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        out = self.out()
+        r = self.export(self.fetch(), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "page", "page.html")), "page/page.html was not written with an empty database")
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), PAGE_BYTES)
+
+    def test_a_second_run_with_the_same_page_is_same_and_rewrites_nothing(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        fetched = self.fetch(meta={"page": META})
+        out = self.out()
+        self.assertEqual(self.export(fetched, out, page=page).returncode, 0)
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written by the first run")
+        os.utime(landed, (SENTINEL, SENTINEL))
+        before = snapshot(out)
+        r = self.export(fetched, out, page=page)
+        self.assertVerdict(r, "same")
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(os.stat(landed).st_mtime, SENTINEL, "an unchanged page/page.html was rewritten")
+        self.assertEqual(snapshot(out), before, "a second run with the same page wrote into the copy")
+
+    def test_a_changed_page_counts_in_changed_n(self):
+        first = write_bytes(os.path.join(self.tmp.name, "page-first.html"), PAGE_BYTES)
+        second = write_bytes(os.path.join(self.tmp.name, "page-second.html"), REVISED_PAGE)
+        fetched = self.fetch(meta={"page": META})
+        out = self.out()
+        self.assertEqual(self.export(fetched, out, page=first).returncode, 0)
+        r = self.export(fetched, out, page=second)
         self.assertChanged(r, 1)
         self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), REVISED_PAGE, "the changed page did not land")
+
+
+class PageScan(Base):
+    """The page's HTML is scanned as text with the docs' shapes, before any write."""
+
+    def test_a_secret_in_the_page_text_refuses_the_export_and_writes_nothing(self):
+        for index, (label, snippet, secret) in enumerate(page_snippets()):
+            with self.subTest(label=label):
+                html = page_with(snippet)
+                self.assertEqual(html.count(secret), 1, "fixture: the secret must sit once in the page")
+                self.assertNotIn(secret, DESIGN_ELEMENT, "fixture: the secret must sit outside the designData block")
+                page = write_text(os.path.join(self.tmp.name, "page-%d.html" % index), html)
+                out = self.out("refused-%d" % index)
+                r = self.export(self.fetch(meta={"page": META}), out, page=page)
+                self.assertVerdict(r, "refused", [secret])
+                self.assertEqual(r.returncode, 1, "%s: refused must exit 1. Output:\n%s" % (label, shown(r, [secret])))
+                self.assertNotIn(secret, r.stdout + r.stderr, "%s: the matched value was printed" % label)
+                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % label)
+
+    def test_a_refused_page_keeps_the_old_copy(self):
+        out = self.out()
+        clean = write_bytes(os.path.join(self.tmp.name, "page-clean.html"), PAGE_BYTES)
+        self.assertEqual(self.export(self.fetch(meta={"page": META}), out, page=clean).returncode, 0)
+        before = snapshot(out)
+        leaky = write_text(os.path.join(self.tmp.name, "page-leaky.html"), page_with("<p>Token: %s</p>\n" % TOKEN))
+        r = self.export(self.fetch(meta={"page": META}, items={"a": {"id": "a", "n": 2}}), out, page=leaky)
+        self.assertVerdict(r, "refused", [TOKEN])
+        self.assertEqual(r.returncode, 1, shown(r, [TOKEN]))
+        self.assertNotIn(TOKEN, r.stdout + r.stderr, "the matched value was printed")
+        self.assertEqual(snapshot(out), before, "a refused page changed the old copy")
+
+    def test_cdn_script_tags_and_prose_punctuation_are_not_refused(self):
+        cases = (("CDN script tags", CDN_SNIPPET), ("comment openers and a lone quote in prose", PROSE_SNIPPET))
+        for index, (label, snippet) in enumerate(cases):
+            with self.subTest(label=label):
+                page = write_text(os.path.join(self.tmp.name, "green-%d.html" % index), page_with(snippet))
+                r = self.export(self.fetch(meta={"page": META}), self.out("green-%d" % index), page=page)
+                self.assertFalse(says(r, "refused"), "%s: the page was refused. Output:\n%s" % (label, shown(r)))
+                self.assertVerdict(r, "changed")
+                self.assertEqual(r.returncode, 0, "%s: a non-secret page failed. Output:\n%s" % (label, shown(r)))
 
 
 class Rebuild(Base):
@@ -606,11 +761,17 @@ class All(Base):
                                 groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
-    def fetched_all(self, docs):
-        """One fetched folder per artifact id, each shaped as a single fetch is."""
+    def fetched_all(self, docs, pages=None, files=None):
+        """One fetched folder per artifact id, each shaped as a single fetch is. `pages` maps an id to its page.html
+        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
         for artifact_id, parts in docs.items():
-            os.rename(self.fetch(**parts), os.path.join(root, artifact_id))
+            folder = self.fetch(**parts)
+            if pages and artifact_id in pages:
+                write_bytes(os.path.join(folder, "page.html"), pages[artifact_id])
+            for rel, data in ((files or {}).get(artifact_id) or {}).items():
+                write_bytes(os.path.join(folder, "files", *rel.split("/")), data)
+            os.rename(folder, os.path.join(root, artifact_id))
         return root
 
     def export_folder(self, worktree, artifact_id):
@@ -684,6 +845,64 @@ class All(Base):
                 self.assertEqual(snapshot(self.export_folder(worktree, leaky)), before, "a refused artifact changed its copy")
                 self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, clean), "items", "fresh.json")),
                                 "the clean artifact was held back by the refused one")
+
+    def test_each_artifact_page_html_lands_under_its_export_path(self):
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}  # the waiting page, and a page of another role
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages=pages), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        for artifact_id, want in pages.items():
+            with self.subTest(artifact=artifact_id):
+                self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
+                landed = os.path.join(self.export_folder(worktree, artifact_id), "page", "page.html")
+                self.assertTrue(os.path.isfile(landed), "%s: page/page.html was not exported. Output:\n%s" % (artifact_id, shown(r)))
+                self.assertEqual(read_bytes(landed), want, "%s: page/page.html is not byte-identical" % artifact_id)
+
+    def test_supporting_files_land_under_the_page_folder_of_their_artifact(self):
+        files = {self.QUEUE: {"assets/app.js": b'console.log("ready");\n', "img/mark.bin": b"\x00\x01\xfe\xff"}}
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        base = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files")
+        for rel, want in files[self.QUEUE].items():
+            with self.subTest(file=rel):
+                landed = os.path.join(base, *rel.split("/"))
+                self.assertTrue(os.path.isfile(landed), "%s was not exported under page/files/. Output:\n%s" % (rel, shown(r)))
+                self.assertEqual(read_bytes(landed), want, "%s is not byte-identical" % rel)
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+4\b")  # one item, the page, and the two files: one count per file
+
+    def test_an_artifact_with_no_docs_still_exports_its_page(self):
+        docs = self.docs()
+        docs[self.QUEUE] = dict(items={}, answers={})  # the empty state of a new page, with its page already made
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(docs, pages={self.QUEUE: QUEUE_PAGE}), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "the empty artifact's page/page.html was not exported. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the empty artifact's page/page.html is not byte-identical")
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
+
+    def test_a_secret_in_an_artifacts_page_refuses_only_that_artifact(self):
+        root, worktree = self.repo(), self.out("worktree")
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        self.assertEqual(self.run_all(root, self.fetched_all(self.docs(), pages=pages), worktree).returncode, 0,
+                         "the clean first run failed")
+        before = snapshot(self.export_folder(worktree, self.QUEUE))
+        leaky = QUEUE_PAGE + ("<p>Token: %s</p>\r\n" % TOKEN).encode("utf-8")
+        docs = self.docs()
+        docs[self.WAIT]["items"]["fresh"] = item(10)  # the clean artifact has a new doc, so it must still export
+        held = dict(pages)
+        held[self.QUEUE] = leaky
+        r = self.run_all(root, self.fetched_all(docs, pages=held), worktree)
+        self.assertVerdictOf(r, self.QUEUE, r"\brefused\b")
+        self.assertEqual(r.returncode, 1, "a find in one artifact's page must exit 1. Output:\n" + shown(r, [TOKEN]))
+        self.assertNotIn(TOKEN, r.stdout + r.stderr, "the matched value was printed")
+        self.assertEqual(snapshot(self.export_folder(worktree, self.QUEUE)), before, "a refused page changed its artifact's copy")
+        self.assertVerdictOf(r, self.WAIT, r"changed\s+1\b")
+        self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, self.WAIT), "items", "fresh.json")),
+                        "the clean artifact was held back by the refused page")
 
 
 if __name__ == "__main__":
