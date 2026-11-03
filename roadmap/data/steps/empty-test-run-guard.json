@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 509,
  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 10.",
- "note": "Promotion lane 10 of 11 (rank = work order). Marked (?) in the plan: no incident found. Child removals: degen, joyous. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Ready.",
- "updatedAt": "2026-11-03T22:44:00Z"
+ "note": "Promotion lane 10 of 11 (rank = work order). Marked (?) in the plan: no incident found. Child removals: degen, joyous. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Todo until its '?' is checked: check for an incident (coordinator, Nov 3 16:44 CST).",
+ "updatedAt": "2026-11-03T22:46:00Z"
 }

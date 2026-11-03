@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 507,
  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 8.",
- "note": "Promotion lane 8 of 11 (rank = work order). Marked (?) in the plan: gap read from code, not run; confirm the stray-branch case before the lane starts. Child removal: banchi clause_push. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Ready.",
- "updatedAt": "2026-11-03T22:44:00Z"
+ "note": "Promotion lane 8 of 11 (rank = work order). Marked (?) in the plan: gap read from code, not run; confirm the stray-branch case before the lane starts. Child removal: banchi clause_push. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Todo until its '?' is checked: confirm the stray-branch case (coordinator, Nov 3 16:44 CST). Owner question: page item 206.",
+ "updatedAt": "2026-11-03T22:46:00Z"
 }
