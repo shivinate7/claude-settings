@@ -20,6 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_models as C  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "hooks", "test_support"))
+from tool_lists import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/test_support/tool_lists.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 
@@ -253,19 +255,6 @@ def agent_parts(text):
     if not head:
         return None, None, "no frontmatter block"
     return C._guard.frontmatter_keys(head), "\n".join(text.splitlines()[len(head) + 2:]), None
-
-
-def tokens(raw):
-    """The items of an inline list: `Bash, Read` and `[Bash, Read]` both read as ['Bash', 'Read']."""
-    return [item.strip().strip("'\"") for item in raw.strip().strip("[]").split(",") if item.strip()]
-
-
-def unread_list(keys):
-    """The tools field whose list sits on the lines below its key, which this reader does not read; else None."""
-    for field in ("tools", "disallowedTools"):
-        if field in keys and not keys[field].strip():
-            return field
-    return None
 
 
 def runs_bash(keys):

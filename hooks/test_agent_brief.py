@@ -42,6 +42,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
 sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+from tool_lists import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/test_support/tool_lists.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -516,18 +518,21 @@ def load_read_only():
 WRITE_TOOLS = {"Edit", "Write"}
 
 
-def tool_names(raw):
-    """The names in a frontmatter list value such as `Edit, Write`, with comments and quotes stripped."""
-    value = (raw or "").split("#", 1)[0]
-    return {part.strip().strip("'\"") for part in value.split(",")} - {""}
+def write_names(raw):
+    """The tool names in a frontmatter list value, comment stripped, each scope dropped: `Edit(src/**)` reads as Edit."""
+    return {item.split("(", 1)[0] for item in tokens(raw.split("#", 1)[0])}
 
 
 def can_write(keys):
     """True when an agent may write, read from its frontmatter keys alone: its `tools` allowlist, when it has one,
-    lists Edit or Write, and its `disallowedTools` lists neither."""
-    if "tools" in keys and not WRITE_TOOLS & tool_names(keys["tools"]):
+    lists Edit or Write, and its `disallowedTools` lists neither. Raises ValueError when a list sits below its key,
+    which the shared reader does not read, so the answer is never a guess."""
+    field = unread_list(keys)
+    if field:
+        raise ValueError("the %s list sits below its key, which the reader does not read" % field)
+    if "tools" in keys and not WRITE_TOOLS & write_names(keys["tools"]):
         return False
-    return not WRITE_TOOLS & tool_names(keys.get("disallowedTools"))
+    return not WRITE_TOOLS & write_names(keys.get("disallowedTools", ""))
 
 
 # The write verdict of an agent's frontmatter, one case per form the lint reader reads: a comma list, a bracket list,
@@ -586,8 +591,16 @@ def agent_entries():
         keys = list(guard.role_agent_keys(REPO_ROOT))
     except OSError as exc:
         return [], "agents/ cannot be read: %s" % exc
-    entries = [(key.get("name", "").split("#", 1)[0].strip().strip("'\""), can_write(key)) for key in keys]
+    entries, unread = [], []
+    for key in keys:
+        name = key.get("name", "").split("#", 1)[0].strip().strip("'\"")
+        try:
+            entries.append((name, can_write(key)))
+        except ValueError as exc:
+            unread.append(str(exc))
     named = [(name, writes) for name, writes in entries if name]
+    if unread:
+        return named, "; ".join(unread)
     if not files or len(keys) != len(files) or len(named) != len(files):
         return named, ("want a name from each of the %d agent files; %d have frontmatter, %d have a name"
                        % (len(files), len(keys), len(named)))
