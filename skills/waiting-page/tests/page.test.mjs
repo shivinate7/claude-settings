@@ -1994,6 +1994,144 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
 });
 
+// ---------------------------------------------------------------- answered sink
+
+// An answered item sinks to the Answered section: after the open tiers, before Arbiter rulings, folded to its answer line.
+// Membership is frozen at load, so an answer sent on the page moves nothing until a reload. Each case leads with sectionOf(),
+// which reads no tier id, so a page without the section fails on the placement and never on a crash.
+const ANSWERED_AT = "2026-10-26T01:00:00Z";
+// An open item added after ANSWERED_AT is new, not seen, so its parts stay unfolded.
+const NEW_ADDED = at(28);
+const answerOf = (it, choice = "a", over = {}) => ({ [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, choice, note: "", ...over } });
+// The id of the section (section.tier) that holds the card, or null.
+const sectionOf = (page, it) => page.evaluate((id) => { const el = document.getElementById("item-" + id); const s = el && el.closest("section.tier"); return s ? s.id : null; }, it.id);
+// The ids of the cards under a selector, in page order. A selector that matches nothing gives [].
+const cardsIn = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s + " article.card")].map((c) => c.id.slice(5)), sel);
+const sectionIds = (page) => page.evaluate(() => [...document.querySelectorAll("#list > section.tier")].map((s) => s.id));
+// Each card with the section that holds it, in page order. Equal before and after a push means nothing moved.
+const layout = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]));
+// The href of the rail row that a chip sits in, or null.
+const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
+
+test("an answered item sinks to the Answered section, after the open tiers and before Arbiter rulings, folded to its answer line", async (t) => {
+  const ans = mk("sink-ans", 1, { added: at(5) }), open1 = mk("sink-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [ans, open1, ARBITER], answers: answerOf(ans, "a", { note: "Kept the red one." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, ans), "tier-answered", `No. ${ans.n} is not in the Answered section`);
+  assert.deepEqual(await sectionIds(page), ["tier-calm", "tier-answered", "tier-ruled"], "the Answered section is not between the open tiers and Arbiter rulings");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [open1.id], "the open item left its tier, or the answered item stayed in it");
+  const c = page.locator(`#tier-answered #item-${ans.id}`), fold = c.locator("button.unfold");
+  assert.doesNotMatch(await c.getAttribute("class"), /\b(holds|due|calm|stands)\b/, "the answered card keeps its tier class");
+  await need(fold, `No. ${ans.n} in the Answered section has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", "the answered card is not folded on load");
+  assert.equal(await c.locator(".rnote").isVisible(), false, "the note shows on the folded card");
+  assert.match(await c.locator(".receipt").textContent(), /You chose A: Red/, "the answer line is missing from the folded card");
+});
+
+test("an answered item already filed stays in the Answered section, with the filed tick and its home", async (t) => {
+  const filed = mk("filed-sunk", 1, { added: at(5) }), open1 = mk("filed-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [filed, open1], answers: answerOf(filed), receipts: { [filed.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, filed), "tier-answered", `No. ${filed.n} is not in the Answered section`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [open1.id], "the open item left its tier");
+  const pill = page.locator(`#tier-answered #item-${filed.id} .ans.filed`);
+  await need(pill, `No. ${filed.n} in the Answered section has no filed tick`);
+  const words = (await pill.textContent()).trim();
+  assert.match(words, /^Filed in c1 /, `the section pill reads "${words}", not "Filed in c1 <time>"`);
+});
+
+test("an open card answered on the page stays in its tier until reload, and a fresh load sinks it to the Answered section", async (t) => {
+  const it = mk("order-send", 1, { added: at(5) }), other = mk("order-other", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  await choose(page, it, "a");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  await card(page, it).locator(".receipt").waitFor();
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the card answered on the open page left its tier before reload");
+  const again = await open(t, { items: [it, other], answers: await answers(page) }); if (!again) return;
+  assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n} is not in the Answered section after a reload`);
+  assert.deepEqual(await cardsIn(again, "#tier-calm"), [other.id], "after a reload the open item is not alone in its tier");
+});
+
+test("in the Answered section, a receipt that arrives after load moves no card, and a read-only receipt leaves the answer unfiled", async (t) => {
+  const filed = mk("late-filed", 1, { added: at(5) }), reads = mk("late-read", 2, { added: at(6) }), open1 = mk("late-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [filed, reads, open1], answers: { ...answerOf(filed), ...answerOf(reads) } }); if (!page) return;
+  assert.equal(await sectionOf(page, filed), "tier-answered", `No. ${filed.n} is not in the Answered section`);
+  assert.equal(await sectionOf(page, reads), "tier-answered", `No. ${reads.n} is not in the Answered section`);
+  const before = await layout(page);
+  // The receipts arrive after the items and answers, through the page's own store handle.
+  await page.evaluate(async ([a, b]) => { await state.db.collection("receipts").doc(a).set({ filed: "2026-10-26T03:00:00Z" }); await state.db.collection("receipts").doc(b).set({ read: "2026-10-26T02:00:00Z" }); }, [filed.id, reads.id]);
+  await page.waitForFunction((id) => !!document.getElementById("c-" + id)?.classList.contains("filed"), filed.id);
+  await page.waitForFunction((id) => !!document.querySelector(`#item-${id} .receipt .read`), reads.id);
+  assert.deepEqual(await layout(page), before, "a receipt that arrived after load moved a card");
+  const ro = page.locator(`#tier-answered #item-${reads.id}`);
+  await need(ro.locator(".ans"), `No. ${reads.n} in the Answered section has no answer pill`);
+  assert.equal(await ro.locator(".ans.filed").count(), 0, `a read-only receipt marks No. ${reads.n} filed`);
+  assert.match((await ro.locator(".ans").textContent()).trim(), /^Filing pending, sent /, `No. ${reads.n} does not read filing pending`);
+  assert.match(await ro.locator(".receipt .read").textContent(), /^Read by test thread /, "the read line is missing");
+  assert.equal(await page.evaluate((id) => document.getElementById("c-" + id).classList.contains("filed"), reads.id), false, `the rail chip for No. ${reads.n} is marked filed`);
+});
+
+test("in the Answered section, a group sinks only when every member is answered; a half-answered group stays whole in its tier", async (t) => {
+  const half = [mk("half-ans", 1, { group: "half", added: at(5) }), mk("half-open", 2, { group: "half", added: NEW_ADDED })];
+  const all = [mk("all-a", 3, { group: "all", added: at(6) }), mk("all-b", 4, { group: "all", added: at(7) })];
+  const page = await open(t, { items: [...half, ...all], answers: { ...answerOf(half[0]), ...answerOf(all[0]), ...answerOf(all[1]) } }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-calm #group-half"), half.map((x) => x.id), "the half-answered group is not whole in its tier");
+  assert.equal(await page.locator(`#tier-answered #item-${half[0].id}`).count(), 0, "the answered member of a half-answered group sank");
+  assert.equal(await sectionOf(page, all[0]), "tier-answered", "the fully answered group is not in the Answered section");
+  assert.deepEqual(await cardsIn(page, "#tier-answered #group-all"), all.map((x) => x.id), "the fully answered group did not sink whole, as one frame");
+});
+
+test("Change on a folded card in the Answered section keeps it there, open, with its fold locked open", async (t) => {
+  const it = mk("change-sunk", 1, { added: at(5) }), other = mk("change-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const c = page.locator(`#tier-answered #item-${it.id}`);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await sectionOf(page, it), "tier-answered", "Change moved the card out of the Answered section");
+  const fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "Change lost the saved pick");
+});
+
+test("the rail gives the Answered section its own row, takes answered items out of their tier row, and the counts agree with the section", async (t) => {
+  const ans = mk("rail-ans", 1, { added: at(5) }), open1 = mk("rail-open", 2, { added: NEW_ADDED }), open2 = mk("rail-open2", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [ans, open1, open2], answers: answerOf(ans) }); if (!page) return;
+  const home = await railRowOf(page, ans);
+  assert.equal(home, "#tier-answered", `the chip for No. ${ans.n} sits in the rail row ${home}, not the Answered row`);
+  const row = page.locator('#rail a.ov-head[href="#tier-answered"]');
+  await need(row, "the rail has no Answered row");
+  const sectionCount = (await cardsIn(page, "#tier-answered")).length;
+  assert.equal((await row.locator(".ct").textContent()).trim(), String(sectionCount), "the Answered row count is not the section's size");
+  assert.equal((await page.locator('#rail a.ov-head[href="#tier-calm"] .ct').textContent()).trim(), "2", "the Whenever row does not count only the open items left in it");
+  const rows = await page.evaluate(() => [...document.querySelectorAll("#rail a.ov-head")].map((a) => a.getAttribute("href")));
+  assert.ok(rows.indexOf("#tier-answered") > rows.indexOf("#tier-calm"), `the Answered row is not after the tier rows: ${rows.join(" ")}`);
+  // A page with no answered item draws no Answered section and no Answered row, as the rulings section draws only with rulings.
+  const none = await open(t, { items: [mk("empty-open", 1, { added: at(5) })] }); if (!none) return;
+  assert.equal(await none.locator("#tier-answered").count(), 0, "an empty Answered section is drawn");
+  assert.equal(await none.locator('#rail a.ov-head[href="#tier-answered"]').count(), 0, "an empty Answered row is in the rail");
+});
+
+test("unfold in the Answered section shows what the fold holds, and a card with nothing to hide has no unfold control", async (t) => {
+  const withNote = mk("fold-note", 1, { added: at(5), reply: "Thanks, noted." }), bare = mk("fold-none", 2, { added: at(6) });
+  const page = await open(t, { items: [withNote, bare], answers: { ...answerOf(withNote, "a", { note: "Kept the red one." }), ...answerOf(bare) } }); if (!page) return;
+  assert.equal(await sectionOf(page, withNote), "tier-answered", `No. ${withNote.n} is not in the Answered section`);
+  assert.equal(await sectionOf(page, bare), "tier-answered", `No. ${bare.n} is not in the Answered section`);
+  const c = page.locator(`#tier-answered #item-${withNote.id}`), fold = c.locator("button.unfold");
+  await need(fold, `No. ${withNote.n} has a note and a reply but no unfold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", "the fold is open on load");
+  assert.equal(await c.locator(".rnote").isVisible(), false, "the note shows before unfold");
+  assert.equal(await c.locator(`#rp-${withNote.id}`).isVisible(), false, "the reply shows before unfold");
+  const show = (await fold.locator(".uf-show").textContent()).trim();
+  assert.match(show, /^Show your note\b.*\bthe reply$/, `the fold label reads "${show}"`);
+  await fold.click();
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "unfold did not open the fold");
+  assert.equal(await c.locator(".rnote").isVisible(), true, "unfold did not show the note");
+  assert.equal(await c.locator(`#rp-${withNote.id}`).isVisible(), true, "unfold did not show the reply");
+  assert.equal(await page.locator(`#tier-answered #item-${bare.id} button.unfold`).count(), 0, "a card with nothing to hide has an unfold control");
+});
+
 // ---------------------------------------------------------------- round 2 looks
 
 const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
