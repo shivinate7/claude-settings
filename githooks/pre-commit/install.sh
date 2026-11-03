@@ -4,15 +4,18 @@
 # The common dir is shared by every worktree of the clone. Never edits core.hooksPath.
 # Git expands a leading ~ in core.hooksPath and resolves a relative one against the root of the
 # worktree the hook runs in, so a relative path gets one copy per worktree that exists now.
-# A pre-commit that differs from this one is never replaced: it may be the repo's own hook.
+# An earlier copy of this hook (it carries the marker line) is replaced. A foreign pre-commit never is.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
+marker="# claude-settings githooks/pre-commit"
 # Each command substitution is its own assignment: as an argument, its failure escapes set -e.
 cdir="$(git rev-parse --git-common-dir)"
 dir="$(git config --path --get core.hooksPath)" || dir=""
 put() {
   mkdir -p "$1" || { echo "ERROR: cannot create $1; in a linked worktree .git is a file" >&2; exit 1; }
-  if [ -e "$1/pre-commit" ] && ! cmp -s "$here/pre-commit" "$1/pre-commit"; then
+  # Our own earlier copy carries the marker line near its top and is upgraded in place.
+  if [ -e "$1/pre-commit" ] && ! cmp -s "$here/pre-commit" "$1/pre-commit" \
+    && ! head -n 5 "$1/pre-commit" | grep -qxF -- "$marker"; then
     echo "ERROR: a different pre-commit already sits at $1/pre-commit; not replaced. Merge the two by hand." >&2
     exit 1
   fi

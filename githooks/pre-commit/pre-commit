@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# claude-settings githooks/pre-commit
 """Shared pre-commit hook: no staged env file, no staged symlink that is absolute or leaves the repo.
 
 Why a hook: the guard in hooks/guard_env.py sees only the command line, so `git add -A` and
@@ -6,7 +7,7 @@ Why a hook: the guard in hooks/guard_env.py sees only the command line, so `git 
 absolute or outside symlink commits a path on one machine; on another it points at nothing, or
 at a mirror that a later clean deletes through the link.
 
-Reads: the staged paths (added, copied, modified, renamed) and the index modes. Staged deletions
+Reads: the staged paths (added, copied, modified, renamed, type-changed) and the index modes. Staged deletions
 are never read, so a file committed earlier can still be removed.
 Env: CLAUDE_HOOKS_DIR (default ~/.claude/hooks) holds guard_env, the one home of the env-file
 name rule. PRE_COMMIT_GUARD=off is the escape hatch. A guard_env that cannot be imported refuses,
@@ -49,7 +50,7 @@ def load_name_rule():
 
 
 def staged_paths():
-    raw = git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+    raw = git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT")
     return [p for p in raw.split("\0") if p]
 
 
