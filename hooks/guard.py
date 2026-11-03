@@ -193,6 +193,14 @@ Other tools, in `judge` order:
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
                        They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
+  simulator-boot-route
+                       deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
+                       after the cap and twin rules. The remedy is `sim-test` for the `test` action,
+                       else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
+  simulator-boot-locked
+                       deny. A simulator MCP `launch` of a shut-down device while the sim-test lock
+                       has a live holder. Judged after the cap and twin rules. An override lifts it.
+                       (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -243,6 +251,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import sys
 import time
 
@@ -3632,8 +3641,64 @@ SIM_BYPASS_REASON = (
 )
 
 
-def sim_boot_refusal(tool: str, names: list) -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted."""
+SIM_ROUTE_BOOLEAN_FLAGS = frozenset({"-quiet", "-verbose", "-json", "-dry-run", "-allowProvisioningUpdates",
+                                     "-allowProvisioningDeviceRegistration", "-skipUnavailableActions"})
+
+
+def _sim_route_remedy(segment: str) -> str:
+    """The remedy for the `xcodebuild -destination` command of SEGMENT: `sim-test` with its arguments (no
+    -destination, no `test` action: sim-test adds it) when the action is `test`, else the generic
+    destination. The action is the word `test` that no option takes as its value."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return ""
+    rest, args, action, skip = tokens[index + 1:], [], False, False
+    for i, token in enumerate(rest):
+        if skip:
+            skip = False
+        elif token == "-destination":
+            skip = True
+        elif token.startswith("-destination="):
+            pass
+        elif token == "test" and not (i and rest[i - 1].startswith("-") and rest[i - 1] not in SIM_ROUTE_BOOLEAN_FLAGS
+                                      and "=" not in rest[i - 1]):
+            action = True
+        else:
+            args.append(token)
+    if action:
+        return "Run `sim-test %s` instead." % " ".join(shlex.quote(a) for a in args)
+    return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
+
+
+def sim_lock_holder():
+    """The holder of <config>/state/sim-test.lock as a string (a live pid, or "unknown" for a lock folder with no
+    readable pid file under 60 s old), or "" when the lock is free. The lock is the one bin/sim-test takes."""
+    try:
+        lock = os.path.join(guard_core.config_dir(), "state", "sim-test.lock")
+        age = time.time() - os.stat(lock).st_mtime
+        try:
+            with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError:
+            text = ""
+        if text.isdigit() and int(text) > 0:
+            try:
+                os.kill(int(text), 0)
+            except ProcessLookupError:
+                return ""
+            except OSError:
+                pass  # EPERM: the pid exists
+            return text
+        return "unknown" if age < 60 else ""
+    except Exception:
+        return ""  # fail open: an unreadable lock is not held
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
+    simulator-boot-route, and an MCP launch while the sim-test lock is held as simulator-boot-locked."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3644,6 +3709,7 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     devices = sweep.sim_read_devices()
     if devices is None:
         return
+    shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
         hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
@@ -3668,6 +3734,19 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
+        shut_down.append(name)
+    for name in shut_down:
+        if tool == SIM_MCP:
+            holder = sim_lock_holder()
+            if holder:
+                refuse(tool, "deny", "simulator-boot-locked",
+                       "`sim-test` holds the one simulator lock (pid %s). A launch of a shut-down simulator "
+                       "boots outside that lock. Wait for sim-test to end, or launch a simulator that is "
+                       "already booted. (decision sim-test-is-the-one-boot-path)" % holder, name)
+        elif (remedies or {}).get(name):
+            refuse(tool, "deny", "simulator-boot-route",
+                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
+                   "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -4246,9 +4325,13 @@ def judge(payload) -> None:
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
                 refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
-            names = [n for seg in segments for n in _sim_boot_names(seg)]
+            names, remedies = [], {}
+            for seg in segments:
+                for n in _sim_boot_names(seg):
+                    names.append(n)
+                    remedies.setdefault(n[0] if isinstance(n, tuple) else n, _sim_route_remedy(seg))
             if names:
-                sim_boot_refusal(tool, names)
+                sim_boot_refusal(tool, names, remedies)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.

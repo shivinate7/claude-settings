@@ -4,6 +4,9 @@
 Modes:
 - PreToolUse: Before a Bash call that names simulator tooling (simctl, xcodebuild) and a device,
   or a simulator MCP launch, saves the state of each simulator.
+- `--record <UDID>`: bin/sim-test calls it after its own boot. Appends one record line for that device,
+  read with the same devices() and launchd() as the modes above. Prints nothing, exits 0. No line when
+  the device is not listed or its launchd_sim is unclear.
 - PostToolUse: After such a call, appends each simulator that the call took from Shutdown to
   Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such
   device. A device that fails the check is stopped and booted once more.
@@ -139,6 +142,33 @@ def retry(udid):
     return sim_ok(udid)
 
 
+def state_dir():
+    return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "state")
+
+
+def write_record(state, udid, rec, at):
+    """Append one record line for UDID to <state>/sim-boots.jsonl. No line when its launchd_sim is unclear:
+    the sweep then keeps the device. The one writer of the record, for the hook modes and `--record`."""
+    pid, start = launchd(udid)
+    if pid is None or start is None:
+        return
+    with open(os.path.join(state, "sim-boots.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps({**rec, "at": at, "launchd_pid": pid, "launchd_start": start}) + "\n")
+
+
+def record_one(udid):
+    """`--record UDID`: one record line for the listed device UDID. Silent."""
+    try:
+        now = devices()
+        if now is None or udid not in now:
+            return
+        state = state_dir()
+        os.makedirs(state, exist_ok=True)
+        write_record(state, udid, now[udid][1], time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    except Exception:
+        pass
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -151,7 +181,7 @@ def main():
         names = named(payload)
         if not names or not shutil.which("xcrun"):  # a call that names no device records nothing
             return
-        state = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "state")
+        state = state_dir()
         key = re.sub(r"[^A-Za-z0-9_-]", "_", str(payload.get("tool_use_id") or payload["session_id"]))
         snap = os.path.join(state, "sim-snapshot-" + key + ".json")
         now = devices()
@@ -180,11 +210,7 @@ def main():
                 to_check = {u for u, _ in hits}
 
             def record(u, rec):
-                pid, start = launchd(u)
-                if pid is None or start is None:
-                    return  # unclear: no record, so the sweep keeps the device
-                with open(os.path.join(state, "sim-boots.jsonl"), "a", encoding="utf-8") as f:
-                    f.write(json.dumps({**rec, "at": at, "launchd_pid": pid, "launchd_start": start}) + "\n")
+                write_record(state, u, rec, at)
             notes, broken = [], []
             for u, rec in hits:
                 record(u, rec)  # before the check: a hook killed mid-check still leaves a record
@@ -205,5 +231,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--record"]:
+        if len(sys.argv) > 2:
+            record_one(sys.argv[2])
+    else:
+        main()
     sys.exit(0)
