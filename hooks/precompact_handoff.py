@@ -69,8 +69,8 @@ the desktop app has none.
   Spec: docs/decisions/precompact-handoff.md, item 8.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
-reads the Claude Code binary at env CLAUDE_CODE_EXECPATH in-process, once per new binary (path,
-size, mtime; one cache entry per path), by anchor strings (setting keys, env names, a flag name, never minified names).
+reads the Claude Code binary at env CLAUDE_CODE_EXECPATH, else `claude` on env PATH through its link,
+in-process, once per new binary (path, size, mtime; one cache entry per path), by anchor strings (setting keys, env names, a flag name, never minified names).
 cc_facts() gives each fact or "unknown"; the facts are cached in <config dir>/cc-behavior.json and
 compared with hooks/cc_compaction_baseline.json. A changed fact prints one line, for the
 session to name under Input Needed. Starts no process. Spec: docs/decisions/precompact-handoff.md,
