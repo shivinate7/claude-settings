@@ -349,7 +349,7 @@ class CodeCheck(unittest.TestCase):
     @NEEDS_TSC
     def test_mjs_imports_that_resolve_or_are_out_of_scope_are_green(self):
         # Node builtins, a bare package that is not installed, a JSON file with an import attribute, a .cjs file by
-        # default import, and a type error: none is a broken relative import, and checkJs is not adopted.
+        # default import, and a type error (checkJs reports it; the import check drops it): none is a broken import.
         rc, out = check({".code-check.json": config([]), "d.json": '{"a": 1}\n',
                          "c.cjs": "module.exports = { a: 1 };\n",
                          "app.mjs": ('import fs from "node:fs";\n'
@@ -375,6 +375,14 @@ class CodeCheck(unittest.TestCase):
                          "app.mjs": 'import { a } from "./lib.mjs";\nexport default a;\n'}, PATH=path_with("git"))
         self.assertEqual(rc, 1, out)
         self.assertIn("could not", out)
+
+    def test_mjs_import_check_whose_tsc_exits_1_with_no_stdout_is_red(self):
+        # tsc fails and writes only to stderr: no diagnostic on stdout, so the import check cannot call the .mjs clean.
+        shim = path_shim("tsc", "echo 'tsc: failed before it checked the file' >&2\nexit 1")
+        rc, out = check({".code-check.json": config([]), "app.mjs": "export const a = 1;\n"},
+                        PATH=shim + os.pathsep + os.environ["PATH"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("printed no diagnostics", out)
 
     @NEEDS_TSC
     def test_mjs_extensionless_import_of_a_sibling_is_red(self):
@@ -420,6 +428,20 @@ class CodeCheck(unittest.TestCase):
         self.assertIn("TS8016", out)
 
     @NEEDS_TSC
+    def test_mjs_ts_only_forms_are_each_red_by_their_code(self):
+        # Node 22 cannot parse these in a .mjs file: `satisfies` is TS8037; enum, interface and import type are TS8006.
+        # Each form has its own file, so each output row must name that file and its code.
+        forms = {"sat.mjs": ("const c = {} satisfies object;\nexport default c;\n", "TS8037"),
+                 "en.mjs": ("enum E {}\n", "TS8006"),
+                 "ifc.mjs": ("interface I {}\n", "TS8006"),
+                 "it.mjs": ('import type { X } from "./x.mjs";\n', "TS8006")}
+        _, out = check({".code-check.json": config([]), "x.mjs": "export class X {}\n",
+                        **{name: text for name, (text, _) in forms.items()}})
+        for name, (_, code) in forms.items():
+            with self.subTest(form=name):
+                self.assertTrue(one_line_with(out, name, code), "%s: no %s row in:\n%s" % (name, code, out))
+
+    @NEEDS_TSC
     def test_mjs_jsdoc_type_annotation_is_green(self):
         # The control for the two cases above: a JSDoc type is plain comment syntax to Node, so it stays green.
         rc, out = check({".code-check.json": config([]),
@@ -433,7 +455,7 @@ class CodeCheck(unittest.TestCase):
         # error stays green: the notice is no diagnostic, and it is not a problem.
         real = shutil.which("tsc")
         self.assertIsNotNone(real, "tsc not on PATH")
-        shim = tsc_with_npm_notice(real)
+        shim = path_shim("tsc", "echo 'npm notice New minor version of npm available' >&2\nexec %s \"$@\"" % shlex.quote(real))
         rc, out = check({".code-check.json": config([]), "app.mjs": "const n = 1;\nn.foo;\nexport default n;\n"},
                         PATH=shim + os.pathsep + os.environ["PATH"], unset=("CI",))
         self.assertIn("javascript typecheck: mjs-imports pass", out, out)
@@ -458,12 +480,12 @@ def path_with(*tools):
     return folder
 
 
-def tsc_with_npm_notice(real):
-    """A PATH folder whose tsc prints an npm update notice on stderr, then execs the real tsc. Returns the folder."""
+def path_shim(name, body):
+    """A PATH folder holding one executable `name`, an sh script of `body`. Returns the folder."""
     folder = tempfile.mkdtemp(dir=RUN_FOLDER)
-    path = os.path.join(folder, "tsc")
+    path = os.path.join(folder, name)
     with open(path, "w", newline="\n") as f:
-        f.write("#!/bin/sh\necho 'npm notice New minor version of npm available' >&2\nexec %s \"$@\"\n" % shlex.quote(real))
+        f.write("#!/bin/sh\n" + body + "\n")
     os.chmod(path, 0o755)
     return folder
 
