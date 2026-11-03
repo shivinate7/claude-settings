@@ -71,6 +71,24 @@ function Test-ReparsePoint([string]$Path) {
     return (([int]$i.Attributes) -band [int][IO.FileAttributes]::ReparsePoint) -ne 0
 }
 
+# settings.json backups, shared by the copy-mode cases below. A repeat run backs the live file up to
+# settings.json.bak.<yyyyMMddHHmmss>.<pid>; the first local run keeps a person's file as settings.json.orig.
+# An older installer's settings.json.bak.<yyyyMMddHHmmss> (no pid) is neither. Names are matched with
+# -match on .Name, never -Filter: PS 5.1's wildcard lets `.*` match empty, so -Filter counts the no-pid file.
+$PidBakRe = '^settings\.json\.bak\.\d{14}\.\d+$'
+$AnyBakRe = '^settings\.json\.bak\.'
+
+# The entries directly under $Dir whose name matches $Pattern, as an array (empty when none).
+function Find-ByName([string]$Dir, [string]$Pattern) {
+    return @(Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $Pattern })
+}
+
+# The field $Field of the JSON file at $Path, or $null when the file is missing or is not JSON.
+function Get-JsonField([string]$Path, [string]$Field) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json).$Field } catch { return $null }
+}
+
 # Every subprocess install below writes its PATH change to this throwaway key, never to the real
 # HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
 # and the variable are removed at the end of the file.
@@ -118,7 +136,8 @@ try {
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: copymode1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
-    $Baks     = Get-ChildItem -Path $Cfg -Recurse -Filter '*.bak.*' -ErrorAction SilentlyContinue
+    # settings.json backups are checked by settingsrepeat1 and settingsorig1, so they are skipped here.
+    $Baks     = Get-ChildItem -Path $Cfg -Recurse -Filter '*.bak.*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^settings\.json' }
     $GotFile  = Join-Path $Cfg 'skills\sample-skill\SKILL.md'
     $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
 
@@ -132,7 +151,8 @@ try {
 
 # ---- copy-mode case: settings.json repeat run (D: copy-mode-overwrites-no-backup) -------------
 # Same shape as copymode1, for the settings.json branch at the tail of install.ps1, not the
-# skills branch.
+# skills branch. Each repeat run backs the live file up to settings.json.bak.<time>.<pid>, and only
+# the newest such backup stays (the settings.json exception in that ruling).
 $Tmp3 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-settingsrepeat-" + [guid]::NewGuid().ToString('N'))
 $Co3  = Join-Path $Tmp3 'clone'
 $Cfg3 = Join-Path $Tmp3 'claude'
@@ -148,6 +168,7 @@ try {
     & $PsHost -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 1 exited $LASTEXITCODE"; $Failed++ }
     Check "settingsrepeat1: settings.json is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg3 'settings.json')))
+    Check "settingsrepeat1: run 1 on an empty config dir adds no settings.json.bak.*" (@(Find-ByName $Cfg3 $AnyBakRe).Count -eq 0)
 
     # Change the source settings.json between runs, the way a real `git pull` would.
     Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":2}' -Encoding utf8
@@ -155,17 +176,82 @@ try {
     & $PsHost -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 2 exited $LASTEXITCODE"; $Failed++ }
 
-    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
-    $Baks     = Get-ChildItem -Path $Cfg3 -Filter 'settings.json.bak.*' -ErrorAction SilentlyContinue
-    $GotFile  = Join-Path $Cfg3 'settings.json'
-    $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
-
-    Check "settingsrepeat1: run 2 leaves no settings.json.bak.* under the config dir" (-not $Baks)
+    $GotFile = Join-Path $Cfg3 'settings.json'
+    $Baks2   = @(Find-ByName $Cfg3 $PidBakRe)
+    $Bak2V   = if ($Baks2.Count -eq 1) { Get-JsonField $Baks2[0].FullName 'v' } else { $null }
+    Check "settingsrepeat1: run 2 leaves exactly one settings.json.bak.<time>.<pid> under the config dir" ($Baks2.Count -eq 1)
+    Check "settingsrepeat1: that backup holds run 1's content (v 1)" ($Bak2V -eq 1)
     Check "settingsrepeat1: settings.json lands after run 2" (Test-Path $GotFile)
-    if ($GotValue) { Check "settingsrepeat1: settings.json holds run 2's content" (($GotValue | ConvertFrom-Json).v -eq 2) }
+    Check "settingsrepeat1: settings.json holds run 2's content (v 2)" ((Get-JsonField $GotFile 'v') -eq 2)
+
+    # Run 3: its backup replaces run 2's, so one backup stays, now holding run 2's content.
+    Set-Content -Path (Join-Path $Co3 'settings.json') -Value '{"v":3}' -Encoding utf8
+    & $PsHost -NoProfile -File (Join-Path $Co3 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsrepeat1 run 3 exited $LASTEXITCODE"; $Failed++ }
+
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    $Baks3 = @(Find-ByName $Cfg3 $PidBakRe)
+    $Bak3V = if ($Baks3.Count -eq 1) { Get-JsonField $Baks3[0].FullName 'v' } else { $null }
+    Check "settingsrepeat1: run 3 still leaves exactly one settings.json.bak.<time>.<pid>" ($Baks3.Count -eq 1)
+    Check "settingsrepeat1: that backup holds run 2's content (v 2)" ($Bak3V -eq 2)
+    Check "settingsrepeat1: settings.json holds run 3's content (v 3)" ((Get-JsonField $GotFile 'v') -eq 3)
 } finally {
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $Tmp3 -ErrorAction SilentlyContinue
+}
+
+# ---- copy-mode case: a person's settings.json is kept as .orig (D: copy-mode-overwrites-no-backup)
+# Plants a person's own settings.json and an older installer's no-pid backup before run 1, the first
+# local install. Run 1 keeps the person's file as settings.json.orig, for good, and adds no other
+# settings backup. Run 2 is a repeat run: it backs the live file up to a pid-form name, and the no-pid
+# backup is never pruned.
+$Tmp6 = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-settingsorig-" + [guid]::NewGuid().ToString('N'))
+$Co6  = Join-Path $Tmp6 'clone'
+$Cfg6 = Join-Path $Tmp6 'claude'
+New-Item -ItemType Directory -Force -Path $Co6, $Cfg6 | Out-Null
+try {
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $Co6 'install.ps1')
+    Set-Content -Path (Join-Path $Co6 'CLAUDE.md') -Value "# settingsorig1 content" -Encoding utf8
+    Set-Content -Path (Join-Path $Co6 'settings.json') -Value '{"v":1}' -Encoding utf8
+    Set-Content -Path (Join-Path $Co6 'landed-dirs.txt') -Value "skills" -Encoding utf8
+
+    $Orig6   = Join-Path $Cfg6 'settings.json.orig'
+    $Legacy6 = Join-Path $Cfg6 'settings.json.bak.20200101000000'
+    Set-Content -Path (Join-Path $Cfg6 'settings.json') -Value '{"mine":1}' -Encoding utf8
+    Set-Content -Path $Legacy6 -Value '{"old":1}' -Encoding utf8
+
+    # Fixture guard: run 1 must be a first local run over a person's file, with no .orig yet.
+    $FixOk6 = (-not (Test-Path -LiteralPath (Join-Path $Cfg6 '.claude-settings-installed'))) -and (-not (Test-Path -LiteralPath $Orig6)) -and ((Get-JsonField (Join-Path $Cfg6 'settings.json') 'mine') -eq 1)
+    if (-not $FixOk6) { Write-Host "FAIL: settingsorig1 fixture: marker or .orig present, or settings.json does not hold mine"; $Failed++ }
+
+    $env:CLAUDE_CONFIG_DIR = $Cfg6
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    & $PsHost -NoProfile -File (Join-Path $Co6 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsorig1 run 1 exited $LASTEXITCODE"; $Failed++ }
+
+    Check "settingsorig1: settings.json is a copy, not a link, after run 1" (-not (Test-ReparsePoint (Join-Path $Cfg6 'settings.json')))
+    Check "settingsorig1: settings.json.orig exists after run 1" (Test-Path -LiteralPath $Orig6)
+    Check "settingsorig1: settings.json.orig holds the person's settings.json after run 1" ((Get-JsonField $Orig6 'mine') -eq 1)
+    Check "settingsorig1: no pid-form settings backup after run 1" (@(Find-ByName $Cfg6 $PidBakRe).Count -eq 0)
+    Check "settingsorig1: the planted no-pid backup is the only settings.json.bak.* after run 1" (@(Find-ByName $Cfg6 $AnyBakRe).Count -eq 1)
+    Check "settingsorig1: the older installer's no-pid backup is still there after run 1" ((Get-JsonField $Legacy6 'old') -eq 1)
+    Check "settingsorig1: settings.json holds the shipped content (v 1) after run 1" ((Get-JsonField (Join-Path $Cfg6 'settings.json') 'v') -eq 1)
+
+    & $PsHost -NoProfile -File (Join-Path $Co6 'install.ps1') *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: settingsorig1 run 2 exited $LASTEXITCODE"; $Failed++ }
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+
+    $Baks6 = @(Find-ByName $Cfg6 $PidBakRe)
+    $Bak6V = if ($Baks6.Count -eq 1) { Get-JsonField $Baks6[0].FullName 'v' } else { $null }
+    Check "settingsorig1: settings.json.orig still exists after run 2" (Test-Path -LiteralPath $Orig6)
+    Check "settingsorig1: settings.json.orig still holds the person's settings.json after run 2" ((Get-JsonField $Orig6 'mine') -eq 1)
+    Check "settingsorig1: run 2 leaves exactly one settings.json.bak.<time>.<pid>" ($Baks6.Count -eq 1)
+    Check "settingsorig1: that backup holds run 1's settings.json (v 1)" ($Bak6V -eq 1)
+    Check "settingsorig1: settings.json holds the shipped content (v 1) after run 2" ((Get-JsonField (Join-Path $Cfg6 'settings.json') 'v') -eq 1)
+    Check "settingsorig1: the older installer's no-pid backup is still there after run 2" ((Get-JsonField $Legacy6 'old') -eq 1)
+} finally {
+    Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $Tmp6 -ErrorAction SilentlyContinue
 }
 
 # ---- copy-mode case: true first install backs up a person's own files once --------------------
