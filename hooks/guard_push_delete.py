@@ -19,6 +19,11 @@ from guard_core import (
 # `-o` is read in the short-flag loop, where its value may be glued on.
 PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
+# The harness names an isolated agent's own branch `worktree-agent-<agent_id>` (guard.py, "each agent's own
+# worktree"). That branch never reaches origin (decision agent-branch-never-pushed). push_verdict answers
+# with AGENT_PUSH_RULE when a push would send one.
+AGENT_BRANCH_PREFIX = "worktree-agent-"
+AGENT_PUSH_RULE = "agent-branch-push"
 
 
 def _push_config(cwd: str, key: str, overrides=None):
@@ -193,16 +198,37 @@ def push_destinations(args, cwd: str, overrides=None):
     return [t.removeprefix("refs/heads/") if t else t for t in found]
 
 
-def push_verdict(args, cwd: str, overrides=None) -> str:
-    """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
+def _agent_branch_push(plain, delete: bool, cwd: str, overrides=None) -> bool:
+    """True when a refspec that writes (not deletes) names an agent's own branch as its destination.
 
-    Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
+    `--delete`, `-d` and a `:name` spec delete, so they never count. A destination git cannot
+    read is None, and unknown is not a hit. A named destination other than `HEAD` or `@` costs
+    no git read.
+    """
+    if delete:
+        return False
+    for spec in plain or [""]:
+        if spec.lstrip("+").startswith(":"):
+            continue
+        target = _push_dest(spec, not plain, cwd, overrides)
+        if target is not None and target.removeprefix("refs/heads/").startswith(AGENT_BRANCH_PREFIX):
+            return True
+    return False
+
+
+def push_verdict(args, cwd: str, overrides=None) -> str:
+    """'' for an allowed push, else 'ask', 'deny' or AGENT_PUSH_RULE, for the `git push` arguments `args`.
+
+    A destination that is an agent's own branch (AGENT_BRANCH_PREFIX): AGENT_PUSH_RULE, forced or
+    not. A delete never reaches it. Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
     resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
     by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
     else 'deny'. A deletion off the default branch is ''.
     """
     force, mirror, every, includes, unpinned, leased, delete, remote, plain = _push_parse(args)
     plus = any(spec.startswith("+") for spec in plain)
+    if _agent_branch_push(plain, delete, cwd, overrides):
+        return AGENT_PUSH_RULE
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):
         return ""
@@ -687,6 +713,12 @@ def cmd_exe_delete_hit(segment: str) -> str:
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
     "Remedy: retry with --force-with-lease --force-if-includes."
+)
+AGENT_PUSH_REASON = (
+    "Rule (Git): an agent's own working branch never reaches the remote "
+    "(decision agent-branch-never-pushed). "
+    "Remedy: push to the branch the brief names, as `git push origin HEAD:<branch>`. "
+    "With no branch named, commit only and report."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
