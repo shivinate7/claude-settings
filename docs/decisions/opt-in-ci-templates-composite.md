@@ -9,7 +9,7 @@ Seven templates any repo can adopt live in one home and one shape: a composite a
 | --- | --- |
 | All-jobs-passed check | `actions/all-jobs-passed` |
 | CI done comment on a red run | `actions/ci-done-comment` |
-| Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper) |
+| Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper; opt-in `dropped-start` flags a pull request whose check run never started) |
 | Weekly README link check | `actions/readme-links` (calls `ci-alarm/issue.sh`) |
 | Ruling kind check on a pull request | `actions/ruling-kind` (runs `lint/check_ruling_kind.py` on the caller's checkout) |
 | Main-ref refusal hook | `githooks/main-ref` (its `install.sh` copies it) |

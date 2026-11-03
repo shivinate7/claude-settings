@@ -6,11 +6,23 @@ description: >
   group that is its group's newest and passed every job of the failed run (exact names), so a green nightly that ran
   other jobs never hides a red push. Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
   workflow with `permissions: {actions: read, issues: write}`; it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
+
+  Opt-in `dropped-start: 'true'` also flags an open, ready pull request, updated over 300 s ago, whose head
+  commit has no real `all-jobs-passed` run (a dropped `pull_request` event; a skipped run counts as absent).
+  It posts one comment per head sha, with the remedy: dispatch the workflow, or `gh pr ready N --undo` then
+  `gh pr ready N`; never an empty commit. It needs `issues: write` (comments), `pull-requests: read` and
+  `checks: read` besides the above. Cost per call: one pulls read; per ready, settled PR one check-runs read;
+  per PR with no run, one comments read and at most one comment write. It starts no process and writes no
+  file or timer of its own: it runs inside the caller's existing scheduled workflow.
 inputs:
   branch:
     description: Branch to watch.
     required: false
     default: main
+  dropped-start:
+    description: "'true' also flags ready pull requests whose all-jobs-passed run never started."
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -21,3 +33,9 @@ runs:
         BRANCH: ${{ inputs.branch }}
         SELF: ${{ github.workflow }}
       run: bash "${{ github.action_path }}/alarm.sh"
+    - name: Flag pull requests whose check run never started
+      if: inputs.dropped-start == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: bash "${{ github.action_path }}/dropped.sh"
