@@ -1608,8 +1608,8 @@ ITEM_98 = ("disk-cleanup", {"id": "disk-cleanup", "n": 98})  # the item the wait
 def case_page_read_back_proves_the_filing():
     """An ArtifactData get, list or query of the waiting page's items collection, after the owner's message,
     whose result returns item 98, proves the filing. The sender cannot export the copy, but it can read the page
-    back. The copy here lacks item 98, so only the read-back can pass the item. Red on dbf3586e: there the copy
-    alone decides, and it refuses."""
+    back. The copy here lacks item 98, so only the read-back can pass the item. The case checks that the filing
+    accepts that read-back, since the copy alone refuses item 98."""
     repo = record_repo("unfiled", copy_files(UNFILED))
     reads = (
         ("a get of items/disk-cleanup", tool_input("get", collection="items", doc_id="disk-cleanup"),
@@ -1631,9 +1631,8 @@ def case_page_read_back_proves_the_filing():
 def case_page_read_back_that_misses_n_does_not_prove_the_filing():
     """A read proves the filing only as an ArtifactData get, list or query of the waiting page's items
     collection, with no out_dir, no error, a result that returns item 98, and a send after the owner's message.
-    Each case here misses one of those. The copy lacks item 98, so it refuses each one. Green on dbf3586e, which
-    has no read-back: there the copy alone refuses. This case guards the proof against over-accepting, and the
-    proof case carries the red."""
+    Each case here misses one of those. The copy lacks item 98, so each one must be refused. The case guards the
+    proof against over-accepting: a read that misses any one condition does not file the number."""
     repo = record_repo("unfiled", copy_files(UNFILED))
     get98 = tool_input("get", collection="items", doc_id="disk-cleanup")
     misses = (
@@ -1671,8 +1670,8 @@ def case_page_read_back_that_misses_n_does_not_prove_the_filing():
 
 def case_page_unfiled_remedy_offers_the_read_back():
     """The remedy for an unfiled number names both ways out: the page writer exports the copy into folder
-    `waiting`, or the sender reads item 98 back from the page. Red on dbf3586e, whose remedy names the export
-    alone."""
+    `waiting`, or the sender reads item 98 back from the page. The case checks that the remedy offers the read-back,
+    since an export of the copy alone cannot file item 98."""
     repo = record_repo("unfiled", copy_files(UNFILED))
     p = page_run(new_cfg(), "page-remedy", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
                  cwd=repo)
