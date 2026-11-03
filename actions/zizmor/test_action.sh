@@ -6,6 +6,7 @@
 #  - control-stub-records-argv: the stub itself records argv and exits with its code (passes on old code).
 #  - default-paths-argv: with ZIZMOR_PATHS unset, run.sh passes .github/ as one entry.
 #  - two-paths-argv, many-paths-argv: each path is one entry, in order; the full-size list is 25 paths.
+#  - newline-paths-argv: paths separated by newlines, as a `paths: |` block gives them, are one entry each.
 #  - empty-paths-never-pass: an empty ZIZMOR_PATHS never reads PASS with no path to audit.
 #  - findings-exit-13-fails, clean-exit-0-passes: zizmor's own exit code decides run.sh's exit code.
 #  - action-input-default-is-github: the action's paths input defaults to .github/.
@@ -175,6 +176,17 @@ if have many-paths-argv "$RUN_SH"; then
   run_sh "$d" 0 "ZIZMOR_PATHS=${many[*]}"
   if called many-paths-argv "$d"; then
     argv_is many-paths-argv "$d" run "$PIN" "${many[@]}"
+  fi
+fi
+
+d="$work/newline"
+if have newline-paths-argv "$RUN_SH"; then
+  # A `paths: |` block hands run.sh one value with a newline between paths and a trailing one.
+  run_sh "$d" 0 "ZIZMOR_PATHS=.github/
+actions/
+"
+  if called newline-paths-argv "$d"; then
+    argv_is newline-paths-argv "$d" run "$PIN" .github/ actions/
   fi
 fi
 
