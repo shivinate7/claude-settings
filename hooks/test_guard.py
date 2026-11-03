@@ -14919,10 +14919,10 @@ LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share on
 
 # --------------------------------------------------------------------------- a design names its file, in a mockup home
 
-# Rule mockup-home (the file of a waiting item's design, judged at write). A designs entry with no file, or a file the
-# judge refuses (lint/layout.py mockup_home_problem), is denied before the picture check starts node. The checker here
-# is a stub that passes, so a call of it is counted and nothing renders. The repo is "fixture" (origin below), so its
-# machine home is <HOME>/Developer/fixture-imports. HOME is a folder of the case's own, with no Developer folder.
+# Rule mockup-home (the file of a waiting item's design, judged at write). The one mockup home is the repo's design
+# folder (docs/design/). A designs entry with no file, or a file the judge refuses (lint/layout.py mockup_home_problem),
+# is denied before the picture check starts node. The machine-home form ~/Developer/<repo name>-imports is refused too.
+# The checker here is a stub that passes, so a call of it is counted and nothing renders. The judge reads no file.
 MH_RULE = "mockup-home"
 MH_ORIGIN = "git@github.com:owner/fixture.git"
 MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
@@ -14933,8 +14933,8 @@ MH_WIN_HOME = "C:\\Users\\x"  # the same home, as the HOME variable holds it
 
 
 def mh_design(**over):
-    """One design entry with a picture and a file. `over` sets a key; None removes it."""
-    entry = {"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": MH_MACHINE}
+    """One design entry with a picture and a file in the design folder. `over` sets a key; None removes it."""
+    entry = {"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}
     entry.update(over)
     return {key: value for key, value in entry.items() if value is not None}
 
@@ -14956,9 +14956,10 @@ def mh_judged(name, data, action="set", windows=False):
     return decision, reason, calls, rows
 
 
-def mh_case(label, name, data, want, checker, action="set", windows=False):
+def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=()):
     """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
-    for the rule. An allow prints nothing and starts `checker` checker calls."""
+    for the rule. An allow prints nothing and starts `checker` checker calls. A deny's reason holds each `says` text
+    and no `not_says` text."""
     def check():
         decision, reason, calls, rows = mh_judged(name, data, action, windows)
         if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
@@ -14971,6 +14972,12 @@ def mh_case(label, name, data, want, checker, action="set", windows=False):
             leak = names_the_target(reason, MH_RULE)
             if leak:
                 return False, "the reason names the forbidden target %r" % leak
+            for text in says:
+                if text not in reason:
+                    return False, "the reason does not name %r: %s" % (text, reason[:160])
+            for text in not_says:
+                if text in reason:
+                    return False, "the reason names %r, a home that holds no mockup now: %s" % (text, reason[:160])
             if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
                 return False, "guard.log holds no deny row for %s" % MH_RULE
         if calls != checker:
@@ -14979,8 +14986,8 @@ def mh_case(label, name, data, want, checker, action="set", windows=False):
     LOG_CHECKS_EXTRA.append(("mockup-home: " + label, check))
 
 
-mh_case("a design with a file under the machine home is allowed, on a machine with no Developer folder",
-        "mh-machine", pd_item(designs=[mh_design()]), "allow", checker=1)
+mh_case("a design with a file under the machine home is denied, on a machine with no Developer folder",
+        "mh-machine", pd_item(designs=[mh_design(file=MH_MACHINE)]), "deny", checker=0)
 mh_case("a design with a file in the design folder is allowed",
         "mh-design", pd_item(designs=[mh_design(file=PD_FILE)]), "allow", checker=1)
 mh_case("a design with no file is denied, naming the file field",
@@ -14989,14 +14996,16 @@ mh_case("a design with an empty file is denied",
         "mh-empty", pd_item(designs=[mh_design(file="")]), "deny", checker=0)
 mh_case("a mockup under Application Support is denied, its path holds spaces",
         "mh-appsupport", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0)
+mh_case("a denied mockup's reason names the design folder, and not the machine home",
+        "mh-words", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0,
+        says=("docs/design",), not_says=("-imports", "Developer"))
 mh_case("an image hosted as an artifact asset is denied",
         "mh-asset", pd_item(designs=[mh_design(file=MH_SHOT)]), "deny", checker=0)
-mh_case("a file that escapes the home with .. is denied",
-        "mh-dotdot", pd_item(designs=[mh_design(file="~/Developer/fixture-imports/item48/../../../escape/a.html")]),
-        "deny", checker=0)
-mh_case("a Windows owner's machine-home file is allowed",
-        "mh-win-ok", pd_item(designs=[mh_design(file="C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html")]),
-        "allow", checker=1, windows=True)
+mh_case("a file that escapes the design folder with .. is denied",
+        "mh-dotdot", pd_item(designs=[mh_design(file="docs/design/../../escape/a.html")]), "deny", checker=0)
+mh_case("a Windows owner's machine-home file is denied",
+        "mh-win-machine", pd_item(designs=[mh_design(file="C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html")]),
+        "deny", checker=0, windows=True)
 mh_case("a Windows owner's AppData mockup is denied",
         "mh-win-appdata",
         pd_item(designs=[mh_design(file="C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html")]),
