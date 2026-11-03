@@ -4,9 +4,6 @@
 Modes:
 - PreToolUse: Before a Bash call that names simulator tooling (simctl, xcodebuild) and a device,
   or a simulator MCP launch, saves the state of each simulator.
-- `--record <UDID>`: bin/sim-test calls it after its own boot. Appends one record line for that device,
-  read with the same devices() and launchd() as the modes above. Prints nothing, exits 0. No line when
-  the device is not listed or its launchd_sim is unclear.
 - PostToolUse: After such a call, appends each simulator that the call took from Shutdown to
   Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such
   device. A device that fails the check is stopped and booted once more.
@@ -17,6 +14,10 @@ holds the retry boot's pid. Stdout stays empty unless a check failed: a retry th
 additionalContext note, a retry that failed writes a `block` decision (the device stays booted and
 is still recorded). Exit 0 always.
 No snapshot, an unreadable snapshot or an unreadable list records nothing.
+
+Record mode: `sim_boot_record.py --record <UDID>`, which bin/sim-test calls after its own boot, appends
+one record line for that device, read with the same devices() and launchd(). It prints nothing and
+exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
 """
 import json
 import os
