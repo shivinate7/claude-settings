@@ -66,7 +66,7 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
 
 - At 14:48 Duo 2 showed "Data Migration Failed" in `simctl bootstatus` at a 1-minute load of 22. Yet the device worked: `hinge open` worked, `hinge posture` read 180.0, and both screens were lit (climate-feel's report).
 - So the bootstatus line may be noise. Then several "fails" counted in this brief may be misreads, and the deleted Duo AC2E94F9 may not have been broken. The real failures seen today were these: no named-display screenshot for about 2 minutes (13:41 to 13:45, at a load of 130 to 173), and a black screen (12:05).
-- Test this first. The standard should define "usable" as: a named-display screenshot works, and `hinge get` answers. It should not trust the bootstatus text. The boot hook should use the same test.
+- Measured since then: "Data Migration Failed" prints on good boots. Good boots seen: 3553660D at 14:53, 14:55, 15:49 and 15:57; 801F55F4 at 14:32, 15:05, 15:12 and 19:41. Every boot starts folded (hinge 0.0), so the outer screen `LCD` is lit and the inner screen `LCD-1` is black. A black LCD-1 shot right after boot means "folded", not "broken" (false alarms at 19:2x and 19:41). The standard should define "usable" as: a screenshot of the lit screen works (LCD when folded; LCD-1 after `hinge open`), or `hinge screenshot`, which picks the lit screen. It should not trust the bootstatus text. The boot hook should use the same test.
 
 ## Compile without a simulator (data from the Degen batch runner, 11-02)
 
