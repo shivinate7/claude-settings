@@ -1245,7 +1245,7 @@ def main():
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1259,7 +1259,7 @@ def main():
 
     def stop_for_refusal():
         if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal}))
+            print(json.dumps({"decision": "block", "reason": refusal + " (decision refusals-reach-the-owner)"}))
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
@@ -1318,7 +1318,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
         except Exception:
             pass
@@ -1369,10 +1369,8 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons)
-        if shape_ok:
-            reason += CORRECTION_TAIL
-        else:
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
+        if not shape_ok:
             write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))
 

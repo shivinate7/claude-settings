@@ -969,12 +969,12 @@ def main():
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
-            reason = "Feedback inbox: " + "; ".join(r.rstrip(".") for r in reasons)
-            if found:
-                reason += (". The check reads the inbox file at each Stop, so items added in any later turn count,"
-                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's message to that repo's triage session, and put open"
-                           " standing ids in the handoff.")
-            out.update(decision="block", reason=reason + ("" if found else "."))
+            out.update(decision="block", reason="Feedback inbox (decision owner-feedback-inbox): "
+                       + "; ".join(r.rstrip(".") for r in reasons)
+                       + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                          " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
+                          " message to that repo's triage session, and put open standing ids in the handoff."
+                          if found else "."))
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr
