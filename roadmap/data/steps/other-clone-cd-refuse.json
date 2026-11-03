@@ -1,0 +1,9 @@
+{
+ "title": "The guard refuses a cd into another clone of the repo",
+ "phase": "now",
+ "status": "doing",
+ "order": 517,
+ "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
+ "note": "Lane session_013NEJKyp5eg8vMtr2bkWK8m, started by the coordinator Nov 3 17:26 CST.",
+ "updatedAt": "2026-11-03T23:28:00Z"
+}

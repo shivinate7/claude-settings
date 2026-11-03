@@ -1,0 +1,9 @@
+{
+ "title": "The session-start hook prints the merge-role line only to batch runners",
+ "phase": "now",
+ "status": "doing",
+ "order": 519,
+ "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
+ "note": "Lane session_013NEJL47tq8a72GBSwC9JY9, started by the coordinator Nov 3 17:26 CST. Title is triage's reading of the lane name; the lane's PR sets the exact scope.",
+ "updatedAt": "2026-11-03T23:28:00Z"
+}

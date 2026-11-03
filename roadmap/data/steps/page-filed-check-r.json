@@ -1,0 +1,9 @@
+{
+ "title": "PR #1112 (a page item's number is filed in the waiting copy) merges main and joins a batch",
+ "phase": "now",
+ "status": "doing",
+ "order": 518,
+ "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
+ "note": "Lane session_013NEJL49khPvxUgFrCNq8KY, started by the coordinator Nov 3 17:26 CST. PR #1112, branch page-filed-check-r.",
+ "updatedAt": "2026-11-03T23:28:00Z"
+}

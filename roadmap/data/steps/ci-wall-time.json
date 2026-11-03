@@ -1,0 +1,9 @@
+{
+ "title": "CI wall time (scope per the lane's brief)",
+ "phase": "now",
+ "status": "doing",
+ "order": 522,
+ "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
+ "note": "Lane session_013NEJL2seJWWQKUXhMCkeZ7, started by the coordinator Nov 3 17:26 CST. Title to be set from the lane's PR.",
+ "updatedAt": "2026-11-03T23:28:00Z"
+}

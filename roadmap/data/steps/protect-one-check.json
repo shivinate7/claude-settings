@@ -1,9 +1,9 @@
 {
  "title": "protect.py refuses more than one --check, as the one-check protection form says",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 497,
  "why": "Lane protect-enforce-admins (PR #1113) found that skills/project-ops/scripts/protect.py:36 takes any number of --check names. Decision same-check-kinds (owner, 2026-10-30 15:03 CDT, page item 87) requires exactly one check, all-jobs-passed.",
- "note": "protect.py stops with a message on a second --check; red test first on two --check names. Changes a check's setting: net-value test after round 3. Cites same-check-kinds; needs no owner answer (page item 202 closed as settled). Ready.",
- "updatedAt": "2026-11-03T22:18:00Z"
+ "note": "protect.py stops with a message on a second --check; red test first on two --check names. Changes a check's setting: net-value test after round 3. Cites same-check-kinds; needs no owner answer (page item 202 closed as settled). Ready. Lane session_013NEJKys4VCWyCWWxtWJPj9, started by the coordinator Nov 3 17:26 CST (batch 2).",
+ "updatedAt": "2026-11-03T23:28:00Z"
 }
