@@ -11450,6 +11450,79 @@ for _n in ("bash -c", "sh -c", "eval"):
                 _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
                 carries=("agent-model-cap",))
 
+# THE CAP STRING FALSE ALARM. Text handed to an interpreter as DATA (a -c argument, a quoted heredoc body
+# fed to a non-shell interpreter, a data heredoc written to a file) that writes no settings file is not a
+# settings write, so it ALLOWS. The pins after the false alarms hold the other side: the same text run as
+# CODE (a shell body, os.system, a redirect outside the string) still asks, or denies when it chains with a
+# second command. On main, 1a and 1b ask and 1c denies under ask-alone, so all three are red there. 1c and 1d
+# are INFERRED reproductions: the exact incident commands were not kept, so each keeps the shape the incident named.
+CAP_STRING_CMD = "echo {\"" + CAP_KEY + "\": \"opus\"} > .claude/settings.json"
+CAP_STRING_PAYLOAD = json.dumps({"tool_name": "Bash", "tool_input": {"command": CAP_STRING_CMD}})
+CAP_STRING_WRITE = CAP_KEY + "=" + OPUS
+CAP_STRING_COMPACT = cap_settings(compact=True)
+
+# 1a. A python -c whose script builds a Bash payload naming the cap write, then runs the guard on it.
+sh("cap data: 1a, a python -c building a Bash payload that names a cap write as text allows [cap-string-false-alarm]",
+   "python3 -c 'import json,subprocess; p=" + CAP_STRING_PAYLOAD
+   + "; subprocess.run([\"python3\",\"hooks/guard.py\"],input=json.dumps(p),text=True)'",
+   "allow", cwd=PROJ)
+
+# 1b. A quoted heredoc fed to python3 hooks/guard.py, whose body is a Bash payload naming the cap write.
+CAP_STRING_BODY = json.dumps({"tool_name": "Bash", "tool_input": {"command":
+                              "echo '{\"env\":{\"" + CAP_KEY + "\":\"opus\"}}' > .claude/settings.json"}})
+sh("cap data: 1b, a quoted heredoc fed to python3 hooks/guard.py, whose body names a cap write, allows [cap-string-false-alarm]",
+   "python3 hooks/guard.py <<'EOF'\n" + CAP_STRING_BODY + "\nEOF", "allow", cwd=PROJ)
+
+# 1c. INFERRED REPRODUCTION of incident 2026-11-03 16:59 CST (lane session cap-string-false-alarm). The
+# exact body was lost. The shape kept: a data heredoc written to probe.py, a python body holding command
+# strings (one a guard call with its own heredoc, one the cap write as text), then `python3 probe.py`.
+_CAP_PROBE_PY = ("CMDS = [\n    " + json.dumps("python3 hooks/guard.py <<'EOF2'\n" + CAP_STRING_BODY + "\nEOF2")
+                 + ",\n    " + json.dumps("echo '{\"env\":{\"" + CAP_KEY + "\":\"opus\"}}' > .claude/settings.json")
+                 + ",\n]\n")
+sh("cap data: 1c, inferred reproduction of the 2026-11-03 incident, a data heredoc to probe.py holding a cap write as text, allows [cap-string-false-alarm]",
+   "cat > probe.py <<'EOF'\n" + _CAP_PROBE_PY + "EOF\npython3 probe.py", "allow", cwd=PROJ)
+
+# 1d. INFERRED REPRODUCTION of the trial run gd incident of 2026-11-02 01:16 CST: a reviewer's python3 -c
+# feeding JSON test payloads to hooks/guard.py, one of them a settings write raising the model to Opus. The
+# exact command was not kept. THIS FORM ALLOWS ON MAIN, so it is a pin, not a red case: a Write-tool payload
+# carrying the cap as text is data for the guard, and the -c script writes nothing itself. The incident's
+# ask therefore came from another form, most likely a payload whose text holds a shell redirect (1a's shape).
+_CAP_TRIAL_PAYLOADS = [{"tool_name": "Bash", "tool_input": {"command": "ls"}},
+                       {"tool_name": "Write", "tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}]
+sh("cap data: 1d pin, a python3 -c feeding a Write-tool payload with the cap as text to the guard allows [cap-string-false-alarm pin: allows on main]",
+   "python3 -c 'import json,subprocess; P=" + json.dumps(_CAP_TRIAL_PAYLOADS)
+   + "; [subprocess.run([\"python3\",\"hooks/guard.py\"],input=json.dumps(p),text=True) for p in P]'",
+   "allow", cwd=NOGIT)
+
+# THE PINS. Each is the same settings write run as CODE, so it still asks, or denies when it chains with a
+# second command. 1a and the os.system pin hold the same string: the pin is where the interpreter runs it.
+# A HEREDOC BODY IS A SECOND COMMAND to the guard, so the two shell heredoc pins DENY under ask-alone on
+# main, not ask. They are pinned at the verdict main gives (deny, ask-alone), so the guard is not changed.
+chained_ask("cap pin: a bash heredoc whose body writes the cap into .claude/settings.json denies as a chained ask command [cap-string-false-alarm pin]",
+   "bash <<'SH'\necho '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH",
+   cwd=PROJ, carries=("agent-model-cap",))
+chained_ask("cap pin: a sh heredoc whose body writes the cap into .claude/settings.json denies as a chained ask command [cap-string-false-alarm pin]",
+   "sh <<'SH'\nprintf '%s' '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH",
+   cwd=PROJ, carries=("agent-model-cap",))
+sh("cap pin: sh -c writing the cap into .claude/settings.json asks [cap-string-false-alarm pin]",
+   "sh -c 'echo " + CAP_STRING_WRITE + " > .claude/settings.json'",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a python -c calling os.system on the cap write to .claude/settings.json asks [cap-string-false-alarm pin]",
+   "python3 -c 'import os; os.system(\"echo " + CAP_STRING_WRITE + " > .claude/settings.json\")'",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a python heredoc body calling os.system on the cap write to .claude/settings.json asks [cap-string-false-alarm pin]",
+   "python3 - <<'PY'\nimport os\nos.system(\"echo " + CAP_STRING_WRITE + " > .claude/settings.json\")\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: python3 -c printing the cap, redirected into .claude/settings.json outside the string, asks [cap-string-false-alarm pin]",
+   "python3 -c 'print(\"" + CAP_STRING_WRITE + "\")' > .claude/settings.json",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a cat redirect into .claude/settings.json with the cap in its heredoc body asks [cap-string-false-alarm pin]",
+   "cat > .claude/settings.json <<'EOF'\n" + cap_settings() + "\nEOF",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(OPUS,))
+chained_ask("cap pin: a quoted body written to x.sh, then run by sh x.sh, writing the cap, denies as a chained ask command [cap-string-false-alarm pin]",
+   "cat > x.sh <<'SH'\nprintf '%s' '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH\nsh x.sh",
+   cwd=PROJ, carries=("agent-model-cap",))
+
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
 #
