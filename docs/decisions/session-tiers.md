@@ -130,7 +130,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Passes: a message without the marker, a brief whose `Topic:` matches the target's topic (a new step on the same topic), and a non-lane target. An override lifts it.
   - Steer: start a new lane with `create_session`.
   - Known miss: a brief without the marker. Also, the coordinator may pick a topic slug too broad for its work, and the guard cannot tell.
-  - Cost: one transcript read per `send_message` that carries the marker; none otherwise. No new process, file or timer.
+  - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise. No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
 
