@@ -13,11 +13,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   outside it (decision auto-mode-owner-acts). Its Covers text names the visible conversation
   and the batch's integration pull request.
 - One "Owner Session Message:" entry quotes mcp__claude-code-remote__send_message. Its Covers text
-  lets a coordinator send a batch runner it created (tags cs-build:batch-runner and cs-repo:) a
-  merge go for a named pull request, because decision standing-merge-grant has the runner run
-  every merge under the coordinator's grant. Its Never covers names permissions, settings,
-  override, and a merge ask to any other session or from a session that is not a coordinator
-  (decision auto-mode-owner-acts).
+  lets a session tagged cs-build:coordinator send a batch runner it created (tags
+  cs-build:batch-runner and the coordinator's own cs-repo: tag) a merge go for a named pull
+  request, because decision standing-merge-grant has the runner run every merge under the
+  coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
+  other session or from a session that is not a coordinator, and a request to approve a pull
+  request (decision auto-mode-owner-acts).
 """
 import json
 import os
@@ -42,7 +43,9 @@ PR_REFUSED = (("merge", "merg"), ("approve", "approv"), ("branch delete", "branc
               ("force push", "force[- ]push"),
               ("another owner or outside", "another owner|outside"))
 MESSAGE_REFUSED = (("permissions", "permission"), ("settings", "setting"),
-                   ("override", "override"), ("merge", "merg"))
+                   ("override", "override"),
+                   ("merge ask to any other session", "merge ask to any other session"),
+                   ("approve", "approv"))
 PR_EXTRA_REFUSED = (("--delete-branch", "--delete-branch"), ("auto-merge", "auto[- ]merge"))
 MESSAGE_EXTRA_REFUSED = (("posted_to_shared_channel", "posted_to_shared_channel"),)
 # (name, case-insensitive pattern) for each term an entry names before its "Never covers" sentence.
@@ -52,9 +55,12 @@ PR_SCOPE = (("owner", "owned by shivinate7"),
 MESSAGE_SCOPE = (("own account", "own account"), ("Remote Control", "Remote Control"))
 # The Covers text names the coordinator's merge go to its batch runner; the Never covers names the
 # merge asks that stay refused.
-MERGE_GO_SCOPE = (("cs-build:batch-runner", "cs-build:batch-runner"), ("cs-repo:", "cs-repo:"),
+MERGE_GO_SCOPE = (("sender tag cs-build:coordinator", "`cs-build:coordinator` may send"),
+                  ("cs-build:batch-runner", "cs-build:batch-runner"),
+                  ("batch runner it created", "batch runner it created"),
+                  ("cs-repo:", "cs-repo:"), ("coordinator's own cs-repo:", "own `cs-repo:`"),
                   ("standing-merge-grant", "standing-merge-grant"), ("merge go", "merge go"),
-                  ("coordinator may send", "coordinator may send"))
+                  ("named PR", "for a named PR"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 
