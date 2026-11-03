@@ -1556,9 +1556,12 @@ def hit_suites(root, paths, skip):
     run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop when the
     workflow, its job or a suite source cannot be read, or a hit line is not a plain suite line."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
-    from workflow_steps import job_block, run_body, step_blocks, step_key  # the one home of the step parser
+    from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_key  # the one home of the step parser
+    flow, why = job_workflow(root, "checks")  # the repo names its workflow file; the `checks` job finds it
+    if why:
+        raise Stop(f"the workflow cannot be read: {why} {BASE_CITE}")
     try:
-        with open(os.path.join(root, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+        with open(flow, encoding="utf-8") as f:
             block = job_block(f.read(), "checks")
     except (OSError, UnicodeError) as e:
         raise Stop(f"the workflow cannot be read ({type(e).__name__}) {BASE_CITE}")

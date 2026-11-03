@@ -4,6 +4,7 @@ The one home of the step parser. lint/test_windows_split.py reads the Windows sp
 bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml keeps: jobs at 2 spaces,
 `      - ` steps, step keys at 8 spaces, `env:` keys and `run: |` bodies at 10.
 """
+import os
 import re
 
 
@@ -11,6 +12,30 @@ def job_block(text, name):
     """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
     m = re.search(rf"^  {re.escape(name)}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
     return m.group(1) if m else None
+
+
+def job_workflow(top, job):
+    """The one workflow file in `<top>/.github/workflows/` (*.yml, *.yaml) that holds `job`. -> (path, None), or
+    (None, why) when the folder is unreadable or no file, or more than one file, holds it. The file name is the repo's
+    own (checks.yml, check.yml), so the job is the key."""
+    folder = os.path.join(top, ".github", "workflows")
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
+    except OSError as e:
+        return None, "cannot read %s: %s" % (folder, e)
+    found = []
+    for n in names:
+        try:
+            with open(os.path.join(folder, n), encoding="utf-8") as f:
+                if job_block(f.read(), job) is not None:
+                    found.append(n)
+        except (OSError, UnicodeError):
+            continue  # a file it cannot read names no job; the job is found in another file, or none
+    if len(found) == 1:
+        return os.path.join(folder, found[0]), None
+    if not found:
+        return None, "no workflow file in %s has a `%s` job" % (folder, job)
+    return None, "more than one workflow file in %s has a `%s` job: %s" % (folder, job, ", ".join(found))
 
 
 def step_blocks(block):

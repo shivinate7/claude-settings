@@ -20,7 +20,8 @@
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
 # joins a batch. Use it with a job such as checks.
-# Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
+# Workflow: the one file in .github/workflows/ at the git top level of the current folder that holds the job
+# (checks.yml, check.yml, any name), unless --workflow names one. No file, or more than one, is unknown.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # GH_TOKEN and GITHUB_TOKEN are unset unless the step's env: sets them, as on the runner (a session token would
@@ -45,7 +46,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
@@ -271,7 +272,12 @@ def main(argv):
         return 2
     job = args[0]
     top = git("rev-parse", "--show-toplevel") or os.getcwd()
-    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "checks.yml")
+    workflow = opts["--workflow"]
+    if not workflow:
+        workflow, why = job_workflow(top, job)
+        if why:
+            print("unknown  cannot read the workflow: %s" % why)
+            return 2
     try:
         with open(workflow, encoding="utf-8") as f:
             block = job_block(f.read(), job)
