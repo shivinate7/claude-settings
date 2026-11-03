@@ -48,14 +48,24 @@ def run_body(step):
     return None
 
 
-def step_env(step):
-    """A step's own `env:` block as {name: raw value}, or {} when it has none."""
-    env, inside = {}, False
+def step_map(step, key):
+    """A step's own `key:` block (`env:` or `with:`) as {name: raw value}, or {} when it has none."""
+    found, inside = {}, False
     for line in step.split("\n"):
-        if re.match(r"^(?:      - |        )env:[ \t]*$", line):
+        if re.match(rf"^(?:      - |        ){re.escape(key)}:[ \t]*$", line):
             inside = True
         elif inside and (m := re.match(r"^          ([\w-]+):[ \t]*(.*?)[ \t]*$", line)):
-            env[m.group(1)] = m.group(2)
+            found[m.group(1)] = m.group(2)
         elif inside and line.strip() and not line.startswith("          "):
             inside = False
-    return env
+    return found
+
+
+def step_env(step):
+    """A step's own `env:` block as {name: raw value}, or {} when it has none."""
+    return step_map(step, "env")
+
+
+def step_with(step):
+    """A step's own `with:` block as {name: raw value}, or {} when it has none."""
+    return step_map(step, "with")

@@ -210,6 +210,8 @@ The other composite actions in `actions/`, in the same home:
 
 - `code-check`: one type check and one lint for defects per language. The caller needs checkout at
   `fetch-depth: 0` and setup-python.
+- `zizmor`: audits the caller's workflows and actions with one pinned zizmor (input `paths`, default
+  `.github/`). The caller needs checkout and pipx on PATH. `run.sh` holds the pin.
 - `playwright-setup`: installs the Playwright that a lockfile pins, and its browsers. No apt step by
   default.
 - `ste-lint`: runs `lint/ste_lint.py` on changed Markdown, or on every file with `scope: all`.
