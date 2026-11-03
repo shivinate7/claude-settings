@@ -8945,6 +8945,28 @@ def role_said(text):
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+# A local session has no cloud env id, so its get_session record names it by sessionId, title and parent, with no
+# ccr block. Its tier is the owner's `tier triage` word, written to <config dir>/state/tier/<session_id>.json
+# (decision session-tiers, roadmap-one-writer). The cases for it sit in section 5e-2, under "local tier:".
+LOCAL_TRIAGE_ID = "local_0b6c1d2e-3f4a-4b5c-8d6e-7f8091a2b3c4"  # its tier file says triage
+LOCAL_LANE_ID = "local_1c2d3e4f-4a5b-4c6d-9e7f-8091a2b3c4d5"    # no tier file of its own
+LOCAL_NOFILE_ID = "local_2d3e4f50-5b6c-4d7e-8f80-91a2b3c4d5e6"  # no tier file, and no record in its transcript
+LOCAL_BAD_ID = "local_3e4f5061-6c7d-4e8f-9091-a2b3c4d5e6f7"     # a tier file that names lane
+LOCAL_CORRUPT_ID = "local_4f506172-7d8e-4f90-a1b2-c3d4e5f60718"  # a tier file that is not JSON
+LOCAL_EMPTY_ID = "local_50617283-8e9f-4a01-b2c3-d4e5f6071829"  # a tier file of zero bytes
+
+
+def local_record(session, title):
+    """The text get_session returns for a local session: its id, title and parent, and no ccr block."""
+    return json.dumps({"sessionId": session, "title": title,
+                       "parentSessionId": "local_0a9b8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d"})
+
+
+def local_call(tool_id, session, title):
+    """One paired get_session call whose result is a local session's record."""
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, local_record(session, title))]
+
+
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
@@ -9007,6 +9029,10 @@ ROLE_LINES = {
     "archive-own-lane": role_call("r0", LANE_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
+    # local sessions (section 5e-2, "local tier:"): a local record has no ccr block, so the cloud reads see none.
+    "local-triage": local_call("g1", LOCAL_TRIAGE_ID, "home triage"),
+    "local-lane": local_call("g1", LOCAL_LANE_ID, "lane: local-triage-tier-proof"),
+    "local-title-tier": local_call("g1", LOCAL_NOFILE_ID, "tier triage"),
 }
 
 
@@ -9276,6 +9302,77 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+# Local sessions, decision session-tiers. A local session is proved triage by its tier file, which holds
+# {"tier": "triage"} under the config dir. The tier file lifts roadmap-one-writer only: merge-role-proof and
+# trust-card-in-build read the cloud record, and stay as they are for a local session (the cases below).
+TIER_CFG = os.path.join(ROOT, "tiercfg")               # a config dir with one tier file per id below
+TIER_EMPTY_CFG = os.path.join(ROOT, "tiercfg-empty")   # a config dir with no state folder at all
+TIER_FILES = {
+    LOCAL_TRIAGE_ID: '{"tier": "triage"}',
+    LOCAL_BAD_ID: '{"tier": "lane"}',
+    LOCAL_CORRUPT_ID: "not json {",
+    LOCAL_EMPTY_ID: "",
+    ROLE_OWN: '{"tier": "triage"}',  # a cloud session's file: a cloud lane must stay refused beside it
+}
+
+
+def write_tier_files():
+    """The tier folders the local cases read. TIER_EMPTY_CFG is a real folder with nothing in it."""
+    folder = os.path.join(TIER_CFG, "state", "tier")
+    os.makedirs(folder, exist_ok=True)
+    for session, text in TIER_FILES.items():
+        with open(os.path.join(folder, session + ".json"), "w", encoding="utf-8") as handle:
+            handle.write(text)
+    os.makedirs(TIER_EMPTY_CFG, exist_ok=True)
+
+
+lazy_fixture([TIER_CFG, TIER_EMPTY_CFG], write_tier_files)
+
+
+def local_refuse(name, command, transcript, session, config=TIER_CFG, **kw):
+    """A git push a local session is refused under roadmap-one-writer, judged against the config dir `config`."""
+    record_refuse("local tier: " + name, command, transcript, env=None, session=session, config=config, **kw)
+
+
+def local_allow(name, command, transcript, session, config=TIER_CFG, **kw):
+    """A git push a local session with its triage tier file is allowed, silently."""
+    record_allow("local tier: " + name, command, transcript, env=None, session=session, config=config, **kw)
+
+
+local_allow("a triage tier file lets a local triage session push roadmap",
+            VCS + " push origin roadmap", role_path("local-triage"), LOCAL_TRIAGE_ID)
+local_allow("a triage tier file lets a local triage session's bare push from the roadmap checkout through",
+            VCS + " push", role_path("local-triage"), LOCAL_TRIAGE_ID, cwd=RECROADMAP)
+# A lane titled like a lane is refused without a tier file. The triage file of another session sits beside it.
+local_refuse("a local lane titled like a lane is refused, and another session's triage file does not lift it",
+             VCS + " push origin roadmap", role_path("local-lane"), LOCAL_LANE_ID)
+local_refuse("a local session with no tier file and no record is refused",
+             VCS + " push origin roadmap", role_path("no-record"), LOCAL_NOFILE_ID)
+local_refuse("a local session titled tier triage, with no tier file, is refused: a title is no proof",
+             VCS + " push origin roadmap", role_path("local-title-tier"), LOCAL_NOFILE_ID)
+local_refuse("a local session whose tier file names lane is refused",
+             VCS + " push origin roadmap", role_path("local-lane"), LOCAL_BAD_ID)
+local_refuse("a local session whose tier file is not JSON is refused",
+             VCS + " push origin roadmap", role_path("local-triage"), LOCAL_CORRUPT_ID)
+local_refuse("a local session whose tier file is empty is refused",
+             VCS + " push origin roadmap", role_path("local-triage"), LOCAL_EMPTY_ID)
+local_refuse("a local triage session with no tier folder at all is refused",
+             VCS + " push origin roadmap", role_path("local-triage"), LOCAL_TRIAGE_ID, config=TIER_EMPTY_CFG)
+# The cloud path stays tags-only: a cloud lane under a triage file is still refused.
+record_refuse("local tier: a cloud lane under a triage tier file is refused, a tier file never lifts a cloud session",
+              VCS + " push origin roadmap", LANE_TRANSCRIPT, env=ROLE_ENV, session=ROLE_OWN, config=TIER_CFG)
+# The refusal of a local session names the step that proves it, and never a get_session retry that cannot pass.
+local_refuse("the refusal of a local lane tells it to ask the owner to type tier triage",
+             VCS + " push origin roadmap", role_path("local-lane"), LOCAL_LANE_ID, carries=("tier triage",))
+sh("roadmap-one-writer: local tier: the refusal of a local lane does not send it to get_session, where a retry cannot pass",
+   VCS + " push origin roadmap", "deny", rule=RECORD_RULE, lacks=RECORD_LACKS + ("get_session",),
+   transcript=role_path("local-lane"), env=None, cwd=PUSHFEAT, session=LOCAL_LANE_ID, config=TIER_CFG)
+# The tier file lifts roadmap-one-writer only: merge-role-proof still refuses a local triage session's role call.
+role_refuse("local tier: a local triage session's tier file does not lift merge-role-proof",
+            MERGE_SHIM + " --role batch-runner", role_path("local-triage"), env=None,
+            session=LOCAL_TRIAGE_ID, config=TIER_CFG)
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
@@ -9407,6 +9504,12 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+# A local triage session's tier file does not lift trust-card-in-build: a local session still has no cloud record.
+for _trust_tool in TRUST_TOOLS:
+    add("trust-card-in-build: local tier: a local triage session's tier file does not lift "
+        + _trust_tool.rsplit("__", 1)[1], "deny", rule=TRUST_RULE, tool=_trust_tool, cwd=NOGIT, lacks=TRUST_NAMED,
+        transcript=role_path("local-triage"), env=None, session=LOCAL_TRIAGE_ID, config=TIER_CFG,
+        **TRUST_TOOLS[_trust_tool])
 
 
 # =========================================================================== 5g. archive of a lane
