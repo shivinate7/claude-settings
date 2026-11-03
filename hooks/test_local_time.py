@@ -699,7 +699,7 @@ def case_tier_off():
     cfg = ov_cfg()
     write_tier(cfg, b'{"tier": "triage"}')
     got, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier off", OV_NOW))
-    check("tier: `tier off` returns ('off', None)", got == ("off", None), "got %r %s" % (got, err))
+    check("tier: `tier off` returns ('tier-off', None)", got == ("tier-off", None), "got %r %s" % (got, err))
     check("tier: `tier off` removes the tier file", tier_text(cfg) is None,
           "file text %r" % (tier_text(cfg),))
 
@@ -781,6 +781,43 @@ def case_tier_hook_writes_the_file():
           "stderr %r" % (proc and proc.stderr[-200:],))
 
 
+def case_tier_context_line():
+    # Each tier word prints one line that names the tier and its end. `tier off` names the tier's end and
+    # never the override's: a session that reads "Override: ended." after `tier off` is told the wrong thing.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "tier triage")
+    lines = proc.stdout.splitlines() if proc else []
+    tier_lines = [l for l in lines if l.startswith("Tier:")]
+    check("tier: `tier triage` prints one Tier line that names the triage tier",
+          len(tier_lines) == 1 and "triage" in tier_lines[0] and any(LINE_FULL.fullmatch(l) for l in lines),
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+    proc = ov_type(cfg, "tier off")
+    lines = proc.stdout.splitlines() if proc else []
+    check("tier: `tier off` prints `Tier: ended.`", "Tier: ended." in lines,
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+    check("tier: `tier off` prints no Override line", not any(l.startswith("Override") for l in lines),
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+
+
+def tier_log_words(cfg):
+    """(decision, rule) of each guard.log line that holds a tier word's record, in order."""
+    return [tuple(line.split("\t")[2:4]) for line in ov_log(cfg) if len(line.split("\t")) >= 4]
+
+
+def case_tier_logs_the_word():
+    # Each tier word writes one guard.log line: decision tier-grant or tier-off, under roadmap-one-writer
+    # (decision session-tiers). A grant is logged once, and so is the `tier off` that ends it.
+    cfg = ov_cfg()
+    ov_type(cfg, "tier triage")
+    grants = [w for w in tier_log_words(cfg) if w[0] == "tier-grant"]
+    check("tier: `tier triage` writes one guard.log line, tier-grant under roadmap-one-writer",
+          grants == [("tier-grant", "roadmap-one-writer")], "log words %r" % (tier_log_words(cfg),))
+    ov_type(cfg, "tier off")
+    offs = [w for w in tier_log_words(cfg) if w[0] == "tier-off"]
+    check("tier: `tier off` writes one guard.log line, tier-off under roadmap-one-writer",
+          offs == [("tier-off", "roadmap-one-writer")], "log words %r" % (tier_log_words(cfg),))
+
+
 def main():
     try:
         case_table_in_process()
@@ -808,6 +845,8 @@ def main():
         case_tier_session_stays_inside()
         case_local_tier_reader()
         case_tier_hook_writes_the_file()
+        case_tier_context_line()
+        case_tier_logs_the_word()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
