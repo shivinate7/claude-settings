@@ -810,6 +810,33 @@ class NoTestCount(unittest.TestCase):
         r, full = self.run_case(code=code)
         self.assert_pass(r)
 
+    def test_echoed_marker_inside_a_line_with_no_count_is_pass(self):
+        """Case 1, echoed marker: a grep hit or a source line that holds the marker mid-line is not the runner's
+        marker, so the run is no test run and needs no count."""
+        for line in ("bin/verdict:114:    if b\"** TEST SUCCEEDED **\" in buf",
+                     "foo: ** TEST SUCCEEDED **",
+                     "log.txt:3:** TEST EXECUTE SUCCEEDED **"):
+            with self.subTest(line=line):
+                r, full = self.run_case(code=printing(line + "\n"))
+                self.assertIn(line, full, "the echoed line never reached the log")
+                self.assert_pass(r)
+
+    def test_marker_at_line_start_after_space_or_colour_with_no_count_is_fail(self):
+        """Case 1 keeps its FAIL: a marker that starts a line, after spaces, a tab or a colour code, is the runner's marker."""
+        for line in ("  ** TEST SUCCEEDED **", "\t** TEST EXECUTE SUCCEEDED **", "\x1b[1m** TEST SUCCEEDED **\x1b[0m"):
+            with self.subTest(line=ascii(line)):
+                r, full = self.run_case(code=printing(line + "\n"))
+                self.assert_no_count_fail(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_swift_test_info_flags_by_argv_with_no_count_are_pass(self):
+        """Case 2: swift test with an info flag runs no tests, so it needs no count and reads PASS."""
+        for flag in ("--list-tests", "-l", "--help", "-h", "--show-codecov-path", "--show-bin-path"):
+            with self.subTest(flag=flag):
+                r, full = self.run_case(argv=["swift", "test", flag], shim=("swift", shim_script("AppTests.testFoo")))
+                self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+                self.assert_pass(r)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
