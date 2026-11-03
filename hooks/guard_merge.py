@@ -12,6 +12,7 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from guard_pointer import (
     pointer_checkout,
 )
@@ -522,76 +523,10 @@ def role_call_of(segment: str):
     return None
 
 
-# A get_session result for another session can arrive as that session's untrusted text, wrapped in one tag.
-_OTHER_SESSION = re.compile(r'<other-session nonce="[^"]*" untrusted="true">(.*)</other-session>', re.DOTALL)
-_CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
-
-
-def _created_session_id(body):
-    """The id a create_session result names: the `id` or `session_id` of a JSON object, else the first
-    `session_...` word of the body. None when the result names none."""
-    if not isinstance(body, str):
-        return None
-    try:
-        parsed = json.loads(body)
-    except ValueError:
-        parsed = None
-    if isinstance(parsed, dict):
-        for key in ("id", "session_id"):
-            if isinstance(parsed.get(key), str):
-                return parsed[key]
-    found = _CREATED_ID.search(body)
-    return found.group(0) if found else None
-
-
 def _own_session_read(transcript: str, own_id: str, created: bool = False):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result. With `created`, a create_session call
-    whose result names own_id is a record too, its tags the call's input.tags: the newest record of either
-    kind decides. Without it, only get_session counts."""
-    uses, newest, tagged_after = set(), None, False
-    creates = {}  # tool_use id -> the tags a create_session call set
-    with open(transcript, encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                content = json.loads(line)["message"]["content"]
-            except (ValueError, KeyError, TypeError):
-                continue
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
-                    uses.add(block.get("id"))
-                elif created and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("create_session"):
-                    given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
-                    if isinstance(given, list):
-                        creates[block.get("id")] = [str(t) for t in given]
-                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    # Only a call that names the own session changes the own tags. A call with no readable
-                    # list of ids counts too: the safe reading is that it may have named this session.
-                    ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
-                    if not isinstance(ids, list) or own_id in ids:
-                        tagged_after = True
-                elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
-                    body = block.get("content")
-                    if isinstance(body, list):
-                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
-                    if block.get("tool_use_id") in creates:
-                        if _created_session_id(body) == own_id:
-                            newest, tagged_after = creates[block.get("tool_use_id")], False
-                        continue
-                    if isinstance(body, str):  # only the body the wrapper holds is parsed
-                        wrapped = _OTHER_SESSION.fullmatch(body.strip())
-                        body = wrapped.group(1).strip() if wrapped else body
-                    try:
-                        ccr = json.loads(body)["ccr"]
-                        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
-                    except (ValueError, KeyError, TypeError):
-                        continue
-    return newest, tagged_after
+    """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id. `created`
+    counts a create_session call as a record too (the lane-one-topic rule reads a lane by its start)."""
+    return own_session.own_session_read(transcript, own_id, created)[:2]
 
 
 def _own_get_session_tags(transcript: str, session_id: str):
