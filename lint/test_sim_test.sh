@@ -89,7 +89,8 @@ if [ -n "${STUB_HANG:-}" ] || [ "$n" -gt 0 ]; then : > "$RUN/started"; sleep "${
 : > "$RUN/xc_finished"
 exit ${STUB_RC:-0}
 SH
-# xcrun: simctl only. $RUN/booted holds the "Booted" lines of `simctl list devices booted`. Each simctl call logs its
+# xcrun: simctl only. $RUN/booted holds the "Booted" lines of `simctl list devices booted`, and $RUN/devices.json answers
+# `simctl list devices --json` (the record mode's read). Each simctl call logs its
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
@@ -100,7 +101,10 @@ lock="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock"
 held=no; [ -d "$lock" ] && held=yes
 echo "$1 $held" >> "$RUN/lock_simctl"
 case "$1" in
-  list) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
+  list) case "$*" in
+    *--json*) cat "$RUN/devices.json" ;;
+    *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
+  esac ;;
   boot) [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; echo "    iPhone 18 Pro ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
@@ -135,7 +139,7 @@ booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
 fresh() {
   : > "$calls"; : > "$booted_file"
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
-    "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl"
+    "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
@@ -467,6 +471,61 @@ need "xcodebuild was stopped: no xc_finished" test ! -e "$work/xc_finished"
 need "shutdown of the simulator it booted" has_call "simctl shutdown $SHARED"
 need "stderr has crash and the count 3" crash_msg_count3
 end_case "46 3 new reports naming no device folder: stop"
+
+# Record: after its own boot, the tool calls the hook's record mode, which appends one sim-boots.jsonl line for the
+# simulator it booted. A reuse writes none. The stub ps names a launchd_sim for SHARED (pid 4242) and for OTHER (pid
+# 4343), so a line has a real launchd_sim to name. The record call is silent, and its failure is ignored.
+LSTART="Sat Oct 10 07:00:00 2026"
+LAUNCHD=/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/launchd_sim
+records=$work/home/.claude/state/sim-boots.jsonl
+# ps_stub: a `ps` that answers the process table with a launchd_sim row for SHARED and OTHER, and the start time of
+# each pid for a `-o lstart= -p PID` call. The case that needs it puts it first on PATH.
+ps_stub() {
+  /bin/mkdir -p "$work/psbin"
+  cat > "$work/psbin/ps" <<SH
+#!/bin/sh
+case "\$*" in
+  *lstart*) case "\$*" in *4242*) echo "4242 $LSTART" ;; *4343*) echo "4343 $LSTART" ;; esac ;;
+  *) printf '%s\n' "4242 1 501 $LAUNCHD $SHARED" "4343 1 501 $LAUNCHD $OTHER" ;;
+esac
+SH
+  chmod +x "$work/psbin/ps"
+}
+# devices_json UDID: the device list after a boot of UDID, one Booted iPhone on one runtime.
+devices_json() {
+  cat > "$work/devices.json" <<JSON
+{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"udid":"$1","name":"iPhone 18 Pro","state":"Booted","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro","isAvailable":true}]}}
+JSON
+}
+# record_lines: how many sim-boots.jsonl lines the run wrote, 0 when it wrote no file.
+record_lines() { if [[ -e $records ]]; then wc -l < "$records" | tr -d ' '; else echo 0; fi; }
+record_names() { grep -Fq "\"udid\": \"$1\"" "$records" 2>/dev/null; }
+no_hook_message() { ! grep -Fq sim_boot_record "$work/run.err"; }
+
+fresh; ps_stub; devices_json "$SHARED"; run PATH="$work/psbin:$PATH"
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "one record line" test "$(record_lines)" -eq 1
+need "the line names the shared UDID" record_names "$SHARED"
+end_case "47 boot path: the simulator it boots gets one sim-boots.jsonl line"
+
+fresh; ps_stub; devices_json "$OTHER"; booted "iPhone 17 Pro" $OTHER; run PATH="$work/psbin:$PATH"
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "no record line" test "$(record_lines)" -eq 0
+end_case "48 reuse path: the simulator it reuses gets no sim-boots.jsonl line"
+
+# A copy of the tool with no hooks folder beside it: the record call finds no hook. It must print nothing, and the
+# run must still boot, test and shut down with xcodebuild's exit code.
+fresh; ps_stub; devices_json "$SHARED"
+/bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; chmod +x "$work/nohooks/bin/sim-test"
+saved_script=$script; script=$work/nohooks/bin/sim-test
+run PATH="$work/psbin:$PATH"
+script=$saved_script
+need "exit code is xcodebuild's" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no hook message on stderr" no_hook_message
+end_case "49 the record call is silent, and its failure does not change the exit code"
 
 # sweep: the run-folder sweep (decisions/test-temp-standard.md). The case reads the real sweep_runs from this file and
 # runs it on a private root under the run folder.
