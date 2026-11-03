@@ -1,0 +1,9 @@
+{
+ "title": "bin/ci-job runs a local action, so this repo's Silent undo step uses actions/silent-undo",
+ "phase": "next",
+ "status": "todo",
+ "order": 524,
+ "why": "Coordinator, Nov 3 17:37 CST; note silent-undo-two-call-sites. Follows PR #1123 (silent-undo-action).",
+ "note": "Dogfoods actions/silent-undo in this repo's checks.",
+ "updatedAt": "2026-11-03T23:39:00Z"
+}

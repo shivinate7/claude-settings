@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 504,
  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 5.",
- "note": "Promotion lane 5 of 11 (rank = work order). Child removals: q_max, banchi. Incident: banchi PR #221 undid PR #218. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKyitrXWiSimRTqNJg9, started by the coordinator Nov 3.",
- "updatedAt": "2026-11-03T22:46:00Z"
+ "note": "Promotion lane 5 of 11 (rank = work order). Child removals: q_max, banchi. Incident: banchi PR #221 undid PR #218. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKyitrXWiSimRTqNJg9, started by the coordinator Nov 3. Lane done Nov 3 17:37 CST: PR #1123, with the batch runner.",
+ "updatedAt": "2026-11-03T23:39:00Z"
 }
