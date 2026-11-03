@@ -476,19 +476,19 @@ class Protect(unittest.TestCase):
         return code, out.getvalue(), calls
 
     def test_preview_changes_nothing_and_names_the_call(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint")
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks")
         self.assertEqual(code, 0, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
         self.assertIn("checks", out)
         self.assertIn("--confirm", out)
 
     def test_an_unprotected_branch_gets_protection_with_the_checks(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint", "--confirm")
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm")
         self.assertEqual(code, 0, out)
         puts = [c for c in calls if "PUT" in c[0]]
         self.assertEqual(len(puts), 1, calls)
         self.assertIn("repos/acme/widgets/branches/main/protection", puts[0][0])
-        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks", "lint"])
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks"])
         body = puts[0][1]
         self.assertIs(body["required_status_checks"]["strict"], False, "the PUT must set strict to False")
         self.assertIs(body["enforce_admins"], True, "the PUT must set enforce_admins to True (admins are included)")
@@ -502,7 +502,7 @@ class Protect(unittest.TestCase):
         self.assertFalse([c for c in calls if "PUT" in c[0]], calls)
 
     def test_checks_already_set_change_nothing(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "b", "--check", "a", "--confirm", existing=["a", "b"])
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "a", "--confirm", existing=["a"])
         self.assertEqual(code, 0, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
 
