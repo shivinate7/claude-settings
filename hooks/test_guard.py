@@ -25828,6 +25828,31 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
        "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
 
+    # Review round 1. The route reads an xcodebuild only as the command word of its own segment, so a wrapper
+    # hides the boot, a `)` glued to the destination makes the id a different name, and an option with a
+    # colon (`-only-testing:X`) reads as taking the next word, so the action `test` after it is not seen.
+    sh("route: a test of a shut-down simulator inside bash -c names sim-test",
+       "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
+       "sh -lc \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
+    sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
+       "bash -c \"xcrun simctl boot " + SIM_UC + "\"", "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
+    sh("route: a test in a subshell, the closing paren glued to the destination, names sim-test",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: the same subshell with the paren apart from the quote. The guard reads this one today, so the
+    # glued case fails on the glue, not on the subshell.
+    sh("route: a test in a subshell, the closing paren apart from the destination, names sim-test (control)",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with -only-testing before the action names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+
     # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
     # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
     # pid. Held: a pid file naming a live pid, or, with no pid file, a lock folder under 60 s old. A dead
@@ -26064,6 +26089,31 @@ def sim_route_override_check():
     return check
 
 
+def sim_lock_eperm_check():
+    """A lock whose pid the guard cannot signal is not held. bin/sim-test reads a failed `kill -0`, EPERM
+    included, as the holder being gone, and takes the lock over, so the guard must read the same. Root can
+    signal any pid, so no real pid gives EPERM in this sandbox: os.kill is patched to raise PermissionError,
+    in process, and the lock's pid is this process's own pid."""
+    guard = _load_guard_module()
+    cfg = os.path.join(ROOT, "simcfg_lock_eperm")
+    lock = os.path.join(cfg, "state", "sim-test.lock")
+    os.makedirs(lock, exist_ok=True)
+    write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    try:
+        with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
+            got = guard.sim_lock_holder()
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    if got != "":
+        return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
+    return True, "a lock whose pid cannot be signalled reads as free"
+
+
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
 # on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
 FAMILY = "simulator"
@@ -26081,6 +26131,9 @@ if os.name != "nt":
     sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
     LOG_FAMILY[sim_route_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
+    sim_eperm_label = "simulator: a lock whose pid the guard cannot signal (EPERM) reads as free"
+    LOG_FAMILY[sim_eperm_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_eperm_label, sim_lock_eperm_check),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
