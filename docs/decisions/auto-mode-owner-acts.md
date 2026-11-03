@@ -20,7 +20,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
-| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
+| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that the owner started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
@@ -52,7 +52,7 @@ Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an o
 
 - The entry now covers two cases, each named in the visible conversation:
   - The batch's integration PR, or a lone lane's PR, named so by the coordinator or batch runner. Rule `git-integration-branch-merge` treats a lone lane as its own integration PR.
-  - The one PR of a solo or one-lane session that no coordinator started, named so by that session.
+  - The one PR of a solo or one-lane session that the owner started, named so by that session.
 - A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
 - The merge itself is not in this entry (see the standing merge grant record).
 
