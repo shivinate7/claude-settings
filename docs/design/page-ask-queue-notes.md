@@ -48,7 +48,7 @@ One home for the words, as `TOLD` and `NOT_TOLD` are today. Each status rests on
 |---|---|---|
 | saving | write running | "Saving…" |
 | told | write done, and `notifyClaude` returned true | "Saved 17:42. A wake was sent. Not read by triage yet." |
-| untold | write done, and `canTell` or the send was false | "Saved 17:42. No session was told. triage reads it at its next wake or turn start." |
+| untold | write done, and `canTell` or the send was false | "Saved 17:42. No session was told. It waits for triage's next wake or turn start." |
 | saved | record only: after a reload, or after the Undo count | "Saved 17:41. Not read by triage yet." |
 | read | the record has `owner` and `read` | today's words: "Read by <owner> <time>. Waiting for its answer." |
 | answered | the record has `reply` | today's thread, unchanged |
@@ -81,7 +81,8 @@ One home for the words, as `TOLD` and `NOT_TOLD` are today. Each status rests on
 ## 8. A row that is not saved
 
 - State `failed`. The row keeps the owner's words and says "Not saved (permission-denied). Your words are kept here." It has Try again and Copy ask, and `role="alert"`.
-  The box keeps the next ask.
+  Its head says "Not sent, typed 17:42" with the due triangle, never "You asked" and the waiting disc, because nothing is in the store. The box keeps the next ask.
+- Kept: the code in brackets, as `renderAskForm` shows it today. ux-machine-text-hidden would put it behind a disclosure. That is a wider change to every "Not saved" line, so it is not made here.
 - Departs from: `renderAskForm`'s failed hint, which keeps the words in the box. With a queue, the box may already hold the next ask.
 
 ## 9. The answer bar shares the words
@@ -98,7 +99,7 @@ One home for the words, as `TOLD` and `NOT_TOLD` are today. Each status rests on
 ## 11. Measured verdicts
 
 Headless Chrome, every state at 390, 800 and 1280, in light and dark. Checks: no sideways scroll, no element past the page edge,
-and every Ask button at least 44 px high.
+and every Ask button at least 44 px high. Both checks went red on a broken copy, with 30 px row buttons 900 px wide.
 
 | State | 390 | 800 | 1280 |
 |---|---|---|---|

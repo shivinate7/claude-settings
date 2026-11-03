@@ -857,7 +857,6 @@ html.coarse .askhint .kbd { display: none; } /* Mockup stand-in for @media (poin
 .astate.bad { color: var(--due); }
 .astate.quiet { font-weight: 400; color: var(--muted); }
 .astate .t { font-variant-numeric: tabular-nums; }
-.askc.just { box-shadow: inset 3px 0 0 var(--acc); }
 @media (max-width: 520px) {
   .arow { grid-template-columns: minmax(0, 1fr); }
   .arow .acts { justify-content: flex-start; }
@@ -887,7 +886,7 @@ const WRITER = "triage";
 const W = {
   saving: "Saving…",
   told: (t) => `Saved ${t}. A wake was sent. Not read by ${WRITER} yet.`,
-  untold: (t) => `Saved ${t}. No session was told. ${WRITER} reads it at its next wake or turn start.`,
+  untold: (t) => `Saved ${t}. No session was told. It waits for ${WRITER}'s next wake or turn start.`,
   saved: (t) => `Saved ${t}. Not read by ${WRITER} yet.`,
   stale: (t, m) => `Saved ${t}. Not read by ${WRITER} after ${m}. If it is not running, copy the ask into a session's chat.`,
   failed: (c) => `Not saved (${c}). Your words are kept here.`,
@@ -915,7 +914,9 @@ function askItem(a, o) {
     return `<li class="askc folded"><button class="frow" type="button" aria-expanded="false"><span class="g done" aria-hidden="true"></span><span class="ftext">${esc(a.text)}</span><span class="fwhen">Answered ${esc(a.answered)}</span><span class="fgo">Show answer</span></button></li>`;
   }
   const answered = st === "answered";
-  const head = `<div class="ahead"><span class="g ${answered ? "done" : "wait"}" aria-hidden="true"></span><span class="aby">You asked, ${esc(a.at)}</span>${a.waited && !answered ? `<span>waited ${esc(a.waited)}</span>` : ""}${answered && a.fresh ? '<span class="newmark">New answer</span><button class="morebtn" type="button" aria-expanded="true">Fold</button>' : ""}</div>`;
+  // A row that never saved has no `at` in the store, so it never says "You asked" and never shows the waiting disc.
+  const failed = st === "failed";
+  const head = `<div class="ahead"><span class="g ${answered ? "done" : failed ? "due" : "wait"}" aria-hidden="true"></span><span class="aby">${failed ? "Not sent, typed " + esc(a.t) : "You asked, " + esc(a.at)}</span>${a.waited && !answered ? `<span>waited ${esc(a.waited)}</span>` : ""}${answered && a.fresh ? '<span class="newmark">New answer</span><button class="morebtn" type="button" aria-expanded="true">Fold</button>' : ""}</div>`;
   const text = `<p class="atext">${esc(a.text)}</p>`;
   if (answered) return `<li class="askc">${head}${text}<div class="thread"><p class="lhead">Answer from ${esc(a.owner)}, ${esc(a.answered)}</p><p class="reply">${esc(a.reply)}</p>${a.home ? `<p class="filed">Filed in ${esc(a.home)}, ${esc(a.filed)}</p>` : ""}</div></li>`;
   const words = { saving: W.saving, told: W.told(a.t), untold: W.untold(a.t), saved: W.saved(a.t), stale: W.stale(a.t, a.waited), failed: W.failed("permission-denied"), read: W.read(a.owner, a.read) }[st];
@@ -927,7 +928,7 @@ function askItem(a, o) {
   if (st === "failed") acts.push(btn(a.id + "-retry", "Try again", "send"));
   if ((st === "failed" || ((st === "untold" || st === "stale") && !hide.includes("copy")))) acts.push(btn(a.id + "-copy", "Copy ask"));
   const live = st === "failed" ? ' role="alert"' : ' aria-live="polite"';
-  return `<li class="askc${undo > 0 || st === "saving" ? " just" : ""}"${lab ? ` data-new="${esc(labText || "own status line and Undo")}"` : ""}>${head}${text}<div class="arow"><p class="astate${cls}"${live}>${words}</p>${acts.length ? `<span class="acts">${acts.join("")}</span>` : ""}</div></li>`;
+  return `<li class="askc"${lab ? ` data-new="${esc(labText || "own status line and Undo")}"` : ""}>${head}${text}<div class="arow"><p class="astate${cls}"${live}>${words}</p>${acts.length ? `<span class="acts">${acts.join("")}</span>` : ""}</div></li>`;
 }
 
 // The box. `hint` is the hint row's inner HTML; `slot` the button beside Send ask; `val` the typed text.
