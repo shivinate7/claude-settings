@@ -530,6 +530,54 @@ def can_write(keys):
     return not WRITE_TOOLS & tool_names(keys.get("disallowedTools"))
 
 
+# The write verdict of an agent's frontmatter, one case per form the lint reader reads: a comma list, a bracket list,
+# quoted names, a scoped entry such as Edit(src/**), a comment, and an absent key. A list below its key fails loudly.
+WRITE_FORMS = (
+    ("a comma tools list that names Edit", {"tools": "Read, Edit"}, True),
+    ("a comma tools list that names no write tool", {"tools": "Read, Grep"}, False),
+    ("a comma disallowedTools list that names Edit", {"disallowedTools": "Edit, Bash"}, False),
+    ("a bracket tools list that names Edit", {"tools": "[Read, Edit]"}, True),
+    ("a bracket disallowedTools list that names Edit and Write", {"disallowedTools": "[Edit, Write]"}, False),
+    ("a quoted tools list that names Edit", {"tools": "\"Read\", 'Edit'"}, True),
+    ("a quoted disallowedTools list that names Write", {"disallowedTools": "\"Write\""}, False),
+    ("a scoped tools entry Edit(src/**)", {"tools": "Read, Edit(src/**)"}, True),
+    ("a scoped disallowedTools entry Write(**)", {"disallowedTools": "Write(**)"}, False),
+    ("a tools list with a comment after it that names Edit", {"tools": "Read, Edit  # writes"}, True),
+    ("no tools or disallowedTools key", {"name": "x"}, True),
+)
+
+
+def write_form_check(keys, want):
+    """A case: can_write answers `want` for the frontmatter `keys`."""
+    def check():
+        got = can_write(keys)
+        if got != want:
+            return "can_write answers %s for %s; want %s" % (got, keys, want)
+        return None
+    return check
+
+
+def unread_list_check(keys, field):
+    """A case: can_write raises ValueError naming `field` when its list sits below the key, never a misjudged answer."""
+    def check():
+        try:
+            got = can_write(keys)
+        except ValueError as exc:
+            if field in str(exc):
+                return None
+            return "can_write raised, but its message does not name %s: %s" % (field, exc)
+        return "can_write answers %s for an empty %s key; want a loud failure" % (got, field)
+    return check
+
+
+for form_name, form_keys, form_want in WRITE_FORMS:
+    add("can_write: %s" % form_name, "custom", fn=write_form_check(form_keys, form_want))
+add("can_write: an empty tools key with its list on the lines below fails loudly, naming tools",
+    "custom", fn=unread_list_check({"tools": ""}, "tools"))
+add("can_write: an empty disallowedTools key with its list on the lines below fails loudly, naming disallowedTools",
+    "custom", fn=unread_list_check({"disallowedTools": ""}, "disallowedTools"))
+
+
 def agent_entries():
     """(entries, problem): one (name, can_write) pair per agents/*.md file, from guard.role_agent_keys, the one
     reader of agent frontmatter. The problem counts the files, so an agent file the reader skips cannot pass unseen."""
