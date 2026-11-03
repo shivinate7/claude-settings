@@ -2140,7 +2140,7 @@ test("unfold in the Answered section shows what the fold holds, and a card with 
   assert.equal(await page.locator(`#tier-answered #item-${bare.id} button.unfold`).count(), 0, "a card with nothing to hide has an unfold control");
 });
 
-// ---------------------------------------------------------------- answered sink, review round 2
+// ---------------------------------------------------------------- answered sink: fold lock, rail chip, freeze gate, group title
 
 test("Answered section: a sunk card with a restored draft opens its fold, or shows it locked open, never a dead button", async (t) => {
   const it = mk("draft-sunk", 1, { added: at(5) }), other = mk("draft-other", 2, { added: NEW_ADDED });
