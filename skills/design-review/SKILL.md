@@ -21,7 +21,8 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 ## Procedure
 
 1. **List the changed pages.** Name each changed page and route. Capture a screenshot of each
-   one at every size and theme it ships in. Use a headless or isolated browser. If a
+   one at every size and theme it ships in. Use a headless or isolated browser. For a text-only change,
+   also capture the same screens on main at every size and theme. If a
    page needs the owner's login, use it; otherwise use none
    (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
    owner's screen, say so in one line (`verification-announce-own-screen`). `bin/shoot` also writes
@@ -55,12 +56,10 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    the list is complete. Then a fix never hides a flaw or blurs the cause of one.
 4. **Compare.** Only now read the repo's design spec, tokens and design decisions. Spawn one
    design reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
-   changed pages, the screenshots, the step's mockup in the design folder, and the full list. It
-   A text-only change has no mockup. Capture the same screens from main at every size and theme, the
-   way step 1 does, and name those screenshots in the brief instead of the mockup. It judges each
-   screen against the mockup, or against those screenshots when there is none, and against the repo's
-   design rules, and sets each finding against them. With no mockup, it looks hardest at overflow,
-   wrapping and truncation. Do not change the list. The design reviewer is not blind, so it never takes the
+   changed pages, the screenshots, the step's mockup in the design folder, and the full list. A
+   text-only change has no mockup, so its brief names the main screenshots from step 1 instead. It
+   judges each screen against the mockup, or against those main screenshots when there is none, and
+   against the repo's design rules, and sets each finding against them. Do not change the list. The design reviewer is not blind, so it never takes the
    place of Reviewer A or B.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix

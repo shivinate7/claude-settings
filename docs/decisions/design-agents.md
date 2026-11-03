@@ -11,16 +11,19 @@ agents, both on Opus, except a text-only change (owner, 2026-11-03: design revie
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
 - The design reviewer (`agents/design-reviewer.md`) runs after the build. It judges each built screen
   against the mockup and the repo's design rules, at every size and theme, with a verdict per screen.
-- Routing has one test: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
-  still reviews the code. One exception: a lane with a text-only change skips the designer. The design
+- Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
+  still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs after the build. Owner ask `ask-mw18vywh8g` (small text changes on existing
   screens), 2026-11-03 16:13 CST.
-  - A text-only change edits an existing screen's files and changes only user-visible copy: string
-    literals, text nodes, locale values. It adds, removes or moves no element, class, style, token or
-    layout, and adds no screen.
+  - A text-only change edits an existing screen's files and changes only user-visible copy. User-visible
+    copy is text nodes, locale values, and an element's visible or read-aloud label, placeholder, title or
+    alt. A class, style, token, icon name, URL, key or test id is never copy. It adds, removes or moves no
+    element, class, style, token or layout, and adds no screen.
   - Outcome the designer protected: the new copy fits the screen, seen before the build. The design
     reviewer protects it now. It compares the built screen with main's screenshots of the same screen,
-    at every size and theme, and catches overflow, wrapping and truncation from the new copy.
+    at every size and theme, and catches overflow, wrapping and truncation from the new copy. It reads the
+    built diff too: any element, class, style, token or layout change in a text-only change is a finding
+    that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
   step, after the blind list is complete (`design-skills`).
