@@ -73,6 +73,13 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(re.fullmatch(matcher, tool), "the first guard matcher does not cover %s: %r" % (tool, matcher))
 
+    def test_guard_matcher_covers_send_message(self):
+        # Rule lane-one-step refuses a brief sent to a lane of another topic, so a guard matcher must see send_message.
+        matchers = guard_matchers()
+        tool = "mcp__claude-code-remote__send_message"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
