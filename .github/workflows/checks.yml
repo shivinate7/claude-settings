@@ -414,10 +414,7 @@ jobs:
 
       - name: Silent undo check
         if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+        uses: $/actions/silent-undo
 
       - name: Comment narration fixture suite
         run: python3 lint/test_check_comment_narration.py
@@ -506,6 +503,7 @@ jobs:
           bash actions/ci-alarm/test_action.sh
           python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
+          bash actions/silent-undo/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
