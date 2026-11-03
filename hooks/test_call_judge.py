@@ -99,10 +99,11 @@ with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encodin
 #
 # make_repo builds a real git repo under ROOT. `decisions` maps a slug to its ruling paragraph (docs/decisions/<slug>.md).
 # `steps` maps a step id to its note (roadmap/data/steps/<id>.json on a local `roadmap` branch). Every repo carries the
-# waiting page (PAGE_URL) in .claude/layout-extras.json, unless the `page` option names another url or None (no page key).
-# These git calls run in the test process, not in the hook.
+# waiting page (PAGE_URL) in .claude/layout-extras.json, unless the `page` option names another url or None
+# (no page key). These git calls run in the test process, not in the hook.
 GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 REPOS = {}
+REPO_PAGES = {}
 
 
 def git(repo, *args):
@@ -112,14 +113,18 @@ def git(repo, *args):
 
 
 def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
-    """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown."""
+    """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
+    A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
     if name in REPOS:
+        if REPO_PAGES[name] != page:
+            raise ValueError("make_repo %r was made with page %r, not %r" % (name, REPO_PAGES[name], page))
         return REPOS[name]
     repo = os.path.join(ROOT, "repo-" + name)
     os.makedirs(os.path.join(repo, ".claude"))
     extras = {"kinds": {}} if page is None else {"kinds": {}, "waiting-page": page}
     with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
         json.dump(extras, f)
+    REPO_PAGES[name] = page
     git(repo, "init", "-q")
     git(repo, "commit", "-q", "--allow-empty", "-m", "init")
     if decisions:
