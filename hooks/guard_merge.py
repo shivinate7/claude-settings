@@ -522,6 +522,8 @@ def role_call_of(segment: str):
     return None
 
 
+# A get_session result for another session can arrive as that session's untrusted text, wrapped in one tag.
+_OTHER_SESSION = re.compile(r'<other-session nonce="[^"]*" untrusted="true">(.*)</other-session>', re.DOTALL)
 _CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
 
 
@@ -578,6 +580,9 @@ def _own_session_read(transcript: str, own_id: str, created: bool = False):
                         if _created_session_id(body) == own_id:
                             newest, tagged_after = creates[block.get("tool_use_id")], False
                         continue
+                    if isinstance(body, str):  # only the body the wrapper holds is parsed
+                        wrapped = _OTHER_SESSION.fullmatch(body.strip())
+                        body = wrapped.group(1).strip() if wrapped else body
                     try:
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
