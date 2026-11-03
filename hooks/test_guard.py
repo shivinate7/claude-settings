@@ -25744,8 +25744,11 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot by destination is allowed",
-       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    # The controls from here to the twin section boot through the simulator MCP launch, with no lock held.
+    # simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down device
+    # would be refused by it before the cap or twin rule is read. The MCP launch runs the same cap and twin code.
+    add("control: one booted, a second boot by MCP launch is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -25771,21 +25774,21 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    sh("control: the twin booted 10 minutes ago is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
-       config=cfgs["twin_recent"][1])
-    sh("control: an unrecorded booted twin is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
-       config=cfgs["twin_unrecorded"][1])
-    sh("control: an idle twin on another runtime does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
-       config=cfgs["twin_other_runtime"][1])
-    sh("control: an idle twin of another device type does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
-       config=cfgs["twin_other_type"][1])
-    sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
-       config=cfgs["twin_rebooted"][1])
+    add("control: the twin booted 10 minutes ago is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
+        config=cfgs["twin_recent"][1])
+    add("control: an unrecorded booted twin is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
+        config=cfgs["twin_unrecorded"][1])
+    add("control: an idle twin on another runtime does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
+        config=cfgs["twin_other_runtime"][1])
+    add("control: an idle twin of another device type does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
+        config=cfgs["twin_other_type"][1])
+    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
+        config=cfgs["twin_rebooted"][1])
 
     # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
     # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
@@ -25948,11 +25951,11 @@ def register_simulator_hold_cases():
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
-           env_path=env_for("hold_%d" % index, rows), config=cfg)
-    sh("control: a twin is not idle when the process table cannot be read",
-       sim_boot_by_destination(SIM_UT1), "allow",
-       env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg)
+    add("control: a twin is not idle when the process table cannot be read",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
 
 
 def register_simulator_bypass_cases():
