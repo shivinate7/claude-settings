@@ -633,6 +633,9 @@ def case_post_compact_sets_flag():
         stop = c.stop("s-1")
         check("post-compact sets the flag: the next Stop blocks and names the handoff",
               blocks(c, stop, "s-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+        reason = str((json_or_none(stop.stdout) or {}).get("reason", ""))
+        check("post-compact: the Stop block cites decision precompact-handoff",
+              "decision precompact-handoff" in reason, "reason=%r" % reason)
     finally:
         c.cleanup()
 

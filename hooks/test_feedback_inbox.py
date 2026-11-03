@@ -516,6 +516,7 @@ def expect_silent(name, p):
 def expect_block(name, p, named=(), unnamed=()):
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("%s: cites decision owner-feedback-inbox" % name, "decision owner-feedback-inbox" in reason, reason)
     for n in named:
         check("%s: names %s" % (name, n), n in reason, reason)
     for n in unnamed:
