@@ -352,6 +352,26 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         told = [s for s in sentences(hook_tier_line()) if re.search(r"\bmerge", s, re.IGNORECASE) and "coordinator" in s.lower()]
         self.assertEqual(told, [], "the tier line says a coordinator merges")
 
+    # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant
+    def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):
+        told = [s for s in sentences(hook_tier_line())
+                if re.search(r"no parent|owner started", s, re.IGNORECASE) and "own PR" in s and "merge grant" in s]
+        self.assertTrue(told, "no sentence says a session with no parent merges its own PR under the merge grant")
+
+    def hand_off_sentence(self):
+        """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
+        found = [s for s in sentences(hook_tier_line()) if "hands" in s and "batch runner" in s]
+        self.assertEqual(len(found), 1, "expected one hand-off sentence, found %d: %r" % (len(found), found))
+        return found[0]
+
+    # decision session-tiers: only a lane (a session with a parent_session_id) hands its branch to the batch runner
+    def test_the_hand_off_sentence_names_a_parent_session_id(self):
+        self.assertIn("parent_session_id", self.hand_off_sentence(), "the hand-off sentence names no parent_session_id")
+
+    # decision session-tiers: only a lane (a session with a parent_session_id) hands its branch to the batch runner
+    def test_the_hand_off_sentence_does_not_say_any_other_session(self):
+        self.assertNotIn("any other session", self.hand_off_sentence().lower(), "the hand-off sentence says any other session hands off")
+
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
         sentence = merge_role_sentence(hook_tier_line())
