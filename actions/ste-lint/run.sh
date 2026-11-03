@@ -104,7 +104,7 @@ SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 LOG_OUT="$(mktemp)"
 
 # Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path or
-# function this range removed. Scope changed only. It runs before the "no markdown changed" exit, so a
+# function this range removed (scope changed only; tree-cites below adds both scopes). It runs before the "no markdown changed" exit, so a
 # code-only PR is checked. Its findings never go through the split script below: every stale line is
 # untouched by the range, and the split makes an untouched line report-only. FAIL=false prints them and
 # keeps the exit 0, as it does for the STE findings.
@@ -114,8 +114,16 @@ if [ "$SCOPE" != "all" ]; then
   python3 "$STALE_CITES" --range "$RANGE"
   STALE_EXIT=$?
   set -e
-  [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 fi
+# --tree (the tree-cites input) names stale cites on lines the range never touched, so it runs in both scopes.
+if [ "${TREE_CITES:-false}" = "true" ]; then
+  set +e
+  python3 "$STALE_CITES" --tree
+  TREE_EXIT=$?
+  set -e
+  [ "$TREE_EXIT" -ne 0 ] && STALE_EXIT="$TREE_EXIT"
+fi
+[ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "ste-lint: no markdown changed"
@@ -170,7 +178,7 @@ with open(sys.argv[3], "w") as o:
 PYEOF
   python3 "$AUDIT_PY" "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
   cat "$LOG_OUT"
-  exit 0
+  exit "$STALE_EXIT"  # 0 unless tree-cites found a stale cite
 fi
 
 # Decision 4: changed lines only. Build a map of file -> added line numbers from a
