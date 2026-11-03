@@ -1,0 +1,9 @@
+{
+ "title": "A small text change on an existing screen skips the designer",
+ "phase": "now",
+ "status": "todo",
+ "order": 495,
+ "why": "Owner ask ask-mw18vywh8g, Nov 3 16:13 CST: 'small text changes on existing screens currently can't skip a designer agent -- this is clearly a scenario where the guards are making unintentional outcomes from what i desire'.",
+ "note": "Cause, read on main da8d8073: CLAUDE.md rule roles-one-role-per-agent says 'A lane that touches a screen gets a designer before the builder and a design reviewer after it', with no exception. No claude-settings hook enforces it (grep hooks/ and lint/); a child-repo guard may, which lane child-guard-promotion surveys. Change: the rule exempts a lane that changes only text on an existing screen (no layout, component or style change) from the designer; the design reviewer still checks the built screen. Any child guard that enforces the old text follows. The owner's ask is the direction; the lane brings the exact rule wording to the coordinator before merge. Port: yes, every repo.",
+ "updatedAt": "2026-11-03T22:16:00Z"
+}
