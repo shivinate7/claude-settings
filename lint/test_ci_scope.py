@@ -360,11 +360,29 @@ class Scope(unittest.TestCase):
     # bin/shoot's suite installs a browser, so only its own paths turn `shoot` on. An edit sets `code` and `shoot`
     # and no other flag; an unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):
-        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json",
-                  "actions/playwright-setup/action.yml"):
+        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
+
+    # checks-guard and checks-shoot both install actions/playwright-setup. The checks-guard job is gated on
+    # checks_guard, which needs `code` and `guard`. An edit to the action must set checks_guard, with
+    # `shoot` for checks-shoot. Named failure: the action arm sets code and shoot only, so checks-guard
+    # skips its install and guard suite on the pull request that changes the action.
+    def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
+        p = "actions/playwright-setup/action.yml"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
+
+    # Control: a bin/shoot edit keeps checks_guard off, so the action's arm must not widen to bin/shoot.
+    def test_shoot_edit_keeps_checks_guard_off(self):
+        p = "bin/shoot"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
 
 if __name__ == "__main__":
     unittest.main()
