@@ -328,8 +328,8 @@ class Stale(unittest.TestCase):
         self.assertRegex(line, r"another account", "the not-found line does not say the page may be another account's")
         self.assertEqual(code, 1, out)
 
-    def test_a_notfound_line_names_the_live_page_of_the_hub_checkout(self):
-        # The live page is the waiting page of the checkout that holds the script, read from its extras file. This hub's
+    def test_a_notfound_line_names_the_claude_settings_waiting_page(self):
+        # The target is the waiting page of the checkout that holds the script, read from its extras file. This hub's
         # URL is not the claude-settings page, so a URL copied into the script fails this case.
         hub_url = URL % "HUBLIVE0123"
         script = self.hub_checkout(hub_url)
@@ -337,15 +337,17 @@ class Stale(unittest.TestCase):
         self.fetch("NNN", notfound=True)
         code, out = self.run_cmd(root, script=script)
         line = self.not_found_line(out, "gone")
-        self.assertIn(hub_url, line, "the not-found line does not name the hub checkout's live page")
+        self.assertIn("the claude-settings waiting page %s" % hub_url, line,
+                      "the not-found line does not name the claude-settings waiting page")
 
-    def test_a_hub_with_no_waiting_page_says_the_live_page_is_unknown(self):
+    def test_a_hub_with_no_waiting_page_says_the_claude_settings_waiting_page_is_unknown(self):
         script = self.hub_checkout(None)
         root = self.repo("gone", "NNN")
         self.fetch("NNN", notfound=True)
         code, out = self.run_cmd(root, script=script)
         line = self.not_found_line(out, "gone")
-        self.assertRegex(line, r"live page[^\n]*unknown", "the not-found line does not say the live page is unknown")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the not-found line does not say the claude-settings waiting page is unknown")
 
     def test_the_total_line_counts_not_found_apart_from_unknown_and_exit_1(self):
         # A page not found from this account is never counted current, and has its own count apart from unknown.
@@ -385,19 +387,63 @@ class Stale(unittest.TestCase):
         code, out = self.run_cmd(root, script=script)
         line = self.not_found_line(out, "sibling")
         self.assertIn("re-file", line, "the not-found line does not say to re-file the items")
-        self.assertIn(hub_url, line, "the not-found line does not name the hub page to re-file on")
+        self.assertIn("the claude-settings waiting page %s" % hub_url, line,
+                      "the not-found line does not name the claude-settings waiting page to re-file on")
         self.assertNotIn("holds", line, "the not-found line says the hub page already holds the items")
 
     def test_a_hub_whose_own_page_is_not_found_names_no_page_to_re_file_on(self):
-        # The hub's live page is its own recorded page. When that page is not found too, no page is named as where to re-file.
+        # The hub's target is its own recorded page. When that page is not found too, no page is named as where to re-file.
         hub_url = URL % "HUBLIVE0123"
         script = self.hub_checkout(hub_url)
         hub = os.path.join(self.tmp.name, "hub")
         self.fetch("HUBLIVE0123", notfound=True)
         code, out = self.run_cmd(hub, script=script)
         line = self.not_found_line(out, "hub")
-        self.assertNotIn("re-file its items on %s" % hub_url, line, "the hub's not-found line names its own page to re-file on")
-        self.assertIn("unknown", line, "the hub's not-found line does not read the target as unknown")
+        self.assertNotIn("the claude-settings waiting page %s" % hub_url, line,
+                         "the hub's not-found line names its own page as the waiting page to re-file on")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the hub's not-found line does not read the waiting page as unknown")
+
+    def test_a_hub_url_with_a_query_string_is_still_its_own_page_for_the_target(self):
+        # The hub's URL carries a query string. It is the same artifact, so the hub's own target is unknown.
+        hub_url = (URL % "HUBLIVE0123") + "?x=1"
+        script = self.hub_checkout(hub_url)
+        hub = os.path.join(self.tmp.name, "hub")
+        self.fetch("HUBLIVE0123", notfound=True)
+        code, out = self.run_cmd(hub, script=script)
+        line = self.not_found_line(out, "hub")
+        self.assertNotIn("the claude-settings waiting page %s" % hub_url, line,
+                         "the hub's own line names its own query-string URL as the waiting page to re-file on")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the hub's own target is not unknown when its URL carries a query string")
+
+    def test_a_sibling_under_a_not_found_hub_gives_its_re_file_target_as_unknown(self):
+        # The hub's page is not found too, so the sibling has no live page to re-file on and must not name the hub's URL.
+        hub_url = URL % "HUBLIVE0123"
+        script = self.hub_checkout(hub_url)
+        hub = os.path.join(self.tmp.name, "hub")
+        root = self.repo("sibling", "NNN")
+        self.fetch("HUBLIVE0123", notfound=True)
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(hub, root, script=script)
+        line = self.not_found_line(out, "sibling")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the sibling's re-file target is not unknown while the hub page is not found")
+        self.assertNotIn(hub_url, line, "the sibling's line names the hub page as its re-file target")
+
+    def test_a_sibling_under_an_unreadable_hub_gives_its_re_file_target_as_unknown(self):
+        # The hub's page cannot be read, so the sibling has no live page to re-file on and must not name the hub's URL.
+        hub_url = URL % "HUBLIVE0123"
+        script = self.hub_checkout(hub_url)
+        hub = os.path.join(self.tmp.name, "hub")
+        root = self.repo("sibling", "NNN")
+        self.fetch("HUBLIVE0123", unreadable=True)
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(hub, root, script=script)
+        line = self.not_found_line(out, "sibling")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the sibling's re-file target is not unknown while the hub page is unreadable")
+        self.assertNotIn(hub_url, line, "the sibling's line names the hub page as its re-file target")
 
     def test_malformed_hub_extras_give_no_traceback_and_an_unknown_target(self):
         # The hub's extras file is not JSON. A sibling's not-found line still prints, with the target unknown, and no traceback.
@@ -408,7 +454,8 @@ class Stale(unittest.TestCase):
         out = r.stdout + r.stderr
         self.assertNotIn("Traceback", out, "malformed hub extras end the batch with a traceback")
         line = self.not_found_line(out, "sibling")
-        self.assertIn("unknown", line, "the not-found line does not read the target as unknown")
+        self.assertIn("the claude-settings waiting page is unknown", line,
+                      "the not-found line does not read the waiting page as unknown")
         self.assertEqual(r.returncode, 1, out)
 
     # Single-page mode: stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
