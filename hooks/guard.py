@@ -95,7 +95,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
-                       it. No record, no transcript or no env id is a refusal. An override lifts it.
+                       it. A local session (no cloud env id) is proved by the owner's `tier triage` word,
+                       the file state/tier/<session_id>.json. No proof or a read error is a refusal. An
+                       override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
@@ -328,7 +330,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, record_reason, settings_roots, TRUST_REASON, archive_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -3172,9 +3174,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
-        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+        refuse(tool, "deny", "roadmap-one-writer", record_reason(), matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

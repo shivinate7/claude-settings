@@ -100,6 +100,8 @@ def override_line(result):
     kind, until = result[:2]
     if kind == "off":
         return "Override: ended."
+    if kind == "tier":
+        return "Tier: this session is %s for the record branch's one writer, until `tier off`." % until
     if kind == "opus-off":
         return "Opus override: ended."
     if kind == "opus":
@@ -310,8 +312,9 @@ def page_note(raw):
 
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
-    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
-    the session's override and prints one line. Any failure is one stderr line, no override."""
+    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override) or the tier word
+    (`tier triage`, `tier off`; decision session-tiers): grants or ends the session's override or tier
+    and prints one line. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override

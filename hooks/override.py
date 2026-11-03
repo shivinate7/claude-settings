@@ -23,6 +23,13 @@ rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
+An owner tier is the file <config dir>/state/tier/<session_id>.json, {"tier": "triage"}. It proves a local
+session's tier to guard rule roadmap-one-writer, which cannot read it from a cloud record (decision
+session-tiers). It is no override: it lifts no refusal itself, and the cloud path never reads it.
+  `tier triage` writes it. `tier off` removes it. Both mean that only as the whole prompt: any other text
+         after `tier` grants nothing, and `tier off now` removes nothing. It has no end time: the owner
+         types `tier off`. local_tier() reads it: "triage", or None for a file that is missing,
+         unreadable or corrupt.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -55,6 +62,8 @@ CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's ove
 PROMPT = re.compile(
     r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
     re.I | re.S)
+TIER_PROMPT = re.compile(r"\s*tier(?=\s|$)(.*)", re.I | re.S)  # the tier word, then the rest
+TIER_NAME = "triage"  # the one tier the owner can grant; roadmap-one-writer reads it
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
@@ -101,13 +110,13 @@ def now():
     return local_time.clock()
 
 
-def _path(session_id, *folder):
-    """The session's override file, or with folder "opus" its Opus override file. None when the id
-    cannot name a file."""
+def _path(session_id, *folder, state="override"):
+    """The session's override file, or with folder "opus" its Opus override file, or with state "tier"
+    its tier file. None when the id cannot name a file."""
     if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id) or session_id[0] == ".":
         return None
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "state", "override", *folder, session_id + ".json")
+    return os.path.join(base, "state", state, *folder, session_id + ".json")
 
 
 def _write(path, data):
@@ -153,13 +162,47 @@ def _grant_opus(session_id, rest, at):
     return "opus", until, role
 
 
+def _grant_tier(session_id, rest):
+    """`tier triage` or `tier off` as the whole prompt. Returns ("tier", "triage") for a new tier file,
+    ("off", None) when `tier off` removed one, else None."""
+    path = _path(session_id, state="tier")
+    words = rest.lower().split()
+    if path is None or len(words) != 1 or words[0] not in (TIER_NAME, "off"):
+        return None  # ambiguous or unknown: grants nothing
+    if words[0] == "off":
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return None
+        return "off", None
+    _write(path, {"tier": TIER_NAME})
+    return "tier", TIER_NAME
+
+
+def local_tier(session_id):
+    """TIER_NAME when the session's tier file names it, else None. A file that is missing, unreadable or
+    corrupt, or names another tier, is None."""
+    path = _path(session_id, state="tier")
+    if path is None:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        return TIER_NAME if isinstance(data, dict) and data.get("tier") == TIER_NAME else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def grant(session_id, prompt, at):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word."""
+    the _grant_tier result for the tier word, else None: the prompt is not a word."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
+    tier = TIER_PROMPT.match(prompt) if isinstance(prompt, str) else None
+    if tier:
+        return _grant_tier(session_id, tier.group(1))
     said = PROMPT.match(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
     if not said or path is None:
