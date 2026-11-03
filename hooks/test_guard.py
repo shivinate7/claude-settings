@@ -8956,10 +8956,13 @@ def role_tag_call(tool_id, session=ROLE_OWN):
             role_result(tool_id, "ok")]
 
 
-def role_target_call(tool_id, tags, target=ROLE_OTHER):
-    """One paired get_session call for another session, `target`, whose record carries `tags`."""
-    return [role_use(tool_id, GET_SESSION, {"session_id": target}),
-            role_result(tool_id, role_record(tags, target, "a lane session"))]
+def role_target_call(tool_id, tags, target=ROLE_OTHER, wrapped=False):
+    """One paired get_session call for another session, `target`, whose record carries `tags`. `wrapped` returns
+    the record the way a read of another session's text comes back: inside an untrusted, nonce-tagged wrapper."""
+    body = role_record(tags, target, "a lane session")
+    if wrapped:
+        body = '<other-session nonce="abc123" untrusted="true">\n' + body + '\n</other-session>'
+    return [role_use(tool_id, GET_SESSION, {"session_id": target}), role_result(tool_id, body)]
 
 
 def role_said(text):
@@ -9054,6 +9057,9 @@ ROLE_LINES = {
     "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
     "step-create-json": role_create_call("c1", STEP_TOPIC_TAGS),
     "step-create-text": role_create_call("c1", STEP_TOPIC_TAGS, plain=True),
+    # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
+    "step-topic-lane-wrapped": role_target_call("t1", STEP_TOPIC_TAGS, wrapped=True),
+    "archive-wrapped-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS, wrapped=True),
 }
 
 
@@ -9513,6 +9519,10 @@ archive_allow("a lane ci with an open head claude/fix-ci-retry-x1 is allowed: th
 # A target whose record names no lane is not judged, even with an open pull request on the slug.
 archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
               role_path("archive-triage"), fake_gh_path(ARCHOPEN))
+# The same target, its record wrapped as another session's untrusted text. The record still decides: a triage target
+# is allowed. A reader that json-parses the whole body finds no record, and refuses.
+archive_allow("a wrapped record of a non-lane target (cs-build:triage) is allowed: the record is read inside its wrapper",
+              role_path("archive-wrapped-triage"), fake_gh_path(ARCHOPEN))
 # No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
 # gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
 archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
@@ -9600,6 +9610,9 @@ step_refuse("a brief for topic colors to a lane that create_session started on t
             role_path("step-create-json"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
 step_refuse("a brief for topic colors to a lane that create_session started on topic icons (plain result) is refused",
             role_path("step-create-text"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
+# Refused: the lane's record comes back wrapped as another session's untrusted text. The topic is still read from it.
+step_refuse("a brief for topic colors to a lane on topic icons, its record wrapped, is refused",
+            role_path("step-topic-lane-wrapped"), "Lane brief: icon-a. Topic: colors.")
 # Refused: no record of the target in the transcript, so the guard cannot tell the lane's topic.
 step_refuse("a marker brief to a target with no record in the transcript is refused",
             role_path("no-record"), "Lane brief: icon-b. Topic: icons.")
