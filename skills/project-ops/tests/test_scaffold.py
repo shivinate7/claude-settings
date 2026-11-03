@@ -178,7 +178,7 @@ class Scaffold(TempDest):
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
                          "one hand-off, one bullet")
         self.assertIn("external_metadata.context_usage", flat)
-        # session-tiers (owner, 2026-11-01 17:56 CST): no usage limit. A standing session runs until autocompact.
+        # session-tiers (owner): no usage limit. A standing session runs until autocompact.
         self.assertNotIn("<triage limit>", flat, "the rotation section still names the triage limit")
         self.assertNotIn("<batch runner limit>", flat, "the rotation section still names the batch runner limit")
         self.assertIn("The coordinator never hands its own sessions to a successor", flat)
@@ -190,7 +190,7 @@ class Scaffold(TempDest):
         return " ".join(rotation_rule(text).split())
 
     def test_rotation_follows_the_no_limit_ruling(self):
-        # session-tiers (owner, 2026-11-01 17:56 CST): no usage limit. A standing session runs until
+        # session-tiers (owner): no usage limit. A standing session runs until
         # autocompact, and the coordinator rotates it only when it goes stale or breaks.
         flat = self.rotation_flat()
         for clause in ("session-tiers", "goes stale or breaks", "runs until autocompact"):
@@ -200,7 +200,7 @@ class Scaffold(TempDest):
             self.assertRegex(flat, r"\barbiter\b", "the rotation section does not name the arbiter")
 
     def test_rotation_names_no_limit_or_exemption(self):
-        # session-tiers (owner, 2026-11-01 17:56 CST): no usage limit, so no limit to be at or to exempt from.
+        # session-tiers (owner): no usage limit, so no limit to be at or to exempt from.
         flat = self.rotation_flat()
         self.assertIn("The coordinator never hands its own sessions to a successor", flat,
                       "the rotation section lost its coordinator rule, so a cut-off section would pass")
@@ -209,13 +209,13 @@ class Scaffold(TempDest):
                 self.assertNotIn(stale, flat.lower(), f"the rotation section still names {stale!r}")
 
     def test_roster_has_no_exemptions_line(self):
-        # session-tiers (owner, 2026-11-01 17:56 CST): no usage limit, so the roster has no exemption line.
+        # session-tiers (owner): no usage limit, so the roster has no exemption line.
         text = tree(SKILL)["templates/roster.md"]
         self.assertIn("## Standing sessions", text, "the roster has no standing sessions section")
         self.assertNotRegex(text, r"(?m)^Exemptions:", "the roster still has an Exemptions line")
 
     def test_skill_names_no_usage_tally(self):
-        # session-tiers (owner, 2026-11-01 17:56 CST): rotation runs until autocompact, not by a usage tally.
+        # session-tiers (owner): rotation runs until autocompact, not by a usage tally.
         flat = " ".join(tree(SKILL)["SKILL.md"].split())
         self.assertIn("name: project-ops", flat, "SKILL.md has no project-ops name")
         self.assertNotRegex(flat, r"(?i)usage tally", "SKILL.md still names a usage tally")
