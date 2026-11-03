@@ -513,16 +513,33 @@ def load_read_only():
         return None, "agent_brief's READ_ONLY set does not load: %s" % exc
 
 
-def agent_names():
-    """(names, problem): the frontmatter `name:` of each agents/*.md file, from guard.role_agent_keys. The problem
-    counts the files, so an agent file the reader skips cannot pass unseen."""
+WRITE_TOOLS = {"Edit", "Write"}
+
+
+def tool_names(raw):
+    """The names in a frontmatter list value such as `Edit, Write`, with comments and quotes stripped."""
+    value = (raw or "").split("#", 1)[0]
+    return {part.strip().strip("'\"") for part in value.split(",")} - {""}
+
+
+def can_write(keys):
+    """True when an agent may write, read from its frontmatter keys alone: its `tools` allowlist, when it has one,
+    lists Edit or Write, and its `disallowedTools` lists neither."""
+    if "tools" in keys and not WRITE_TOOLS & tool_names(keys["tools"]):
+        return False
+    return not WRITE_TOOLS & tool_names(keys.get("disallowedTools"))
+
+
+def agent_entries():
+    """(entries, problem): one (name, can_write) pair per agents/*.md file, from guard.role_agent_keys, the one
+    reader of agent frontmatter. The problem counts the files, so an agent file the reader skips cannot pass unseen."""
     try:
         files = [name for name in os.listdir(AGENTS_DIR) if name.endswith(".md")]
         keys = list(guard.role_agent_keys(REPO_ROOT))
     except OSError as exc:
         return [], "agents/ cannot be read: %s" % exc
-    names = [key.get("name", "").split("#", 1)[0].strip().strip("'\"") for key in keys]
-    named = [name for name in names if name]
+    entries = [(key.get("name", "").split("#", 1)[0].strip().strip("'\""), can_write(key)) for key in keys]
+    named = [(name, writes) for name, writes in entries if name]
     if not files or len(keys) != len(files) or len(named) != len(files):
         return named, ("want a name from each of the %d agent files; %d have frontmatter, %d have a name"
                        % (len(files), len(keys), len(named)))
@@ -530,21 +547,23 @@ def agent_names():
 
 
 READ_ONLY, READ_ONLY_PROBLEM = load_read_only()
-AGENT_NAMES, NAMES_PROBLEM = agent_names()
+AGENT_ENTRIES, NAMES_PROBLEM = agent_entries()
+AGENT_NAMES = [name for name, _writes in AGENT_ENTRIES]
 
 
-def staged_check(name):
-    """Build a check for one agent. A committing type's brief holds exactly one staged-diff line; a read-only
-    type's brief holds none. The hook's READ_ONLY set decides which, as agent_brief's build() does."""
+def staged_check(name, writes):
+    """Build a check for one agent. A committing agent's brief holds exactly one staged-diff line; a read-only
+    agent's brief holds none. `writes` is the agent's frontmatter verdict (can_write), not the hook's READ_ONLY set,
+    so a writer filed into READ_ONLY still has to show its line."""
     def check():
-        if READ_ONLY_PROBLEM:
-            return READ_ONLY_PROBLEM
         text, problem = context_for(payload(name))
         if problem:
             return problem
         hits = [line for line in text.split("\n") if STAGED_KEY in line]
-        if name.lower() in READ_ONLY:
-            return "a read-only type gets the staged-diff line: %r" % hits[0][:90] if hits else None
+        if not writes:
+            if hits:
+                return "a read-only type gets the staged-diff line: %r" % hits[0][:90]
+            return None
         if len(hits) != 1:
             return "want one line that holds %r, got %d" % (STAGED_KEY, len(hits))
         return None
@@ -583,10 +602,50 @@ def copies_check():
 
 add("staged-diff step: agents/ names every agent, with committing and read-only types both present",
     "custom", fn=agent_list_check)
-for _name in AGENT_NAMES:
+for _name, _writes in AGENT_ENTRIES:
     add("staged-diff step, agent %s: one line if it commits, none if it is read-only" % _name,
-        "custom", fn=staged_check(_name))
+        "custom", fn=staged_check(_name, _writes))
 add("staged-diff step: no agents/*.md file carries its own copy of it", "custom", fn=copies_check)
+
+
+def staged_once_check(agent_type):
+    """Build a check: the brief for `agent_type` holds the staged-diff line exactly once. A general type and a
+    missing type take the general scope line and the writer set, so each holds the line too."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = [line for line in text.split("\n") if STAGED_KEY in line]
+        if len(hits) != 1:
+            return "want one line that holds %r, got %d" % (STAGED_KEY, len(hits))
+        return None
+    return check
+
+
+add("staged-diff step: a general type (general-purpose) holds the staged-diff line exactly once", "custom",
+    fn=staged_once_check("general-purpose"))
+add("staged-diff step: a missing agent type holds the staged-diff line exactly once", "custom",
+    fn=staged_once_check(MISSING))
+
+
+def read_only_set_check():
+    """agent_brief's READ_ONLY set names exactly the agents whose frontmatter says they cannot write. A failure names
+    one agent and the way it disagrees."""
+    if NAMES_PROBLEM:
+        return NAMES_PROBLEM
+    if READ_ONLY_PROBLEM:
+        return READ_ONLY_PROBLEM
+    for name, writes in AGENT_ENTRIES:
+        listed = name.lower() in READ_ONLY
+        if writes and listed:
+            return "%s can write by its frontmatter, but agent_brief's READ_ONLY lists it" % name
+        if not writes and not listed:
+            return "%s cannot write by its frontmatter, but agent_brief's READ_ONLY does not list it" % name
+    return None
+
+
+add("staged-diff step: agent_brief's READ_ONLY set names exactly the agents whose frontmatter cannot write",
+    "custom", fn=read_only_set_check)
 
 
 def main():
