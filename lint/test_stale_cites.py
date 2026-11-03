@@ -824,6 +824,14 @@ class TreeTests(StaleCase):
         text, lines = rows_text(rows)
         self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines])
 
+    def test_a_working_tree_only_file_is_not_live_and_uncommitted_markdown_is_not_read(self):
+        rng = self.tree("# Notes\n\n- see `hooks/gone.py`\n- see `hooks/new_tool.py`\n")
+        write(rng.repo, NOTES, "# Notes\n\n- see `hooks/guard.py`\n- see `hooks/guard.py`\n")  # a fix, uncommitted
+        write(rng.repo, "hooks/new_tool.py", "def tool():\n    return 1\n")  # a file, uncommitted
+        write(rng.repo, "docs/scratch.md", "- see `hooks/gone.py`\n")  # a page, uncommitted
+        # HEAD holds the first version of the notes, and no new_tool.py: both lines are dead at HEAD.
+        self.assert_tree_flags(rng, [(NOTES, 3, "STALE003"), (NOTES, 4, "STALE003")])
+
     def test_range_mode_still_flags_only_what_the_range_removed(self):
         # The dead cite on line 4 is a tree finding. --range must not name it.
         notes = "# Notes\n\n- refusal list in `hooks/lib.mjs`\n- see `hooks/gone.py`\n"
