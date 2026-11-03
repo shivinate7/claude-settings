@@ -1432,7 +1432,7 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen card's fold stays open and its control is locked.
+// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen or answered card's fold stays open and its control is locked.
 const foldLocked = (it) => !!eff(it) || withdrawing(it);
 // words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
 function unfoldBtn(it, open, locked, ncmd, words) {

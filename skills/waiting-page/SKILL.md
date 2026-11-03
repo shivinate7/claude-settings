@@ -57,7 +57,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
-    when every member is answered, as one frame headed "Answered together", at its newest member's time. A group with an
+    when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
     open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
     it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A Change keeps
