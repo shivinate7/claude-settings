@@ -464,7 +464,7 @@ class LintMode(unittest.TestCase):
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
-                if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check)\s*$", line):
+                if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
         done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
@@ -567,8 +567,9 @@ ZIZMOR = "Workflow supply-chain audit (zizmor)"
 
 
 class LintTools(Job):
-    """--lint runs checks' Code check action (code_check.py, one home) and the pinned zizmor step. A planted bug
-    fails them; a missing pipx makes them unknown; neither may vanish from the lint run."""
+    """--lint runs checks' Code check action (code_check.py, one home) and the zizmor action (actions/zizmor/run.sh,
+    one home of the pin). A planted bug fails them; a missing pipx makes them unknown; neither may vanish from the lint
+    run."""
 
     CODE = step("Code check", uses="$/actions/code-check", **{"with": {"base": "${{ github.event.before }}"}})
     INJECTION = ("on: issues\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
@@ -582,6 +583,7 @@ class LintTools(Job):
         # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
                         os.path.join(self.root, "actions", "code-check"))
+        shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
         shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
 
     def git(self, *a):
@@ -649,6 +651,27 @@ class LintTools(Job):
         rc, lines, out = self.run_job(checks_step(ZIZMOR), args=("--lint", "--base", "origin/main"), env=NO_PIPX)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("tool missing: pipx", lines[0])
+
+    def test_the_zizmor_action_under_lint_runs_with_no_base(self):
+        # A literal uses: step, not checks_step(ZIZMOR): checks.yml's step has the run: form on this branch, and the
+        # old run: path needs no base, so it could not show red here. The fixture has no origin/main, so no base resolves.
+        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
+        argv_file = os.path.join(bin_dir, "argv.txt")
+        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
+        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
+        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        no_main = subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", "origin/main"],
+                                 env=ENV, capture_output=True)
+        self.assertNotEqual(no_main.returncode, 0, "the fixture must have no origin/main, so no base resolves")
+        rc, lines, out = self.run_job(step(ZIZMOR, uses="./actions/zizmor", **{"with": {"paths": ".github/ actions/"}}),
+                                      args=("--lint",), env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        self.assertTrue(os.path.exists(argv_file), "pipx was never called, so the action did not run zizmor\n" + out)
+        with open(argv_file, encoding="utf-8") as f:
+            argv = f.read().splitlines()
+        self.assertEqual(argv[0], "run", out)
+        self.assertEqual(argv[2:], [".github/", "actions/"], out)
 
     def test_an_unpinned_or_chained_pipx_run_is_not_a_lint_step(self):
         code, lines, out = plan_lint(self.root, workflow(step("loose", "pipx run zizmor .github/"),
