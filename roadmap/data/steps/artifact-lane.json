@@ -1,9 +1,9 @@
 {
- "title": "Artifact lane (scope per the lane's brief)",
+ "title": "Git is every artifact's home; designer-gap fixes, scan false alarms, the 14 step links",
  "phase": "now",
  "status": "doing",
  "order": 523,
- "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
- "note": "Lane session_013NEJL4UZnwcbTxUfsYRPJa, started by the coordinator Nov 3 17:26 CST. Title to be set from the lane's PR.",
- "updatedAt": "2026-11-03T23:28:00Z"
+ "why": "Feedback fb-1456-1, fb-1458-1, fb-1458-2, fb-1512-1, fb-1509-1, fb-1510-1. The degen copy move is a follow-up. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
+ "note": "Lane session_013NEJL4UZnwcbTxUfsYRPJa, started by the coordinator Nov 3 17:26 CST.",
+ "updatedAt": "2026-11-03T23:30:00Z"
 }

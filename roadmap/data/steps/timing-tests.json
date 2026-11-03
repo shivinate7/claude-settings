@@ -1,9 +1,9 @@
 {
- "title": "Timing tests (scope per the lane's brief)",
+ "title": "Logic tests use fake clocks; real-time checks run only on a quiet runner with a measured threshold",
  "phase": "now",
  "status": "doing",
  "order": 521,
- "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
- "note": "Lane session_013NEJL1jPC89ae6X6Pa4jmf, started by the coordinator Nov 3 17:26 CST. Title to be set from the lane's PR.",
- "updatedAt": "2026-11-03T23:28:00Z"
+ "why": "A decision record says logic tests use fake clocks, and real-time checks run only on a quiet runner with a measured threshold; claude-settings tests that read real time are converted. Feedback fb-1627-2. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
+ "note": "Lane session_013NEJL1jPC89ae6X6Pa4jmf, started by the coordinator Nov 3 17:26 CST.",
+ "updatedAt": "2026-11-03T23:30:00Z"
 }
