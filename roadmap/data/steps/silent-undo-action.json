@@ -1,0 +1,9 @@
+{
+ "title": "A shared silent-undo action wraps check_silent_undo.py",
+ "phase": "next",
+ "status": "todo",
+ "order": 504,
+ "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 5.",
+ "note": "Promotion lane 5 of 11 (rank = work order). Child removals: q_max, banchi. Incident: banchi PR #221 undid PR #218. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Ready.",
+ "updatedAt": "2026-11-03T22:44:00Z"
+}
