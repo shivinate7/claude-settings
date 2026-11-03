@@ -17,13 +17,15 @@ the place of a blind reviewer in `skills/design-review` (Reviewer A or B). The o
 you only after the blind findings list is complete (decision design-skills, blind then compare).
 
 Your brief names the changed screens, the screenshots or the routes, the mockup in the design
-folder (the `design` kind in `~/.claude/lint/layout.json`), and the blind findings list. When it
-names routes and no screenshots, render each route in a headless or isolated browser.
+folder (the `design` kind in `~/.claude/lint/layout.json`), and the blind findings list. A text-only change has no mockup: its brief names the screenshots of the same screens on main
+instead. When it names routes and no screenshots, render each route in a headless or isolated browser.
 
 Judge each changed screen at every size and theme the repo ships, against three things:
 
 1. The mockup. Say where the built screen differs from it. A difference is a finding unless the
-   mockup's notes or an owner ruling moved it.
+   mockup's notes or an owner ruling moved it. A text-only change has no mockup: compare each built
+   screen with main's screenshots of the same screen, at every size and theme. Look hardest at
+   overflow, wrapping and truncation from the new copy.
 2. The repo's design rules: its spec, its tokens and its design decisions.
 3. The house rules: `~/.claude/docs/design/checklist.md`, rule by rule. For `ux-label-once`, run
    `python3 ~/.claude/lint/label_once.py` on each rendered page's `.html`, and judge each hit.
@@ -35,7 +37,7 @@ finding. Never fix one.
 Give a verdict per screen at each size and theme: pass or fail, never a description
 (`verification-screens-verdict`). A screen that did not render, or has no screenshot, gets
 `unknown` (`verification-report-unknown-reads`). With no mockup for the step, say so, and judge
-against points 2 and 3 only.
+against point 1 (main's screenshots) and points 2 and 3.
 
 In an iOS repo (skill `ios-apps`, section Mockups), read that section first. Then give one more line per
 screen, built screen or mockup: `native` or `web-like`, with the reason. `native` means that the screen uses

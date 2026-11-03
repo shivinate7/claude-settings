@@ -56,8 +56,11 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 4. **Compare.** Only now read the repo's design spec, tokens and design decisions. Spawn one
    design reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
    changed pages, the screenshots, the step's mockup in the design folder, and the full list. It
-   judges each screen against the mockup and the repo's design rules, and sets each finding
-   against them. Do not change the list. The design reviewer is not blind, so it never takes the
+   A text-only change has no mockup. Capture the same screens from main at every size and theme, the
+   way step 1 does, and name those screenshots in the brief instead of the mockup. It judges each
+   screen against the mockup, or against those screenshots when there is none, and against the repo's
+   design rules, and sets each finding against them. With no mockup, it looks hardest at overflow,
+   wrapping and truncation. Do not change the list. The design reviewer is not blind, so it never takes the
    place of Reviewer A or B.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
