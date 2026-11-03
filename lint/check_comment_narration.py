@@ -31,11 +31,21 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 PATTERNS = {
-    "review round": re.compile(r"\bround\s*\d|\breview\s+(?:round|finding|points?)\b", re.I),
+    # A digit after "round" followed by a numeric unit, such as "2 decimals", is arithmetic, not narration.
+    "review round": re.compile(r"\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
+                               r"|\breview\s+(?:round|finding|points?)\b", re.I),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
-    "date": re.compile(r"\b20\d\d-\d\d-\d\d\b"),
+    # A date that a rule or a limit runs on (effective, valid, until, from, expires) says why, so it is not history.
+    "date": re.compile(r"(?<!effective\s)(?<!valid\s)(?<!until\s)(?<!from\s)(?<!expires\s)\b20\d\d-\d\d-\d\d\b", re.I),
+    # Each form names the next word, so "previously seen keys" and "the user changed the value" stay clean.
+    "history phrase": re.compile(
+        r"\bpreviously\s+(?:this|it|they|we|was|were|returned)\b"
+        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b)"
+        r"|\badded\s+after\s+review\b(?!\s+of\b)"
+        r"|\bformerly\b"
+        r"|\bthe\s+old\s+behaviou?r\b", re.I),
     "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
