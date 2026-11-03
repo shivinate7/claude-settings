@@ -4,6 +4,7 @@
 
 Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. It says "21:40 CDT", never a
 UTC time and never a 12-hour time.
+Every clock time the session gives the owner names its zone, each time, not once per message (owner, 2026-11-02 13:10 CST).
 
 `hooks/local_time.py` gives each session the current Central time as one line, for example `Local time: 2026-10-13 21:40 CDT (UTC-05:00)`.
 In winter the line reads CST and UTC-06:00.

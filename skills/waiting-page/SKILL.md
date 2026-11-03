@@ -180,26 +180,28 @@ into `meta/page`. The writer watches the page ("Read the answers").
 
 ## Chat first
 
-A session that talks with the owner asks in chat first. The chat ask is the reply, or, with nothing
-running, the terminal question box (decision questions-go-to-owner, "Chat first, then the page"). It
-gives no page URL: no item exists yet.
+A session that talks with the owner sends each question to the writer in the turn it asks it
+(decision questions-go-to-owner, "Same turn to the page", owner 2026-11-01 23:31 CST). The chat ask is
+the reply, or, with nothing running, the terminal question box, which also counts as the send. The
+writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
-- No answer in chat after 5 minutes: send the question to the writer, who adds the item. Then
-  "Add an item" step 3 tells the owner where it is.
-- No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
-  Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
-  question only when the owner answers or the session wakes.
-- A chat answer: still send the question and the answer, with its time, to the writer. Jot
-  `- <id> [page] -> page:<n>` under the owner's message in the inbox; the Stop guard blocks until
-  the transcript shows that send. The writer puts the item's `n` in every items write, set or update,
-  so the guard can match it.
-  - No item yet: the writer writes the item closed (`status: "closed"`), with the answer and its
+- The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
+  asks a yes/no. It passes only when the same turn sent the question to the writer, wrote a page item,
+  or opened the box. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
+- A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
+  Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
+  (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
+  `n` in every items write, set or update, so the guard can match it.
+  - Not written yet: the writer writes the item closed (`status: "closed"`), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
     close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
-  - An open item: the writer adds the answer and its time to the item's `context`. The owning
-    session then routes and closes it, as "Route and close" says. Either way, every question and
-    answer ends in the page's record.
-- A lane has no chat with the owner. Its question goes in its report.
+  - Written: the writer closes the item, with the answer and its time in `context`. The owning
+    session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
+    question and answer ends in the page's record.
+- A lane has no chat with the owner. Its question goes in its report, and a lane session also sends it
+  to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
+  Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
+  a page link or a promise does not pass.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
 - The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo").
@@ -383,8 +385,8 @@ sessions that watch the page. Only the owning session reads, routes and closes i
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
 relays an answer. An answer typed in the chat counts the same. A chat answer to an open item: the
-writer adds the answer and its time to the item's `context`, and the owning session routes and
-closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
+writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
+written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
 - A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
@@ -518,7 +520,7 @@ key. It never reuses main's.
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
    `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
-   `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
+   `<title>` to "<repo> Cockpit" (owner ruling, 2026-11-02 11:12 CST). Change nothing else. A republish keeps the title, and renames an old "Queue" or "Roadmap" title to "<repo> Cockpit" (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
 3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
