@@ -137,11 +137,15 @@ class Stale(unittest.TestCase):
         r = self.run_script(self.fetched, *roots, script=script)
         return r.returncode, r.stdout + r.stderr
 
+    def line_starting(self, out, prefix):
+        """The one output line that starts with `prefix`."""
+        lines = [line for line in out.splitlines() if line.startswith(prefix)]
+        self.assertEqual(len(lines), 1, "want one line starting %r:\n%s" % (prefix, out))
+        return lines[0]
+
     def not_found_line(self, out, owner):
         """The one output line that starts `not-found: <owner>`."""
-        lines = [line for line in out.splitlines() if line.startswith("not-found: %s" % owner)]
-        self.assertEqual(len(lines), 1, "want one not-found line for %s:\n%s" % (owner, out))
-        return lines[0]
+        return self.line_starting(out, "not-found: %s" % owner)
 
     def total_line(self, out):
         """The one output line that starts `waiting pages:`."""
@@ -149,9 +153,10 @@ class Stale(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one total line:\n" + out)
         return lines[0]
 
-    def hub_checkout(self, url=None):
+    def hub_checkout(self, url=None, extras_text=None):
         """A claude-settings checkout for batch mode: a copy of the script with page.html and lint/ beside it, and an
-        extras file naming `url` as its waiting page (None: no waiting page). Returns the copy's path."""
+        extras file naming `url` as its waiting page (None: no waiting page), or `extras_text` as the file's text.
+        Returns the copy's path; the checkout is self.tmp.name/hub."""
         hub = os.path.join(self.tmp.name, "hub")
         skill = os.path.join(hub, "skills", "waiting-page")
         write_text(os.path.join(skill, "page.html"), PAGE)
@@ -161,7 +166,8 @@ class Stale(unittest.TestCase):
         extras = {"kinds": {}}
         if url:
             extras["waiting-page"] = url
-        write_text(os.path.join(hub, ".claude", "layout-extras.json"), json.dumps(extras))
+        text = extras_text if extras_text is not None else json.dumps(extras)
+        write_text(os.path.join(hub, ".claude", "layout-extras.json"), text)
         return os.path.join(skill, "stale_pages.py")
 
     def test_old_and_unreadable_are_named_and_current_passes(self):
@@ -360,6 +366,50 @@ class Stale(unittest.TestCase):
         self.assertEqual(self.total_line(out), "waiting pages: 0 current, 0 behind, 0 unknown, 0 not-found",
                          "the total line has no not-found count")
         self.assertEqual(code, 0, out)
+
+    def test_an_unreadable_line_says_the_read_failed_and_not_or_not_found(self):
+        # An unreadable page is another account's or a failed read. The line claims no more than that: .notfound owns "not found".
+        root = self.repo("other-account", "CCC")
+        self.fetch("CCC", unreadable=True)
+        code, out = self.run_cmd(root)
+        line = self.line_starting(out, "unknown: other-account")
+        self.assertIn("the read failed", line, "the unreadable line does not say the read failed")
+        self.assertNotIn("or not found", line, "the unreadable line still says 'or not found'")
+
+    def test_a_sibling_not_found_line_says_to_re_file_its_items_on_the_hub_page(self):
+        # The hub page holds the hub's own items, not this repo's. The line tells the owner to re-file this repo's items there.
+        hub_url = URL % "HUBLIVE0123"
+        script = self.hub_checkout(hub_url)
+        root = self.repo("sibling", "NNN")
+        self.fetch("NNN", notfound=True)
+        code, out = self.run_cmd(root, script=script)
+        line = self.not_found_line(out, "sibling")
+        self.assertIn("re-file", line, "the not-found line does not say to re-file the items")
+        self.assertIn(hub_url, line, "the not-found line does not name the hub page to re-file on")
+        self.assertNotIn("holds", line, "the not-found line says the hub page already holds the items")
+
+    def test_a_hub_whose_own_page_is_not_found_names_no_page_to_re_file_on(self):
+        # The hub's live page is its own recorded page. When that page is not found too, no page is named as where to re-file.
+        hub_url = URL % "HUBLIVE0123"
+        script = self.hub_checkout(hub_url)
+        hub = os.path.join(self.tmp.name, "hub")
+        self.fetch("HUBLIVE0123", notfound=True)
+        code, out = self.run_cmd(hub, script=script)
+        line = self.not_found_line(out, "hub")
+        self.assertNotIn("re-file its items on %s" % hub_url, line, "the hub's not-found line names its own page to re-file on")
+        self.assertIn("unknown", line, "the hub's not-found line does not read the target as unknown")
+
+    def test_malformed_hub_extras_give_no_traceback_and_an_unknown_target(self):
+        # The hub's extras file is not JSON. A sibling's not-found line still prints, with the target unknown, and no traceback.
+        script = self.hub_checkout(extras_text="{not json")
+        root = self.repo("sibling", "NNN")
+        self.fetch("NNN", notfound=True)
+        r = self.run_script(self.fetched, root, script=script)
+        out = r.stdout + r.stderr
+        self.assertNotIn("Traceback", out, "malformed hub extras end the batch with a traceback")
+        line = self.not_found_line(out, "sibling")
+        self.assertIn("unknown", line, "the not-found line does not read the target as unknown")
+        self.assertEqual(r.returncode, 1, out)
 
     # Single-page mode: stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
 
