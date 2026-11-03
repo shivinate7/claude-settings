@@ -1,9 +1,9 @@
 {
  "title": "A report line that says \"answered\" cites where",
  "phase": "cleanup",
- "status": "todo",
+ "status": "done",
  "order": 103.21027,
  "why": "Reports said \"answered\" with no source (F188). Source: owner-feedback audit, claude-settings draft PR #1008 (docs/plans/owner-feedback-audit.md, section 6), Nov 1 20:06 CST.",
- "note": "A report line that says answered with no cited source goes red. Red first: replay F188. Ready. Port: yes, shared.",
- "updatedAt": "2026-11-02T02:08:00Z"
+ "note": "Done on main da8d8073: via PR #1091 (batch 66c) (repo check by triage, Nov 3 17:02 CST). Earlier note: A report line that says answered with no cited source goes red. Red first: replay F188. Ready. Port: yes, shared.",
+ "updatedAt": "2026-11-03T23:03:00Z"
 }

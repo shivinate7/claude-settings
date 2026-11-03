@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.21032,
  "why": "A repeat of the owner's Oct 31 14:12 CDT ask (step records-page-before-ready, done). That fix added a draft mode, but the merge tool still rebuilds and pushes on a READY PR: batch 60 (PR #1009) went green at 20:48 CST after 25 minutes, then the rebuild push (d4171560) restarted CI for about 25 to 30 more minutes. The owner said at 20:50 CST that page fixes take hours to land.",
- "note": "Fix: merge --confirm on a ready PR whose records page or record-number claims are stale refuses, with the remedy: return the PR to draft and run the records step. Red first: replay PR #1009 head d39a0040. Source: coordinator Nov 1 21:02 CST. Port: yes, the merge tool is shared. Ready.",
- "updatedAt": "2026-11-02T03:03:00Z"
+ "note": "Fix: merge --confirm on a ready PR whose records page or record-number claims are stale refuses, with the remedy: return the PR to draft and run the records step. Red first: replay PR #1009 head d39a0040. Source: coordinator Nov 1 21:02 CST. Port: yes, the merge tool is shared. Ready. WIP: branch records-stale-docs@4b1b2083, 1 commit (decision records-index-at-merge only), no PR (Nov 3 17:02 CST).",
+ "updatedAt": "2026-11-03T23:03:00Z"
 }

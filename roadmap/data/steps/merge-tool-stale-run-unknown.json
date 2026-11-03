@@ -1,9 +1,9 @@
 {
  "title": "The merge tool clears a cancelled scheduled run on an older main once a newer run passed",
  "phase": "cleanup",
- "status": "todo",
+ "status": "done",
  "order": 103.210101,
  "why": "Batch 65 (PR #1090), Nov 2 06:18 CST: the merge tool read main as unknown from scheduled run 41434991174 on old main 4477f7e3, cancelled with no red job, while main's head 07f855dc was green (run 41437045856). A re-run cleared it. Likely to recur: scheduled runs get cancelled often, and q_max PR #1011's cancelled browser run (page item 154) is the same shape.",
- "note": "Fix to weigh: a cancelled run with no red job, on a commit older than main's head, clears when a newer completed run of the same workflow passed the same jobs; the same rule PR #1067 built for red runs. Red first: a fixture with that cancelled older run and a green newer run merges; a cancelled run on main's head stays unknown. Related step merge-ignores-superseded-runs (same idea on the PR head). Basis: named incident (batch 65, coordinator Nov 2 07:18 CST). Port: yes, the merge tool is shared. Ready.",
- "updatedAt": "2026-11-02T13:19:00Z"
+ "note": "Done on main da8d8073: d20640dc, via PR #1096 (batch 68) (repo check by triage, Nov 3 17:02 CST). Earlier note: Fix to weigh: a cancelled run with no red job, on a commit older than main's head, clears when a newer completed run of the same workflow passed the same jobs; the same rule PR #1067 built for red runs. Red first: a fixture with that cancelled older run and a green newer run merges; a cancelled run on main's head stays unknown. Related step merge-ignores-superseded-runs (same idea on the PR head). Basis: named incident (batch 65, coordinator Nov 2 07:18 CST). Port: yes, the merge tool is shared. Ready.",
+ "updatedAt": "2026-11-03T23:03:00Z"
 }
