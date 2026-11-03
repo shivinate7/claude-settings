@@ -37,29 +37,33 @@ classify() {
     *) echo other ;;
   esac
 }
+# serve_pages <dir> <jq filter or ""> <paged or ""> : one list read. Each page is one JSON document in <dir>/<n>;
+# page 1 alone unless --paginate. A missing page 1 fails the read.
+serve_pages() {
+  local dir="$1" jqf="$2" paged="$3" k=1
+  [ -f "$dir/1" ] || { echo "gh: no fixture in $dir (fake)" >&2; exit 1; }
+  while [ -f "$dir/$k" ]; do
+    if [ -n "$jqf" ]; then jq -r "$jqf" "$dir/$k" || exit 1; else cat "$dir/$k"; fi
+    [ -n "$paged" ] || break
+    k=$((k + 1))
+  done
+  exit 0
+}
 # dropped_api: serves a dropped-start read from its fixture, or logs a POST with its body.
 dropped_api() {
-  local route body="" jqf="" prev="" a file="" sha n
+  local route body="" jqf="" prev="" paged="" a file="" sha n
   route="$(printf '%s\n' "$@" | sed -n '/^repos\//{p;q;}')"
   for a in "$@"; do
     case "$a" in body=*) body="${a#body=}" ;; esac
     if [ "$prev" = --jq ] || [ "$prev" = -q ]; then jqf="$a"; fi
+    if [ "$a" = --paginate ]; then paged=1; fi
     prev="$a"
   done
   if [ "$2" = --method ]; then printf 'POST %s\n%s\n' "$route" "$body" >> "$DROP_LOG"; echo '{"id": 1}'; exit 0; fi
   case "$route" in
-    */pulls|*/pulls\?*)
-      [ -f "$DROP_PULLS/1" ] || { echo "gh: no fixture for $route (fake)" >&2; exit 1; }
-      paged=""; for a in "$@"; do [ "$a" = --paginate ] && paged=1; done
-      n=1
-      while [ -f "$DROP_PULLS/$n" ]; do
-        if [ -n "$jqf" ]; then jq -r "$jqf" "$DROP_PULLS/$n" || exit 1; else cat "$DROP_PULLS/$n"; fi
-        [ -n "$paged" ] || break
-        n=$((n + 1))
-      done
-      exit 0 ;;
+    */pulls|*/pulls\?*) serve_pages "$DROP_PULLS" "$jqf" "$paged" ;;
     */check-runs*) sha="${route#*commits/}"; file="$DROP_CHECKS/${sha%%/*}" ;;
-    */issues/*/comments*) n="${route#*issues/}"; file="$DROP_COMMENTS/${n%%/*}" ;;
+    */issues/*/comments*) n="${route#*issues/}"; serve_pages "$DROP_COMMENTS/${n%%/*}" "$jqf" "$paged" ;;
   esac
   [ -f "$file" ] || { echo "gh: no fixture for $route (fake)" >&2; exit 1; }
   if [ -n "$jqf" ]; then jq -r "$jqf" "$file"; exit $?; fi
@@ -283,10 +287,13 @@ dpr() {
 dpage() { echo PAGE >> "$dd/pulls.lines"; }
 # dchecks <sha> <json array>: the check runs of one head commit, as the check-runs read gives them.
 dchecks() { jq -n --argjson r "$2" '{total_count: ($r | length), check_runs: $r}' > "$dd/checks/$1"; }
-# dcomments <pr> [body]: the comments of one PR; a PR given no body has none.
+# dcomments <pr> [body]: page 1 of the comments of one PR; a PR given no body has none.
 dcomments() {
-  if [ $# -lt 2 ]; then echo '[]'; else jq -cn --arg b "$2" '[{id: 1, body: $b}]'; fi > "$dd/comments/$1"
+  mkdir -p "$dd/comments/$1"
+  if [ $# -lt 2 ]; then echo '[]'; else jq -cn --arg b "$2" '[{id: 1, body: $b}]'; fi > "$dd/comments/$1/1"
 }
+# dcommentpage <pr> <page> <body>: a later page of the comments of one PR, holding one comment.
+dcommentpage() { jq -cn --arg b "$3" '[{id: 2, body: $b}]' > "$dd/comments/$1/$2"; }
 # drun <FAIL glob or "">: one run of dropped.sh on $dd. Sets out, code, and the reads and log files.
 drun() {
   rm -rf "$dd/pulls"; mkdir -p "$dd/pulls"
@@ -429,5 +436,10 @@ td red dropped-comment-remedy-is-ready-and-undo-not-a-workflow-run "" 1 1 1 1 "P
 dnew; dpr 1 "$SHA_A" "$OLD"; dpage; dpr 2 "$SHA_B" "$OLD"
 dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'; dchecks "$SHA_B" '[]'; dcomments 2
 td red dropped-flagged-pr-on-page-two-is-found-from-one-pulls-read "" 1 2 1 1 "POST repos/o/r/issues/2/comments"
+
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1 "an unrelated comment"
+dcommentpage 1 2 "<!-- dropped-start-alarm:$SHA_A -->
+already flagged"
+td green dropped-marker-on-page-two-of-comments-is-green-with-no-post "" 1 1 1 0 "!POST repos/"
 
 exit $bad
