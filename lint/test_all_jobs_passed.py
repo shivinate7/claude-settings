@@ -10,16 +10,22 @@ checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed.
 
 Stdlib only, no PyYAML. CHECKS_YML overrides the path (red runs on a scratch copy).
 Run with:  python3 lint/test_all_jobs_passed.py -v
+A child repo's workflow is checked with:  python3 lint/test_all_jobs_passed.py --workflow PATH
 """
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base, yaml_scalar  # noqa: E402  the one home of the scope condition and scalar parsers
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -332,6 +338,163 @@ class AllJobsPassedFixtures(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertIn(old, GOOD, label)  # a mutation that matches nothing proves nothing
                 self.assertTrue(all_problems(GOOD.replace(old, new, 1)), label)
+
+
+# A child repo's workflow: the generic rules, read through `--workflow PATH`. CHILD_GOOD passes them and each
+# CHILD_MUTATIONS entry breaks one. It has no scope job, no ci-done and no checkout step. Its all-jobs-passed `if` means
+# GOOD's, with the terms in another order, so the rule must read the meaning and not the text.
+CHILD_PIN = "3b5d2f1a9c8e7f60b4a2d1c0e9f8a7b6c5d4e3f2"
+CHILD_IF = "    if: ${{ !github.event.pull_request.draft && always() && github.event_name == 'pull_request' }}\n"
+NEEDED_JOB = "      - test-mac # the mac job\n"
+CHILD_GOOD = """name: checks
+on:
+  pull_request:
+  push:
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: "Lint # quoted, so its hash is text"
+        run: |
+          # a comment line in a block body is text, not a key
+          if: not a key
+          echo "Don't stop here # not a comment"
+  test-mac:
+    runs-on: macos-latest
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Mac's step
+        run: echo mac
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: lint
+    steps:
+      - run: echo publish
+  all-jobs-passed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # the cap
+    if: ${{ !github.event.pull_request.draft && always() && github.event_name == 'pull_request' }}
+    needs:
+      - lint
+      # - retired-job
+      - test-mac # the mac job
+    steps:
+      - uses: shivinate7/claude-settings/actions/all-jobs-passed@@PIN@ # v1.2.0
+        with:
+          needs: ${{ toJSON(needs) }} # every job above
+""".replace("@PIN@", CHILD_PIN)
+CHILD_CI_DONE = "  ci-done:\n    runs-on: ubuntu-latest\n    needs: all-jobs-passed\n    steps:\n      - run: echo done\n"
+CHILD_MUTATIONS = [
+    ("a needed job missing from needs", NEEDED_JOB, ""),
+    ("a push-only job in needs", NEEDED_JOB, NEEDED_JOB + "      - publish\n"),
+    ("an empty needs list", "    needs:\n      - lint\n      # - retired-job\n" + NEEDED_JOB, "    needs: []\n"),
+    ("the action pinned to @main", "all-jobs-passed@" + CHILD_PIN, "all-jobs-passed@main"),
+    ("the action pinned to @v1", "all-jobs-passed@" + CHILD_PIN, "all-jobs-passed@v1"),
+    ("the draft guard dropped from the if", CHILD_IF, "    if: ${{ always() && github.event_name == 'pull_request' }}\n"),
+    ("always() dropped from the if", "always() && ", ""),
+    ("the if also runs on push", CHILD_IF, "    if: ${{ !github.event.pull_request.draft && always() }}\n"),
+    ("the needs input is not toJSON(needs)", "needs: ${{ toJSON(needs) }}", "needs: ${{ toJSON(github.event) }}"),
+    ("no all-jobs-passed job", "  all-jobs-passed:\n", "  all-jobs-gone:\n"),
+]
+RUN_FOLDER = None  # set by setUpModule, so a `--workflow` run makes no folder of its own
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
+
+
+def full_size_child(count=40):
+    """CHILD_GOOD with `count` more jobs that run on a PR, each one in all-jobs-passed's needs after the comment line."""
+    jobs = "".join("  job-%02d:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo %02d\n" % (i, i) for i in range(count))
+    needs = "".join("      - job-%02d\n" % i for i in range(count))
+    text = CHILD_GOOD.replace("  all-jobs-passed:\n", jobs + "  all-jobs-passed:\n", 1)
+    return text.replace("      # - retired-job\n", "      # - retired-job\n" + needs, 1)
+
+
+def child_check(text):
+    """(exit code, output) of `--workflow` on one child workflow. The file is written into this run's folder."""
+    folder = tempfile.mkdtemp(prefix="allpassed-", dir=RUN_FOLDER)
+    path = os.path.join(folder, "checks.yml")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    done = subprocess.run([sys.executable, os.path.abspath(__file__), "--workflow", path], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+    return done.returncode, done.stdout + done.stderr
+
+
+class ChildWorkflow(unittest.TestCase):
+    """The child cases call the script's CLI and assert its exit code first. On a script without the flag the exit is 2
+    (usage), so each case fails there before it reaches an in-process check."""
+
+    def test_the_cs_rules_reject_a_valid_child(self):
+        # Green control, and the gap this lane closes: the cs rules flag a child that passes the generic rules.
+        self.assertTrue(all_problems(CHILD_GOOD), "the cs rules pass a valid child: the gap is closed or the cs rules changed")
+
+    def test_the_child_fixture_keeps_its_scanner_cases(self):
+        for case in ('"Lint # quoted', "# a comment line in a block body", "if: not a key", "Don't stop here", "Mac's step",
+                     "# the cap", "# v1.2.0", "# every job above"):
+            self.assertIn(case, CHILD_GOOD, case)
+
+    def test_the_harness_runs_this_script_from_its_path(self):
+        # Green control: the subprocess that the child cases start reaches this script. The selector runs one case that starts nothing.
+        done = subprocess.run([sys.executable, os.path.abspath(__file__), "-k", "test_the_passing_fixture_is_green"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(done.returncode, 0, "the script does not run from its path: " + done.stdout + done.stderr)
+
+    def test_a_valid_child_file_exits_0(self):
+        code, out = child_check(CHILD_GOOD)
+        self.assertEqual(code, 0, "a valid child: exit %d, want 0: %s" % (code, out))
+        self.assertEqual(child_problems(CHILD_GOOD), [], "a valid child has problems under child_problems")
+
+    def test_a_valid_child_with_a_ci_done_job_exits_0(self):
+        text = CHILD_GOOD + CHILD_CI_DONE
+        code, out = child_check(text)
+        self.assertEqual(code, 0, "a child with ci-done: exit %d, want 0: %s" % (code, out))
+        self.assertEqual(child_problems(text), [], "ci-done counted as a needed job or a defect")
+
+    def test_a_full_size_child_exits_0(self):
+        self.assertIn("      # - retired-job\n", CHILD_GOOD)  # the anchor the full-size fixture inserts its needs after
+        text = full_size_child()
+        self.assertEqual(text.count("      - job-"), 40, "the full-size fixture lost needs entries")
+        code, out = child_check(text)
+        self.assertEqual(code, 0, "a full-size child: exit %d, want 0: %s" % (code, out))
+        self.assertEqual(child_problems(text), [], "a full-size child has problems under child_problems")
+
+    def test_an_empty_file_exits_1_and_names_the_missing_job(self):
+        code, out = child_check("")
+        self.assertEqual(code, 1, "an empty file: exit %d, want 1: %s" % (code, out))
+        self.assertNotIn("Traceback", out, "an empty file crashes the reader")
+        self.assertIn("all-jobs-passed", out, "the output does not name the missing job: " + out)
+        self.assertTrue(child_problems(""), "an empty file has no problem under child_problems")
+
+    def test_each_child_defect_exits_1(self):
+        for label, old, new in CHILD_MUTATIONS:
+            with self.subTest(defect=label):
+                self.assertIn(old, CHILD_GOOD, label)  # a mutation that matches nothing proves nothing
+                text = CHILD_GOOD.replace(old, new, 1)
+                code, out = child_check(text)
+                self.assertEqual(code, 1, "%s: exit %d, want 1" % (label, code))
+                self.assertNotIn("Traceback", out, "%s: a crash also exits 1" % label)
+                self.assertTrue(child_problems(text), "%s: no problem under child_problems" % label)
+
+    def test_a_child_missing_a_needed_job_exits_1_and_prints_the_problem(self):
+        text = CHILD_GOOD.replace(NEEDED_JOB, "", 1)
+        code, out = child_check(text)
+        self.assertEqual(code, 1, "a missing needed job: exit %d, want 1: %s" % (code, out))
+        self.assertNotIn("Traceback", out, "a missing needed job crashes the reader")
+        problems = child_problems(text)
+        self.assertTrue(problems, "a missing needed job has no problem under child_problems")
+        for problem in problems:
+            self.assertIn(problem, out, "the problem is not printed: " + problem)
+        self.assertIn("test-mac", out, "the printed problem does not name test-mac: " + out)
 
 
 if __name__ == "__main__":
