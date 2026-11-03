@@ -119,6 +119,10 @@ MUTATIONS = [
      "      # - checks-macos\n    steps:\n      - uses: actions/checkout"),
     ("scope runs on a draft PR", "|| !github.event.pull_request.draft }}", "|| github.event.pull_request.draft }}"),
     ("no all-jobs-passed job", "  all-jobs-passed:\n", "  all-jobs-gone:\n"),
+    ("the action step sets continue-on-error", "      - uses: $/actions/all-jobs-passed\n",
+     "      - uses: $/actions/all-jobs-passed\n        continue-on-error: true\n"),
+    ("the action step sets its own if", "      - uses: $/actions/all-jobs-passed\n",
+     "      - uses: $/actions/all-jobs-passed\n        if: ${{ github.event_name == 'pull_request' }}\n"),
 ]
 
 
@@ -334,6 +338,8 @@ CHILD_FALSE_ALARMS = [
     ("needs as a multi-line flow list", NEEDS_BLOCK, "    needs: [\n      lint,\n      test-mac ]\n"),
     ("block-list needs items indented 8 spaces", NEEDS_BLOCK,
      "    needs:\n        - lint\n        # - retired-job\n        - test-mac # the mac job\n"),
+    ("block-list needs at the key's indent", NEEDS_BLOCK,
+     "    needs:\n    - lint\n    # - retired-job\n    - test-mac # the mac job\n"),
     ("a comment after steps:", "    steps:\n      - uses: shivinate7", "    steps: # note\n      - uses: shivinate7"),
     ("CRLF line endings", "\n", "\r\n"),
 ]
