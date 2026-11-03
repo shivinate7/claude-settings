@@ -255,5 +255,6 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. No
-    version is a no.
+    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. A step
+    that runs the shared action (`actions/zizmor@<sha>` or `$/actions/zizmor`) is also a yes: its
+    `run.sh` holds the pin. No version and no shared action is a no.

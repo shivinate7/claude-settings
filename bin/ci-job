@@ -150,7 +150,7 @@ def missing_in_log(log, start, script):
 
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed|pipx run [\w.-]+==[\w.]+)"
                       r"(?: [^|&;`<>]*)?")
-RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN"}  # absent from a runner step's env unless its env: maps them
+RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
