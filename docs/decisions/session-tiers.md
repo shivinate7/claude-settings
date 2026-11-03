@@ -50,6 +50,8 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Triage sets the URL once with `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`.
   - It never marks the repo rolled out (`one-layout-every-repo`, the layout record).
 - **Lane session.** A lane session runs its own lane as an orchestrator. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator. Owner, about 14:52, in short: sessions that spawn under a coordinator are their own orchestrators, reporting up to it.
+  - One topic (owner, 2026-11-03 16:36 and 16:40 CST). A lane holds one topic: the slug in its topic tag, `cs-topic` (How it works, tier tags). A lane may take several steps on that topic. A step is a small amount of work, and each step the lane takes gets its own `cs-step` tag.
+  - Unrelated work starts a new lane with `create_session`. The coordinator never sends a brief on another topic to an existing lane, idle or not.
 - **Lane session model** (owner, 16:15, waiting item 50, pick b). A lane session runs Opus. It keeps itself light, but it needs top reasoning on what it is asked.
   - The helpers it starts, such as a builder or a designer, keep today's model and effort table in `agent-model-cap` (owner, 17:50, waiting item 59, pick a). This holds until step-down cost and quality are measured (see the todo line). The Measured part of that record has their token cost. Their quality against one step down is unmeasured.
 - **Lane session effort** (owner, 2026-10-30 15:11 CDT). A lane session runs at medium effort. The coordinator starts it with the prompt `/effort medium` alone, then sends the brief. The pin and its guard live in `agent-model-cap`.
@@ -58,7 +60,10 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the integration batch,
   - the CI waits,
   - the merge tool runs,
-  - archiving finished lanes.
+  - archiving lanes. This is the batch runner's act. Once the integration pull request merges, it archives each lane whose topic has no queued step:
+    - Each lane pull request stays draft and closes as replaced (rule `git-integration-branch-merge`, how a batch merges). The cloud cannot close a pull request: auto mode refuses `gh pr close` as an external system write, even with the auto-mode entry "Owner PR Housekeeping" (decision `auto-mode-owner-acts`). A session on the owner's computer closes a replaced draft when the coordinator names it, under the standing grant "Acts the cloud refuses" in this repo's project `CLAUDE.md`.
+    - Rule `lane-closes-after-records` (its bullet below) checks each archive. A replaced draft need not be closed first: the rule passes an open draft whose head commit is already in the default branch.
+    - The coordinator's wake report lists each idle lane with its topic and whether its pull request merged. The batch runner archives each listed lane that passes the test above.
   Before it joins a lane, it runs `merge --lane-lint <pr>` on the lane head and refuses a red lane (`lanes-run-no-full-ci-job`, a lane runs no full CI job).
   The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
   - Ruling (owner, 2026-11-01 21:34 CST): "cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again". The coordinator never merges. A batch runner runs every merge, in claude-settings and in other repos, under the coordinator's standing merge grant, which stays the coordinator's (record `standing-merge-grant` holds the words, the repos and the limits). Several batch runners may each own a set of repos.
@@ -109,12 +114,25 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - The guard allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag. It reads the tags as `merge-role-proof` does. No record, no transcript or no env id is a denial.
   - Steer: a `cs-build` session hands the act to the owner or to an untagged session. A session with no record runs `get_session` alone in its own turn, then retries.
   - A `set_session_tags` call after the newest own record read voids the proof, so the trust-card calls are denied until `get_session` runs again. Only a call that names the own session id, or whose `session_ids` is not a list, voids it. A call on another session does not. Window that stays open: the read is judged by result order. A tag another session adds after the newest read is not seen. A `get_session` and a `set_session_tags` in the same message can leave the new tag unseen. Batch runners and lanes get their tags at `create_session`, so the window is unused today.
-- **Lane closes after records** (rule `lane-closes-after-records`, guard rule that denies the batch runner's close of a lane while the lane's records pull request is open). Risk kind: incident. The home repo's wheel lane was archived before its records pull request landed. Landed 2026-11-02.
-  - The guard reads the target's newest `get_session` record in the calling session's own transcript, with the reader `merge-role-proof` uses. A record with no `cs-build:lane` tag passes. A lane is denied while any open pull request of its `cs-repo` has a head ref equal to its `cs-step` slug (exact match, as the roadmap skill matches a step's open pull request). The open list is read through REST, every page, as the merge tool reads it. A lane record with no `cs-step` or no `cs-repo` tag, a failed read and a missing `gh` are denials.
-  - Steer: with no record of the target, run `get_session` on the target alone, then retry. With a pull request open, wait until it merges or is closed as replaced, then retry.
+- **Lane closes after records** (rule `lane-closes-after-records`, guard rule that denies the batch runner's close of a lane while the lane's records pull request is open). Risk kind: incident. The home repo's wheel lane was archived before its records pull request landed. Landed 2026-11-02. Second incident, 2026-11-03: the cloud could not close a replaced draft (see the batch runner bullet), so every archive of such a lane was refused. Changed 2026-11-03, landed at merge: the default-branch exemption below.
+  - The guard reads the target's newest `get_session` record in the calling session's own transcript, with the reader `merge-role-proof` uses. A record with no `cs-build:lane` tag passes. A lane is denied while any open pull request of its `cs-repo` has a head ref equal to its `cs-step` slug (exact match, as the roadmap skill matches a step's open pull request). Exemption: such a pull request does not block when its head commit is already in the default branch. The GitHub compare API reports the head as `behind` or `identical` to the default branch. Its commits landed through the integration pull request. The open list is read through REST, every page, as the merge tool reads it. A lane record with no `cs-step` or no `cs-repo` tag, a failed read and a missing `gh` are denials.
+  - Steer: with no record of the target, run `get_session` on the target alone, then retry. With an open pull request whose head is not in the default branch, wait until it merges or a session on the owner's computer closes it, then retry.
   - False alarm that does not occur: a lane pull request that is merged or closed as replaced is not on the open list, so the close passes. The match is exact, so lane `c1` is not refused by an open `c10`. Known miss, not a false alarm: a lane pull request on any other head, such as `<slug>-r2` or `claude/<slug>-x1`, is not seen.
   - Known gap: a held lane's open draft pull request blocks its close. The owner's override lifts the rule.
-  - Cost: one transcript read and one paginated `gh` REST read per lane archive; a non-lane archive makes none, inside the guard already running. No new process, file or timer. A deny adds one `guard.log` line. Test: three log-check cases in `hooks/test_guard.py`, family `lane-closes-after-records`: "a lane archive reads the open pull requests in one gh call", "a non-lane archive makes no gh call", "a lane archive writes no file in the session's folders".
+  - Known miss: a lane commit that was rebased gets a new hash, so its draft head is not in the default branch and still blocks. A session on the owner's computer closes that draft under the standing grant.
+  - Cost: one transcript read and one paginated `gh` REST read per lane archive, plus one compare `gh` read per open pull request that matches the slug; a non-lane archive makes none, inside the guard already running. No new process, file or timer. A deny adds one `guard.log` line. Test: three log-check cases in `hooks/test_guard.py`, family `lane-closes-after-records`: "a lane archive reads the open pull requests in one gh call", "a non-lane archive makes no gh call", "a lane archive writes no file in the session's folders". The default-branch exemption needs one more case in that family (to add).
+- **Lane one topic** (rule `lane-one-topic`, guard rule that denies a lane brief for another topic). Risk kind: incident. Incident: the owner's waiting-page ask `ask-mw19oqeg4w` (2026-11-03 16:36 CST) reported coordinators sending unrelated work to idle lanes instead of starting new ones. Its clarification (16:40 CST): a lane that had done icon work was given bugfixes hours later. Lane `tier-boundaries-enforced` also carried three items on three pull requests, #919, #1042 and #1065. Pull request #919 (head `tier-boundaries-enforced`) has been open since 2026-11-01.
+  - Form: each lane has one `cs-topic:<slug>` tag. Each brief's first line is `Lane brief: <step-slug>. Topic: <topic-slug>.`. The guard compares the two written slugs. It guesses nothing from prose.
+  - Verdict: a `mcp__claude-code-remote__send_message` is read only when its first non-blank line starts with `Lane brief:`. It is denied when the target's newest record (a `get_session` result, or the `create_session` call that made it) is tagged `cs-build:lane`, and either:
+    - the target has a `cs-topic` tag whose slug differs from the brief's `Topic:`, or the brief names no `Topic:`; or
+    - the target has no `cs-topic` tag (an older lane), and the brief's step slug equals none of its `cs-step` tags.
+  - A target with no record is denied, with the steer "run get_session on the target alone, then retry".
+  - Passes: a message without the marker, a brief whose `Topic:` matches the target's topic (a new step on the same topic), and a non-lane target. An override lifts it.
+  - Steer: start a new lane with `create_session`.
+  - Known miss: a brief without the marker. Also, the coordinator may pick a topic slug too broad for its work, and the guard cannot tell.
+  - Cost: one transcript read per `send_message` that carries the marker; none otherwise. No new process, file or timer.
+  - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
+  - Landed at merge.
 
 ## How it works
 
@@ -123,6 +141,7 @@ Mechanics that carry out the rulings above. They are not owner rulings.
 - **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries these two tags, beside any others such as `cs-step:<step>`.
   - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `arbiter`, `lane`.
   - `cs-repo:<owner>/<name>`, the repo it builds. It must be the full owner/name, never the short name. A roll-out lane also carries the starting repo's tag, beside its target's. Guard rule `lane-repo-tag` enforces it on a lane `create_session`.
+  - `cs-topic:<slug>`, the one topic a lane holds (rule `lane-one-topic`). The coordinator sets it on each lane at `create_session`. Each step the lane takes gets its own `cs-step:<slug>` tag, at `create_session`, or by `set_session_tags` when the step is added.
 - **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
   - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
   - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
@@ -137,6 +156,8 @@ Mechanics that carry out the rulings above. They are not owner rulings.
 - The batch runner leaves the coordinator with lane state only. The coordinator then talks with the owner (15:11). The coordinator never merges, so it stays focused on being coordinator (owner, 2026-11-01 21:34 CST).
 - A wrong-tier line saves context in the tier that should do the work. It also teaches the owner the setup (15:12).
 - No coded overlap guard. A false "done" fails at merge, because the merge tool reads GitHub's head and CI (15:01).
+- A lane on one topic does the work it was started for. Unrelated work sent to an idle lane is the failure the owner reported (owner, 2026-11-03 16:36 and 16:40 CST).
+- The guard compares two written slugs, the brief's `Topic:` and the `cs-topic` tag. It guesses nothing from prose (rule `lane-one-topic`).
 
 ## Open
 
