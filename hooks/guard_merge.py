@@ -3,14 +3,16 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
@@ -492,11 +494,11 @@ ROLE_REASON = (
 )
 
 
-def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+def merge_tool_args(segment: str):
+    """The arguments after the merge tool in a segment that runs it, else None. The one reader of which segment runs the merge tool.
 
     The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    `merge/merge.py` or `merge/launch.py`.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -511,8 +513,17 @@ def role_call_of(segment: str):
         if script is None or basename(script) not in ("merge.py", "launch.py") \
                 or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
             return None
-        rest = rest[rest.index(script) + 1:]
-    elif word != "merge":
+        return rest[rest.index(script) + 1:]
+    return rest if word == "merge" else None
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+
+    A role flag with no value gives ''.
+    """
+    rest = merge_tool_args(segment)
+    if rest is None:
         return None
     for at, arg in enumerate(rest):
         if arg == "--role":
@@ -582,6 +593,81 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         except Exception:
             pass
         return "merge role " + tier
+    return ""
+
+
+# ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
+REPO_REASON = (
+    "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
+    "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
+    "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
+    "Otherwise hand the pull request to a batch runner whose cs-repo tags name the repo "
+    "(list_sessions, tag cs-build:batch-runner). "
+    "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
+)
+
+
+class _FlagsUnreadable(Exception):
+    """The merge tool's own parser refused a command's arguments."""
+
+
+def _merge_flags(rest):
+    """The merge tool's parsed arguments for `rest`, read with the tool's own parser (merge.build_parser), so the guard and the tool
+    read -C, --repo-dir and --confirm alike. Raises _FlagsUnreadable when the tool is not loadable or the parser refuses."""
+    module = merge_module()
+    if module is None:
+        raise _FlagsUnreadable("the merge tool is not loadable")
+    parser = module.build_parser()
+
+    def refuse(message):
+        raise _FlagsUnreadable(message)
+    parser.error = refuse
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            return parser.parse_args(list(rest))
+        except SystemExit:  # --help and the like exit without calling error
+            raise _FlagsUnreadable("the parser exited")
+
+
+def _merge_target_repo(stripped: str, cwd: str, repo_dir):
+    """The `owner/name` of the checkout a merge acts in, or None: the -C value (relative to where the command runs), else that
+    directory, which is a leading `cd` or the working directory."""
+    import git_reads
+    where = command_root(stripped, cwd)
+    if repo_dir is not None:
+        if not repo_dir:
+            return None
+        where = _absolute(os.path.expanduser(repo_dir), where)
+    return git_reads.github_repo(where) if where and os.path.isdir(where) else None
+
+
+def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
+    """Return a short label when a cloud session's `merge --confirm` acts in a checkout whose repo no cs-repo tag of the own newest
+    get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
+    checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
+    --lane-lint merges nothing and is not judged. Outside the cloud nothing is judged. Cost: none for a call that is no merge confirm;
+    else one parse, one read of the origin and one transcript read."""
+    if not is_cloud():
+        return ""
+    for segment in split_segments(stripped):
+        rest = merge_tool_args(segment) if segment.strip() else None
+        if rest is None or "--confirm" not in rest:
+            continue
+        try:
+            flags = _merge_flags(rest)
+            if flags.lane_lint or not flags.confirm:
+                continue
+            repo = _merge_target_repo(stripped, cwd, flags.repo_dir)
+            from override import remote_session_id
+            from shared_names import repo_tag_names
+            own_id = remote_session_id()
+            if repo and own_id and transcript:
+                tags, tagged_after = _own_session_read(transcript, own_id)
+                if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
+                    continue
+        except Exception:
+            pass
+        return "merge --confirm"
     return ""
 
 
