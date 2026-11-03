@@ -70,7 +70,7 @@ def main(argv, gh=run_gh):
             print(f"protect: cannot read the protection of {a.branch}: {whole}", file=sys.stderr)
             return 1
         call = ["-X", "PUT", base]
-        body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": False,
+        body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": True,
                 "required_pull_request_reviews": None, "restrictions": None}
         what = f"protect {a.branch} with the required checks {', '.join(checks)}"
     else:
