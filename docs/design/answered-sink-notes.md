@@ -8,9 +8,12 @@ so the sizes come from the brief. Mid 800 is drawn because page.html has a break
 The mockup draws with page.html's own `<style>`. It adds no colour: each new rule reads a page token.
 Options are named by name, never by a letter: the waiting page stamps its own letters.
 
-Settled by the brief, not options here: answered is `isSaved(it)`, filed is `rcOf(it).filed`, rulings stay
-in their own section, the answered set is frozen at load like the seen set, a group sinks only when every
-member is answered, and the section reuses the seen fold and the `rulingsEl()` section shape.
+Settled by the brief, not options here:
+- Answered is `isSaved(it)`. Filed is `rcOf(it).filed`.
+- Rulings stay in their own section.
+- The answered set is frozen at load, like the seen set.
+- A group sinks only when every member is answered.
+- The section reuses the seen fold and the `rulingsEl()` section shape.
 
 ## 1. The section: name, place, open or folded
 
