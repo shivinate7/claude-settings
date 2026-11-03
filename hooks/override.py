@@ -26,7 +26,7 @@ rule's settings-write ask, and it reaches agents.
 An owner tier is the file <config dir>/state/tier/<session_id>.json, {"tier": "triage"}. It proves a local
 session's tier to guard rule roadmap-one-writer, which cannot read it from a cloud record (decision
 session-tiers). It is no override: it lifts no refusal itself, and the cloud path never reads it.
-  `tier triage` writes it. `tier off` removes it. Both mean that only as the whole prompt: any other text
+  `tier triage` writes it. `tier off` removes it. Each logs one guard.log line, as the Opus word does. Both mean that only as the whole prompt: any other text
          after `tier` grants nothing, and `tier off now` removes nothing. It has no end time: the owner
          types `tier off`. local_tier() reads it: "triage", or None for a file that is missing,
          unreadable or corrupt.
@@ -63,6 +63,7 @@ PROMPT = re.compile(
     r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
     re.I | re.S)
 TIER_PROMPT = re.compile(r"\s*tier(?=\s|$)(.*)", re.I | re.S)  # the tier word, then the rest
+TIER_RULE = "roadmap-one-writer"  # the rule whose proof a tier file is, for the log lines
 TIER_NAME = "triage"  # the one tier the owner can grant; roadmap-one-writer reads it
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
@@ -164,7 +165,7 @@ def _grant_opus(session_id, rest, at):
 
 def _grant_tier(session_id, rest):
     """`tier triage` or `tier off` as the whole prompt. Returns ("tier", "triage") for a new tier file,
-    ("off", None) when `tier off` removed one, else None."""
+    ("tier-off", None) when `tier off` removed one, else None."""
     path = _path(session_id, state="tier")
     words = rest.lower().split()
     if path is None or len(words) != 1 or words[0] not in (TIER_NAME, "off"):
@@ -174,8 +175,10 @@ def _grant_tier(session_id, rest):
             os.remove(path)
         except FileNotFoundError:
             return None
-        return "off", None
+        _log(session_id, "tier-off", "", TIER_RULE)
+        return "tier-off", None
     _write(path, {"tier": TIER_NAME})
+    _log(session_id, "tier-grant", TIER_NAME, TIER_RULE)
     return "tier", TIER_NAME
 
 
@@ -196,7 +199,7 @@ def local_tier(session_id):
 def grant(session_id, prompt, at):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    the _grant_tier result for the tier word, else None: the prompt is not a word."""
+    the _grant_tier result for the tier word (("tier-off", None) when `tier off` removed one), else None: the prompt is not a word."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)

@@ -100,6 +100,8 @@ def override_line(result):
     kind, until = result[:2]
     if kind == "off":
         return "Override: ended."
+    if kind == "tier-off":
+        return "Tier: ended."
     if kind == "tier":
         return "Tier: this session is %s for the record branch's one writer, until `tier off`." % until
     if kind == "opus-off":
