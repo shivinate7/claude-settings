@@ -89,6 +89,33 @@ function Get-JsonField([string]$Path, [string]$Field) {
     try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json).$Field } catch { return $null }
 }
 
+# A fresh clone and config dir for one settings.json case: install.ps1 copied in, CLAUDE.md, a shipped
+# settings.json holding {"v":1}, and landed-dirs.txt. Returns Tmp, Co (clone) and Cfg (config dir).
+function New-SettingsFixture {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("claude-settings-set-" + [guid]::NewGuid().ToString('N'))
+    $co  = Join-Path $tmp 'clone'
+    $cfg = Join-Path $tmp 'claude'
+    New-Item -ItemType Directory -Force -Path $co, $cfg | Out-Null
+    Copy-Item (Join-Path $Here 'install.ps1') (Join-Path $co 'install.ps1')
+    Set-Content -Path (Join-Path $co 'CLAUDE.md') -Value "# settings case content" -Encoding utf8
+    Set-Content -Path (Join-Path $co 'settings.json') -Value '{"v":1}' -Encoding utf8
+    Set-Content -Path (Join-Path $co 'landed-dirs.txt') -Value "skills" -Encoding utf8
+    return [pscustomobject]@{ Tmp = $tmp; Co = $co; Cfg = $cfg }
+}
+
+# Runs the clone's install.ps1 in copy mode, with CLAUDE_CONFIG_DIR set to $CfgEnv (the path as
+# given, so a caller can pass forward slashes). Returns the child's exit code.
+function Invoke-CopyModeInstall([string]$CloneDir, [string]$CfgEnv) {
+    $env:CLAUDE_CONFIG_DIR = $CfgEnv
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        & $PsHost -NoProfile -File (Join-Path $CloneDir 'install.ps1') *> $null
+        return $LASTEXITCODE
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+}
+
 # Every subprocess install below writes its PATH change to this throwaway key, never to the real
 # HKCU:\Environment. install.ps1 reads the key path from CLAUDE_SETTINGS_USER_ENV_KEY. The key
 # and the variable are removed at the end of the file.
@@ -141,7 +168,7 @@ try {
     $GotFile  = Join-Path $Cfg 'skills\sample-skill\SKILL.md'
     $GotValue = if (Test-Path $GotFile) { Get-Content -Raw $GotFile } else { $null }
 
-    Check "copymode1: run 2 leaves no .bak under the config dir" (-not $Baks)
+    Check "copymode1: run 2 leaves no .bak under the config dir (settings.json backups excluded)" (-not $Baks)
     Check "copymode1: sample-skill/SKILL.md lands after run 2" (Test-Path $GotFile)
     if ($GotValue) { Check "copymode1: sample-skill/SKILL.md holds run 2's content (v2)" ($GotValue.Trim() -eq 'v2') }
 } finally {
@@ -252,6 +279,75 @@ try {
 } finally {
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $Tmp6 -ErrorAction SilentlyContinue
+}
+
+# ---- copy-mode case: a forward-slash config dir still keeps the repeat run's backup (slash1) ------
+# install.ps1 prunes the older pid-form backups by comparing FullName with the backup path it built.
+# With CLAUDE_CONFIG_DIR given with forward slashes, the built path keeps the slashes and FullName
+# does not, so the backup the run has just made would be pruned. Same shape as settingsrepeat1.
+$F7 = New-SettingsFixture
+try {
+    $CfgEnv7 = $F7.Cfg -replace '\\', '/'
+    $rc7a = Invoke-CopyModeInstall $F7.Co $CfgEnv7
+    if ($rc7a -ne 0) { Write-Host "FAIL: slash1 run 1 exited $rc7a"; $Failed++ }
+    Set-Content -Path (Join-Path $F7.Co 'settings.json') -Value '{"v":2}' -Encoding utf8
+    $rc7b = Invoke-CopyModeInstall $F7.Co $CfgEnv7
+    if ($rc7b -ne 0) { Write-Host "FAIL: slash1 run 2 exited $rc7b"; $Failed++ }
+
+    $Baks7 = @(Find-ByName $F7.Cfg $PidBakRe)
+    $Bak7V = if ($Baks7.Count -eq 1) { Get-JsonField $Baks7[0].FullName 'v' } else { $null }
+    Check "slash1: run 2 with a forward-slash config dir leaves exactly one settings.json.bak.<time>.<pid>" ($Baks7.Count -eq 1)
+    Check "slash1: that backup holds run 1's content (v 1)" ($Bak7V -eq 1)
+    Check "slash1: settings.json holds run 2's content (v 2)" ((Get-JsonField (Join-Path $F7.Cfg 'settings.json') 'v') -eq 2)
+} finally {
+    Remove-Item -Recurse -Force $F7.Tmp -ErrorAction SilentlyContinue
+}
+
+# ---- copy-mode case: a first run with a settings.json.orig keeps it and backs up the file (origkeep1)
+# The person's settings.json.orig is already there, so the first run does not write .orig again. Its
+# plain settings.json goes to a pid-form backup, and the .orig is left as it is.
+$F8 = New-SettingsFixture
+try {
+    Set-Content -Path (Join-Path $F8.Cfg 'settings.json.orig') -Value '{"orig":1}' -Encoding utf8
+    Set-Content -Path (Join-Path $F8.Cfg 'settings.json') -Value '{"mine":2}' -Encoding utf8
+    $rc8 = Invoke-CopyModeInstall $F8.Co $F8.Cfg
+    if ($rc8 -ne 0) { Write-Host "FAIL: origkeep1 run 1 exited $rc8"; $Failed++ }
+
+    $Orig8 = Join-Path $F8.Cfg 'settings.json.orig'
+    $Baks8 = @(Find-ByName $F8.Cfg $PidBakRe)
+    $Bak8V = if ($Baks8.Count -eq 1) { Get-JsonField $Baks8[0].FullName 'mine' } else { $null }
+    Check "origkeep1: settings.json.orig still exists after run 1" (Test-Path -LiteralPath $Orig8)
+    Check "origkeep1: settings.json.orig still holds orig 1" ((Get-JsonField $Orig8 'orig') -eq 1)
+    Check "origkeep1: run 1 leaves exactly one settings.json.bak.<time>.<pid>" ($Baks8.Count -eq 1)
+    Check "origkeep1: that backup holds the plain settings.json (mine 2)" ($Bak8V -eq 2)
+} finally {
+    Remove-Item -Recurse -Force $F8.Tmp -ErrorAction SilentlyContinue
+}
+
+# ---- copy-mode case: a settings.json another process holds open is not replaced (lockfail1) -----
+# Run 1 succeeds. Then a handle with FileShare.None holds settings.json while run 2 runs. The backup
+# copy cannot read the file, so run 2 must stop before it replaces anything: a non-zero exit, the file
+# unchanged, and no new pid-form backup. The handle is closed before the file is read.
+$F9 = New-SettingsFixture
+$Lock9 = $null
+try {
+    $rc9a = Invoke-CopyModeInstall $F9.Co $F9.Cfg
+    if ($rc9a -ne 0) { Write-Host "FAIL: lockfail1 run 1 exited $rc9a"; $Failed++ }
+    $Live9 = Join-Path $F9.Cfg 'settings.json'
+    $Baks9Before = @(Find-ByName $F9.Cfg $PidBakRe).Count
+    Set-Content -Path (Join-Path $F9.Co 'settings.json') -Value '{"v":2}' -Encoding utf8
+
+    try { $Lock9 = [IO.File]::Open($Live9, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None) }
+    catch { Write-Host "FAIL: lockfail1 could not hold settings.json open: $($_.Exception.Message)"; $Failed++ }
+    $rc9b = Invoke-CopyModeInstall $F9.Co $F9.Cfg
+    if ($Lock9) { $Lock9.Close(); $Lock9 = $null }
+
+    Check "lockfail1: run 2 exits non-zero while settings.json is held open" ($rc9b -ne 0)
+    Check "lockfail1: settings.json still holds run 1's content (v 1)" ((Get-JsonField $Live9 'v') -eq 1)
+    Check "lockfail1: run 2 adds no settings.json.bak.<time>.<pid>" (@(Find-ByName $F9.Cfg $PidBakRe).Count -eq $Baks9Before)
+} finally {
+    if ($Lock9) { $Lock9.Close() }
+    Remove-Item -Recurse -Force $F9.Tmp -ErrorAction SilentlyContinue
 }
 
 # ---- copy-mode case: true first install backs up a person's own files once --------------------
