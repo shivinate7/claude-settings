@@ -28,6 +28,10 @@ MARKER="# claude-settings githooks/pre-commit"
 
 bad=0
 [ -f "$hook" ] || { bad=1; echo "FAIL hook absent: githooks/pre-commit/pre-commit"; }
+if [ -f "$hook" ]; then
+  head -n 5 "$hook" >"$run/shipped5"
+  grep -qxF -- "$MARKER" "$run/shipped5" || { bad=1; echo "FAIL shipped hook has no marker line in its first five lines: githooks/pre-commit/pre-commit"; }
+fi
 
 fresh() { # name: a repo of its own under the run folder, with one commit and no hook
   cd "$run" && mkdir "$1" && cd "$1" && git init -q -b main . && git commit -q --allow-empty -m init
@@ -175,10 +179,8 @@ lands "ok: empty commit, nothing staged" git commit -q --allow-empty -m c
 
 # installer
 fresh i-upgrade
-{ head -n 1 "$hook"; echo "$MARKER"; tail -n +2 "$hook"; } | sed '$ s/$/ # an earlier copy/' >.git/hooks/pre-commit
+sed '$ s/$/ # an earlier copy/' "$hook" >.git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
-head -n 5 .git/hooks/pre-commit >"$run/head5"
-must_run "the earlier copy has no marker line in its first five lines" grep -qxF -- "$MARKER" "$run/head5"
 if run_installer; then
   if [ "$got" -ne 0 ]; then bad=1; echo "FAIL installer does not replace an earlier copy of our hook (exit $got), wanted ok"
   elif ! cmp -s "$hook" .git/hooks/pre-commit || [ ! -x .git/hooks/pre-commit ]; then bad=1; echo "FAIL installer leaves the earlier copy of our hook in place"
