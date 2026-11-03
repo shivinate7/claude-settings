@@ -4,11 +4,11 @@
 
 Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner`, "Same turn to the page"). When the last reply's Input Needed item offers a pick with options, the stop passes only if the same turn holds a qualifying act. The act no longer depends on a clock or on words in the reply. Decision `questions-go-to-owner` and the spec `questions-reach-page` hold the full rule, including the lane route and the other questions the guard reads ("?" sentences).
 
-- Owner-facing session: the question box (`AskUserQuestion`, main session), a send to the page writer, or an ArtifactData set, update or batch under collection `items` to this repo's page. The box passes in every repo. The guard does not re-check that nothing runs: `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs.
-- Lane: a send to its parent or to the page writer. A box, a page link and a promise pass nothing.
+- Owner-facing session: a send to the page writer, or an ArtifactData set, update or batch under collection `items` to this repo's page. The question box (`AskUserQuestion`, main session) passes only in a repo with no waiting page (owner, 2026-11-01 23:31 CST, pick a). A send to `@parent` reaches no one here. The guard does not re-check that nothing runs: `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs.
+- Lane: a send to its parent (`@parent` counts only here) or to the page writer. A box, a page link and a promise pass nothing.
 - A page link in the reply and a 5-minute promise pass nothing now. Owner ruling 2026-10-28 15:10 CDT (chat first, then the page) added both; the 2026-11-01 23:31 CST ruling retired them, because a promise passed while nothing was sent.
 
-The refusal names the route. Owner-facing: "Pick guard: every question goes to the page writer in the same turn it is asked ... Send it now: send_message to the writer <id>, or read meta/page first. With nothing running, the question box also counts." Lane: "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent (send_message session_id @parent) now."
+The refusal names the route. Owner-facing: "Pick guard: every question goes to the page writer in the same turn it is asked ... Send it now: send_message to the writer <id>, or read meta/page first." Lane: "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent (send_message session_id @parent) now."
 
 Incident, named: on 2026-10-27 a degen session put "Two ways: A (my pick) ... B ..." under Input Needed as report text only. No control offered a click, and the owner found it late. This guard is the answer to that named incident. It also guards a likely risk: any session ends a report this way.
 
@@ -27,7 +27,7 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 Known limit: a drive name such as "the A: drive and the B: drive" reads as two lettered markers.
 
-Cost: no new process, file or timer. No file written. The extra reads come only on a turn that asks with no send to @parent or the page writer. In a session with a remote id, that turn adds the own-record import and one more transcript read. When no box counts either, it adds one layout read. A repo with no waiting page is not blocked: the guard prints a systemMessage, and a lane is never failed open.
+Cost: no new process, file or timer. No file written. The extra reads come only on a turn that asks with no send to the page writer. In a session with a remote id, that turn adds the own-record import and one more transcript read. When no send counts either, it adds one layout read. A repo with no waiting page is not blocked: the guard prints a systemMessage, and a lane is never failed open.
 
 Kind: process
 Home: lint/report_guard.py

@@ -266,11 +266,14 @@ def last_incoming_index(records, acks=None):
 
     `acks` maps a sender id to the send targets that reach it. A peer message from that sender, after a
     send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
-    sends before it stay in the turn."""
+    sends before it stay in the turn. The ack uses up that sender's targets, so only its first reply is an
+    ack; a later message from it starts a turn."""
     found, sent = None, set()
     for i, rec in enumerate(records):
         if is_incoming(rec):
-            if acks and acks.get(peer_sender(rec), set()) & sent:
+            reach = acks.get(peer_sender(rec), set()) if acks else set()
+            if reach & sent:
+                sent -= reach
                 continue
             found, sent = i, set()
         elif acks and not rec.get("isSidechain"):

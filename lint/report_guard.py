@@ -28,15 +28,15 @@ options, or a sentence ending in "?" outside quotes and backticks), it also bloc
 holds a qualifying act (`questions-reach-page`: every question goes to the page writer in the same
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
-starts no turn. Owner-facing session: the question box (main session), a send to
+starts no turn. Owner-facing session: a send to
 the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
-collection items to this repo's page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer. A promise or a page link passes nothing. A
+collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
+parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
-transcript this hook already holds. Only on a turn that asks with no send to @parent or the writer: the
+transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id; and
-one layout read when no box counts either (`decisions-reach-a-clickable-pick`).
+one layout read when no send counts either (`decisions-reach-a-clickable-pick`).
 A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
@@ -539,7 +539,7 @@ ASK_TOOL = "AskUserQuestion"
 
 OWNER_REFUSAL = (
     "Pick guard: every question goes to the page writer in the same turn it is asked (owner, 2026-11-01 "
-    "23:31 CST). Send it now: %s. With nothing running, the question box also counts."
+    "23:31 CST). Send it now: %s."
 )
 LANE_REFUSAL = (
     "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent "
@@ -791,24 +791,22 @@ def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
-    Owner-facing: the question box, a send to the page writer, or an items write to this repo's page.
-    Lane: a send to the parent or the page writer. A send to @parent passes in any session. Cost: nothing
-    past the text check when the turn has no question or sends to @parent or the writer. Else the own-record
-    import and a transcript read, only in a session with a remote id; and the layout read only when no box
-    or send counts."""
+    Owner-facing: a send to the page writer, or an items write to this repo's page. The question box counts
+    only in a repo with no waiting page. A send to @parent reaches no one there.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
+    import and a transcript read, only in a session with a remote id; and the layout read only when no send
+    counts."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
-    if any(t & PARENT_TARGETS for t in sends) or (writer and any(writer in t for t in sends)):
+    if writer and any(writer in t for t in sends):
         return "", ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id
     own_id = remote_session_id()
-    boxed = any(u.get("name") == ASK_TOOL for u in uses)
-    if boxed and not own_id:
-        return "", ""  # no remote id, so no own record: owner-facing, where the box counts
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
     if lane:
         if parent:
@@ -816,8 +814,6 @@ def question_problem(records, turn, text, hook):
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
-    if boxed:
-        return "", ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
@@ -827,7 +823,8 @@ def question_problem(records, turn, text, hook):
                 and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
             return "", ""
     if here is None:
-        return "", NO_PAGE_NOTE
+        # No page: the question is asked in the reply or the box, so the box counts.
+        return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     route = ("send_message to the writer " + writer if writer else
              "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
     return OWNER_REFUSAL % route, ""
