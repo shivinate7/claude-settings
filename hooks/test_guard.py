@@ -65,6 +65,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+import layout  # noqa: E402  the design folder is the layout's `design` kind, never a literal
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -1576,6 +1577,59 @@ def _build_branch():
         if archive.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: the branch-delete refusal's handed "
                      "push failed. stderr: %s" % archive.stderr.strip())
+    # DESIGN BRANCHES. The design folder is the layout's `design` kind, read through lint/layout.py,
+    # so these cases follow the folder the guard reads. Each design branch is pushed under its own
+    # name, so origin holds its tip: a branch whose remote copy is deleted loses its design file. A
+    # design branch that was never pushed is already refused as the only copy.
+    design = layout.layout()["kinds"]["design"]["path"].strip("/")
+
+    def design_branch(name, rel, text):
+        run_vcs(BRANCHREPO, "checkout", "-q", "-b", name)
+        write(os.path.join(BRANCHREPO, *rel.split("/")), text)
+        run_vcs(BRANCHREPO, "add", rel)
+        run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", name + "'s design file")
+        pushed = run_vcs(BRANCHREPO, "push", "-q", "origin", name)
+        if pushed.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: pushing %s failed. stderr: %s"
+                     % (name, pushed.stderr.strip()))
+        run_vcs(BRANCHREPO, "checkout", "-q", "main")
+
+    picked = design + "/picked.html"
+    landed = design + "/landed.html"
+    design_branch("design-only", picked, "picked, found nowhere on main\n")
+    design_branch("design-archived", design + "/archived.html", "archived by its own push\n")
+    archived = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                       "design-archived:refs/heads/archive/design-archived")
+    if archived.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-archived failed. "
+                 "stderr: %s" % archived.stderr.strip())
+    design_branch("design-landed", landed, "landed on main as a squash\n")
+    # design-stale: its archive takes the first draft, then the branch moves on to a second draft,
+    # so the archive does not hold the tip.
+    stale = design + "/stale.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-stale")
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "first draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's first draft")
+    stale_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                            "design-stale:refs/heads/archive/design-stale")
+    if stale_archive.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-stale's first draft "
+                 "failed. stderr: %s" % stale_archive.stderr.strip())
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "second draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's second draft")
+    stale_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-stale")
+    if stale_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-stale failed. stderr: %s"
+                 % stale_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-landed's file reaches main as its own commit with the same bytes, as a squash merge
+    # leaves it. Made after every design branch above, so none of them inherits it.
+    write(os.path.join(BRANCHREPO, *landed.split("/")), "landed on main as a squash\n")
+    run_vcs(BRANCHREPO, "add", landed)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "landed.html lands on main")
+
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
@@ -1598,6 +1652,33 @@ def _build_branch():
             "origin/main, so it does not prove the patch-id test. git cherry says: %r"
             % cherry_check.stdout
         )
+
+    # The design cases' scope, read with git before any case relies on it: origin's default branch
+    # holds the squash-landed file and lacks the picked one, and each design branch's origin copy is
+    # its tip, while the stale archive does not contain the tip.
+    def rev(name):
+        return run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", name).stdout.strip()
+
+    def listed(ref, rel):
+        return run_vcs(BRANCHREPO, "ls-tree", "--name-only", ref, "--", rel).stdout.strip()
+
+    if listed("origin/main", picked):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds the picked design file, "
+                 "so design-only would not be a design branch")
+    if not listed("origin/main", landed):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks the squash-landed design "
+                 "file, so design-landed would not be a design branch on the default branch")
+    for name in ("design-only", "design-archived", "design-landed", "design-stale"):
+        if not rev(name) or rev(name) != rev("origin/" + name):
+            sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s"
+                     % (name, name))
+    if rev("origin/archive/design-archived") != rev("design-archived"):
+        sys.exit("fixture setup failed in build_fixtures: the design-archived archive is not its tip")
+    stale_contains = run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-stale",
+                             "origin/archive/design-stale")
+    if stale_contains.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the design-stale archive holds the tip, so "
+                 "it would not be stale")
 
     # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
     # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
@@ -1639,6 +1720,14 @@ def _build_branch():
     write(os.path.join(BRANCHNOBASE, "o.txt"), "irrelevant to the unreadable case\n")
     run_vcs(BRANCHNOBASE, "add", "o.txt")
     run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-work's commit")
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
+    # A design file on a tip with no readable base: the design read cannot tell whether origin's
+    # default branch lacks it, so the rule asks. orphan-work above holds no design file and stays allowed.
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "-b", "orphan-design")
+    orphan = design + "/orphan.html"
+    write(os.path.join(BRANCHNOBASE, *orphan.split("/")), "design file, no readable base\n")
+    run_vcs(BRANCHNOBASE, "add", orphan)
+    run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-design's design file")
     run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
     base_check2 = run_vcs(BRANCHNOBASE, "rev-parse", "--verify", "-q", "refs/heads/main")
     if base_check2.returncode == 0:
@@ -3084,6 +3173,39 @@ sh("branch: local master's fallback still denies an only-copy branch",
 # denied and never silently passed over an unproven subject.
 sh("branch: no origin/HEAD, no local main, no local master: unreadable, allowed",
    VCS + " branch -D orphan-work", "allow", cwd=BRANCHNOBASE)
+
+# THE DESIGN FILE RULE. A branch whose tip holds a file under the design folder that origin's default
+# branch lacks is the only copy of that file, unless an archive of the tip sits on origin. Each design
+# branch is pushed under its own name, so origin/<branch> already holds the tip and today's
+# remote-contains test allows every delete below: the deny cases go red on today's code. ARCHIVE_RULE
+# is the rule id the guard prints for it, named once so a rename is one edit (the CHAIN_ASK pattern).
+# It is not "shared-tree": the old only-copy refusal cannot satisfy a case that names this id.
+ARCHIVE_RULE = "shared-trees-archive-then-delete"
+sh("branch: a pushed design file with no archive denies -D",
+   VCS + " branch -D design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("branch: the same pushed design file denies -d",
+   VCS + " branch -d design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("branch: a design file whose archive is an older commit denies -D",
+   VCS + " branch -D design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-stale",))
+sh("branch: a design file whose archive holds its tip allows -D",
+   VCS + " branch -D design-archived", "allow", cwd=BRANCHREPO)
+sh("branch: a design file that origin's default branch also holds allows -D",
+   VCS + " branch -D design-landed", "allow", cwd=BRANCHREPO)
+sh("branch: a design file with no readable default branch asks on -D",
+   VCS + " branch -D orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a pushed design file with no archive denies",
+   VCS + " push origin --delete design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("push: a delete refspec of a pushed design file with no archive denies",
+   VCS + " push origin :design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("push: a --delete of a design file whose archive holds its tip allows",
+   VCS + " push origin --delete design-archived", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a pushed branch with no design file allows",
+   VCS + " push origin --delete pushed-work", "allow", cwd=BRANCHREPO)
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
