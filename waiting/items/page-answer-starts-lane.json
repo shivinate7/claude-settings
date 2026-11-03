@@ -65,7 +65,7 @@
       "lose": "The account limit is outside the repo; the waiting-data copy in each repo already lets the owning session read answers from git; it does not remove the click."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "decisions session-tiers and lanes-start-as-agents; debt page-answer-second-click",
   "short": "page answer starts its lane",

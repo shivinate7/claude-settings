@@ -45,7 +45,7 @@
       "lose": "Each trusted session is limited to trusted devices for good, which cannot be undone."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "draft PR #1051, docs/plans/local-session-reach.md, section 4; roadmap step local-session-reach",
   "reply": "00:58 CST: you picked other picks but named none. Still open: say which you want: the board only; one trusted bridge session per computer session; the trust card on your word each time; or one test of the card in a throwaway session.",

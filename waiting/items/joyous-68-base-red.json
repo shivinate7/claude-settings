@@ -49,7 +49,7 @@
       "lose": "joyous main stays red, and every joyous merge stays blocked."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "joyous PR #68; joyous runs 41389182137 (build) and 40323547948 (readme links)",
   "reply": "Reopened 05:32 CST at the coordinator's request: the earlier pick b no longer fits, because the stale red is gone and only main's real build red blocks #68. Meanwhile the merging session holds #68.",

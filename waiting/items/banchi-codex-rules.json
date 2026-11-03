@@ -58,7 +58,7 @@
       "lose": "CLAUDE.md stays at 37.6 KB and misses its size target."
     }
   ],
-  "owner": "banchi lane (session_013NEJL3SffaYSu5tzgYVhAv)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "banchi PR #1005; banchi decision D135 (Codex reads the same rules as Claude)",
   "reply": "Why split: Claude Code loads CLAUDE.md whole into every session, so every line costs reading time in every banchi session. The shared size check warns past 200 lines, and banchi's is 37.6 KB. The split moves rules that matter only in one folder (app, server, pipeline, codes) into files Claude loads only when it reads that folder. Still open: pick a, b or c, or say not to split.",

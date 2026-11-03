@@ -39,7 +39,7 @@
       "lose": "Most batches go red today, so builders learn to ignore the check."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "step no-undo-lane-commits; decision silent-undo-check-design; inbox fb-1041-1",
   "short": "how wide the no-undo check reads",

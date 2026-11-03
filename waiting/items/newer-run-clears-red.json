@@ -54,7 +54,7 @@
       "widens": true
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "decision no-merge-onto-red-main; step red-main-same-sha-green; banchi runs 41436198024 (red nightly) and 41483723188 (green, by hand); lane handoff handoffs/red-main-same-sha-green.md on branch handoff/red-main-same-sha-green at 243f9b62",
   "short": "newer green run clears a red",

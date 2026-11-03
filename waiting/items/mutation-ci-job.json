@@ -53,7 +53,7 @@
       "lose": "Nothing watches test strength between hand runs."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "PRs #996, #1010, #1080 and banchi #1052; roadmap step test-practices-first-principles",
   "short": "test-strength CI job",

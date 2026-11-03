@@ -49,7 +49,7 @@
       "lose": "A browser break already on main can hide under the merge."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "q_max PRs #1011 and #1008; q_max browser runs 40740294267 and 41377928751",
   "reply": "01:01 CST: reopened. Your \"merge\" reached the merging session, but the tool still refuses on main's unknown browser state; pick how.",

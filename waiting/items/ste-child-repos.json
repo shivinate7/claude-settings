@@ -40,7 +40,7 @@
       "lose": "The child repos keep a rule the parent dropped."
     }
   ],
-  "owner": "coordinator (session_013NEJL2pASwRjgJDnsvnpNe)",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "decision plain-prose-lint; draft PR #1105; child repos q_max, banchi, degen, joyous",
   "short": "STE in child repos",
