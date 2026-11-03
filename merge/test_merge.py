@@ -186,6 +186,85 @@ class FakeHost:
         self.draft = False
         return True, ""
 
+MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
+
+class RepoHost(FakeHost):
+    """A FakeHost that main builds itself, the way `Host(cwd=...)` would: it keeps the keyword arguments it was built with."""
+    def __init__(self, root, other, **built_with):
+        super().__init__(root, other)
+        self.built_with = built_with
+
+    def refuse_pinned_mismatch(self):  # the real Host reads the pinned checks from GitHub; a fake has none
+        return None
+
+def second_checkout(t):
+    """Make a second checkout in folder t, the way copy_repos builds one: its own origin, a main whose stamp config names MAILAUDIT_CHECK, and
+    a feat with one commit of its own, so its head differs from the first checkout's. -> (co, other)."""
+    os.makedirs(t, exist_ok=True)
+    if not copy_repos(t):
+        build_repos(t)
+    co, other = os.path.join(t, "co"), os.path.join(t, "other")
+    cfg = json.loads(json.dumps(CONFIG))
+    cfg["merge"]["requiredChecks"] = [MAILAUDIT_CHECK]
+    put(os.path.join(co, ".github/stamp.json"), json.dumps(cfg))
+    sh(co, "git", "add", "-A"); sh(co, "git", "commit", "-q", "-m", "mailaudit: stamp config"); sh(co, "git", "push", "-q", "origin", "main")
+    sh(co, "git", "checkout", "-q", "feat")
+    put(os.path.join(co, "docs/decisions/mail.md"), record("pending", "mail"))
+    sh(co, "git", "add", "-A"); sh(co, "git", "commit", "-q", "-m", "mailaudit: feat"); sh(co, "git", "push", "-q", "origin", "feat")
+    return co, other
+
+class RepoDirRuns:
+    """Mixin for a case that runs merge.main from one checkout and names another with -C or --repo-dir. Needs self.co, self.b_co, self.b_other, self.now."""
+
+    def run_from(self, cwd, argv, host=None, lock=None, tree=None):
+        """-> (rc, output, seen). merge.main runs with the process in `cwd`. With no host, main builds one: a RepoHost on the second
+        checkout, kept in seen["hosts"] with the keyword arguments main gave it. default_lock(root) is recorded in seen["locks"] and gives a
+        GitLock at that root. open_worktree is recorded in seen["trees"]; with `tree` set, the run stops there (no lint runs)."""
+        seen = {"hosts": [], "locks": [], "trees": []}
+        real_tree = merge.open_worktree
+
+        def make_host(**kw):
+            seen["hosts"].append(RepoHost(self.b_co, self.b_other, **kw))
+            return seen["hosts"][-1]
+
+        def make_lock(root):
+            seen["locks"].append(root)
+            return merge.GitLock(root, now=lambda: self.now, pause=lambda s: None)
+
+        def open_tree(root, info, base):
+            seen["trees"].append(root)
+            if tree:
+                raise merge.Stop("stopped after the worktree was named")
+            return real_tree(root, info, base)
+
+        out, err = io.StringIO(), io.StringIO()
+        here = os.getcwd()
+        os.chdir(cwd)
+        try:
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(contextlib.redirect_stdout(out))
+                stack.enter_context(contextlib.redirect_stderr(err))
+                stack.enter_context(unittest.mock.patch.object(merge, "Host", make_host))
+                stack.enter_context(unittest.mock.patch.object(merge, "default_lock", make_lock))
+                stack.enter_context(unittest.mock.patch.object(merge, "open_worktree", open_tree))
+                try:
+                    rc = merge.main(list(argv), host=host, lock=lock)
+                except SystemExit as e:  # argparse's usage error: its code is the rc
+                    rc = e.code
+        finally:
+            os.chdir(here)
+        return rc, out.getvalue() + err.getvalue(), seen
+
+    def spellings(self, *tail):
+        """The named checkout in each spelling argparse takes, each followed by `tail`."""
+        b = self.b_co
+        return [["--repo-dir", b, *tail], ["--repo-dir=" + b, *tail], ["-C", b, *tail], ["-C" + b, *tail]]
+
+    def main_subjects(self, checkout):
+        """The subjects on origin/main of `checkout`, after a fetch."""
+        sh(checkout, "git", "fetch", "-q", "origin")
+        return sh(checkout, "git", "log", "origin/main", "--format=%s")
+
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
     times, so a caller trusts the count only when in_loop is False."""
@@ -10829,6 +10908,100 @@ class StandingGrantSwitch(CloudSession):
         self.assert_merged(rc, out, err)
 
 
+class RepoDirFlag(RepoDirRuns, Env):
+    """merge takes its checkout from -C PATH or --repo-dir PATH, not only from the process directory. Every read of the named checkout (its
+    root, the host's gh calls, the lock, the stamp config) and the merge itself land there. The process stands in self.co, a checkout with its
+    own origin; the named one is self.b_co, with its own origin and its own stamp config."""
+
+    def setUp(self):
+        super().setUp()
+        self.b_co, self.b_other = second_checkout(os.path.join(self.t, "mailaudit"))
+        self.plain = os.path.join(self.t, "plain")  # a folder that is no checkout
+        os.makedirs(self.plain)
+        self.assertNotEqual(self.co, self.b_co, "fixture: the process directory is the named checkout")
+        self.assertNotEqual(self.head("feat"), sh(self.b_co, "git", "ls-remote", "origin", "refs/heads/feat").split("\t")[0],
+                            "fixture: both checkouts' feat heads are the same")
+
+    def test_without_the_flag_the_process_directory_is_the_checkout_read(self):
+        """A control: with no flag, the process directory names the checkout, and the lock and the stamp config come from it."""
+        rc, out, seen = self.run_from(self.b_co, ["7"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(seen["locks"], [self.b_co], "without the flag, the lock is not at the process directory's checkout")
+        self.assertEqual(seen["hosts"][0].required, [MAILAUDIT_CHECK], "without the flag, the stamp config is not the process directory's")
+
+    def test_the_named_checkout_is_the_one_the_host_the_lock_and_the_config_read(self):
+        for argv in self.spellings("7"):
+            with self.subTest(spelling=argv[0]):
+                rc, out, seen = self.run_from(self.co, argv)
+                self.assertTrue(seen["hosts"], "merge built no host, so it did not read the named checkout (rc %r): %s" % (rc, out))
+                cwd = seen["hosts"][0].built_with.get("cwd")
+                self.assertEqual(cwd, self.b_co, "the host's gh reads ran in %r, not the named checkout" % (cwd,))
+                self.assertEqual(seen["locks"], [self.b_co], "the merge lock was taken in %r, not the named checkout" % (seen["locks"],))
+                self.assertEqual(seen["hosts"][0].required, [MAILAUDIT_CHECK],
+                                 "the stamp config was read from another checkout: %r" % (seen["hosts"][0].required,))
+
+    def assert_merged_in_named(self, rc, out):
+        self.assertEqual(rc, 0, "the confirm did not merge: " + out)
+        self.assertIn("merge #7", self.main_subjects(self.b_co), "the merge did not land in the named checkout")
+        self.assertNotIn("merge #7", self.main_subjects(self.co), "the merge landed in the process directory's checkout")
+
+    def test_a_confirm_with_repo_dir_merges_in_the_named_checkout(self):
+        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
+
+    def test_a_confirm_with_repo_dir_equals_merges_in_the_named_checkout(self):
+        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
+
+    def test_a_confirm_with_c_merges_in_the_named_checkout(self):
+        self.assert_merged_in_named(*self.run_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+
+    def test_a_path_that_is_no_checkout_stops_before_any_read(self):
+        probe = subprocess.run(["git", "-C", self.plain, "rev-parse", "--show-toplevel"], capture_output=True)
+        self.assertNotEqual(probe.returncode, 0, "fixture: the plain folder sits inside a checkout")
+        rc, out, seen = self.run_from(self.co, ["-C", self.plain, "7"])
+        self.assertEqual(rc, 1, "merge did not stop at a path that is no checkout (rc %r): %s" % (rc, out))
+        self.assertIn("not in a git checkout", out, "merge stopped without naming the checkout problem: " + out)
+        self.assertEqual(seen["hosts"], [], "merge read a host before it checked the named path")
+        self.assertEqual(seen["locks"], [], "merge took a lock before it checked the named path")
+
+    def test_a_repeated_flag_takes_its_last_value(self):
+        rc, out, seen = self.run_from(self.co, ["--repo-dir", self.co, "--repo-dir", self.b_co, "7"])
+        self.assertTrue(seen["locks"], "merge stopped before any read: " + out)
+        self.assertEqual(seen["locks"], [self.b_co], "merge read the first -C value, not the last")
+
+    def test_an_abbreviation_of_the_flag_is_a_parse_error(self):
+        """A control: `--repo` is refused on the old parser and on the new one. The prefix cases below are the red ones."""
+        rc, out, seen = self.run_from(self.co, ["--repo", self.b_co, "7"])
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(seen["hosts"], [], "merge read a host after a usage error")
+
+    def test_a_prefix_of_an_existing_flag_is_a_parse_error(self):
+        """argparse takes a prefix of a flag as that flag unless allow_abbrev is off: `--sess` is --session, `--confir` is --confirm."""
+        for argv in (["--sess", "lane", "7"], ["--confir", "7"]):
+            with self.subTest(argv=argv):
+                rc, out, seen = self.run_from(self.co, argv)
+                self.assertEqual(rc, 2, "a prefix of a flag was taken as the flag, not refused: " + out)
+                self.assertEqual(seen["hosts"], [], "a prefix of a flag read a pull request")
+
+    def test_the_gh_lock_runs_its_calls_in_the_checkout_it_is_given(self):
+        """Outside the cloud the lock is GitHub's. Its `gh api` calls name the repo by {owner}/{repo}, which gh reads from the directory it
+        runs in, so default_lock(root) must run them in root, or the lock lands in another repo."""
+        lock = merge.default_lock(self.b_co)
+        self.assertIsInstance(lock, merge.GhLock, "fixture: outside the cloud the lock is GitHub's")
+        lock.pause = lambda s: None  # a retry is a no-op: a case never sleeps
+        ran = []
+        real_sh = merge.sh
+
+        def record(args, *rest, **kwargs):
+            if args and args[0] == "gh":
+                ran.append(kwargs.get("cwd"))
+                return 1, '{"message": "Not Found"}'
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", record):
+            lock.read("main")
+        self.assertTrue(ran, "the lock read made no gh call")
+        self.assertEqual(ran, [self.b_co] * len(ran), "the lock's gh calls ran in %r, not the checkout it was given" % (ran,))
+
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # The one shim form, plain and with trailing arguments. Bare `merge` is not on a cloud session's PATH, and `bin/merge` would allow any
@@ -10907,6 +11080,12 @@ class ShellScan(unittest.TestCase):
         self.assertIn("ln -sfn a b", local)
         self.assertNotIn(self.NAME, head + local)
 
+def bash_rule_matches(rule, command):
+    """True when a `Bash(...)` allow rule's pattern matches the whole command. Each `*` matches any text: modelled here as `.*`, which is
+    a model of the rule and not the harness's own matcher."""
+    pattern = rule[len("Bash("):-1]
+    return re.fullmatch(".*".join(re.escape(part) for part in pattern.split("*")), command) is not None
+
 class CloudAllow(unittest.TestCase):
     """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
     (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
@@ -10914,6 +11093,15 @@ class CloudAllow(unittest.TestCase):
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
+
+    def test_a_confirm_rule_matches_the_repo_dir_and_c_spellings(self):
+        """A `merge --repo-dir PATH <pr> --confirm` and a `merge -C PATH <pr> --confirm` are the same confirm shape as a bare one: the rule's `*`
+        takes the flag and its value. The repo check is the guard's, not this file's."""
+        for command in ("~/.claude/bin/merge --repo-dir /home/user/mailaudit 185 --confirm",
+                        "~/.claude/bin/merge -C /home/user/mailaudit 185 --confirm"):
+            with self.subTest(command=command):
+                self.assertTrue(any(bash_rule_matches(rule, command) for rule in self.allow() if "--confirm" in rule),
+                                f"no confirm rule allows {command!r}")
 
     # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
     def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
