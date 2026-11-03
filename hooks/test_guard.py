@@ -1604,6 +1604,13 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: archiving design-archived failed. "
                  "stderr: %s" % archived.stderr.strip())
     design_branch("design-landed", landed, "landed on main as a squash\n")
+    # design-local is never pushed: no ref on origin holds its tip, so it is the only copy.
+    local = design + "/local.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-local")
+    write(os.path.join(BRANCHREPO, *local.split("/")), "local only, never pushed\n")
+    run_vcs(BRANCHREPO, "add", local)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-local's design file")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
     # design-stale: its archive takes the first draft, then the branch moves on to a second draft,
     # so the archive does not hold the tip.
     stale = design + "/stale.html"
@@ -1679,6 +1686,10 @@ def _build_branch():
     if stale_contains.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: the design-stale archive holds the tip, so "
                  "it would not be stale")
+
+    if rev("origin/design-local"):
+        sys.exit("fixture setup failed in build_fixtures: origin holds design-local, so it would not "
+                 "be the only copy")
 
     # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
     # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
@@ -3174,38 +3185,48 @@ sh("branch: local master's fallback still denies an only-copy branch",
 sh("branch: no origin/HEAD, no local main, no local master: unreadable, allowed",
    VCS + " branch -D orphan-work", "allow", cwd=BRANCHNOBASE)
 
-# THE DESIGN FILE RULE. A branch whose tip holds a file under the design folder that origin's default
-# branch lacks is the only copy of that file, unless an archive of the tip sits on origin. Each design
-# branch is pushed under its own name, so origin/<branch> already holds the tip and today's
-# remote-contains test allows every delete below: the deny cases go red on today's code. ARCHIVE_RULE
-# is the rule id the guard prints for it, named once so a rename is one edit (the CHAIN_ASK pattern).
-# It is not "shared-tree": the old only-copy refusal cannot satisfy a case that names this id.
+# THE DESIGN FILE RULE. A design file on a branch's tip is the only copy of that file when no ref on
+# origin holds the tip. Two acts split the rule:
+#   a local delete (`branch -d/-D`) loses nothing when origin/<branch>, or any archive ref on origin,
+#   holds the tip: the copy stays on origin.
+#   a remote delete (`push --delete`, `push :<branch>`) removes the origin copy, so only
+#   archive/<branch> holding the tip keeps the file.
+# ARCHIVE_RULE is the rule id the guard prints for the remote-delete refusal and for the ask on an
+# unreadable default branch, named once so a rename is one edit (the CHAIN_ASK pattern). A local-only
+# design branch is refused by the old only-copy refusal, rule "shared-tree", which stays right.
 ARCHIVE_RULE = "shared-trees-archive-then-delete"
-sh("branch: a pushed design file with no archive denies -D",
-   VCS + " branch -D design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
-   carries="archive/", lacks=("design-only",))
-sh("branch: the same pushed design file denies -d",
-   VCS + " branch -d design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
-   carries="archive/", lacks=("design-only",))
-sh("branch: a design file whose archive is an older commit denies -D",
-   VCS + " branch -D design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
-   carries="archive/", lacks=("design-stale",))
+sh("branch: a design file origin holds at its tip allows -D",
+   VCS + " branch -D design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -d",
+   VCS + " branch -d design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -D even when its archive is older",
+   VCS + " branch -D design-stale", "allow", cwd=BRANCHREPO)
+sh("branch: a design file no origin ref holds is the only copy, and -D denies",
+   VCS + " branch -D design-local", "deny", "shared-tree", cwd=BRANCHREPO,
+   lacks=("design-local",))
 sh("branch: a design file whose archive holds its tip allows -D",
    VCS + " branch -D design-archived", "allow", cwd=BRANCHREPO)
 sh("branch: a design file that origin's default branch also holds allows -D",
    VCS + " branch -D design-landed", "allow", cwd=BRANCHREPO)
 sh("branch: a design file with no readable default branch asks on -D",
    VCS + " branch -D orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
-sh("push: a --delete of a pushed design file with no archive denies",
+sh("push: a --delete of a design file with no archive holding its tip denies",
    VCS + " push origin --delete design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
    carries="archive/", lacks=("design-only",))
-sh("push: a delete refspec of a pushed design file with no archive denies",
+sh("push: a delete refspec of a design file with no archive holding its tip denies",
    VCS + " push origin :design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
    carries="archive/", lacks=("design-only",))
+sh("push: a --delete of a design file whose archive is an older commit denies",
+   VCS + " push origin --delete design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-stale",))
 sh("push: a --delete of a design file whose archive holds its tip allows",
    VCS + " push origin --delete design-archived", "allow", cwd=BRANCHREPO)
 sh("push: a --delete of a pushed branch with no design file allows",
    VCS + " push origin --delete pushed-work", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file with no readable default branch asks",
+   VCS + " push origin --delete orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a branch with no design file and no readable default branch allows",
+   VCS + " push origin --delete orphan-work", "allow", cwd=BRANCHNOBASE)
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
