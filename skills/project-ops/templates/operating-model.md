@@ -58,18 +58,18 @@ If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
-Count the use of triage and the batch runner. Never wait for the owner to notice.
+Read the use of each standing session: triage, the batch runner and the arbiter. Never wait for the owner to notice.
 
 The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads triage's and the batch runner's use from `get_session`:
+- At each wake, the coordinator reads each standing session's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
-- The limits are `<triage limit>` and `<batch runner limit>`.
-- Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
-  re-asked question, a reply that contradicts the roadmap, or a missed ruling.
+- A standing session runs until autocompact. The coordinator rotates one only when it goes stale
+  or breaks: at once after a slip. A slip is a re-asked question, a reply that contradicts the
+  roadmap, or a missed ruling (claude-settings decision `session-tiers`, owner, 2026-11-01 17:56 CST).
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
@@ -87,7 +87,6 @@ parent, or miss a message while busy.
      before any other act. It reads each page's comments since the time in the hand-off file.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
      that reads the answer, so an item left with the old `owner` gets no reader.
-- The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
 

@@ -11,5 +11,3 @@ the same turn that a session rotates. A session reads it right before it message
   "<session title>", <session id>, since <date and time>.
 
 Lane sessions are not on the roster. The coordinator holds lane state.
-
-Exemptions: <none, or the session, the limit, the condition and the owner's date>.

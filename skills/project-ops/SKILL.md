@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation by usage tally, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation of standing sessions, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -14,7 +14,7 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
 
 - **Session tiers.** The coordinator, triage, the batch runner and lane sessions.
   `templates/operating-model.md` says what each tier owns, and how triage and the batch runner
-  rotate by a usage tally. The coordinator compacts in place and has no successor.
+  rotate. The coordinator compacts in place and has no successor.
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
