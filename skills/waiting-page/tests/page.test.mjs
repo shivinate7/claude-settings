@@ -42,7 +42,7 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
 // meta docs, which the status part must never read. window.__reads lists every read as
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {} }) {
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra = {} }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -57,7 +57,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
   window.__answers = () => data.answers;
   // Pushes one item through the items listener, as a session adding an item after the page loaded would.
   window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
-  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
+  // holdReceipts: the receipts' first snapshot waits for window.__releaseReceipts(), so a case can act before receipts arrive.
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
@@ -98,7 +99,7 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -112,7 +113,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -2137,6 +2138,59 @@ test("unfold in the Answered section shows what the fold holds, and a card with 
   assert.equal(await c.locator(".rnote").isVisible(), true, "unfold did not show the note");
   assert.equal(await c.locator(`#rp-${withNote.id}`).isVisible(), true, "unfold did not show the reply");
   assert.equal(await page.locator(`#tier-answered #item-${bare.id} button.unfold`).count(), 0, "a card with nothing to hide has an unfold control");
+});
+
+// ---------------------------------------------------------------- answered sink, review round 2
+
+test("Answered section: a sunk card with a restored draft opens its fold, or shows it locked open, never a dead button", async (t) => {
+  const it = mk("draft-sunk", 1, { added: at(5) }), other = mk("draft-other", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }), storage: { "waiting.draft": JSON.stringify({ [it.id]: { choice: "b" } }) } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const c = page.locator(`#tier-answered #item-${it.id}`), fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has a note but no fold control`);
+  // A locked fold is open by rule; an unlocked one must open on the press.
+  if ((await fold.getAttribute("aria-disabled")) !== "true") await fold.click();
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `the fold of No. ${it.n} stays shut with a draft on it: a dead button`);
+  assert.equal(await c.locator(".rnote").isVisible(), true, `the fold of No. ${it.n} reads open but its note is hidden`);
+});
+
+test("Answered section: with the section folded by its head, a rail chip of a sunk item opens the section and brings the card into view", async (t) => {
+  const it = mk("chip-sunk", 1, { added: at(5) });
+  const filler = Array.from({ length: 6 }, (_, i) => mk("chip-open-" + i, 10 + i, { added: NEW_ADDED, context: LONG }));
+  const page = await open(t, { items: [...filler, it], answers: answerOf(it), viewport: { width: 1280, height: 400 } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const head = page.locator("#b-answered");
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the head did not fold the section, so the chip case cannot start");
+  await page.locator(`#c-${it.id}`).click();
+  assert.equal(await head.getAttribute("aria-expanded"), "true", `the rail chip for No. ${it.n} did not open the folded Answered section`);
+  // A smooth scroll takes a moment; the wait ends when the card is in view, and the check below reads where it landed.
+  await page.waitForFunction((id) => { const r = document.getElementById("item-" + id).getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }, it.id).catch(() => {});
+  const top = await page.evaluate((id) => document.getElementById("item-" + id).getBoundingClientRect().top, it.id);
+  assert.ok(top >= 0 && top < 400, `the card for No. ${it.n} sits ${Math.round(top)}px from the top, outside the 400px view`);
+});
+
+test("Answered section: a Send made before the first receipts snapshot keeps its card in its tier when the receipts arrive", async (t) => {
+  const it = mk("window-send", 1, { added: at(5) }), other = mk("window-other", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], holdReceipts: true }); if (!page) return;
+  await choose(page, it, "a");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  await card(page, it).locator(".receipt").waitFor();
+  await page.evaluate(() => window.__releaseReceipts());
+  await page.waitForFunction(() => feed.receipts === true);
+  assert.equal(await sectionOf(page, it), "tier-calm", `No. ${it.n}, answered before the receipts came, left its tier when they arrived`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the open page re-sorted when the receipts arrived");
+});
+
+test("Answered section: a fully answered group's bundle head reads Answered together, not Answer these together", async (t) => {
+  const all = [mk("bundle-a", 1, { group: "all", added: at(5) }), mk("bundle-b", 2, { group: "all", added: at(6) })];
+  const page = await open(t, { items: [...all, mk("bundle-open", 3, { added: NEW_ADDED })], answers: { ...answerOf(all[0]), ...answerOf(all[1]) } }); if (!page) return;
+  assert.equal(await sectionOf(page, all[0]), "tier-answered", `No. ${all[0].n} is not in the Answered section`);
+  const head = page.locator("#tier-answered #group-all > header > b");
+  await need(head, "the fully answered group has no bundle head in the Answered section");
+  const words = (await head.textContent()).trim();
+  assert.equal(words, "Answered together", `the bundle head reads "${words}"`);
 });
 
 // ---------------------------------------------------------------- round 2 looks
