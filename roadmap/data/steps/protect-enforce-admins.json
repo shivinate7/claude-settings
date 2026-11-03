@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 489,
  "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, table 'claude-settings: homes'): skills/project-ops/scripts/protect.py:72-74 sets enforce_admins false on new repos; decision main-branch-protection (:23, :41) requires true.",
- "note": "First read git log -S for a stated reason; no record gives one. If none, set true. Done: a test on the PUT body is red on old code; main-branch-protection names the form. Changes a check's setting: net-value test after round 3. Lane session_013NEJL149GsJbveafCkMLjo, started by the coordinator Nov 3. Ready.",
- "updatedAt": "2026-11-03T21:50:00Z"
+ "note": "First read git log -S for a stated reason; no record gives one. If none, set true. Done: a test on the PUT body is red on old code; main-branch-protection names the form. Changes a check's setting: net-value test after round 3. Lane session_013NEJL149GsJbveafCkMLjo, started by the coordinator Nov 3. Ready. With the batch runner: PR #1113, head 87fcc5ad. Owner question on --check count: page item 202.",
+ "updatedAt": "2026-11-03T22:18:00Z"
 }

@@ -1,0 +1,9 @@
+{
+ "title": "The merge tool takes a repo-dir flag, so a cloud runner can merge a second repo",
+ "phase": "now",
+ "status": "doing",
+ "order": 496,
+ "why": "Coordinator, Nov 3 16:15 CST: a cloud batch runner holds one checkout and cannot run the merge tool against a child repo.",
+ "note": "Add a repo-dir flag to merge/merge.py. Changes the merge tool: net-value test after round 3. Lane session_013NEJL19PYKPFXLekGuTmnX, started by the coordinator Nov 3.",
+ "updatedAt": "2026-11-03T22:18:00Z"
+}
