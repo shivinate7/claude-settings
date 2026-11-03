@@ -4,7 +4,7 @@
 The cs rules (all_problems) check .github/workflows/checks.yml. The child rules (child_problems) check a child
 repo's workflow that pins the shared action. They need no scope job, no ci-done and no checkout step.
 
-A child job's own if decides whether it gates a PR, so a push-only job stays out of needs.
+A child job's own if decides whether it blocks a PR, so a push-only job stays out of needs.
 
 Stdlib only, no PyYAML. Check a child workflow with:
 python3 lint/all_jobs_passed_rules.py --workflow PATH
