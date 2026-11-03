@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 512,
  "why": "Repo check Nov 3 17:02 CST: page-ask-box is done on main (PR #1032), but branch design/page-ask-box@dc1b7e62 holds 2 commits not on main (docs/design/page-ask-box.html and page-ask-box-notes.md: a mid frame, Hide A, gain and loss notes).",
- "note": "Merge them as the mockup of record, or archive the branch (archive/design/page-ask-box). Coordinator asked for this note, Nov 3 16:57 CST.",
- "updatedAt": "2026-11-03T23:10:00Z"
+ "note": "Merge them as the mockup of record, or archive the branch (archive/design/page-ask-box). Coordinator asked for this note, Nov 3 16:57 CST. Waits for a lane on the page-ask-box topic (coordinator, Nov 3 17:00 CST).",
+ "updatedAt": "2026-11-03T23:14:00Z"
 }

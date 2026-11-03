@@ -1,9 +1,9 @@
 {
  "title": "Each shipped platform names where it is tested",
- "phase": "cleanup",
- "status": "todo",
+ "phase": "now",
+ "status": "doing",
  "order": 103.3375005,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 5 of 12, ranked by harm avoided.",
- "note": "Repos: degen, mailaudit, banchi, home, ios-adblock. Each shipped platform gets a CI job or a named local check with a recorded green run.\nRuling: decision swift-tests-at-milestones (owner, from step c95's ruling, decision ci-cut-in-steps). Applications, process-only (coordinator, Nov 1 18:44 and 22:06 CST, not the owner's words): degen's and mailaudit's full Swift suite runs at milestones on a GitHub Mac machine with a recorded result, and a red run blocks the next merge; job milestone-proof stays outside all-jobs-passed until its first green hosted run, then joins it. Page item 133 was withdrawn as already ruled. home waits on the owner's go. Ready. Port: yes. Gate (Nov 1 22:06 CST, coordinator): mailaudit's waiting item 37 (tab-bar skip: text only, or any element) gates most native audit reds in the milestone run; the Packages audit stays red until the owner rules it on mailaudit's page. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST).",
- "updatedAt": "2026-11-03T23:10:00Z"
+ "note": "Repos: degen, mailaudit, banchi, home, ios-adblock. Each shipped platform gets a CI job or a named local check with a recorded green run.\nRuling: decision swift-tests-at-milestones (owner, from step c95's ruling, decision ci-cut-in-steps). Applications, process-only (coordinator, Nov 1 18:44 and 22:06 CST, not the owner's words): degen's and mailaudit's full Swift suite runs at milestones on a GitHub Mac machine with a recorded result, and a red run blocks the next merge; job milestone-proof stays outside all-jobs-passed until its first green hosted run, then joins it. Page item 133 was withdrawn as already ruled. home waits on the owner's go. Ready. Port: yes. Gate (Nov 1 22:06 CST, coordinator): mailaudit's waiting item 37 (tab-bar skip: text only, or any element) gates most native audit reds in the milestone run; the Packages audit stays red until the owner rules it on mailaudit's page. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST). Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: degen session_013NEJKyve3QGybsUbGmN134; mailaudit session_013NEJL1FBY32ZG9cZqThvix; banchi session_013NEJKzhkRnoo46QQHr3AaZ; ios-adblock session_013NEJL485VByFJqzsMRBr5M. home waits on the owner's go.",
+ "updatedAt": "2026-11-03T23:14:00Z"
 }
