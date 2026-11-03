@@ -1,9 +1,9 @@
 {
  "title": "Each repo's waiting-page URL points at a live page",
- "phase": "cleanup",
- "status": "todo",
+ "phase": "now",
+ "status": "doing",
  "order": 103.21039,
  "why": "Nov 1 22:15 CST (coordinator): the mailaudit page URL that layout.py gives (https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13) reads \"not found\" from two sessions, and the owner's artifact list holds no mailaudit page. Mailaudit item 37, pending since Oct 28, had no live home.",
- "note": "Fix: a check reads each repo's page URL from layout.py and reports a page that is not found (unknown when the read cannot run, rule verification-report-unknown-reads); a dead URL points at the live page that holds that repo's items (today the claude-settings Queue, https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx). Items from a dead page are re-filed there. Port: yes, every repo. Ready.",
- "updatedAt": "2026-11-02T04:16:00Z"
+ "note": "Fix: a check reads each repo's page URL from layout.py and reports a page that is not found (unknown when the read cannot run, rule verification-report-unknown-reads); a dead URL points at the live page that holds that repo's items (today the claude-settings Queue, https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx). Items from a dead page are re-filed there. Port: yes, every repo. Ready. Lane session_013NEJL1KXjcFYdWJrRWJ32D, started by the coordinator Nov 3 16:57 CST.",
+ "updatedAt": "2026-11-03T23:10:00Z"
 }

@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 483,
  "why": "Three incidents on Nov 1: after auto mode rightly refused a stray agent call, the report guard forced an \"allow <tool>?\" owner question each time: merge-lock-record-drift (create_session, 22:12 CST), roles-follow-ruling (interrupt_session, 23:17), worktree-base-copies-remove (interrupt_session, 23:48). Each recommended keeping the refusal, which is main's state, so none was filed, and each cost a question round. Two more, Nov 2: lane red-main-stale-schedule had to ask \"allow create_session?\" at 00:20 CST after a subagent's call was refused, though its brief bans that tool; lane worktree-base-copies-remove at 00:19 CST saw a subagent's refused call counted as the session's own. Cause in both: the guard treats a subagent's refused call as the session's refusal.",
- "note": "The report guard asks for an allow line only when the refused call was in the agent's brief scope, or accepts \"refusal was right\" as the answer. A guard verdict change: red first on the five incidents; the guard also stops counting a subagent's refused call as the session's own. Ready. Port: yes.",
- "updatedAt": "2026-11-02T06:23:00Z"
+ "note": "The report guard asks for an allow line only when the refused call was in the agent's brief scope, or accepts \"refusal was right\" as the answer. A guard verdict change: red first on the five incidents; the guard also stops counting a subagent's refused call as the session's own. Ready. Port: yes. Held: joins report-guard slice 2 after PR #1117 merges. (coordinator, Nov 3 16:57 CST)",
+ "updatedAt": "2026-11-03T23:10:00Z"
 }

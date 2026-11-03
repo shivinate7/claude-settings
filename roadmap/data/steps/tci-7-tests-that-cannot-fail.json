@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.3375007,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 7 of 12, ranked by harm avoided.",
- "note": "Repos: home, mailaudit. Done when XCTAssertTrue(true) is gone and the mailaudit debt is closed. home waits on the owner's go (he is working there). Ready for mailaudit. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Scope (coordinator, 18:35 CST): only home and mailaudit; banchi, q_max and degen have no part. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state.",
- "updatedAt": "2026-11-02T19:10:00Z"
+ "note": "Repos: home, mailaudit. Done when XCTAssertTrue(true) is gone and the mailaudit debt is closed. home waits on the owner's go (he is working there). Ready for mailaudit. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Scope (coordinator, 18:35 CST): only home and mailaudit; banchi, q_max and degen have no part. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST).",
+ "updatedAt": "2026-11-03T23:10:00Z"
 }

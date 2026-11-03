@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.2102,
  "why": "Owner pick a, Nov 2 13:38 CST (page item 174): mechanize rule building-one-home-per-capability, both ways, accounting for child repos' local nuance. Incident: 9 agents/*.md kept old STE wording 16 days after CLAUDE.md was reworded.",
- "note": "Plan: docs/plans/one-home-check.md on branch one-home-check-design. Extend lint/find_copies.py (one home): in-repo copied rule sentence (8+ words) without its id fails; a reword lists every file holding the old sentence; child override tag <!-- override: <rule-id> reason: ... --> with required reason and no dead ids. Red test first on the real incident. Changes a check: net-value test after round 3. Ready.",
- "updatedAt": "2026-11-02T19:50:00Z"
+ "note": "Plan: docs/plans/one-home-check.md on branch one-home-check-design. Extend lint/find_copies.py (one home): in-repo copied rule sentence (8+ words) without its id fails; a reword lists every file holding the old sentence; child override tag <!-- override: <rule-id> reason: ... --> with required reason and no dead ids. Red test first on the real incident. Changes a check: net-value test after round 3. Ready. Held: waits on the review of its plan, PR #1106. (coordinator, Nov 3 16:57 CST)",
+ "updatedAt": "2026-11-03T23:10:00Z"
 }
