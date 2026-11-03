@@ -1162,3 +1162,8 @@
 - restates-kind-line-unit-dropped: a unit whose first line is a `Kind:`, `Plan:` or `Home:` line is dropped whole (`plain_words`, lint/compliance_probes.py), so a copy on the next line with no blank line between passes. Rare in a CLAUDE.md. Decision: child-cites-not-copies (a child repo names a claude-settings record and never copies it).
 - page-stale-title-space: `stale_pages.carries_data` renames the live title before it collapses white space, so an untouched page titled "Queue " (with a trailing space, a newline or NBSP) and empty blocks passes `page-stale`. A copy of page.html has the exact title, so normal work does not hit it. Decision: page-stale-publish
 - page-stale-old-main: until a checkout fetches this merge, its origin/main template is still titled "Queue", and an untouched "Queue" page passes `page-stale`. It ends at the fetch. Decision: page-stale-publish
+- verdict-argv-value-match: `test_argv` (bin/verdict) matches any argv token, values included. `xcodebuild -scheme test build` reads as a test run, and `swift test --filter list` reads as no run. Rare names.
+- verdict-swift-version: `swift test --version` is not in SWIFT_INFO (bin/verdict), so it reads FAIL "no test count". Rare in normal work.
+- verdict-marker-prefixed: a test success marker after `\r`, a timestamp or a `sed` prefix is not at a line start, so `verdict` does not mark it. Same family as debt verdict-rewritten-xcode-output.
+- verdict-sgr-in-count: EXEC (bin/verdict) reads raw text, so a colour code inside a count line with a marker reads FAIL. Forced colour only.
+- playwright-pass-with-no-tests: `npx playwright test --pass-with-no-tests` exits 0 with no count and reads PASS in `verdict`. Opt-in flag only.
