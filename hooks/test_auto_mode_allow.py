@@ -12,8 +12,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   and never covers merge, approve, branch delete, force push, a base branch change, or a repo
   outside it (decision auto-mode-owner-acts). Its Covers text names the visible conversation
   and the batch's integration pull request.
-- One "Owner Session Message:" entry quotes mcp__claude-code-remote__send_message and never
-  covers permissions, settings, override, or merge (decision auto-mode-owner-acts).
+- One "Owner Session Message:" entry quotes mcp__claude-code-remote__send_message. Its Covers text
+  lets a coordinator send a batch runner it created (tags cs-build:batch-runner and cs-repo:) a
+  merge go for a named pull request, because decision standing-merge-grant has the runner run
+  every merge under the coordinator's grant. Its Never covers names permissions, settings,
+  override, and a merge ask to any other session or from a session that is not a coordinator
+  (decision auto-mode-owner-acts).
 """
 import json
 import os
@@ -46,6 +50,13 @@ PR_SCOPE = (("owner", "owned by shivinate7"),
             ("coordinator or batch runner", "coordinator or batch runner"),
             ("replaced, empty or batched", "replaced, empty or batched"))
 MESSAGE_SCOPE = (("own account", "own account"), ("Remote Control", "Remote Control"))
+# The Covers text names the coordinator's merge go to its batch runner; the Never covers names the
+# merge asks that stay refused.
+MERGE_GO_SCOPE = (("cs-build:batch-runner", "cs-build:batch-runner"), ("cs-repo:", "cs-repo:"),
+                  ("standing-merge-grant", "standing-merge-grant"), ("merge go", "merge go"),
+                  ("coordinator may send", "coordinator may send"))
+MERGE_GO_REFUSED = (("any other session", "any other session"),
+                    ("not a coordinator", "not a coordinator"))
 
 
 def auto_mode():
@@ -187,6 +198,20 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_never_covers_names_priority_now(self):
         self.assertRegex(never_covers(allow_entry(OWNER_MESSAGE)) or "", r"(?i)priority:\s*now",
                          "Never covers must name interrupting the target's turn with priority: now")
+
+    def test_covers_names_the_merge_go_to_its_batch_runner(self):
+        entry = allow_entry(OWNER_MESSAGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
+        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
+        missing = unnamed_terms(bounds_text(entry), MERGE_GO_SCOPE)
+        self.assertFalse(missing, "Covers text does not name the merge go to a batch runner: %r"
+                         % missing)
+
+    def test_never_covers_names_other_sessions_and_non_coordinators(self):
+        clause = never_covers(allow_entry(OWNER_MESSAGE))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
+        missing = unnamed_terms(clause, MERGE_GO_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the merge-ask limits %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
