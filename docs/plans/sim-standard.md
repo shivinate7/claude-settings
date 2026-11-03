@@ -58,7 +58,7 @@ Home's record also hands off two skill edits that never landed: "a new iOS runti
 4. **No exclusive use.** The guard caps booted devices at 2 and refuses a twin of an idle device. The sweep shuts devices down after 1 hour idle (`sweep-shuts-down-idle-simulators`). Nothing gives one session sole use of a device. On 11-02:
    - Home's 2-minute 18 Pro run was refused by the cap while the gatekeeper's Duo and Degen's iPhone 17 held both slots.
    - Two Home lanes overwrote each other's app install on the Duo before taking screenshots.
-5. **`sim-test` reuses "the first booted iPhone".** It can pick another lane's throwaway phone, such as Degen's iPhone 17, instead of the shared device.
+5. **`sim-test` reuses "the first booted iPhone".** It can pick another lane's throwaway phone, such as Degen's iPhone 17, instead of the shared device. It takes no device id or env var, so with two Duos booted it always takes Duo 1. On 11-02 20:12 CST it ran duo-play's 43 HomeApp unit tests on Duo 1, which viewer-strip (Degen) held. Workaround: raw `xcodebuild -destination 'platform=iOS Simulator,id=<udid>'`, which loses sim-test's crash stop. Fix: a device pin, such as `SIM_TEST_UDID`.
 6. **A gatekeeper session is not a durable home.** It sleeps, dies and costs context. The queue order and the timeout must live in a record and a tool, not in one chat session.
 7. **Disk.** Each Duo adds about 14 GB. A 10 GB backup of the Duo from 11-01 sits at `~/Library/Developer/CoreSimulator/poster-backup-AC2E94F9-20261101/`.
 
