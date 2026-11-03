@@ -6,7 +6,7 @@ Deep links: `#s=named|long|nolabel|marked|askfix|today`, `&w=all|390|800|1280`, 
 Sizes: 390, 800 and 1280, which are page.html's bands (`layout.py devices` prints `unknown`). Themes: light and dark.
 Incident: Nov 2 12:15 and 12:25 CST. The block said "An option of this decision uses the key none", and the owner had to ask which option.
 
-## 1. The words (pick), states `named`, `long` and `nolabel`, focus `#noneMsg`
+## 1. The words (pick), states `named`, `long` and `nolabel`, focus `#noneNamed`
 
 - New: `Option B, "Keep search at the top", has the key none. The page keeps that key for "None of these", so this decision cannot be answered.`
   Then today's `fix` sentence: "Ask the session to fix item 12."
@@ -17,7 +17,7 @@ Incident: Nov 2 12:15 and 12:25 CST. The block said "An option of this decision 
 - Kept: `.status.broken`, `role="alert"`, `blocks: true`, and its place under the title (`buildCard`).
 - Gain: the owner sees which option to name in the fix. Loss: a longer line.
 
-## 2. Ring the option too (hide: "rings the option"), state `marked`, focus `#noneOpt`
+## 2. Ring the option too (hide: "rings the option"), state `marked`, focus `#noneMarked`
 
 - The option card with the key none gets the due ring and a "Key none" tag under its head.
 - Gain: the eye finds the option on a long card. Loss: one more class in `optCard`, and a second red mark on the card.

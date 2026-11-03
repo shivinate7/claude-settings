@@ -874,7 +874,7 @@ function msg(s) {
 function card(s, lab) {
   const fix = " Ask the session to fix item 12.";
   const id = { named: "noneMsg", long: "noneMsg", nolabel: "noneMsg", marked: "noneOptMsg", askfix: "noneAskMsg", today: "noneTodayMsg" }[s];
-  const ask = s === "askfix" ? `<span class="fixrow"${lab ? ' data-new="Ask to fix: fills the Ask box"' : ""}><button class="btn alt" type="button" id="noneAskFix">Ask to fix</button><span>Puts this in the Ask box for you to send.</span></span>` : "";
+  const ask = s === "askfix" ? `<span class="fixrow"${lab ? ' data-new="Ask to fix: fills the Ask box"' : ""}><button class="btn alt" type="button" id="noneAskBtn">Ask to fix</button><span>Puts this in the Ask box for you to send.</span></span>` : "";
   const block = `<p class="status broken" role="alert" id="${id}"${lab ? ` data-${s === "today" ? "today" : "new"}="${s === "today" ? "none-key block" : "names the option"}"` : ""}>${msg(s)}${s === "askfix" ? "" : fix}${ask}</p>`;
   const optEls = opts(s).map((o, i) => {
     const bad = o.key === "none" && s === "marked";
