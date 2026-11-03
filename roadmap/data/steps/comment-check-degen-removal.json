@@ -1,0 +1,9 @@
+{
+ "title": "degen drops scripts/comment_check.py and uses bin/ci-job --lint",
+ "phase": "next",
+ "status": "todo",
+ "order": 511,
+ "why": "Child-guard survey, degen row 18 (docs/plans/child-guard-promotion.md, PR #1119). Shared bin/ci-job <job> --lint already checks a draft locally (measured Nov 3 16:47 CST), so degen's own copy is a duplicate.",
+ "note": "A lane in degen: remove scripts/comment_check.py and its make target; point degen's docs at bin/ci-job --lint. A child removal starts only on the owner's ask. Replaces step comment-check-local-entry.",
+ "updatedAt": "2026-11-03T22:48:00Z"
+}
