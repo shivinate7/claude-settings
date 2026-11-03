@@ -664,7 +664,7 @@ class LintTools(Job):
         no_main = subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", "origin/main"],
                                  env=ENV, capture_output=True)
         self.assertNotEqual(no_main.returncode, 0, "the fixture must have no origin/main, so no base resolves")
-        rc, lines, out = self.run_job(step(ZIZMOR, uses="./actions/zizmor", **{"with": {"paths": ".github/ actions/"}}),
+        rc, lines, out = self.run_job(step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}}),
                                       args=("--lint",), env=env)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertTrue(os.path.exists(argv_file), "pipx was never called, so the action did not run zizmor\n" + out)

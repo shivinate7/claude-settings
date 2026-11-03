@@ -282,10 +282,10 @@ scan_case scanner-ends-block-before-env "$scan/after.yml" no
 u=$(zizmor_step uses)
 if [ "$u" = absent ]; then
   fail checks-zizmor-step-is-the-action "checks.yml has no step named Workflow supply-chain audit (zizmor)"
-elif [ "$u" = ./actions/zizmor ]; then
+elif [ "$u" = "\$/actions/zizmor" ]; then
   pass checks-zizmor-step-is-the-action
 else
-  fail checks-zizmor-step-is-the-action "the zizmor step's uses is '$u', wanted ./actions/zizmor"
+  fail checks-zizmor-step-is-the-action "the zizmor step's uses is '$u', wanted \$/actions/zizmor"
 fi
 
 p=$(zizmor_step paths)
