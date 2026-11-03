@@ -54,6 +54,10 @@ FLAGGED = [
     "changed from a dict to a list", "Added after review by billing", "added after review",
     "formerly returned None", "the old behaviour dropped rows",
     "round 2 of 3", "in round 2", "fixed 2026-10-30",
+    "Fixed from 2026-10-30 onward", "Changed from 2024-01-01 to the new rule",
+    "Fixed in round 2 places where the rows were summed", "Previously, this returned None",
+    "Previously used a dict", "Added after code review", "Added after review of the PR feedback",
+    "Changed from returning None to raising",
 ]
 
 # Near misses. No pattern may flag any of them.
@@ -66,6 +70,9 @@ CLEAN = [
     "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
     "changed files only", "the user changed the value", "added to the queue after review of the input",
     "round 3 places", "used to compute the total",
+    "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
+    "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
+    "Skip when previously it was seen in this loop",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
