@@ -4,6 +4,8 @@
 
 Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. Report its PR and its CI verdict. A change that can move a verdict still gets a reviewer.
 
+Owner, <pending grant>: a decision record that files an owner ruling, and changes no rule text, guard, check or product code, is docs only; a repo's own rule may still ask a reviewer.
+
 Why: a review of a change that simple is wasted. `roles-solo-reviews-logic-diffs-only` says the same for solo mode. This record extends it to every other session shape.
 
 Kind: process

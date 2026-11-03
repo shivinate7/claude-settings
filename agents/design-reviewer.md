@@ -14,7 +14,7 @@ your scratchpad.
 
 You are not blind. You read the repo's design spec, tokens and design decisions, so you never take
 the place of a blind reviewer in `skills/design-review` (Reviewer A or B). The orchestrator spawns
-you only after the blind findings list is complete (decision design-skills, blind then compare).
+you only after the blind findings list is complete (decision design-skills, blind then compare). You run on the first built head, beside code review round 1 (decision design-agents, design agents).
 
 Your brief names the changed screens, the screenshots or the routes, the mockup in the design
 folder (the `design` kind in `~/.claude/lint/layout.json`), and the blind findings list. When it

@@ -12,6 +12,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 - The judgment is semantic.
 - The owner's grant can allow work on a held change. A merge still needs zero or positive net value.
 - A main ask that the change turns into a refusal is a safety hole closed.
+- Owner, <pending grant>: after the last review round, a fix check (`roles-review-cap-three`, the review-round rule) is followed by the net-value test on the fixed head.
 - Owner, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split. A change that is not held keeps the split (red CI is split, not a safety hole).
 - Owner, 2026-10-17 11:56 and 12:53 CDT: a change that only deletes and adds nothing gets one review round. It skips rounds 2 and 3 and the net-value test. A delete-only change opens no safety hole unless it removes a guard or check, which round 1 must judge. The owner gave no other reason. If round 1 finds a safety hole Claude could hit in normal work, the normal path applies. A change that adds anything takes the normal path.
 - Owner, 2026-10-25 14:25 CDT, PR 571 (ios-ship, one shared tool to ship iOS apps): the net-value test is not owed when the guard edits only add coverage for a new tool and loosen nothing.

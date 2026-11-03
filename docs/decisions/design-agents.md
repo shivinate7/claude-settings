@@ -9,8 +9,11 @@ agents, and both run Opus.
   screen, with a notes file, in the repo's design folder (the `design` kind in `lint/layout.json`).
   home's `docs/design/` is the working pattern.
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
-- The design reviewer (`agents/design-reviewer.md`) runs after the build. It judges each built screen
-  against the mockup and the repo's design rules, at every size and theme, with a verdict per screen.
+- The blind reviews and the design reviewer run on the first built head, beside code review round 1.
+  The design reviewer (`agents/design-reviewer.md`) judges each built screen against the mockup and the
+  repo's design rules, at every size and theme, with a verdict per screen. Its code findings join round
+  1's fix, so they get the normal code rounds. A design finding that still needs code after the last code
+  round gets the fix check (`roles-review-cap-three`, the review-round rule).
 - Routing has one test: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
@@ -25,6 +28,8 @@ Owner, 2026-10-27: "a lane or two of totally blank and a lane that gets to see t
 in between with directed prompts ... to get a good mix of control and idea between the mockups."
 A design exploration spreads its mockups across blind, informed and directed designer lanes. The
 procedure is `skills/design-explore/SKILL.md`.
+
+Owner, <pending grant>: the blind reviews and the design reviewer run beside code review round 1, not after the last round.
 
 ## The guard
 

@@ -15,6 +15,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - A one-lane session that the owner started merges its own lone lane under the same limits (owner, 2026-11-02 15:14 CST; decision `session-tiers`). A cloud confirm still fails without the batch-runner role.
 - A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
+- Owner, <pending grant>: a passing fix check counts as the fresh reviewer's approval of the fixed head (`roles-review-cap-three`, the review-round rule).
 
 This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
@@ -45,7 +46,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
   - A diff that touches a rule's behaviour, a guard's or check's verdict, or program logic merges only after a
-    fresh reviewer approves it.
+    fresh reviewer approves it. A passing fix check on the fixed head counts as that approval (`roles-review-cap-three`, the review-round rule).
   - After review round 3, a change that changes a guard or check gets the net-value test (`hold-unsafe-after-round-3`: the net-value hold after round 3). A held lane stays parked until the owner decides.
   - Batch lanes into one integration PR, the only PR that goes ready and runs CI
     (`git-integration-branch-merge`: how lanes join a batch).

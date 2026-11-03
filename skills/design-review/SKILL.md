@@ -94,10 +94,11 @@ It is not a review of a built screen.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- A change gets at most three review rounds (`roles-review-cap-three`). A change that only
-  deletes and adds nothing gets one round. A round is steps 2 to
-  5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
-  is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
+- The design review (steps 2 to 4) runs on the first built head, beside code review round 1
+  (decision design-agents, design agents). It adds no round of its own. Its code findings join round 1's
+  fix and get the code rounds (`roles-review-cap-three`, the review-round rule). A design finding that
+  still needs code after the last code round gets the fix check (`roles-review-cap-three`). Each finding
+  that is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
   note. Each points to its decision (`roles-review-cap-three`, `roles-findings-are-debts-or-notes`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
 - Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, a control beside its area, container queries, fluid tokens).
