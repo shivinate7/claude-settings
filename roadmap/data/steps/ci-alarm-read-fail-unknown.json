@@ -1,0 +1,9 @@
+{
+ "title": "ci-alarm reports unknown, not success, when its gh read fails",
+ "phase": "now",
+ "status": "doing",
+ "order": 515,
+ "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: ci-alarm exits 0 on a failed gh read.",
+ "note": "Lane session_013NEJL2HopqCB6N9kYxBhQh, started by the coordinator Nov 3 17:16 CST.",
+ "updatedAt": "2026-11-03T23:18:00Z"
+}
