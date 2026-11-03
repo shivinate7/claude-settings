@@ -20,6 +20,7 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
+from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -1180,14 +1181,14 @@ class SmallBaseMove(Env):
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
 
-    def scoped(self, workflow=CHECKS_YML, scope=True):
-        """Main and feat both gain the CI files; feat then holds main's tip."""
+    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
+        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
-        put(os.path.join(o, ".github/workflows/checks.yml"), workflow)
+        put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
@@ -1288,6 +1289,52 @@ class SmallBaseMove(Env):
         self.assertNotIn("hooks/test_guard.py", new)
         self.assertIn("merge/test_merge.py", new)  # this suite reads the real tree whole, just above, so every path hits it
         self.assertIn("skills/ios-apps/tests/test_new_app.py", hits("skills/ios-apps/templates/" + "new.md"))  # through new_app.py
+
+    def workflow_files(self):
+        """-> (the workflow file names of the other checkout, sorted; the ones among them that hold a `checks` job)."""
+        folder = os.path.join(self.other, ".github", "workflows")
+        names = sorted(os.listdir(folder))
+        with_job = []
+        for n in names:
+            with open(os.path.join(folder, n), encoding="utf-8") as f:
+                if job_block(f.read(), "checks") is not None:
+                    with_job.append(n)
+        return names, with_job
+
+    def suites_hit_on_other(self, path):
+        """-> the suite files hit_suites names for a doc at path, read from the other checkout. A stop is a failed assert that names it."""
+        try:
+            return [f for f, _ in merge.hit_suites(self.other, [path], set())]
+        except merge.Stop as e:
+            self.fail(f"hit_suites stopped on the other checkout: {e}")
+
+    def test_a_workflow_named_check_yml_with_a_checks_job_gets_its_suites_hit(self):
+        self.scoped(name="check.yml")
+        self.assertEqual(self.workflow_files(), (["check.yml"], ["check.yml"]), "fixture: the workflow folder does not hold one checks workflow, check.yml")
+        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
+                      "hit_suites did not find the checks job of check.yml")
+
+    def test_two_workflow_files_that_each_hold_a_checks_job_stop_hit_suites(self):
+        self.scoped()  # checks.yml, with a checks job
+        put(os.path.join(self.other, ".github", "workflows", "check.yml"), CHECKS_YML)
+        self.assertEqual(self.workflow_files()[1], ["check.yml", "checks.yml"], "fixture: both workflow files must hold a checks job")
+        with self.assertRaises(merge.Stop, msg="two workflow files hold a checks job, and hit_suites read one of them without a stop"):
+            merge.hit_suites(self.other, ["docs/guide.md"], set())
+
+    def test_a_checks_yml_with_a_checks_job_still_gets_its_suites_hit(self):
+        self.scoped()
+        self.assertEqual(self.workflow_files(), (["checks.yml"], ["checks.yml"]), "fixture: the workflow folder does not hold one checks workflow, checks.yml")
+        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
+                      "hit_suites lost the checks job of checks.yml")
+
+    def test_no_workflow_with_a_checks_job_stops_hit_suites(self):
+        self.scoped()
+        os.remove(os.path.join(self.other, ".github", "workflows", "checks.yml"))
+        put(os.path.join(self.other, ".github", "workflows", "check.yml"), "name: check\non: push\njobs:\n  scope:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo ok\n")
+        self.assertEqual(self.workflow_files()[1], [], "fixture: a workflow file holds a checks job")
+        with self.assertRaises(merge.Stop, msg="no workflow holds a checks job, and hit_suites named no stop"):
+            merge.hit_suites(self.other, ["docs/guide.md"], set())
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
