@@ -55,11 +55,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     works it out again. A seen card folds every answer part behind one control (options, or steps, command and
     links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
     An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
-  - An answered item (`answers/<id>` exists, filed or not) is in no tier once the page has loaded it. It sits in the
+  - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
-    when every member is answered, at its newest member's time; a group with an open member stays whole in its tier.
-    The page works this out once, when the items, answers and receipts have loaded, and keeps it: an answer sent on the
-    open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
+    when every member is answered, as one frame headed "Answered together", at its newest member's time. A group with an
+    open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
+    it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A Change keeps
     the card in the section, open, until reload. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
@@ -140,9 +140,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
-  them on the answered card. With no record, the card says "Filing pending, sent" and the save
-  time. With `filed`, it says "Filed in <home>" (the item's `home`) and the filed time. In its tier, an item answered on
-  the open page keeps "Answered, " before both. With only `read`, it also says "Read by <owner>" and the time.
+  them on the answered card. In a tier (an item answered on the open page), with no record the card says
+  "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
+  filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
+  `read`, the card also says "Read by <owner>" and the time.
 - `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
   (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
