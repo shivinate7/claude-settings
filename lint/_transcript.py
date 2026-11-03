@@ -1,13 +1,19 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
 `lint/report_guard.py`, `hooks/decision_watch.py` and `hooks/feedback_guard.py` import this module, so the readers have one
-copy.
+copy. The send predicates (a send_message, an ArtifactData items write, the page writer id) live here too: the
+feedback guard and the pick guard in report_guard both read them.
 
 read_transcript / is_last_human / owner_text / tool_uses / records_after_last_human walk the JSONL
 transcript and its `content` blocks. last_reply returns the text of the last assistant reply.
 """
 import json
 import os
+import re
+
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
+WRITE_VERBS = ("set", "update", "batch")
 
 
 def read_transcript(path):
@@ -31,12 +37,16 @@ def _is_peer(origin):
 
 
 def is_last_human(rec):
+    # A cross-session reply is type user too, but it is a peer's words, never the owner's.
+    return is_incoming(rec) and not _is_peer(rec.get("origin"))
+
+
+def is_incoming(rec):
+    """True for a message that starts a turn: a main-session user record with text and no tool
+    result, whoever sent it. A lane's input is peer messages, which is_last_human skips."""
     if rec.get("type") != "user":
         return False
     if rec.get("isSidechain"):
-        return False
-    # A cross-session reply is type user too, but it is a peer's words, never the owner's.
-    if _is_peer(rec.get("origin")):
         return False
     msg = rec.get("message") or {}
     content = msg.get("content")
@@ -242,3 +252,128 @@ def head_moved_since(cwd, base):
         return os.path.getmtime(reflog) >= base - 1
     except OSError:
         return None
+
+
+def peer_sender(rec):
+    """The id of the session that sent a peer message record (origin.fromSession), else None."""
+    origin = rec.get("origin")
+    found = origin.get("fromSession") if _is_peer(origin) else None
+    return found if isinstance(found, str) and found else None
+
+
+def last_incoming_index(records, acks=None):
+    """Index of the last incoming message (is_incoming), or None when the transcript has none.
+
+    `acks` maps a sender id to the send targets that reach it. A peer message from that sender, after a
+    send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
+    sends before it stay in the turn."""
+    found, sent = None, set()
+    for i, rec in enumerate(records):
+        if is_incoming(rec):
+            if acks and acks.get(peer_sender(rec), set()) & sent:
+                continue
+            found, sent = i, set()
+        elif acks and not rec.get("isSidechain"):
+            for use in tool_uses(rec):
+                sent |= send_targets(use)
+    return found
+
+
+def _in_items(d):
+    return (d.get("collection") == "items"
+            or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
+
+
+def _is_write(d):
+    """False for a dict whose action or op is a verb other than set, update, batch."""
+    verb = d.get("action", d.get("op"))
+    return not isinstance(verb, str) or verb in WRITE_VERBS
+
+
+def _has_n(node, n):
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        v = node.get("n")
+        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
+                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
+            return True
+        return any(_has_n(c, n) for c in node.values())
+    return isinstance(node, list) and any(_has_n(c, n) for c in node)
+
+
+def writes_n(node, n):
+    """True when a write dict that names the items collection holds key n == n at any depth below it."""
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        return (_in_items(node) and _has_n(node, n)) or any(writes_n(c, n) for c in node.values())
+    return isinstance(node, list) and any(writes_n(c, n) for c in node)
+
+
+def items_write(node):
+    """True when a set, update or batch call writes under the items collection at any depth: the page
+    writer's own write of an item. A get, a list or another collection is no write to items."""
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        return _in_items(node) or any(items_write(c) for c in node.values())
+    return isinstance(node, list) and any(items_write(c) for c in node)
+
+
+def send_targets(use):
+    """The ids a send_message / SendMessage tool_use names (session_id and to), else an empty set."""
+    inp = use.get("input")
+    if use.get("name") not in SEND_TOOLS or not isinstance(inp, dict):
+        return set()
+    return {v for v in (inp.get("session_id"), inp.get("to")) if isinstance(v, str)}
+
+
+def _result_text(block):
+    body = block.get("content")
+    if isinstance(body, list):
+        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+    return body if isinstance(body, str) else ""
+
+
+def _finds_writer(node):
+    if isinstance(node, dict):
+        if isinstance(node.get("writer"), str) and node["writer"]:
+            return node["writer"]
+        for child in node.values():
+            found = _finds_writer(child)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for child in node:
+            found = _finds_writer(child)
+            if found:
+                return found
+    return None
+
+
+def page_writer_id(records):
+    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
+    pending, writer = set(), None
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            inp = use.get("input")
+            if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
+                    and inp.get("action") == "get"
+                    and (inp.get("path") == "meta/page"
+                         or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
+                pending.add(use.get("id"))
+        content = (rec.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
+                text = _result_text(block)
+                try:
+                    found = _finds_writer(json.loads(text))
+                except ValueError:
+                    m = re.search(r'"writer"\s*:\s*"([^"]+)"', text)
+                    found = m.group(1) if m else None
+                if found:
+                    writer = found
+    return writer
