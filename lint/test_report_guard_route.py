@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""The question route the pick check judges (owner ruling 2026-11-01 23:31 CST, "Same turn to the page").
+"""The question route the pick check judges.
 
-Every question for the owner goes to the page writer in the turn it is asked. A repo with no waiting page
-asks in the reply or the question box only. These cases pin three gaps in audit row pr1108-fixes:
+A question for the owner must reach the page writer in the turn it is asked, because a waiting page is the
+only place the owner answers it. Only a repo with no waiting page takes the question box instead. The rule is
+the page-writer ruling of the questions decision, stamped 23:31 CST on 1 November.
+
+These cases pin three gaps the check had:
 
 - an ack that carries a later message from the same sender into the turn (the lane-ack debt);
-- an owner-facing session, with its own record, whose question goes to @parent;
+- an owner-facing session, with its own record, whose question goes to @parent, which reaches no one there;
 - a question box alone in a repo that has a waiting page, with or without a remote id.
 
 The fixture, the transcript helpers and the run folder come from lint/test_report_guard.py, the one home.
-They are borrowed by name here, so this file adds only its cases and stays apart from that file, which
-other lanes edit. Run with:
+They are borrowed by name here, so this file adds only its cases. Run with:
 
     python3 lint/test_report_guard_route.py -v
 """
