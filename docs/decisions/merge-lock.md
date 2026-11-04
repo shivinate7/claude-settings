@@ -58,8 +58,8 @@ Known gaps, all in `docs/debts/notes.md`:
 - `lock-read-error-never-expires`: `GhLock.read` gives an infinite expiry when the lock commit cannot be
   read for a reason other than the network, so that lock never expires.
 
-Risk: likely risk (`building-guard-needs-incident`: a rule needs a named incident, a measured risk or a
-likely risk). Two runs on one base would race, and batches often run while another batch merges
+Risk: likely risk (`building-guard-needs-incident`: a guard or check needs a mistake Claude has made or is
+likely to make in normal work). Two runs on one base would race, and batches often run while another batch merges
 (`merge-needs-current-base`). Landed 2026-09-30, the first merge lock in `merge/merge.py`.
 
 Kind: process

@@ -22,7 +22,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-solo-grows-switch-to-orchestrate` | A shape can grow: solo to one lane, one lane to coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-orchestrator-never-builds` | Every session that spawns agents is an orchestrator. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-model-per-role-table` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's third try (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -41,7 +41,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-archive-then-delete` | Push an unmerged branch to `archive/<branch>` on origin, or a new archive name if taken. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-machine-wide-kill` | Kill only yours. | [`CLAUDE.md`](../CLAUDE.md) |
-| `shared-trees-one-checkout-per-agent` | Give one checkout to each concurrent agent. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-own-ports-data` | A branch switch is a whole-tree act. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-confirm-before-write` | Confirm which checkout and branch you stand in before any git write or merge. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -118,7 +117,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `action-pins-follow-sessions` | Owner, 2026-10-26 (gripe on the degen Duo batch): "doesn't this just mean CI is old? | [`docs/decisions/action-pins-follow-sessions.md`](../docs/decisions/action-pins-follow-sessions.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`docs/decisions/adoptions-declined-2026-09-28.md`](../docs/decisions/adoptions-declined-2026-09-28.md) |
 | `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when an agent ends, each process it left under its own worktree stops. | [`docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
-| `agent-model-cap` | Each agent role has its own model and effort, in the table below. | [`docs/decisions/agent-model-cap.md`](../docs/decisions/agent-model-cap.md) |
+| `agent-model-cap` | Each agent role runs the model and effort of its row in the table below. | [`docs/decisions/agent-model-cap.md`](../docs/decisions/agent-model-cap.md) |
 | `agent-powershell-tool` | With Claude Code's PowerShell tool. | [`docs/decisions/agent-powershell-tool.md`](../docs/decisions/agent-powershell-tool.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`docs/decisions/agent-worktree-discard-is-noted.md`](../docs/decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`docs/decisions/agents-wait-with-monitor.md`](../docs/decisions/agents-wait-with-monitor.md) |
@@ -206,6 +205,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`docs/decisions/playwright-install-once.md`](../docs/decisions/playwright-install-once.md) |
 | `port-keeps-behaviour` | Owner, 2026-10-27 15:32 CDT: when a session ports or redesigns an existing app, the working app already answers most questions. | [`docs/decisions/port-keeps-behaviour.md`](../docs/decisions/port-keeps-behaviour.md) |
+| `pr-review-record` | Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. | [`docs/decisions/pr-review-record.md`](../docs/decisions/pr-review-record.md) |
 | `precompact-handoff` | Auto-compact drops detail. | [`docs/decisions/precompact-handoff.md`](../docs/decisions/precompact-handoff.md) |
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`docs/decisions/predicate-is-the-act.md`](../docs/decisions/predicate-is-the-act.md) |
 | `premise-format` | A premise is a statement, not a fact. | [`docs/decisions/premise-format.md`](../docs/decisions/premise-format.md) |
@@ -233,6 +233,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shoot-is-one-shared-command` | Owner, 2026-10-17: build one screenshot script in this repo. | [`docs/decisions/shoot-is-one-shared-command.md`](../docs/decisions/shoot-is-one-shared-command.md) |
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`docs/decisions/silent-undo-check-design.md`](../docs/decisions/silent-undo-check-design.md) |
 | `sim-boot-is-verified` | The record hook of `sweep-shuts-down-idle-simulators` (ruling 1) checks each device that an MCP `launch` took from `Shutdown` to `Booted`, and each device that an overridden `simctl boot` took the same way. | [`docs/decisions/sim-boot-is-verified.md`](../docs/decisions/sim-boot-is-verified.md) |
+| `sim-lease-tool` | bin/sim-lease is the one simulator queue and lease on a Mac | [`docs/decisions/sim-lease-tool.md`](../docs/decisions/sim-lease-tool.md) |
 | `sim-test-is-the-one-boot-path` | One lock makes sim-test the one boot path on a Mac | [`docs/decisions/sim-test-is-the-one-boot-path.md`](../docs/decisions/sim-test-is-the-one-boot-path.md) |
 | `sim-test-stops-a-crash-loop` | sim-test stops a simulator that crash-loops | [`docs/decisions/sim-test-stops-a-crash-loop.md`](../docs/decisions/sim-test-stops-a-crash-loop.md) |
 | `source-prose-lint-ships-dark` | The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and `check_source`). | [`docs/decisions/source-prose-lint-ships-dark.md`](../docs/decisions/source-prose-lint-ships-dark.md) |
@@ -269,6 +270,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`docs/decisions/catalog-cells-never-cut.md`](../docs/decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`docs/decisions/ci-wait-reads-run-status.md`](../docs/decisions/ci-wait-reads-run-status.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`docs/decisions/claude-md-change-is-flagged.md`](../docs/decisions/claude-md-change-is-flagged.md) |
+| `cloud-start-hooks-run-fresh` | In a cloud session, `install.sh --cloud` runs the repo's startup hooks itself, after it has copied them into `~/.claude`. | [`docs/decisions/cloud-start-hooks-run-fresh.md`](../docs/decisions/cloud-start-hooks-run-fresh.md) |
 | `compliance-defined` | Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins over a child repo's text on the same question, unless that text names the rule as a known exemption. | [`docs/decisions/compliance-defined.md`](../docs/decisions/compliance-defined.md) |
 | `guard-reads-wrapped-commands` | The guards judge the command a wrapper runs, not the raw text. | [`docs/decisions/guard-reads-wrapped-commands.md`](../docs/decisions/guard-reads-wrapped-commands.md) |
 | `hook-catalog-page` | `docs/catalog.md` lists every hook, judge, mod and skill. | [`docs/decisions/hook-catalog-page.md`](../docs/decisions/hook-catalog-page.md) |
@@ -305,7 +307,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `build-disk-guard` | Part 2 of `build-dirs-reaped-at-agent-end`, the low-disk build guard, is not built. | [`docs/debts/build-disk-guard.md`](../docs/debts/build-disk-guard.md) |
 | `carry-source-words` | `SOURCE_RE` accepts only the words git, page and digest as the source of a Recovered item. | [`docs/debts/carry-source-words.md`](../docs/debts/carry-source-words.md) |
 | `checks-job-near-timeout` | The checks job took 35.4 min slowest over 16 green runs (median 28.9, range 25.2-35.4), 68% of its 52 min cap, from 2026-11-01 to 2026-11-02; its old 36 min cap was at 98%. | [`docs/debts/checks-job-near-timeout.md`](../docs/debts/checks-job-near-timeout.md) |
-| `ci-job-multiline-with` | `bin/ci-job --lint` reads a step's `with: paths: \|` (or `>`) as the literal `\|` or `>`, and an inline `# comment` stays in the value. | [`docs/debts/ci-job-multiline-with.md`](../docs/debts/ci-job-multiline-with.md) |
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
@@ -340,6 +341,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
+| `mutate-guard-split` | `checks-mutate-guard` runs every guard mutant in one job, 4 at a time. | [`docs/debts/mutate-guard-split.md`](../docs/debts/mutate-guard-split.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed, bin/ci-job and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`docs/debts/nowindow-bin-no-fallback.md`](../docs/debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`docs/debts/nowindow-ctrl-c-orphans.md`](../docs/debts/nowindow-ctrl-c-orphans.md) |
 | `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`docs/debts/nowindow-fallback-silent.md`](../docs/debts/nowindow-fallback-silent.md) |
@@ -348,7 +350,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `npm-audit-fix-linked` | The rule judges only npm install, i, ci, update, uninstall and their aliases. | [`docs/debts/npm-audit-fix-linked.md`](../docs/debts/npm-audit-fix-linked.md) |
 | `old-merge-tool-refuses-stamp` | A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. | [`docs/debts/old-merge-tool-refuses-stamp.md`](../docs/debts/old-merge-tool-refuses-stamp.md) |
 | `one-shot-grant-label` | A one-shot approval, such as "go ahead and merge PR 12" or "approved, push it", counts as a grant, so the guard asks for a home. | [`docs/debts/one-shot-grant-label.md`](../docs/debts/one-shot-grant-label.md) |
-| `opus-ask-scheduled-text` | The seed check in `grant_opus_ask` skips a prompt with no earlier owner turn in a cloud session. | [`docs/debts/opus-ask-scheduled-text.md`](../docs/debts/opus-ask-scheduled-text.md) |
+| `opus-ask-scheduled-text` | A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. | [`docs/debts/opus-ask-scheduled-text.md`](../docs/debts/opus-ask-scheduled-text.md) |
 | `other-checkout-cwd-outside` | `other_checkout_hit` returns `""` when the call's `cwd` is in no checkout of the clone. | [`docs/debts/other-checkout-cwd-outside.md`](../docs/debts/other-checkout-cwd-outside.md) |
 | `page-answer-second-click` | One waiting-page answer needed a second approval. | [`docs/debts/page-answer-second-click.md`](../docs/debts/page-answer-second-click.md) |
 | `page-only-copy-of-mockup` | A mockup lives only inside the `designData` block of the waiting page. | [`docs/debts/page-only-copy-of-mockup.md`](../docs/debts/page-only-copy-of-mockup.md) |
@@ -367,10 +369,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
 | `refusal-shapes-missed` | The PreCompact digest's refusal match misses four denial lines that Claude Code 2.1.316 writes: "Permission to read <path> has been denied.", "Permission to edit <path> has been denied.", "Permission for this tool use was denied: it requires interactive approval", and "Permission for this command was denied by a built-in Claude Code safety check". | [`docs/debts/refusal-shapes-missed.md`](../docs/debts/refusal-shapes-missed.md) |
 | `replay-big-file-unknown` | A file that does not parse is listed as skipped, and its row can still show a kill rate. | [`docs/debts/replay-big-file-unknown.md`](../docs/debts/replay-big-file-unknown.md) |
+| `report-guard-gh-api-merge` | A turn that merges with `gh api -X PUT repos/o/r/pulls/N/merge` or `gh api repos/o/r/merges` lands a commit. | [`docs/debts/report-guard-gh-api-merge.md`](../docs/debts/report-guard-gh-api-merge.md) |
 | `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`docs/debts/ruling-kind-vacuous-local-pass.md`](../docs/debts/ruling-kind-vacuous-local-pass.md) |
 | `scan-mid-sentence-false-alarm` | The waiting-page export allows `password: optional` and `PWD=/Users/x` only when nothing follows the value on its line. | [`docs/debts/scan-mid-sentence-false-alarm.md`](../docs/debts/scan-mid-sentence-false-alarm.md) |
 | `script-file-runs-test-write` | A heredoc writes a script to a file, such as `cat > /tmp/gen.py <<EOF`. | [`docs/debts/script-file-runs-test-write.md`](../docs/debts/script-file-runs-test-write.md) |
 | `session-home-lane-visit` | A top-level session whose `cwd` enters a non-agent lane tree gets a session-home record naming it, and a return to the primary does not clear it. | [`docs/debts/session-home-lane-visit.md`](../docs/debts/session-home-lane-visit.md) |
+| `session-start-handoff-text` | `hooks/session_start.sh` line 18 tells a session that wants a merge to hand the branch, head and PR to the batch runner. | [`docs/debts/session-start-handoff-text.md`](../docs/debts/session-start-handoff-text.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`docs/debts/sharables-adopts-the-stamp.md`](../docs/debts/sharables-adopts-the-stamp.md) |
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |

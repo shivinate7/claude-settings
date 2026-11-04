@@ -109,19 +109,19 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "impeccable": "impeccable is review-only",
-    "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
+    "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
-    "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
-    "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
-    "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
-    "gh-login-switch": "the waiting-page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
-    "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
-    "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
-    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
-    "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
-    "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
-    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
+    "uniform-pick": "the page writer: a pick never names an option that widens a shared tool",
+    "press-link": "the page writer: a press in a web app carries a link to the exact page",
+    "command-in-item": "the page writer: a task step never sends the owner to a file for a command",
+    "gh-login-switch": "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
+    "task-names-check": "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
+    "owner-judge": "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "question-departs": "the page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
+    "option-letter-keys": "the page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
+    "rework-off-page": "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
+    "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -437,6 +437,9 @@ GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run report
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
+HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
+HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
+HOOK_BUDGET_S = 60     # the hook's own time budget
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
@@ -8740,9 +8743,12 @@ sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y
 add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
     owner="y", env_path=NEED_ON, config=MERGECFG)
-sh("merge-checks: a gh slower than the guard waits is unknown, and denies",
-   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
-   env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+# A guard still judging at the hook's 60 s budget is past the point where the hook is cut off, so the case
+# stops it there, not after every slow call (4 calls x 20 s, its mutant took 98 s). The correct guard ends near
+# MERGE_READ_TIMEOUT (25 s). Off Windows only: a `.cmd` fake cannot be killed on time there.
+add("merge-checks: a gh slower than the guard waits is unknown, and denies", "deny", "merge-checks",
+    carries="could not run", cwd=NOGIT, env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG,
+    max_seconds=HOOK_BUDGET_S if os.name != "nt" else None, command="gh pr merge 12 --squash")
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
 # so a settled, all-green head still reads as unknown and the guard cries wolf on passing CI.
 # c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
@@ -12874,6 +12880,42 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
+# verb from each of them. One check per root flag form, called on gh_call_of directly.
+FAMILY = "merge"
+
+
+def gh_root_flag_verb_check(segment, verb):
+    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    guard = _load_guard_module()
+    rest = guard.gh_call_of(segment)
+    if rest is None:
+        return False, "gh_call_of reads no gh call in %r" % segment
+    if rest[:2] != verb:
+        return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
+    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+
+
+def gh_root_dash_r_check():
+    return gh_root_flag_verb_check("gh -R o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_equals_check():
+    return gh_root_flag_verb_check("gh --repo=o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_spaced_check():
+    return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
+                         gh_root_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
+                         gh_root_repo_spaced_check))
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
@@ -16689,10 +16731,17 @@ def decide(case):
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
-    result = subprocess.run(
-        command, input=payload, capture_output=True, text=True, env=env,
-        timeout=120, cwd=case.get("process_cwd") or None,
-    )
+    limit = case.get("max_seconds")
+    try:
+        # A case with a limit stops its guard at the limit, so a guard too slow fails at once, not at 120 s.
+        result = subprocess.run(
+            command, input=payload, capture_output=True, text=True, env=env,
+            timeout=min(120, limit + 1) if limit else 120, cwd=case.get("process_cwd") or None,
+        )
+    except subprocess.TimeoutExpired:
+        if not limit:
+            raise
+        return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
@@ -18331,10 +18380,6 @@ def merge_import_exits_case():
     if "unknown" not in reason and "pending" not in reason:
         return False, "expected unknown or pending in the reason, got " + reason[:160]
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
-
-
-HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
-HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
 
 
 def guard_merge_read_timeout():

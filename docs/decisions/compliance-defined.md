@@ -41,12 +41,13 @@ Done check (roadmap step `parent-rules-supersede`): a fixture child repo with a 
 
 ## Not mechanized
 
-No check reads these four. The ruling holds for all four.
+No check reads these five. The ruling holds for all five.
 
 - A semantic conflict with no departure wording: a child paragraph or list item that answers a shared question in other words.
 - A departure split over two sentences. The check reads one sentence at a time, so a cue in one sentence and a shared rule in the next pass.
 - Hook and code text in the child. Reading it needs a parser, and the check reads Markdown only.
 - Which rule an exemption names. The id is not tied to the rule the text departs from, so any live id passes. A negated "no known exemption" reads as a known exemption.
+- Whether the owner granted an exemption for that child repo. No check reads the grant; the ruling holds.
 
 Unmeasured: how many paragraphs and list items the check flags across the owner's child repos.
 

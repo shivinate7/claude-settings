@@ -28,7 +28,8 @@ Every doc is scanned, as parsed JSON, before the first write: each string value,
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
 Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
-words such as "token budget" or "password manager" pass.
+words such as "token budget" or "password manager" pass. So do a password word with a
+placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -97,9 +98,23 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
-    ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
+# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
+# must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
+# a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
+PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
+MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
+# `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
+PLACEHOLDER_VALUE = re.compile(
+    r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
+REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
+WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
+SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
+SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
+NO_REPLY_NAME = re.compile(r"(?:do[-_.]?not[-_.]?|no[-_.]?)reply", re.I)  # a mailbox that names no person
+PUBLIC_GIT_HOSTS = frozenset(("github.com", "gitlab.com", "bitbucket.org"))  # `git@host:` is their ssh remote, no person
 # A phone in a string has a country code and separated groups, or the "(xxx) xxx-xxxx" form, or groups of 3, 3 and 4
 # digits joined by one separator. A bare run of digits is never one: a PO number or a timestamp is not a phone.
 PHONE_COUNTRY = re.compile(r"(?<![\w+])\+\d{1,3}[\s.\-]*\(?\d{1,4}\)?(?:[\s.\-]+\d{2,4}){1,4}(?!\d)")
@@ -132,9 +147,46 @@ def is_phone(text):
     return any(shape.search(text) for shape in PHONE_OTHER)
 
 
+def bare_value(value):
+    """`value` without trailing punctuation, a `)` or `]` that closes a wrapper opened before the match, and one
+    pair of wrapping quotes or brackets."""
+    value = value.rstrip(".,;")
+    if value[-1:] in (")", "]") and ("(" if value[-1] == ")" else "[") not in value:
+        value = value[:-1].rstrip(".,;")
+    if value[:1] + value[-1:] in WRAP_PAIRS:
+        value = value[1:-1]
+    return value
+
+
+def password_is_no_secret(found):
+    """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
+    `PWD=<path>`, and nothing but blanks follows it on its line."""
+    if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
+        return False
+    value = bare_value(found.group(2))
+    if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
+        return True
+    return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
+            or bool(PLACEHOLDER_VALUE.fullmatch(value)))
+
+
+def email_is_no_person(found):
+    """True when the address is a no-reply mailbox, or `git@<public git host>` in an ssh remote."""
+    local, _, host = found.group(0).rpartition("@")
+    if NO_REPLY_NAME.fullmatch(local):
+        return True
+    return (local == "git" and host.lower() in PUBLIC_GIT_HOSTS
+            and found.string[found.end():found.end() + 1] in (":", "/"))
+
+
+# A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
+NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person}
+
+
 def kinds_in(text):
     """The kinds of secret or personal data that `text` has the shape of, each once."""
-    found = [name for name, shape in SECRET_SHAPES if shape.search(text)]
+    found = [name for name, shape in SECRET_SHAPES
+             if any(not NO_SECRET_MATCH.get(name, lambda match: False)(m) for m in shape.finditer(text))]
     if is_phone(text):
         found.append("phone")
     return found
