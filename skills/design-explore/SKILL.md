@@ -7,7 +7,8 @@ Run this in the orchestrator. Workers never spawn, so the orchestrator spawns ev
 The ruling is decision design-agents, 2026-10-27. The owner wants a mix of control and new ideas
 between the mockups.
 
-In this skill, "the repo" and `<repo root>` mean the target repo: the repo whose screen the lanes draw.
+In this skill, `<repo root>` and "the target repo" mean the repo whose screen the lanes draw. The target
+repo defaults to the spawning repo. Lanes always draw in a worktree of the spawning repo.
 
 ## Lane kinds
 
@@ -39,8 +40,9 @@ designer.
 
 ## Procedure
 
-1. **Write the briefs.** Each brief names the target repo. A blind brief names it in the first sentence of
-   its Job section, by name and with no path. Use the lane kinds above. The first line of each brief is
+1. **Write the briefs.** A brief names a target repo only when its screen belongs to another repo;
+   otherwise the target is the spawning repo. A blind brief that names one does so in the first sentence
+   of its Job section, by name and with no path. Use the lane kinds above. The first line of each brief is
    `Lane kind: blind|informed|directed`. A directed brief adds its direction. The skill always names
    the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
@@ -68,13 +70,14 @@ designer.
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the
-   step's design branch in the target repo, so the owner sees the whole set in one place.
+   step's design branch, so the owner sees the whole set in one place.
 7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
    and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the
    kept path in the briefs of the builder and the design reviewer, and the builder builds to it
-   (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, from a branch of the
-   target repo, into that repo's design folder (the `design` kind in `~/.claude/lint/layout.json`). The PR
-   goes through that repo's normal PR path and merges there (owner ruling, 2026-11-02 14:58 CST: git is
+   (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, into the target repo's design
+   folder (the `design` kind in `~/.claude/lint/layout.json`). If the target is another repo, the
+   orchestrator first copies the pair onto a branch of that repo. The PR goes through that repo's
+   normal PR path and merges there (owner ruling, 2026-11-02 14:58 CST: git is
    every artifact's home, mockups included).
 8. **Clean up.** Push each lane branch to `archive/<branch>`, then delete it locally
    (`shared-trees-archive-then-delete`).
@@ -86,5 +89,5 @@ designer.
   (decision blind-briefs-use-a-template). Re-brief the lane.
 - A set whose mockups all share today's structure is flagged at the top of the owner's list, with
   an offer of one more round of blind lanes (skill `design-review`, Mockup set check).
-- The designer lane writes only in the target repo's design folder (guard rule `designer-scope`).
+- The designer lane writes only in the design folder of its spawning repo (guard rule `designer-scope`).
 - After the cull, the builder and the design reviewer run as usual (decision design-agents).
