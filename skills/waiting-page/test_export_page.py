@@ -79,6 +79,12 @@ CDN_SNIPPET = ('<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react
 PROSE_SNIPPET = ("<p>Don't use /* or // or # here.</p>\n<!-- a note for the reader -->\n"
                  "<script>\nconst s = `line one\nline two`;\n</script>\n")
 
+# Parts of the postal-address and credential-name rows. A credential value is joined from parts, as TAIL is.
+STREET = "123 Main Street"
+API_VALUE = "abcdefgh" + "12345678"
+SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
+CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
     ("GitHub token", "ghp_" + TAIL, "ghp_" + TAIL),
@@ -137,6 +143,37 @@ RED = [
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token after a lone quote", "Don't paste " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token in a multi-line string", "first line\nsecond line " + "ghp_" + TAIL + "\nthird line", "ghp_" + TAIL),
+    ("street address", STREET, STREET),
+    ("PO box", "PO BOX 1234", "PO BOX 1234"),
+    ("P.O. box", "P.O. Box 1234", "P.O. Box 1234"),
+    ("city, state and ZIP", "AUSTIN, TX 78701", "AUSTIN, TX 78701"),
+    ("city, state and ZIP+4", "Austin, TX 78701-1234", "Austin, TX 78701-1234"),
+    ("street address in a full line", "Send it to " + STREET + ", Austin, TX 78701", STREET),
+    ("API_SECRET assignment", "API_SECRET=" + API_VALUE, API_VALUE),
+    ("SESSION_TOKEN assignment", "SESSION_TOKEN=" + SESSION_VALUE, SESSION_VALUE),
+    ("CLIENT_SECRET assignment with a colon", "CLIENT_SECRET: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("cf_clearance cookie value", "cf_clearance=" + "c3c3c3c3" + "c3c3c3c3", "c3c3c3c3" + "c3c3c3c3"),
+    ("sessionid cookie value", "sessionid=" + "abcdef0123" + "456789abcd", "abcdef0123" + "456789abcd"),
+    ("SESSION_COOKIE assignment", "SESSION_COOKIE=" + "abcdefgh" + "12345678", "abcdefgh" + "12345678"),
+    ("bare Bearer token with no header name", "Bearer " + "abcdefghijkl" + "mnopqrstuvwx", "abcdefghijkl" + "mnopqrstuvwx"),
+    ("TCG_TRACKING_KEY assignment", "TCG_TRACKING_KEY=" + "k9Qx7vLm" + "2Npw4Rt8", "k9Qx7vLm" + "2Npw4Rt8"),
+    ("X-API-Key header", "X-API-Key: " + "abcdef" + "1234567890", "abcdef" + "1234567890"),
+    ("secret: value", "secret: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("token: value", "token: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("bare Basic credential", "Basic " + "abcdefghij" + "klmnopqrst", "abcdefghij" + "klmnopqrst"),
+    ("csrftoken cookie value", "csrftoken=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("sid cookie value", "sid=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("apiKey camelCase name", "apiKey: " + "abcd1234" + "efgh5678", "abcd1234" + "efgh5678"),
+    ("clientSecret camelCase name", "clientSecret: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
+    ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
+    ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
+    ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
+    ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
+    ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
+    ("street with the suffix Ter", "400 Pine Ter", "400 Pine Ter"),
     # Over-widening guard: a placeholder or a tool value must not open these real-looking values.
     ("password with a real-looking value", "password: " + "S3cr3t!x9", "S3cr3t!x9"),
     ("pwd assignment with a real-looking value", "pwd=" + "hunter2x", "hunter2x"),
@@ -181,6 +218,38 @@ GREEN = [
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
     ("a number with 14 digits, not a string", {"n": 20261102110400, "note": "budget"}),
+    # Near misses of the address and credential shapes: a street word, a state code before a five-digit number, a rule name.
+    ("step number of three digits", "step 123"),
+    ("a street name with no number", "Main Street"),
+    ("PR number before the word lane", "PR 1167 batch lane"),
+    ("a digit before the word road", "step 3 on the road map"),
+    ("a digit before the word way", "a 2 way merge"),
+    ("a digit before a hyphenated word", "lane 4 drive-by fix"),
+    ("PR with a five-digit number", "merged, PR 12345"),
+    ("OK with a five-digit number", "done, OK 12345"),
+    ("a bare rule name in caps with TOKEN", "TOKEN_BUDGET"),
+    ("a TOKENS setting with a number", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000"),
+    ("a MAX_TOKENS setting with a number", "MAX_TOKENS=200000"),
+    ("a model setting", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet"),
+    ("a CI secret reference", "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"),
+    ("an env-var reference in a secret name", "API_SECRET=$API_SECRET"),
+    ("a rule anchor name", "rule roles-review-cap-three"),
+    ("a count of records", "3 records in place"),
+    ("a count of cards", "5 cards in this lane"),
+    ("a join key label with a colon", "join key:"),
+    ("a JSX key prop", "key={item.id}"),
+    ("a token label with a plain word", "token: budget"),
+    ("a secret label with no value", "secret: none"),
+    ("the word Basic in prose", "Basic idea: keep it short"),
+    ("the word sid in prose", "sid is the session id"),
+    ("a token budget label with a number", "token budget: 200000"),
+    ("a KEY label with prose", "KEY: see the record"),
+    # Prose with a time or a number before a street word or a key word is no address and no credential name, so it passes.
+    ("a time and a street word in prose", "Meeting 13:44 CDT. Lane 2 is open"),
+    ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
+    ("a number before the word Park in prose", "Phase 2 Park the lane"),
+    ("a key inside a longer word", "turnkey solution"),
+    ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
     ("shell working-dir variable", "PWD" + "=" + "/Users/x"),
