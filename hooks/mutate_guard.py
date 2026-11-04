@@ -2065,7 +2065,7 @@ MUTATIONS = [
     ("simulator-boot-bypass: the refusal is never raised",
      '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
      '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
-    # RULES simulator-boot-route and simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5).
+    # RULE simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5).
     # Each mutant breaks one arm of its rule. The named case is the one that must die.
     ("simulator-boot-route: an xcodebuild boot of a shut-down device is never refused",
      '        elif (remedies or {}).get(name):',
@@ -2083,26 +2083,6 @@ MUTATIONS = [
      "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
      "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
      "route: a build of a shut-down simulator names the generic destination"),
-    ("simulator-boot-locked: an MCP launch under a live lock is never refused",
-     '            if holder:\n                refuse(tool, "deny", "simulator-boot-locked",',
-     '            if False:\n                refuse(tool, "deny", "simulator-boot-locked",', "guard",
-     "lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test"),
-    ("simulator-boot-locked: a dead holder pid still holds the lock",
-     '            except ProcessLookupError:\n                return ""',
-     '            except ProcessLookupError:\n                return text', "guard",
-     "lock: a dead holder is not held, so an MCP launch with room goes through"),
-    ("simulator-boot-locked: a pid-less lock folder is held for ever, not for 60 s",
-     'return "unknown" if age < 60 else ""',
-     'return "unknown"', "guard",
-     "lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through"),
-    ("simulator-boot-locked: a pid-less lock folder is never held",
-     'return "unknown" if age < 60 else ""',
-     'return "unknown" if age < 0 else ""', "guard",
-     "lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused"),
-    ("simulator-boot-locked: a launch of a booted device is refused under the lock",
-     '    for name in shut_down:\n        if tool == SIM_MCP:',
-     '    for name in names:\n        if tool == SIM_MCP:', "guard",
-     "lock: a live holder does not refuse an MCP launch of a booted device"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
