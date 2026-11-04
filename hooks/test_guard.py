@@ -1784,6 +1784,17 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: design-torn's tree reads, so the design "
                  "read would not fail")
 
+    # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
+    # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
+    run_vcs(BRANCHREPO, "tag", "v1.0", "main")
+    if run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", "refs/tags/v1.0").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: tagging v1.0 failed")
+    if rev("refs/heads/v1.0") or rev("refs/remotes/origin/v1.0"):
+        sys.exit("fixture setup failed in build_fixtures: a branch named v1.0 exists, so v1.0 would "
+                 "not be a tag-only name")
+    if run_vcs(BRANCHREPO, "ls-remote", "--heads", "origin", "v1.0").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin holds a branch named v1.0")
+
     # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
     # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
     make_repo(BRANCHFALLBACKMAIN, {"base.txt": "base\n"})
@@ -3335,6 +3346,14 @@ sh("push: a --delete of a design branch already on the default branch, its file 
    VCS + " push origin --delete design-merged", "allow", cwd=BRANCHREPO)
 sh("push: a --delete of a design file whose tip an archive under a new name holds allows",
    VCS + " push origin --delete design-taken", "allow", cwd=BRANCHREPO)
+# A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
+# it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
+# which allows. Its control is the same no-tip read with no tag of that name: that still asks.
+sh("push: a --delete of a name that is only a local tag allows",
+   VCS + " push origin --delete v1.0", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a name with no ref and no tag still asks, beside the tag allow",
+   VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-unseen",))
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
