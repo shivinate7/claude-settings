@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """Print a waiting page rebuilt and republished the way the writer does it, for page.test.mjs.
 
-    python3 skills/waiting-page/tests/merged_page.py --page LIVE.html [--no-roadmap] [--current PHASE]
+    python3 skills/waiting-page/tests/merged_page.py --page LIVE.html [--no-roadmap] [--current PHASE] [--data JSON]
 
 Builds the roadmap data block of a fixture roadmap repo (skills/roadmap/build.py --block), splices
 it into LIVE.html (skills/waiting-page/splice.py) and prints the result. With --no-roadmap the repo
 has no record branch, so the block holds ROADMAP_DATA = null. With --current PHASE every one of the
 five phases has a step: each phase before PHASE is done, PHASE has a step in progress and each phase
-after it is to do, so PHASE is the phase the rail marks as current. The fixture repo is the one in
+after it is to do, so PHASE is the phase the rail marks as current. With --data JSON the steps and
+meta docs are the ones the JSON names, {"steps": {file stem: step}, "meta": {file stem: doc}}, in
+place of the built-in ones. The fixture repo is the one in
 skills/roadmap/test_build.py (make_repo). Its folder is this run's folder from lint/_test_temp.py,
 removed before the script ends (decision test-temp-standard). A step that fails prints its stderr
 and exits 1, so a missing builder or splice reads as that, not as a blank page.
 """
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -61,9 +64,12 @@ def main():
     ap.add_argument("--page", required=True, help="the live page to splice the block into")
     ap.add_argument("--no-roadmap", action="store_true", help="a repo with no record branch")
     ap.add_argument("--current", choices=PHASE_KEYS, help="the phase the rail marks as current")
+    ap.add_argument("--data", help='the steps and meta docs to bake, as JSON {"steps": {file stem: step}, "meta": {file stem: doc}}')
     args = ap.parse_args()
     if args.no_roadmap and args.current:
         ap.error("--current needs a roadmap: a repo with no record branch has no current phase, so it cannot go with --no-roadmap")
+    if args.data and (args.no_roadmap or args.current):
+        ap.error("--data replaces the built-in steps, so it cannot go with --no-roadmap or --current")
     folder = _test_temp.run_folder()
     try:
         if args.no_roadmap:
@@ -74,8 +80,13 @@ def main():
             test_build.git(repo, "add", "-A")
             test_build.git(repo, "commit", "-q", "-m", "main")
         else:
-            steps = steps_current_in(args.current) if args.current else {"z1": BAKED_STEP}
-            repo = test_build.make_repo(folder, steps=steps, meta={"phases": BAKED_PHASES})
+            if args.data:
+                fixture = json.loads(args.data)
+                steps, meta = fixture.get("steps", {}), fixture.get("meta", {})
+            else:
+                steps = steps_current_in(args.current) if args.current else {"z1": BAKED_STEP}
+                meta = {"phases": BAKED_PHASES}
+            repo = test_build.make_repo(folder, steps=steps, meta=meta)
             test_build.git(repo, "checkout", "-q", "main")
         block, merged = os.path.join(folder, "block.html"), os.path.join(folder, "merged.html")
         run([sys.executable, str(ROOT / "skills" / "roadmap" / "build.py"), "--repo", str(repo), "--block",

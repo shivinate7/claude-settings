@@ -1096,7 +1096,10 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
-CHECKS_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+CHECKS_YML = ("name: checks\non: pull_request\njobs:\n"  # checks-merge-install comes first: a test that appends steps puts them in `checks`, the last job
+             "  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Merge install suite\n        run: python3 hooks/x.py\n"
+             "  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
              "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
 SLUG_LINT = '''import collections, os, re, sys
@@ -1277,7 +1280,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("exit 3", self.refused())
 
-    def test_the_suites_a_doc_hits_come_from_the_checks_job(self):
+    def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
         lints = merge.lint_steps(root, "origin/main")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
@@ -1335,6 +1338,24 @@ class SmallBaseMove(Env):
         self.assertEqual(self.workflow_files()[1], [], "fixture: a workflow file holds a checks job")
         with self.assertRaises(merge.Stop, msg="no workflow holds a checks job, and hit_suites named no stop"):
             merge.hit_suites(self.other, ["docs/guide.md"], set())
+
+    def test_a_workflow_without_the_checks_merge_install_job_stops_the_suite_read(self):
+        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that holds `checks` alone stops and names the
+        missing job; the control first shows that both jobs read the suite of `checks`, so the stop is the missing job's."""
+        root = tempfile.mkdtemp(dir=self.run_dir)
+        put(os.path.join(root, "hooks", "test_reads_guide.py"), DOC_SUITE)
+        put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the merge install step's suite: read, names no path
+        checks = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                  "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
+        merge_install = ("  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
+                         "      - name: Merge install suite\n        run: python3 hooks/x.py\n")
+        def hits(workflow):
+            put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow)
+            return [f for f, _ in merge.hit_suites(root, ["docs/guide.md"], set())]
+        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install))
+        with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
+            hits(checks)
+        self.assertIn("checks-merge-install", str(cm.exception))
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])

@@ -7,13 +7,15 @@
 # `bin/ste-changed ...` or a pinned `pipx run <tool>==<version> ...` (the pin read from the workflow), one command
 # per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and every other command (hooks/ suites,
 # bash, unpinned pipx, other uses:) is left out and printed nowhere, except a `uses:` of this repo's own action
-# (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
-# by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
-# actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from a checkout of this repo. The step's uses: picks which checkout, as CI does. A local uses: (`$/actions/...`,
-# `./actions/...`) runs the repo under test's own code_check.py, never another's: missing or failing, it FAILs. A
-# remote uses: (`owner/repo/actions/code-check@ref`) runs the copy beside ci-job, else the one in the checkout the
-# global rules file names, else the step is unknown and names the paths it looked at. The step's line names
+# (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Three `uses:` it runs in place, each
+# by its one home: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
+# actions/ste-lint/run.sh), actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`,
+# and actions/zizmor as its run.sh with the step's `with: paths` in ZIZMOR_PATHS. The first two need a base; zizmor
+# needs none, and with no pipx it is unknown ("tool missing: pipx"). The step's uses: picks which checkout, as CI
+# does. A local uses: (`$/actions/...`, `./actions/...`) runs the repo under test's own code_check.py or run.sh,
+# never another's: missing or failing, it FAILs. A remote uses: (`owner/repo/actions/code-check@ref`) runs the copy
+# beside ci-job, else (code-check, zizmor) the one in the checkout the global rules file names, else the step is
+# unknown and names the paths it looked at. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
@@ -46,7 +48,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
@@ -149,27 +151,32 @@ def missing_in_log(log, start, script):
 
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed|pipx run [\w.-]+==[\w.]+)"
                       r"(?: [^|&;`<>]*)?")
-RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN"}  # absent from a runner step's env unless its env: maps them
-KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check)(?:@\S*)?")
+RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
+KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
+ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
 
 
-def code_check(top, step):
-    """(path, None) to the code_check.py the step's uses: names; (None, looked-at) when a remote uses: finds none.
-    A local uses: is always the repo under test's own file, even when missing, so the step fails here as in CI. A
-    remote uses: is the copy beside this file, else the one in the pointer checkout."""
+def action_file(top, step, rel):
+    """(path, None) to the file `rel` of the action the step's uses: names; (None, looked-at) when a remote uses:
+    finds none. A local uses: is always the repo under test's own file, even when missing, so the step fails here as
+    in CI. A remote uses: is the copy beside this file, else the one in the pointer checkout."""
     if LOCAL_ACTION.fullmatch(uses(step)):
-        return os.path.join(top, CODE_CHECK), None
+        return os.path.join(top, rel), None
     roots = [os.path.dirname(BIN)]
     try:
         from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
         roots.append(pointer_checkout())
     except ImportError:
         pass
-    paths = [os.path.join(root, CODE_CHECK) for root in roots if root]
+    paths = [os.path.join(root, rel) for root in roots if root]
     found = next((p for p in paths if os.path.isfile(p)), None)
     return found, None if found else " or ".join(paths)
+
+
+def code_check(top, step):
+    return action_file(top, step, CODE_CHECK)
 
 
 def uses(step):
@@ -177,14 +184,14 @@ def uses(step):
 
 
 def known_action(step):
-    """ste-lint or code-check when the step uses one of them, else None."""
+    """ste-lint, code-check or zizmor when the step uses one of them, else None."""
     m = KNOWN_ACTION.fullmatch(uses(step))
     return m.group(1) if m else None
 
 
 def is_lint(step):
     """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script.
-    The ste-lint and code-check actions count: plan() runs each one's own command for it."""
+    The ste-lint, code-check and zizmor actions count: plan() runs each one's own command for it."""
     if known_action(step):
         return True
     body = run_body(step)
@@ -212,6 +219,19 @@ def plan(step, pr, values, top):
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
     action = known_action(step)
+    if action == "zizmor":  # run.sh under the action's folder, with the step's with: paths; it needs no base
+        if not shutil.which("bash") or not shutil.which("pipx"):
+            return "unknown", "tool missing: %s" % " and ".join(t for t in ("bash", "pipx") if not shutil.which(t)), None, None, None
+        path, looked = action_file(top, step, ZIZMOR_RUN)
+        if not path:
+            return "unknown", "no run.sh: looked for %s" % looked, None, None, None
+        env = {}
+        if "paths" in step_with(step):
+            env["ZIZMOR_PATHS"] = expand(step_with(step)["paths"].strip("'\""), values)
+            if env["ZIZMOR_PATHS"] is None:
+                return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
+        # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
+        return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\nbash "%s"\n' % (path, path, path), SHELLS[None], env, None
     if action:
         if not pr:
             return "skipped", "a pull-request step: pass --base to run it", None, None, None
