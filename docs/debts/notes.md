@@ -1164,3 +1164,4 @@
 - page-stale-old-main: until a checkout fetches this merge, its origin/main template is still titled "Queue", and an untouched "Queue" page passes `page-stale`. It ends at the fetch. Decision: page-stale-publish
 - zizmor-env-unset-untested: `ZIZMOR_PATHS` in RUNNER_UNSET (bin/ci-job) has no red case. An exported value reaches only a zizmor step with no `with: paths`, and checks.yml always sets it. Decision: none
 - zizmor-paths-doc-drift: the `paths` input text in actions/zizmor/action.yml says "separated by spaces"; run.sh splits on spaces or newlines. Decision: none
+- zizmor-test-comment-files: actions/ste-lint/test_action.py:11-12 and :653-654 say zizmor pins are compared on run.sh only; bin/ste-changed compares run.sh and action.yml. Decision: action-pins-follow-sessions
