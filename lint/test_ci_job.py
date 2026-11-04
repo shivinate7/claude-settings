@@ -6,6 +6,7 @@ a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-re
 None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
+StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -23,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+from workflow_steps import step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -404,6 +406,66 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+
+def mapped(parent, body):
+    """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
+    return "      - name: s\n        %s:\n%s\n" % (parent, body)
+
+
+def words_of(mapping, key):
+    """The words of mapping[key], as run.sh splits a paths value; [] when the key is absent."""
+    return mapping.get(key, "").split()
+
+
+class StepMaps(unittest.TestCase):
+    """A step's with: and env: values as lint/workflow_steps.py reads them for bin/ci-job. A block scalar (`|`, `>`,
+    `|-`) reads as its lines. An inline comment (a space, then `#`) is not part of the value. A `#` inside quotes or
+    inside a block scalar is text."""
+
+    def test_a_literal_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: |\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: | was read as its marker, not its lines")
+
+    def test_a_folded_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: >\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: > was read as its marker, not its lines")
+
+    def test_a_chomping_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: |-\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: |- was read as its marker, not its lines")
+
+    def test_an_empty_block_reads_as_no_words(self):
+        value = step_with(mapped("with", "          paths: |\n"))
+        self.assertEqual(words_of(value, "paths"), [], "an empty with: paths: | block read its marker as a path")
+
+    def test_an_inline_comment_is_not_part_of_the_value(self):
+        value = step_with(mapped("with", "          paths: .github/ # audit\n"))
+        self.assertEqual(value.get("paths"), ".github/", "the inline comment stayed in the with: paths value")
+
+    def test_a_comment_after_a_quoted_value_is_dropped_and_a_hash_inside_quotes_is_kept(self):
+        value = step_with(mapped("with", '          paths: "a/ # b/" # audit\n'))
+        self.assertEqual(value.get("paths", "").strip("'\""), "a/ # b/", "the inline comment stayed in the with: paths value")
+
+    def test_a_hash_with_no_space_before_it_is_text(self):
+        value = step_with(mapped("with", "          paths: a/#b # note\n"))
+        self.assertEqual(value.get("paths"), "a/#b", "the inline comment stayed in the with: paths value")
+
+    def test_a_lone_quote_in_text_is_kept(self):
+        value = step_with(mapped("with", "          paths: don't/ # note\n"))
+        self.assertEqual(value.get("paths"), "don't/", "the inline comment stayed in the with: paths value")
+
+    def test_a_hash_inside_a_block_is_text(self):
+        value = step_with(mapped("with", "          paths: |\n            a/ # kept\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "#", "kept"], "a # inside a with: paths block was dropped")
+
+    def test_an_env_literal_block_reads_its_lines(self):
+        value = step_env(mapped("env", "          ZIZMOR_PATHS: |\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "ZIZMOR_PATHS"), ["a/", "b/"], "env: ZIZMOR_PATHS: | was read as its marker")
+
+    def test_an_env_inline_comment_is_not_part_of_the_value(self):
+        value = step_env(mapped("env", "          NOTE: x # y\n"))
+        self.assertEqual(value.get("NOTE"), "x", "the inline comment stayed in the env: NOTE value")
 
 
 class RealChecks(unittest.TestCase):
