@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T00:19:00Z",
+  "context": "Goal: coordinators of child repos can get the acts the cloud refuses done.\nProblem (rule): the standing grant \"Acts the cloud refuses\" in .claude/CLAUDE.md names only the claude-settings coordinator, so a child repo's coordinator must ask you for each act.\nBased on (read): .claude/CLAUDE.md, Standing grants: a local session may set branch protection to the shared form, delete merged branches, and close PRs the coordinator names as replaced or empty (owner, 2026-10-30 16:20 CDT).\nBased on (read): raised by lane one-lane-one-step (PR #1136).\nDeparts from: that grant, which names the claude-settings coordinator only \u2014 any repo's coordinator may ask, for the same three acts.",
+  "home": "one-lane-one-step",
+  "id": "cloud-refused-acts-any-repo",
+  "kind": "decision",
+  "n": 219,
+  "options": [
+    {
+      "gain": "Child repos clean up merged branches and replaced PRs without asking you each time.",
+      "how": "The grant names each repo's coordinator; the three acts stay the same.",
+      "key": "a",
+      "label": "Widen to each repo's coordinator",
+      "lose": "More sessions can ask a session on your computer for these acts."
+    },
+    {
+      "gain": "Only claude-settings' coordinator can ask.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Keep it",
+      "lose": "Each child-repo cleanup waits on your word."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 19,
+  "ref": "lane one-lane-one-step (PR #1136); .claude/CLAUDE.md, Standing grants",
+  "short": "Cloud-refused acts, any repo",
+  "status": "open",
+  "title": "Should any repo's coordinator be able to ask a session on your computer for the three acts the cloud refuses?",
+  "why": "The three acts are narrow and undoable or low-harm, and the same rule applies in every repo."
+}

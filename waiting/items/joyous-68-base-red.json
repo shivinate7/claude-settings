@@ -49,11 +49,12 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
   "rank": 1,
   "ref": "joyous PR #68 in integration PR #71 (head 5d1166f); joyous run 41389182137 (build)",
-  "reply": "Reopened Nov 3 17:14 CST at the coordinator's request: the close on Nov 3 was wrong, because you never answered the reopened question. #68 now merges inside joyous integration PR #71, held by batch runner 9.",
+  "reply": "Answered: you typed the override in batch runner 9's session at 18:02 CST (pick a), and joyous PR #71 merged as 5c36e982c, carrying #68 (coordinator, Nov 3 18:05 CST).",
   "short": "joyous #68 merge (reopened)",
-  "status": "open",
+  "status": "closed",
   "title": "joyous #68: type the override now that only main's real build red blocks it?",
   "why": "joyous main is red from a failed build (run 41389182137), and #68 is the fix. The merge tool fix d20640d clears only cancelled runs, so it does not cover this red, and a plain merge can never land #68."
 }

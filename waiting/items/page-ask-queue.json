@@ -1,6 +1,23 @@
 {
   "added": "2026-11-03T23:52:00Z",
   "context": "Goal: you can send several asks from the waiting page, and each one reaches its writer.\nProblem (goal): the page holds one ask at a time; how several queue changes the screen.\nBased on (incident): owner, Nov 2 12:55 CST: \"can add only one ask before Send\".\nBased on (read): page.html has one textarea (:795) and one sent slot (:2063); a second Send within the 8 s Undo replaces the first one's Undo.\nDeparts from: docs/design/page-ask-box-notes.md item 5 (one Undo at the box) \u2014 each ask gets its own row.",
+  "designs": [
+    {
+      "label": "Undo on each row (phone 390)",
+      "option": "a",
+      "slug": "page-ask-queue-a"
+    },
+    {
+      "label": "Stack, then send (phone 390)",
+      "option": "b",
+      "slug": "page-ask-queue-b"
+    },
+    {
+      "label": "Latest Undo at the box (phone 390)",
+      "option": "c",
+      "slug": "page-ask-queue-c"
+    }
+  ],
   "home": "ask-reaches-writer",
   "id": "page-ask-queue",
   "kind": "decision",
@@ -10,40 +27,44 @@
       "url": "https://github.com/shivinate7/claude-settings/blob/3bf3e26b/docs/design/page-ask-queue.html"
     }
   ],
+  "look": true,
   "n": 218,
   "options": [
     {
+      "design": "page-ask-queue-a",
       "gain": "Each sent ask shows its own status and its own Undo.",
-      "how": "Each sent ask gets its own row under the box, with its status and its own Undo (mockup state rows).",
+      "how": "Each sent ask gets its own row under the box, with its status and its own Undo.",
       "key": "a",
       "label": "Undo on each row",
       "links": [
         {
-          "label": "Mockup, state rows",
+          "label": "Full mockup, state rows",
           "url": "https://github.com/shivinate7/claude-settings/blob/3bf3e26b/docs/design/page-ask-queue.html"
         }
       ],
       "lose": "A list of rows under the box."
     },
     {
+      "design": "page-ask-queue-b",
       "gain": "You review the batch before it goes.",
-      "how": "Asks stack in the box and go together on a final Send (mockup state stack).",
+      "how": "Asks stack in the box and go together on a final Send.",
       "key": "b",
       "label": "Stack, then send",
       "links": [
         {
-          "label": "Mockup, state stack",
+          "label": "Full mockup, state stack",
           "url": "https://github.com/shivinate7/claude-settings/blob/3bf3e26b/docs/design/page-ask-queue.html"
         }
       ],
       "lose": "Nothing reaches the writer until the final Send; one more click."
     },
     {
+      "design": "page-ask-queue-c",
       "gain": "Smallest change.",
-      "how": "Keep one Undo at the box for the latest ask only.",
+      "how": "The latest ask keeps its Undo at the box; an earlier ask still in its 8 s gets its Undo on its row.",
       "key": "c",
       "label": "Latest Undo at the box",
-      "lose": "Earlier asks lose their Undo."
+      "lose": "Earlier asks lose their Undo at the box; Undo has two homes."
     }
   ],
   "owner": "lane report-guard-slice-2 (session_013NEJL3dNLxnmdt942Ffipw)",
