@@ -3,7 +3,7 @@ name: design-explore
 description: Use before the builder on a lane that explores a screen, a new screen or a redesign. Spawns designer lanes in blind, informed and directed kinds, so the owner can cull a varied set of mockups. Not for a small change to an existing screen.
 ---
 
-Run this in the orchestrator. Workers never spawn, so the orchestrator spawns every designer lane.
+Run this in the orchestrator. Agents never spawn, so the orchestrator spawns every designer lane.
 The ruling is decision design-agents, 2026-10-27. The owner wants a mix of control and new ideas
 between the mockups.
 
@@ -17,7 +17,7 @@ worktree (`parallelism-each-own-checkout`).
   also holds the device and its poses, and fixed House rules and Deliver text. It never names the current
   screen, a view of today's product or its code. It never names a screenshot, a mockup, a path or
   link, the spec, the tokens, or a keep or match rule. It holds no colour, font or spacing value of
-  the repo, so it has no Palette section (the d4 designer drew "Banchi blue #3d5af1" from one). The orchestrator reads the job and the data from the spec or the
+  the repo, so it has no Palette section. The orchestrator reads the job and the data from the spec or the
   owner's words, and writes them in plain words. A blind lane shows ideas the repo's habits would
   hide. Each designer's worktree holds the code, spec, tokens and mockups, and the guard
   `designer-scope` limits writes only, so the brief and the designer's own instruction keep it blind.
