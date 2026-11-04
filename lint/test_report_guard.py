@@ -79,16 +79,17 @@ def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
 
 
-def peer_msg(body, stamp=None):
+def peer_msg(body, stamp=None, from_session="local_fixture"):
     """A cross-session reply in the shape a real transcript stores: type user, origin.kind peer,
-    isMeta true. It lands mid-turn, so it is never the owner's last message."""
+    isMeta true. It lands mid-turn, so it is never the owner's last message. `from_session` is the
+    id of the session that sent it."""
     rec = {"type": "user", "isSidechain": False, "isMeta": True,
            "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                      "name": "peer-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                      "name": "peer-cf", "fromSession": from_session, "fromMode": "bypass",
                       "body": body},
            "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                       '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % body}}
+                       '<cross-session-message from="uds:fixture-pipe" from-session="%s" '
+                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % (from_session, body)}}
     if stamp:
         rec["timestamp"] = stamp
     return rec
@@ -1644,9 +1645,8 @@ class PickGuardTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
                 self.assertIn("question box", out["reason"])
-                # Catches: the refusal naming the box as allowed only with nothing running.
-                self.assertRegex(out["reason"], r"question box[^.]*only with nothing running|"
-                                                r"only with nothing running[^.]*question box")
+                # Catches: the refusal dropping the box's nothing-running condition (spec v2 block text).
+                self.assertRegex(out["reason"], r"nothing running[^.]*question box")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1666,8 +1666,9 @@ class PickGuardTests(unittest.TestCase):
         out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
         self.assertIsNotNone(out)
 
-    def test_pk_red_page_write_without_link_in_reply_blocks(self):
-        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
+    def test_pk_green_page_write_without_link_passes(self):
+        # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks
@@ -1676,25 +1677,23 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, calls))
 
     def test_pk_red_pick_with_no_link_blocks_whatever_the_calls(self):
-        # With no link in the reply, the pick blocks whatever the calls: another collection, a get, or
-        # an items update (decisions-reach-a-clickable-pick).
-        for call in (self.page_set(collection="notes"), self.page_set(action="get"),
-                     self.page_set(action="update")):
+        # Catches: another collection or a get passing as the send. An items update passes (the green test below).
+        for call in (self.page_set(collection="notes"), self.page_set(action="get")):
             with self.subTest(call=call):
                 self.assertIsNotNone(self.verdict(self.PICK, [call]))
 
-    def test_pk_green_link_passes_whatever_the_calls(self):
-        # A reply that holds this repo's waiting page URL passes, whatever ArtifactData calls the
-        # turn made (decisions-reach-a-clickable-pick).
+    def test_pk_red_page_link_alone_blocks_whatever_the_calls(self):
+        # A page link alone is not a send. A link only shows the page; nothing reaches the writer, so the question still blocks.
         reply = self.PICK + "\n" + self.PAGE
         for calls in ([], [self.page_set(collection="notes")], [self.page_set(action="get")]):
             with self.subTest(calls=calls):
-                self.assertIsNone(self.verdict(reply, calls))
+                self.assertIsNotNone(self.verdict(reply, calls))
 
-    def test_pk_red_unknown_page_only_the_box_passes(self):
+    def test_pk_green_unknown_page_box_and_write_pass(self):
+        # With no waiting page, the box or the writer's items write still passes (spec v2, "No page").
         bare = os.path.join(self.tmp.name, "bare")
         os.makedirs(os.path.join(bare, ".git"))
-        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
+        self.assertIsNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
     def test_pk_green_update_and_batch_writes_pass(self):
@@ -1705,7 +1704,7 @@ class PickGuardTests(unittest.TestCase):
         reply = self.PICK + "\n" + self.PAGE
         self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
         self.assertIsNone(self.verdict(reply, [batch]))
-        self.assertIsNone(self.verdict(reply, [other]))
+        self.assertIsNotNone(self.verdict(reply, [other]))
         self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
@@ -1718,21 +1717,20 @@ class PickGuardTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Pick guard", out["reason"])
 
-    def test_pk_green_reply_links_this_repos_page_with_no_write_passes(self):
-        # Chat first, then the page (questions-go-to-owner): the session sends the question to the
-        # page's writer, so its reply links the page and it writes nothing itself.
-        self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
+    def test_pk_red_reply_links_page_with_no_write_blocks(self):
+        # A link to the page with no write does not reach the writer, so a pick with only that link still blocks.
+        self.assertIsNotNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
 
-    def test_pk_green_five_minute_wait_names_the_page_with_no_box_passes(self):
-        # Chat first, then the page (questions-go-to-owner): after 5 minutes unanswered in chat, the
-        # question goes to the page.
+    def test_pk_red_five_minute_promise_blocks(self):
+        # A promise to send after 5 minutes passes nothing. The question must reach the page writer in its
+        # own turn, so a wait does not count as a send.
         for phrase in ("5 min", "5 minutes", "5-minute", "five minutes"):
             with self.subTest(phrase=phrase):
                 reply = ("> **Done** OTHER read the code\n"
                          "> **Input Needed** Two ways. Ask in chat; after %s unanswered it goes to the "
                          "waiting page.\n> A (my pick): fold the guard\n> B: add a second hook\n> "
                          + self.DEPARTS_LINE + "\n> **Next** wait") % phrase
-                self.assertIsNone(self.verdict(reply))
+                self.assert_pick_blocked(reply)
 
     def test_pk_red_wait_needs_both_words_blocks(self):
         # Catches: a 5-minute wait with no page word, and a page word with no 5-minute wait.
@@ -1758,21 +1756,26 @@ class PickGuardTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assert_pick_blocked(reply)
 
-    def test_pk_red_wait_without_a_waiting_page_blocks(self):
-        # Catches: the 5-minute wait and the page words in a repo whose layout gives no waiting page,
-        # with no extras file and with an extras file that has no waiting-page key.
+    def test_pk_green_wait_without_a_waiting_page_is_not_blocked(self):
+        # Catches: a repo with no waiting page (no extras file, or one with no waiting-page key) blocked on
+        # the wait. Such a pick is not blocked; the hook says it was not sent (spec v2, "No page").
         reply = ("> **Done** OTHER read the code\n"
                  "> **Input Needed** Two ways. After 5 minutes unanswered it goes to the waiting page.\n"
-                 "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait")
+                 "> A (my pick): fold the guard\n> B: add a second hook\n> " + self.DEPARTS_LINE + "\n"
+                 "> **Next** wait")
         bare = os.path.join(self.tmp.name, "bare")
         os.makedirs(os.path.join(bare, ".git"))
-        self.assert_pick_blocked(reply, repo=bare)
         nokey = os.path.join(self.tmp.name, "nokey")
         os.makedirs(os.path.join(nokey, ".git"))
         os.makedirs(os.path.join(nokey, ".claude"))
         with open(os.path.join(nokey, ".claude", "layout-extras.json"), "w") as f:
             json.dump({"kinds": {}}, f)
-        self.assert_pick_blocked(reply, repo=nokey)
+        for repo in (bare, nokey):
+            with self.subTest(repo=repo):
+                out = self.verdict(reply, repo=repo)
+                self.assertIsNotNone(out, "the unsent pick was not reported")
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn("no waiting page", out.get("systemMessage", ""))
 
     def test_pk_red_other_minute_counts_block(self):
         # Catches: the five-minute wait read inside a longer number, such as 15, 25 or 35, or a
@@ -1791,18 +1794,16 @@ class PickGuardTests(unittest.TestCase):
 
     def test_pk_green_no_false_alarm(self):
         rows = [
-            # Catches: a plain ask with no options refused.
-            "> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
             # Catches: a quoted earlier answer read as a pick.
             "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait",
             "> **Done** OTHER read it\n> **Input Needed** A decision is open. B was the old plan.",
             # Catches: options outside Input Needed read as a pick.
             "> **Done** OTHER two ways: A (my pick) or B\n> **Next**\n> 1. one\n> 2. two",
-            # Catches: "X or Y" in a plain ask read as a pick.
-            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply?",
-            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code?",
-            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field?",
-            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field?",
+            # Catches: "X or Y" in a plain ask read as a pick. No question mark, so no question either (spec v2.1).
+            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply.",
+            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code.",
+            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field.",
+            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field.",
             # Catches: numbered separate asks read as options.
             "> **Done** OTHER read it\n> **Input Needed**\n> 1. Approve the cap raise.\n> 2. Confirm the date.",
             # No Input Needed label.
@@ -1872,7 +1873,8 @@ class PickGuardTests(unittest.TestCase):
         for row in rows:
             for landed in (False, True):
                 with self.subTest(row=row, landed=landed):
-                    self.assertIsNone(self.verdict(row, landed=landed))
+                    # The "?" row is a question under spec v2.1, so it carries the box to pass.
+                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed))
 
     def test_dp_one_predicate_for_the_report_and_the_chat_box(self):
         # Catches: a report copy of the rule that judges a line the chat box does not. Both read question_form.
@@ -1921,6 +1923,457 @@ class PickGuardTests(unittest.TestCase):
                 with self.subTest(line=line, landed=landed):
                     reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
                     self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
+
+
+import itertools
+_CALL_IDS = itertools.count(1)
+
+
+class SameTurnWriter:
+    """The same-turn send a question needs: an ArtifactData get of the page's meta, whose result names the
+    writer, then a send to that writer id. A TestCase mixes it in and sets PAGE to the waiting page its repo
+    names."""
+
+    WRITER = "session_writer1"
+
+    def call(self, name, input_, result=None, side=False):
+        """The records one tool call leaves: the call, and its result when one is given."""
+        use_id = "toolu_%d" % next(_CALL_IDS)
+        recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
+        if result is not None:
+            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
+        return recs
+
+    def send(self, session_id=None, to=None):
+        """A send: send_message names its target by session_id, SendMessage by to."""
+        if to is None:
+            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
+        return self.call("SendMessage", {"to": to, "message": "pick"})
+
+    def writer_read(self, writer, collection="meta", doc_id="page"):
+        """An ArtifactData get whose result carries the writer id."""
+        return self.call("ArtifactData", {"action": "get", "collection": collection, "doc_id": doc_id,
+                                          "url": self.PAGE},
+                         result=json.dumps({"writer": writer, "url": self.PAGE}))
+
+
+class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
+    """Every question for the owner reaches the page writer in the turn it is asked. A question is an
+    offered pick, or an Input Needed sentence ending in "?" outside quotes. The Stop check reads the turn
+    alone: no clock, no state file.
+    Owner-facing turn: the question box (main session), a send to the writer id, or an ArtifactData set,
+    update or batch under collection items. Lane turn: a send to @parent or the parent id, or to the writer
+    id. A promise, a page link, a box or an items write passes nothing in a lane."""
+
+    PAGE = "https://claude.ai/artifact/waitpage2"
+    OLDER_WRITER = "session_writer0"
+    PARENT = "session_parent1"
+    LANE_ENV = "cse_lane1"  # override.remote_session_id() reads this as LANE_ID
+    LANE_ID = "session_lane1"
+    DEPARTS = "Departs from: lint/report_guard.py pick check — it also needs a Departs from line"
+    PICK = ["Two ways:", "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
+    PROMISE = ["Ask in chat; after 5 minutes unanswered it goes to the waiting page.",
+               "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
+    LINKED = PICK + [PAGE]
+    QUESTION = ["Close q_max #969 as replaced by #1010?"]
+
+    def setUp(self):
+        self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.run_dir, ignore_errors=True)
+        self.cfg = os.path.join(self.run_dir, "cfg")
+        self.home = os.path.join(self.run_dir, "home")
+        os.makedirs(self.cfg)
+        os.makedirs(self.home)
+        self.repo = self.make_repo("repo")
+
+    def make_repo(self, name, page=True):
+        repo = os.path.join(self.run_dir, name)
+        os.makedirs(os.path.join(repo, ".git"))
+        if page:
+            os.makedirs(os.path.join(repo, ".claude"))
+            with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
+                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+        return repo
+
+    def reply(self, body):
+        """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
+        landed turn passes the report's shape."""
+        lines = ["> **Done** BUILT abc123", "> **Input Needed** " + body[0]]
+        lines += ["> " + line for line in body[1:]]
+        return "\n".join(lines + ["> **Next** wait"])
+
+    def items_write(self, action="set", collection="items"):
+        return self.call("ArtifactData", {"action": action, "collection": collection, "url": self.PAGE,
+                                          "doc_id": "q1", "data": {}})
+
+    def items_batch(self):
+        return self.call("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]})
+
+    def box(self, side=False):
+        return self.call("AskUserQuestion", {}, side=side)
+
+    def lane_record(self, tags=("cs-build:lane",), parent=PARENT):
+        """This session's own get_session result. A lane tag or a parent id marks a lane."""
+        ccr = {"id": self.LANE_ID, "tags": list(tags), "parent_session_id": parent}
+        return self.call("mcp__claude-code-remote__get_session", {"session_id": self.LANE_ID},
+                         result=json.dumps({"ccr": ccr}))
+
+    def stop(self, records, env_id=None, repo=None, stop_active=False):
+        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing."""
+        path = write_transcript(records, self.run_dir)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_active,
+                "cwd": repo or self.repo}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        if env_id:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = env_id
+        run = run_guard(REPORT_GUARD, hook, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def lane(self, *records, repo=None):
+        """Stop on a lane: its own record first, then `records`. A lane's input is peer messages."""
+        return self.stop([*self.lane_record(), *records], env_id=self.LANE_ENV, repo=repo)
+
+    def assert_blocked(self, out, *phrases):
+        self.assertIsNotNone(out, "the question passed; expected a block")
+        self.assertEqual(out.get("decision"), "block", out)
+        for phrase in phrases:
+            self.assertIn(phrase, out.get("reason", ""), out)
+
+    def written_files(self):
+        return [os.path.join(d, name) for top in (self.cfg, self.home)
+                for d, _, names in os.walk(top) for name in names]
+
+    # Owner-facing turn.
+
+    def test_qm_red_question_mark_sentence_blocks_with_no_send(self):
+        # Catches: an Input Needed sentence ending in "?" read as no question, so it never reaches the page.
+        out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_question_mark_rows_block(self):
+        # Catches: a plain "X or Y?" ask with no box or send passing as a non-pick (spec v2.1).
+        rows = ("Should the guard also cover Codex? I wait.", "Does Q or A mode apply?",
+                "Rename I or U in the code?", "Is X or Y the field?", "Is A or B the field?")
+        for row in rows:
+            with self.subTest(row=row):
+                self.assert_blocked(self.stop([human("decide"), assistant_text(self.reply([row]))]), "Pick guard")
+
+    def test_qm_green_question_mark_in_a_quoted_past_question_is_no_question(self):
+        # Catches: a "?" inside a quoted past question read as a question asked now (false alarm).
+        out = self.stop([human("decide"), assistant_text(self.reply(['You asked "merge it?" and I picked A.']))])
+        self.assertIsNone(out)
+
+    def test_qm_green_turn_with_no_question_has_no_output_and_no_file(self):
+        # Catches: a turn with no question writing a file, or printing a block.
+        out = self.stop([human("status?"), assistant_text(self.reply(["None."]))])
+        self.assertIsNone(out)
+        self.assertEqual(self.written_files(), [])
+
+    def test_qm_green_box_in_the_turn_passes(self):
+        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out)
+
+    def test_qm_red_sidechain_box_does_not_count(self):
+        # Catches: an agent's box read as the owner's question box.
+        out = self.stop([human("decide"), *self.box(side=True), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_send_to_the_writer_passes(self):
+        # Catches: a send to the writer id not read as the send, in either field.
+        for label, send in (("session_id", self.send(session_id=self.WRITER)),
+                            ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_another_session_blocks(self):
+        # Catches: a send to a session that is not the writer passing as the question's send.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER),
+                         *self.send(session_id="session_other9"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
+    def test_qm_red_unknown_writer_blocks_and_names_the_page_read(self):
+        # Catches: a send to an id that no meta/page read named passing; the block says how to find the writer.
+        out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", "meta/page", self.PAGE, "ArtifactData get")
+
+    def test_qm_red_writer_from_another_item_does_not_count(self):
+        # Catches: a writer id read from a get of another item taken as the page writer.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER, collection="items", doc_id="q1"),
+                         *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", "meta/page")
+
+    def test_qm_green_newest_writer_read_names_the_writer(self):
+        # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
+        reads = [*self.writer_read(self.OLDER_WRITER), *self.writer_read(self.WRITER)]
+        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                     assistant_text(self.reply(self.PICK))]))
+        out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
+                         assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
+    def test_qm_green_items_write_in_the_turn_passes(self):
+        # Catches: the writer's own items write (set, update, batch) not read as the send.
+        for label, write in (("set", self.items_write("set")), ("update", self.items_write("update")),
+                             ("batch", self.items_batch())):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_items_read_or_other_collection_does_not_count(self):
+        # Catches: a read, or a write to another collection, passing as the send.
+        for label, write in (("get", self.items_write("get")), ("notes", self.items_write("set", "notes"))):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_act_in_an_earlier_turn_does_not_count(self):
+        # Catches: a send, a box or an items write from an earlier turn passing for this turn's question.
+        earlier = (("send", [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)]),
+                   ("box", self.box()),
+                   ("items", self.items_write("set")))
+        for label, act in earlier:
+            with self.subTest(act=label):
+                out = self.stop([human("first"), *act, assistant_text("Sent earlier."), human("decide"),
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_before_a_peer_message_does_not_count(self):
+        # Catches: a send before the last incoming message (a peer's) read as this turn's send.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER), *self.send(session_id=self.WRITER),
+                         peer_msg("status?"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_ack_from_the_writer_after_a_send_keeps_the_turn(self):
+        # Catches: the writer's ack of this turn's send starting a new turn, which hides the send and blocks
+        # a question that send already covers. The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # so the reply that follows it has no send and blocks.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER),
+                         peer_msg("status?", from_session=self.WRITER),
+                         assistant_text(self.reply(["Close q_max #969?"]))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_promise_words_or_page_link_alone_block(self):
+        # Catches: the 5-minute promise, or a page link, passing a question with no send (both clauses retired).
+        for body in (self.PROMISE, self.LINKED):
+            with self.subTest(body=body[0]):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_no_page_is_not_blocked_and_says_so(self):
+        # Catches: a repo with no waiting page (or no repo) blocked, or the pick left unreported.
+        bare = self.make_repo("bare", page=False)
+        loose = os.path.join(self.run_dir, "loose")
+        os.makedirs(loose)
+        for label, body, repo in (("pick", self.PICK, bare), ("promise", self.PROMISE, bare),
+                                  ("no repo", self.PICK, loose)):
+            with self.subTest(case=label):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))], repo=repo)
+                self.assertIsNotNone(out, "the unsent pick was not reported")
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn("pick not sent", out.get("systemMessage", ""))
+                self.assertIn("no waiting page", out.get("systemMessage", ""))
+
+    def test_qm_green_stop_hook_active_never_blocks(self):
+        # Catches: a rewrite blocked again for a question the first Stop already judged.
+        for body in (self.PICK, self.QUESTION):
+            with self.subTest(body=body[0]):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))], stop_active=True)
+                self.assertIsNone(out)
+
+    def test_qm_landed_turn_follows_the_same_rule(self):
+        commit = self.call("Bash", {"command": "git commit -m x"})
+        self.assert_blocked(self.stop([human("decide"), *commit, assistant_text(self.reply(self.PICK))]),
+                            "Pick guard")
+        self.assertIsNone(self.stop([human("decide"), *commit, *self.writer_read(self.WRITER),
+                                     *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
+
+    def test_qm_green_own_record_without_a_lane_tag_is_owner_facing(self):
+        # Catches: a session record with no lane tag and no parent read as a lane, which would refuse the box.
+        out = self.stop([human("decide"), *self.lane_record(tags=("coordinator",), parent=None), *self.box(),
+                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV)
+        self.assertIsNone(out)
+
+    def test_qm_red_peer_only_session_with_no_lane_record_gets_the_owner_rule(self):
+        # Catches: the early return when no human record exists, which skips the pick check.
+        out = self.stop([peer_msg("status?"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_question_mark_before_markup_blocks(self):
+        # Catches: a "?" followed by bold, a closing bracket, a dash or a closing curly quote read as no question.
+        for body in ("**Merge #5 now?**", "(merge it now?)", "Merge it now?—", "Merge it now?”"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_url_query_alone_is_no_question(self):
+        # Catches: a "?" inside a URL read as a question. A "?" counts only before whitespace or the end.
+        out = self.stop([human("decide"), assistant_text(self.reply(["https://x.y/a?b=1"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_lone_quote_does_not_hide_a_question(self):
+        # Catches: a lone double quote paired with a later one, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(['Set 5" rack, merge it? Pick "main".']))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_single_quoted_past_question_is_no_question(self):
+        # Catches: a "?" inside a single-quoted past question read as a question asked now (false alarm).
+        out = self.stop([human("decide"), assistant_text(self.reply(["You asked 'merge it?' and I picked A"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_question_mark_before_a_word_or_link_markup_blocks(self):
+        # Catches: a "?" followed by a dash and a word, or by the closing bracket of link markup,
+        # read as no question.
+        for body in ("Merge it now?—yes", "[Merge #5?](https://x.y/5)"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_lone_single_quote_does_not_hide_a_question(self):
+        # Catches: a lone apostrophe paired with a later single quote, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(["Don't merge it? Pick 'main'."]))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
+        # Catches: a session with no own record whose question goes to its parent, refused as if it had no route.
+        for label, send in (("@parent", self.send(session_id="@parent")), ("to parent", self.send(to="parent"))):
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    FRESH_QUESTION_CODE = (
+        "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
+        "print(json.dumps(list(report_guard.question_problem(data['records'], data['records'], data['text'], "
+        "data['hook']))))" % HERE)
+
+    def test_qm_question_problem_works_on_a_fresh_import(self):
+        # Catches: question_problem reaching for hooks/ modules that only pending_refusals puts on sys.path, so a
+        # caller that imports report_guard and asks straight away fails with ImportError.
+        records = [human("decide"), assistant_text(self.reply(self.QUESTION))]
+        hook = {"hook_event_name": "Stop", "transcript_path": write_transcript(records, self.run_dir),
+                "stop_hook_active": False, "cwd": self.repo}
+        payload = json.dumps({"records": records, "text": self.reply(self.QUESTION), "hook": hook})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        run = subprocess.run([sys.executable, "-c", self.FRESH_QUESTION_CODE], input=payload, capture_output=True,
+                             text=True, timeout=15, cwd=self.run_dir, env=env)
+        self.assertEqual(run.returncode, 0, "question_problem raised on a fresh import: %s" % run.stderr[-400:])
+        refusal, _note = json.loads(run.stdout)
+        self.assertIn("Pick guard", refusal)
+
+    # Lane turn.
+
+    def test_ln_green_send_to_parent_in_the_turn_passes(self):
+        # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
+        # The human-first shape is red on main: main checks it and blocks, where a peers-only lane is skipped.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
+                 ("to parent", self.send(to="parent")))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, form=label):
+                    self.assertIsNone(self.lane(*incoming, *send, assistant_text(self.reply(self.PICK))))
+
+    def test_ln_red_promise_or_page_link_alone_blocks(self):
+        # Catches: a lane's promise or page link passing; a lane's chat never reaches the owner.
+        for body in (self.PROMISE, self.LINKED):
+            with self.subTest(body=body[0]):
+                out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
+                self.assert_blocked(out, "Lane pick guard", "@parent")
+
+    def test_ln_red_box_or_items_write_blocks(self):
+        # Catches: a lane's box or items write read as its send. Neither passes a lane.
+        for label, act in (("box", self.box()), ("items", self.items_write("set"))):
+            with self.subTest(act=label):
+                out = self.lane(peer_msg("pick?"), *act, assistant_text(self.reply(self.PICK)))
+                self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_green_send_to_writer_passes(self):
+        # Catches: a lane's send to the writer id not read as its send, in either field and either shape.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER)))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, field=label):
+                    out = self.lane(*self.writer_read(self.WRITER), *incoming, *send,
+                                    assistant_text(self.reply(self.PICK)))
+                    self.assertIsNone(out)
+
+    def test_ln_red_send_to_another_session_blocks(self):
+        # Catches: a lane's send to a session that is neither its parent nor the writer.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="session_other9"),
+                        assistant_text(self.reply(self.PICK)))
+        self.assert_blocked(out, "Lane pick guard", "@parent")
+
+    def test_ln_red_send_in_an_earlier_turn_blocks(self):
+        # Catches: a send before the lane's last incoming message passing as this turn's send.
+        out = self.lane(peer_msg("first"), *self.send(session_id="@parent"), peer_msg("second"),
+                        assistant_text(self.reply(self.PICK)))
+        self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_green_ack_from_the_parent_after_a_send_keeps_the_turn(self):
+        # Catches: the parent's ack of a lane's send starting a new turn, which hides the send and blocks the question.
+        # The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.PARENT)
+        forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
+                 ("to parent", self.send(to="parent")))
+        for label, send in forms:
+            with self.subTest(form=label):
+                self.assertIsNone(self.lane(*send, ack, assistant_text(self.reply(["Close q_max #969?"]))))
+
+    def test_ln_red_peer_from_the_parent_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # and the reply that follows it blocks.
+        self.assert_blocked(self.lane(peer_msg("pick?", from_session=self.PARENT),
+                                      assistant_text(self.reply(["Close q_max #969?"]))), "Lane pick guard")
+
+    def test_ln_landed_turn_follows_the_lane_rule(self):
+        commit = self.call("Bash", {"command": "git commit -m x"})
+        self.assert_blocked(self.lane(peer_msg("pick?"), *commit, assistant_text(self.reply(self.PICK))),
+                            "Lane pick guard")
+        self.assertIsNone(self.lane(peer_msg("pick?"), *commit, *self.send(session_id="@parent"),
+                                    assistant_text(self.reply(self.PICK))))
+
+    def test_ln_red_lane_marked_by_tag_or_by_parent_blocks(self):
+        # Catches: a lane recognised by one of its two marks only.
+        for label, record in (("tag only", self.lane_record(tags=("cs-build:lane",), parent=None)),
+                              ("parent only", self.lane_record(tags=(), parent=self.PARENT))):
+            with self.subTest(mark=label):
+                out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))],
+                                env_id=self.LANE_ENV)
+                self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_red_lane_with_no_page_still_blocks(self):
+        # Catches: a lane failed open because its repo has no waiting page.
+        bare = self.make_repo("bare", page=False)
+        self.assert_blocked(self.lane(peer_msg("pick?"), assistant_text(self.reply(self.PICK)), repo=bare),
+                            "Lane pick guard")
+
+    def test_ln_red_question_mark_sentence_blocks(self):
+        # Catches: a lane's "?" sentence with no send read as no question (spec v2.1).
+        self.assert_blocked(self.lane(peer_msg("pick?"), assistant_text(self.reply(self.QUESTION))),
+                            "Lane pick guard")
+
+    def test_ln_green_stop_hook_active_never_blocks(self):
+        # Catches: a lane's rewrite blocked again for a question the first Stop already judged.
+        out = self.stop([*self.lane_record(), peer_msg("pick?"), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, stop_active=True)
+        self.assertIsNone(out)
 
 
 class ConfigReportTests(unittest.TestCase):
@@ -3501,7 +3954,9 @@ C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settin
                  "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
 
 
-class PastRulingRelay(unittest.TestCase):
+class PastRulingRelay(SameTurnWriter, unittest.TestCase):
+    PAGE = tcj.PAGE_URL  # the waiting page tcj.make_repo names, which the writer read cites
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -3531,9 +3986,11 @@ class PastRulingRelay(unittest.TestCase):
         with open(self.record, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None):
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False):
         if records is None:
-            records = [human("decide"), assistant_text(reply)]
+            # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
+            sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
+            records = [human("decide"), *sent, assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
         overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
@@ -3557,7 +4014,8 @@ class PastRulingRelay(unittest.TestCase):
         self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
 
     def test_absent_sources_allow_with_the_unknown_notice(self):
-        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW)
+        # The send to the writer keeps the question check quiet, so this case tests only the relay's unknown notice.
+        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW, to_writer=True)
         self.assertEqual(out, {}, out)
         self.assertIn("past-ruling search unknown:", err)
         self.assertEqual(len(self.model_calls()), 1)
@@ -3579,11 +4037,12 @@ class PastRulingRelay(unittest.TestCase):
         self.assertEqual(self.model_calls(), [])
 
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
-        out, _ = self.stop(self.decided, RELAY, model_fail=True)
+        # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
+        out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
         self.assertIn("Unvetted:", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
-        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True)
+        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
         self.assertEqual(out, {}, out)
         self.assertEqual(len(self.model_calls()), 1)
 
@@ -3995,6 +4454,7 @@ class PendingRefusalTests(unittest.TestCase):
     SID = "pd-sid-1"
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     ADD_REPO = "mcp__claude-code-remote__add_repo"
+    PAGE = "https://claude.ai/artifact/waitpage3"
     PROSE = "Nothing landed. The state is unchanged."
     LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
                         "> **Input Needed** allow `mcp__github__update_pull_request`?\n> **Next** wait")
@@ -4006,6 +4466,12 @@ class PendingRefusalTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.scratch, True)
         self.cfg = os.path.join(self.scratch, "cfg")
         os.makedirs(self.cfg)
+        # A repo with a waiting page: an owner question in it is judged, not handed the no-page note.
+        self.repo = os.path.join(self.scratch, "repo")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as handle:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE}, handle)
 
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
@@ -4025,14 +4491,14 @@ class PendingRefusalTests(unittest.TestCase):
         except FileNotFoundError:
             return []
 
-    def stop(self, reply, landed=False, active=False, sid=SID):
+    def stop(self, reply, landed=False, active=False, sid=SID, cwd=None):
         records = [human("do the task")]
         if landed:
             records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         records += [tool_use_msg(self.ARCHIVE), tool_result_msg(), assistant_text(reply)]
         path = write_transcript(records, self.scratch)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
-                "session_id": sid, "cwd": self.scratch}
+                "session_id": sid, "cwd": cwd or self.scratch}
         run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
         self.assertEqual(run.returncode, 0, run.stderr)
         return run
@@ -4056,25 +4522,32 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
-    def test_e_named_under_input_needed_passes_and_clears_the_entry(self):
-        styles = (("backticks", "> **Input Needed** allow `%s`?"),
-                  ("plain", "> **Input Needed** allow %s?"))
-        for label, line in styles:
+    def test_e_allow_line_with_no_send_blocks_as_a_question(self):
+        # An "allow <tool>?" line is a question for the owner (spec v2.1), so it blocks until the question is
+        # sent. Naming the refused tool still clears its entry: the owner was asked about that refusal.
+        styles = (("backticks", "Bash", "> **Input Needed** allow `Bash`?"),
+                  ("should I", "Bash", "> **Input Needed** Should I allow `Bash`?"),
+                  ("plain MCP name", self.ARCHIVE, "> **Input Needed** allow %s?" % self.ARCHIVE))
+        for label, tool, line in styles:
             with self.subTest(label):
-                self.write_refusals([self.ARCHIVE])
-                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait"
-                         % (line % self.ARCHIVE))
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a named refusal still blocked: %s" % run.stdout)
-                self.assertNotIn(self.ARCHIVE, self.pending_tools(), "the passing reply did not clear the entry")
+                self.write_refusals([tool])
+                reply = "> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait" % line
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "an allow line with no send passed as the answer")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("Pick guard", out["reason"])
+                self.assertNotIn("Refusal guard", out["reason"], "the named refusal was raised again")
+                self.assertNotIn(tool, self.pending_tools(), "the reply did not clear the entry")
 
-    def test_e2_every_pending_tool_named_passes_and_clears_all(self):
+    def test_e2_every_pending_tool_named_clears_all_and_the_question_still_blocks(self):
         self.write_refusals([self.ARCHIVE, self.ADD_REPO])
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                  "> **Input Needed** allow `%s` and `%s`?\n> **Next** wait" % (self.ARCHIVE, self.ADD_REPO))
-        run = self.stop(reply)
-        self.assertEqual(run.stdout.strip(), "", "a reply that names both refusals still blocked: %s" % run.stdout)
-        self.assertEqual(self.pending_tools(), [], "the passing reply left an entry in the file")
+        out = self.blocked(self.stop(reply, cwd=self.repo))
+        self.assertIsNotNone(out, "a reply that asks about two refusals with no send passed")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Pick guard", out["reason"])
+        self.assertEqual(self.pending_tools(), [], "the reply left an entry in the file")
 
     def test_e3_a_name_outside_input_needed_is_no_answer(self):
         self.write_refusals([self.ARCHIVE])
@@ -4101,14 +4574,18 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(self.pending_tools(), [tool], "a plain mention cleared the entry")
 
     def test_k2_a_backticked_built_in_tool_name_clears_it(self):
+        # The named refusal clears and is not raised again. The allow line is a question (spec v2.1), so the
+        # reply still blocks until the question is sent.
         for tool in ("Edit", "Bash"):
             with self.subTest(tool):
                 self.write_refusals([tool])
                 reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                          "> **Input Needed** allow `%s`?\n> **Next** wait" % tool)
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a backticked %s still blocked: %s" % (tool, run.stdout))
-                self.assertEqual(self.pending_tools(), [], "the passing reply left %s in the file" % tool)
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "a backticked %s allow line with no send passed" % tool)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertNotIn("Refusal guard", out["reason"], "a backticked %s was raised again" % tool)
+                self.assertEqual(self.pending_tools(), [], "the reply left %s in the file" % tool)
 
     def test_k3_a_short_mcp_name_does_not_clear_the_full_name(self):
         self.write_refusals([self.ARCHIVE])
