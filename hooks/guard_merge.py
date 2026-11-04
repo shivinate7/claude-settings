@@ -524,8 +524,8 @@ def role_call_of(segment: str):
 
 
 def _own_session_read(transcript: str, own_id: str, created: bool = False):
-    """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id. `created`
-    counts a create_session call as a record too (the lane-one-topic rule reads a lane by its start)."""
+    """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
+    # `created` counts a create_session call as a record too: rule lane-one-topic reads a lane by its start.
     return own_session.own_session_read(transcript, own_id, created)[:2]
 
 
