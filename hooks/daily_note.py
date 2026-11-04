@@ -14,7 +14,7 @@ names the reader, lint/guard_log_report.py, by its absolute path beside this hoo
 path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
-There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
+There is no volume check: refusals grow with use, so a count check fires on ordinary days.
 A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
 
 Before the done-today stamp check, at every start, it also prints the one line of
