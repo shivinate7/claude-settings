@@ -53,6 +53,9 @@ const extractSection = (text, headingTest) => {
 };
 
 const LIST_ITEM_TOKEN_RE = /^[ \t]*[-*+]\s+`([^`]+)`/;
+// A `##` heading of a trace page, and the text after the `—` that ends the path of a map line or a step.
+const H2_RE = /^##\s+(.*\S)/;
+const afterDash = (rest) => rest.replace(/^\s*—\s*/, '').trim();
 
 const listTokens = (lines) => {
   const found = [];
@@ -76,7 +79,7 @@ export const mapLines = (text, re) => {
   if (!(re instanceof RegExp)) throw new TypeError('mapLines: the second argument must be a RegExp');
   return text.split('\n').flatMap((l) => {
     const m = l.match(LIST_ITEM_TOKEN_RE);
-    return m && re.test(m[1]) ? [{ path: m[1], sentence: l.slice(m[0].length).replace(/^\s*—\s*/, '').trim() }] : [];
+    return m && re.test(m[1]) ? [{ path: m[1], sentence: afterDash(l.slice(m[0].length)) }] : [];
   });
 };
 
@@ -176,10 +179,10 @@ const unclosedFence = (text) => {
 export const traceStepItems = (text) => {
   let heading = '';
   return unfenced(text).flatMap(([, l]) => {
-    const h = l.match(/^##\s+(.*\S)/);
+    const h = l.match(H2_RE);
     if (h) heading = h[1];
     const m = l.match(TRACE_STEP_RE);
-    return m ? [{ path: m[1], text: l.slice(m[0].length).replace(/^\s*—\s*/, '').trim(), heading }] : [];
+    return m ? [{ path: m[1], text: afterDash(l.slice(m[0].length)), heading }] : [];
   });
 };
 
@@ -197,7 +200,7 @@ export const actionsWithoutStep = (text) => {
   const out = [];
   let open = null;
   for (const [, l] of unfenced(text)) {
-    const h = l.match(/^##\s+(.*\S)/);
+    const h = l.match(H2_RE);
     if (h) {
       if (open !== null) out.push(open);
       open = h[1];

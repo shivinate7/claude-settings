@@ -3,37 +3,45 @@
 //   a file path  prints its area, its map line, its fact lines, its Homes lines and its trace steps.
 //   an area id   prints each map line of that area as `path — sentence`.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
-// Nothing found: `no map line for <arg>` on stderr, exit 1. No arg: a usage line, exit 2. A map the skill cannot read: the error on stderr, exit 3.
+// A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. A Tables row is none.
+// A path may be absolute: under the repository root it is read as its relative form.
+// Nothing found: `no map line for <arg>` on stderr, exit 1. No arg: a usage line, exit 2.
+// A map the skill cannot read (a bad config, or a page that is tracked and not on disk): one plain stderr line, exit 3.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
+import { extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
 import { repoMapConfig } from './lib/map-config.mjs';
-
-// A map line names any file, not only a code extension of the config: the map also lines `.py` and `.json` files.
-const ANY_FILE = /\.\w+$/;
 
 const fail = (msg, code) => { console.error(msg); process.exit(code); };
 
 const arg = process.argv[2];
 if (!arg) fail('usage: map-show.mjs <path|area|folder/>', 2);
 
-try { repoMapConfig(); } catch (e) { fail(e.message, 3); }
-
 const root = process.cwd();
-const files = gitLsFiles(root);
-const read = (f) => readFileSync(path.join(root, f), 'utf8');
-// One entry per area page, in the order git lists them.
-const areas = mapFilePaths(files).map((f) => {
-  const text = read(f);
-  return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, ANY_FILE) };
-});
-const traces = files.flatMap((f) => {
-  const m = f.match(TRACE_PAGE_RE);
-  return m ? [{ key: m[1], steps: traceStepItems(read(f)) }] : [];
-});
+let areas, traces;
+try {
+  const re = extRe(repoMapConfig());
+  const files = gitLsFiles(root);
+  const read = (f) => {
+    try { return readFileSync(path.join(root, f), 'utf8'); } catch (e) { throw new Error(`cannot read ${f}: ${e.code ?? e.message}`); }
+  };
+  // One entry per area page, in the order git lists them.
+  areas = mapFilePaths(files).map((f) => {
+    const text = read(f);
+    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re) };
+  });
+  traces = files.flatMap((f) => {
+    const m = f.match(TRACE_PAGE_RE);
+    return m ? [{ key: m[1], steps: traceStepItems(read(f)) }] : [];
+  });
+} catch (e) {
+  fail(e.message.replace(/\s*\n\s*/g, ' '), 3);
+}
 
+// An absolute path under the root is its relative form. One outside the root stays absolute, and no map line names it.
+const rel = path.isAbsolute(arg) ? path.relative(root, arg) : arg;
 // Backslashes and a leading `./` name the same path: Windows and shell completion type them.
-const want = path.posix.normalize(arg.replace(/\\/g, '/'));
+const want = path.posix.normalize(rel.replace(/\\/g, '/'));
 const row = (l) => `${l.path} — ${l.sentence}`;
 
 const out = [];
