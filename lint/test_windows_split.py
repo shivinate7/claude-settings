@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Guard for the Windows split of .github/workflows/checks.yml.
+"""Guard for the splits of .github/workflows/checks.yml: the Windows split, the Linux split and the macOS split.
 
-Proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
+WindowsSplit proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
-Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job has no job-level if: its scope condition sits in each step
+Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
+job-level if, if any, holds only the draft guard; its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
 CHECKS_YML overrides the path (used for red runs on a scratch copy).
 
-CiCoverage (last class) also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
+CiCoverage also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
 
-PairSplit does the same for the Linux pair (checks, checks-merge-install) and the macOS pair (checks-macos, checks-macos-b).
+SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
+each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
@@ -65,8 +67,8 @@ REQUIRED = [
 
 # The suites the single `checks` job ran (Linux) and the single `checks-macos` job ran (macOS) before the split, each with
 # its step's `if:` and `shell:`. checks-merge-install and checks-macos-b took some of them, so each suite runs in exactly one
-# job of its pair. A suite is a run of a test file, a mutation sweep or the mod tests. This is the one home of these lists.
-LINUX_PAIR = ("checks", "checks-merge-install")
+# job of its split. A suite is a run of a test file, a mutation test or the mod tests. This is the one home of these lists.
+LINUX_SPLIT = ("checks", "checks-merge-install")
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
@@ -156,6 +158,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_silent_undo.py": (None, None),
     "python3 lint/test_check_comment_narration.py": (None, None),
     "python3 lint/test_check_unknown_reads_contract.py": (None, None),
+    "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
     "python3 lint/test_check_agent_models.py": (None, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
@@ -186,8 +189,8 @@ LINUX_SUITES = {
     "bash .github/scripts/mod-tests.sh": (LINUX_MODS, "bash"),
 }
 
-# The macOS pair. The guard suite runs in two shards, one per job, each with its GUARD_SHARD env. No other macOS job runs it.
-MACOS_PAIR = ("checks-macos", "checks-macos-b")
+# The macOS split. The guard suite runs in two shards, one per job, each with its GUARD_SHARD env. No other macOS job runs it.
+MACOS_SPLIT = ("checks-macos", "checks-macos-b")
 MACOS_GUARD = "python3 hooks/test_guard.py"
 MACOS_GUARD_SHARD = {"checks-macos": "1/2", "checks-macos-b": "2/2"}
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
@@ -199,6 +202,7 @@ MACOS_SUITES = {
     "python3 hooks/test_guard_load_os.py": (MAC_CODE, None),
     "python3 lint/test_rm_shim.py": (MAC_CODE, None),
     "python3 lint/test_hook_platform_exit.py": (MAC_CODE, None),
+    "python3 lint/check_unknown_reads_contract.py": (MAC_CODE, None),
     "python3 janitor/test_sweep.py": (MAC_CODE, None),
     "python3 janitor/mutate_sweep.py": (MAC_SWEEP, None),
     "python3 hooks/test_config_watch.py": (MAC_OWN, None),
@@ -515,20 +519,38 @@ def scope_condition_step_problems(name, job, scope_condition):
             for st in job["steps"] if scope_condition_rest(step_if(st), scope_condition) is None]
 
 
+def draft_guard_only(expr):
+    """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
+    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft) == want for event, flag, draft, want in (
+            ("pull_request", "false", True, False),
+            ("pull_request", "false", False, True),
+            ("pull_request", "true", False, True),
+            ("push", "false", False, True),
+            ("push", "true", False, True)))
+    except Exception:
+        return False
+
+
 def job_check_problems(name, job, flag=None):
     """`needs: scope`. A shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint jobs
-    (LINT_JOBS) have no scope condition. A scoped job has no job-level if: its scope condition G is the one its steps carry (read_scope_condition), every step
-    carries G (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names the scope output
-    for a job whose flag is not its own name (FLAG_OF)."""
+    (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
+    A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
+    (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
+    the scope output for a job whose flag is not its own name (FLAG_OF)."""
     problems = []
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
     if shard_base(name):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
-    if name in LINT_JOBS:  # they run on every PR: no job-level if, no scope condition
-        return problems + ([f"{name}: job-level if: {expr}"] if expr is not None else [])
-    if expr is not None:
+    if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
+        return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
+    if expr is not None and not draft_guard_only(expr):
         return problems + [f"{name}: scoped job keeps a job-level if, its scope condition belongs in its steps: {expr}"]
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
@@ -573,8 +595,9 @@ def hardening_problems(text):
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
                     if isinstance(st.get("env"), dict) and var in st["env"]
                     and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD))
-        if text.count(var) != homes:
-            problems.append(f"{var} appears {text.count(var)} times in checks.yml, want {homes} (once per shard step's env)")
+        mentions = sum(strip_comment(line).count(var) for line in text.splitlines())  # a comment that names the var is no home
+        if mentions != homes:
+            problems.append(f"{var} appears {mentions} times in checks.yml, want {homes} (once per shard step's env)")
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
         if not any(key(st) in REQUIRED for st in steps):
@@ -677,7 +700,7 @@ def run_lines(st):
     return [ln.strip() for ln in (run_body(st) or "").split("\n") if ln.strip()]
 
 
-def pair_homes(text, jobs, cmd):
+def split_homes(text, jobs, cmd):
     """(job, step) for each step of the named jobs that runs `cmd` on one of its lines."""
     return [(job, st) for job in jobs for st in step_blocks(job_block(text, job)) if cmd in run_lines(st)]
 
@@ -701,32 +724,32 @@ def job_env_problems(text, jobs):
             if re.search(r"^    env:", job_block(text, j) or "", re.M)]
 
 
-def linux_pair_problems(text):
-    """Each LINUX_SUITES command runs in exactly one LINUX_PAIR job, with the `if:` and `shell:` pinned for it."""
-    problems = job_env_problems(text, LINUX_PAIR)
+def linux_split_problems(text):
+    """Each LINUX_SUITES command runs in exactly one LINUX_SPLIT job, with the `if:` and `shell:` pinned for it."""
+    problems = job_env_problems(text, LINUX_SPLIT)
     for cmd, (want_if, want_shell) in LINUX_SUITES.items():
-        homes = pair_homes(text, LINUX_PAIR, cmd)
+        homes = split_homes(text, LINUX_SPLIT, cmd)
         if len(homes) != 1:
-            problems.append(f"{cmd!r} runs {len(homes)} times in {LINUX_PAIR}: {[j for j, _ in homes]}")
+            problems.append(f"{cmd!r} runs {len(homes)} times in {LINUX_SPLIT}: {[j for j, _ in homes]}")
         else:
             problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell)
     return problems
 
 
-def macos_pair_problems(text):
-    """Each MACOS_SUITES command runs in exactly one MACOS_PAIR job, pinned as above, except the guard suite: one shard in
-    each job of the pair, each with its GUARD_SHARD value, and no other macOS job runs it."""
-    problems = job_env_problems(text, MACOS_PAIR)
+def macos_split_problems(text):
+    """Each MACOS_SUITES command runs in exactly one MACOS_SPLIT job, pinned as above, except the guard suite: one shard in
+    each job of the split, each with its GUARD_SHARD value, and no other macOS job runs it."""
+    problems = job_env_problems(text, MACOS_SPLIT)
     for cmd, (want_if, want_shell) in MACOS_SUITES.items():
         if cmd == MACOS_GUARD:
             continue
-        homes = pair_homes(text, MACOS_PAIR, cmd)
+        homes = split_homes(text, MACOS_SPLIT, cmd)
         if len(homes) != 1:
-            problems.append(f"{cmd!r} runs {len(homes)} times in {MACOS_PAIR}: {[j for j, _ in homes]}")
+            problems.append(f"{cmd!r} runs {len(homes)} times in {MACOS_SPLIT}: {[j for j, _ in homes]}")
         else:
             problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell)
     want_if, want_shell = MACOS_SUITES[MACOS_GUARD]
-    homes = pair_homes(text, MACOS_PAIR, MACOS_GUARD)
+    homes = split_homes(text, MACOS_SPLIT, MACOS_GUARD)
     if sorted(j for j, _ in homes) != sorted(MACOS_GUARD_SHARD):
         problems.append(f"{MACOS_GUARD!r} runs in {sorted(j for j, _ in homes)}, want one shard in each of "
                         f"{sorted(MACOS_GUARD_SHARD)}")
@@ -734,9 +757,9 @@ def macos_pair_problems(text):
         if job in MACOS_GUARD_SHARD:
             problems += pin_problems(job, st, MACOS_GUARD, want_if, want_shell, {"GUARD_SHARD": MACOS_GUARD_SHARD[job]})
     macos = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("macos")]
-    third = [j for j, _ in pair_homes(text, macos, MACOS_GUARD) if j not in MACOS_PAIR]
+    third = [j for j, _ in split_homes(text, macos, MACOS_GUARD) if j not in MACOS_SPLIT]
     if third:
-        problems.append(f"{MACOS_GUARD!r} runs in a macOS job outside {MACOS_PAIR}: {third}")
+        problems.append(f"{MACOS_GUARD!r} runs in a macOS job outside {MACOS_SPLIT}: {third}")
     return problems
 
 
@@ -806,6 +829,20 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(job_check_problems("checks-macos", job()), [])
         self.assertEqual(job_check_problems("checks", {"needs": "scope", "if": None, "steps": []}), [])
         self.assertTrue(job_check_problems("checks", {"needs": None, "if": None, "steps": []}))
+        # ci-hygiene steps 11 and 19: a job-level if that holds only the draft guard is allowed on a lint job and a scoped job.
+        draft = "${{ !github.event.pull_request.draft }}"
+        for name, flag in (("checks-merge-install", None), ("checks-macos-b", "checks_macos")):
+            with self.subTest(job=name, defect="the draft guard as job-level if is refused"):
+                self.assertEqual(job_check_problems(name, job(job_if=draft), flag), [])
+        lint_bad = {
+            "a job-level if reads a flag": job(job_if="${{ needs.scope.outputs.code == 'true' }}"),
+            "a job-level if is a trigger guard": job(job_if="${{ github.event_name == 'pull_request' }}"),
+            "draft guard and scope in one job-level if": job(job_if=f"${{{{ !github.event.pull_request.draft && ({scope_condition}) }}}}"),
+        }
+        for label, j in lint_bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(job_check_problems("checks-merge-install", j), label)
+                self.assertTrue(job_check_problems("checks-macos-b", j, "checks_macos"), label)
         bad = {
             "job-level if kept": job(job_if=f"${{{{ {scope_condition} }}}}"),
             "pr_only": job([{"if": "${{ needs.scope.outputs.checks_macos == 'true' }}"}]),  # skips on push when the flag is false
@@ -828,6 +865,35 @@ class WindowsSplit(unittest.TestCase):
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
+
+    def test_a_comment_that_names_a_shard_value_is_no_home(self):
+        # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
+        # Named failure: a comment that names GUARD_SHARD counts as a shard home, so checks.yml goes red for a comment.
+        self.assertIn("          GUARD_SHARD: 1/2\n", self.text)  # the fixture: a full step's shard key
+        cases = {
+            "a full-line comment": self.text + "# GUARD_SHARD=1/2 sets the shard on the full step only\n",
+            "a trailing comment on a shard key": self.text.replace("          GUARD_SHARD: 1/2\n",
+                                                                  "          GUARD_SHARD: 1/2  # GUARD_SHARD\n", 1),
+            "a comment after a lone apostrophe": self.text + "      - run: echo Don't # GUARD_SHARD=1/2\n",
+        }
+        baseline = hardening_problems(self.text)  # a comment changes no verdict, whatever the file's own verdict is
+        for label, text in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(hardening_problems(text), baseline, label)
+
+    def test_a_shard_value_in_quotes_or_after_a_lone_quote_is_a_leak(self):
+        # Rows: a comment opener inside quotes, a lone apostrophe before a leak, and a leak on the line after an open quote.
+        # Named failure: a quote or an apostrophe hides a shard value that reaches $GITHUB_ENV, so it goes unflagged.
+        cases = {
+            "a comment opener inside quotes": self.text + '      - run: echo "# x" && echo GUARD_SHARD=1/2 >> "$GITHUB_ENV"\n',
+            "a lone apostrophe before the leak": self.text + "      - run: echo Don't; echo GUARD_SHARD=1/2 >> \"$GITHUB_ENV\"\n",
+            "a leak after an open quote on the line above": self.text + ('      - run: |\n          echo "start\n'
+                                                                         '          echo GUARD_SHARD=1/2 >> "$GITHUB_ENV"\n'
+                                                                         '          end"\n'),
+        }
+        for label, text in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
 
     def test_checker_sees_drop_and_duplicate(self):
         def doc(*jobs, slice_=True):
@@ -963,7 +1029,7 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
 
 
-def pair_doc(jobs):
+def split_doc(jobs):
     """checks.yml text for `jobs`, {name: (runs-on, [(cmd, if, shell, env)])}, each step laid out as the real file lays it out."""
     out = ["jobs:"]
     for name, (runs_on, steps) in jobs.items():
@@ -981,19 +1047,19 @@ def pair_doc(jobs):
     return "\n".join(out) + "\n"
 
 
-class PairSplit(unittest.TestCase):
-    """The Linux pair (checks, checks-merge-install) and the macOS pair (checks-macos, checks-macos-b): each suite of the old
-    single job runs in exactly one job of its pair, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
+class SplitJobs(unittest.TestCase):
+    """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
+    single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
 
-    def test_each_linux_suite_runs_once_in_its_pair(self):
-        self.assertEqual(linux_pair_problems(self.text), [])
+    def test_each_linux_suite_runs_once_in_its_split(self):
+        self.assertEqual(linux_split_problems(self.text), [])
 
-    def test_each_macos_suite_runs_once_in_its_pair_and_the_guard_in_two_shards(self):
-        self.assertEqual(macos_pair_problems(self.text), [])
+    def test_each_macos_suite_runs_once_in_its_split_and_the_guard_in_two_shards(self):
+        self.assertEqual(macos_split_problems(self.text), [])
 
     def test_a_macos_shard_value_outside_its_step_is_flagged(self):
         # The shard values are counted as homes in hardening_problems, so a stray one (here at job level) is a named problem.
@@ -1001,14 +1067,14 @@ class PairSplit(unittest.TestCase):
         self.assertEqual(hardening_problems(self.text), [])
         self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p])
 
-    def test_checker_sees_the_linux_pair_defects(self):
+    def test_checker_sees_the_linux_split_defects(self):
         rows = [(c, i, s, {}) for c, (i, s) in LINUX_SUITES.items()]
         half = len(rows) // 2
 
         def doc(rs):
-            return pair_doc({"checks": ("ubuntu-latest", rs[:half]), "checks-merge-install": ("ubuntu-latest", rs[half:])})
+            return split_doc({"checks": ("ubuntu-latest", rs[:half]), "checks-merge-install": ("ubuntu-latest", rs[half:])})
 
-        self.assertEqual(linux_pair_problems(doc(rows)), [])
+        self.assertEqual(linux_split_problems(doc(rows)), [])
         c0, i0, s0, _ = rows[0]
         bad = {
             "a suite dropped": doc(rows[1:]),
@@ -1020,9 +1086,9 @@ class PairSplit(unittest.TestCase):
         }
         for label, text in bad.items():
             with self.subTest(defect=label):
-                self.assertTrue(linux_pair_problems(text), label)
+                self.assertTrue(linux_split_problems(text), label)
 
-    def test_checker_sees_the_macos_pair_defects(self):
+    def test_checker_sees_the_macos_split_defects(self):
         rows = [(c, i, s, {}) for c, (i, s) in MACOS_SUITES.items() if c != MACOS_GUARD]
         half = len(rows) // 2
         guard_i, guard_s = MACOS_SUITES[MACOS_GUARD]
@@ -1033,9 +1099,9 @@ class PairSplit(unittest.TestCase):
         def doc(a=None, b=None, extra=None):
             a = rows[:half] + [guard("1/2")] if a is None else a
             b = rows[half:] + [guard("2/2")] if b is None else b
-            return pair_doc({"checks-macos": ("macos-latest", a), "checks-macos-b": ("macos-latest", b), **(extra or {})})
+            return split_doc({"checks-macos": ("macos-latest", a), "checks-macos-b": ("macos-latest", b), **(extra or {})})
 
-        self.assertEqual(macos_pair_problems(doc()), [])
+        self.assertEqual(macos_split_problems(doc()), [])
         c0, i0, s0, _ = rows[0]
         bad = {
             "a suite dropped": doc(a=rows[1:half] + [guard("1/2")]),
@@ -1049,7 +1115,30 @@ class PairSplit(unittest.TestCase):
         }
         for label, text in bad.items():
             with self.subTest(defect=label):
-                self.assertTrue(macos_pair_problems(text), label)
+                self.assertTrue(macos_split_problems(text), label)
+
+    def test_the_unknown_reads_check_runs_once_in_each_split(self):
+        # Named failure: check_unknown_reads_contract.py runs twice, or not at all, in a split, and no case notices.
+        # Rows: a copy in checks-macos-b, a drop from checks-macos, and a drop from checks (Linux).
+        mac_step = ("      - name: Unknown-read contract (guard + session_start)\n"
+                    "        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}\n"
+                    "        run: python3 lint/check_unknown_reads_contract.py\n")
+        linux_step = ("      - name: Unknown-read contract (guard + session_start)\n"
+                      "        if: ${{ needs.scope.outputs.code == 'true' }}\n"
+                      "        run: python3 lint/check_unknown_reads_contract.py\n")
+        self.assertIn(mac_step, self.text)  # the fixture: checks-macos runs the check
+        self.assertIn(linux_step, self.text)  # the fixture: checks runs the check
+        self.assertIn("  checks-macos-b:\n", self.text)
+        head, sep, tail = self.text.partition("  checks-macos-b:\n")
+        copied = head + sep + tail.replace("    steps:\n", "    steps:\n" + mac_step, 1)
+        cases = {
+            "a copy in checks-macos-b": (copied, macos_split_problems),
+            "the check dropped from checks-macos": (self.text.replace(mac_step, "", 1), macos_split_problems),
+            "the check dropped from checks (Linux)": (self.text.replace(linux_step, "", 1), linux_split_problems),
+        }
+        for label, (text, check) in cases.items():
+            with self.subTest(defect=label):
+                self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
 
 
 class TopLevelOr(unittest.TestCase):
@@ -1466,12 +1555,13 @@ TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh)|.*\.test\.ps1)$")
 
 
 def strip_comment(text):
-    """`text` up to a `#` that opens a shell comment: at the start, or after a space, outside quotes."""
+    """`text` up to a `#` that opens a shell comment: at the start, or after a space, outside quotes. A quote opens
+    only at the start of a word, so the apostrophe in `don't` is text and a `#` after it still opens a comment."""
     quote = ""
     for i, ch in enumerate(text):
         if quote:
             quote = "" if ch == quote else quote
-        elif ch in "\"'":
+        elif ch in "\"'" and (i == 0 or text[i - 1] in " \t(=:"):
             quote = ch
         elif ch == "#" and (i == 0 or text[i - 1] in " \t"):
             return text[:i]
@@ -1547,6 +1637,7 @@ class CiCoverage(unittest.TestCase):
             ("comment line", "      - run: echo\n      # run: python3 lint/test_x.py\n"),
             ("trailing comment", "      - run: echo  # python3 lint/test_x.py\n"),
             ("comment line in a block", "      - run: |\n          echo start\n          # python3 lint/test_x.py\n"),
+            ("comment after a lone quote", "      - run: echo don't  # python3 lint/test_x.py\n"),
         ]
         for case, text in cases:
             with self.subTest(case):
