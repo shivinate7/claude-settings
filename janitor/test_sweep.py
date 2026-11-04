@@ -5831,14 +5831,32 @@ class RunLogTests(unittest.TestCase):
 
     def test_cap_keeps_the_newest_lines_and_leaves_no_temp_file(self):
         cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the count
-        self._write_run_lines(["old-%05d" % i for i in range(cap)])
+        # Three roots reused, each with a line inside the window: no root line lies before the cut, so the
+        # file holds exactly the cap (the root bound adds nothing here).
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
         self._append("new-1")
         kept = _read_run_log(self.log)
-        self.assertEqual(len(kept), cap, "the run log kept %d lines, over the cap of %d" % (len(kept), cap))
-        self.assertEqual(kept[0]["root"], "old-00001", "the oldest kept line is not the second-oldest line")
+        self.assertEqual(len(kept), cap, "the run log kept %d lines, not the cap of %d" % (len(kept), cap))
+        self.assertEqual(kept[0]["time_ms"], 1, "the oldest kept line is not the second-oldest line")
         self.assertEqual(kept[-1]["root"], "new-1", "the newest line is not the one just appended")
         leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
         self.assertEqual(leftovers, [], "the trim left a temp file behind: %r" % leftovers)
+
+    def test_roots_past_the_cut_are_bounded_to_the_newest_max_run_log_roots(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        roots_kept = getattr(sweep, "MAX_RUN_LOG_ROOTS", 200)  # the fallback lets an older build fail on the count
+        total = 3000  # one-off roots: 1000 lines sit before the cut, and only the newest roots_kept of them stay
+        results = [{"root": "root-%04d" % i, "worktrees": [], "branches": []} for i in range(total)]
+        sweep.append_run_log(self.log, results)
+        kept = _read_run_log(self.log)
+        self.assertEqual(len(kept), cap + roots_kept,
+                         "the run log kept %d lines, not the cap of %d plus %d root lines"
+                         % (len(kept), cap, roots_kept))
+        roots = [row["root"] for row in kept]
+        want = ["root-%04d" % i for i in range(total - cap - roots_kept, total)]
+        self.assertTrue(roots == want,  # not assertEqual: its failure would print every kept root
+                        "the kept lines are not the newest %d roots past the cut, then the newest %d lines"
+                        % (roots_kept, cap))
 
     def test_each_roots_newest_line_survives_the_cap(self):
         cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
@@ -5850,7 +5868,8 @@ class RunLogTests(unittest.TestCase):
 
     def test_threaded_appends_under_the_cap_keep_every_line_valid_json(self):
         cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
-        self._write_run_lines(["old-%05d" % i for i in range(cap - 5)])
+        # Four prefill roots reused and every thread line inside the window, so the file ends at exactly the cap.
+        self._write_run_lines(["old-%d" % (i % 4) for i in range(cap - 5)])
         threads, per_thread = 8, 10
         barrier = threading.Barrier(threads)
         lock = getattr(sweep, "_RUN_LOG_LOCK", None)
