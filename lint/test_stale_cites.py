@@ -700,6 +700,24 @@ class ValueTests(StaleCase):
         unknown = [line for line in out.splitlines() if line.startswith("stale-cites: unknown") and "hooks/lib.mjs" in line]
         self.assertTrue(unknown, "a cited .mjs value must print a stale-cites unknown line that names hooks/lib.mjs\n" + out)
 
+    def test_a_wrong_cite_added_by_a_range_that_changes_no_literal_is_flagged(self):
+        base_cfg = "LIMIT = 4\n"
+        self.assertEqual(assigned_value(base_cfg, "LIMIT"), 4)  # scope: base and head bind LIMIT to 4, the range changes no literal
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 6`\n")  # the added cite: 6 is neither base nor head
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(extra={"hooks/config.py": base_cfg}), change), [(NOTES, 3, "STALE004")])
+
+    def test_a_correct_cite_added_by_a_range_that_changes_no_literal_passes(self):
+        base_cfg = "LIMIT = 4\n"
+        self.assertEqual(assigned_value(base_cfg, "LIMIT"), 4)  # scope: base and head bind LIMIT to 4, the range changes no literal
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 4`\n")
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(extra={"hooks/config.py": base_cfg}), change))
+
     def test_every_parity_row_the_grammar_matches_is_flagged_when_its_value_changed(self):
         rows = [row for row in parity_rows() if row["match"]]
         self.assertTrue(rows, "scope: the parity fixture holds matching rows")
@@ -865,6 +883,23 @@ class CostTests(StaleCase):
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         # ls-tree lists the tracked Markdown, so a run without it reads no .md.
         self.assertNotIn("ls-tree", subs, subs)
+
+    def test_a_run_that_changes_no_literal_and_touches_no_markdown_reads_no_markdown(self):
+        head_guard = GUARD.replace("return 1", "return 2")
+        literals = [ast.dump(node) for node in ast.parse(GUARD).body if isinstance(node, ast.Assign)]
+        self.assertEqual(literals, [ast.dump(node) for node in ast.parse(head_guard).body if isinstance(node, ast.Assign)],
+                         "scope: the range changes no module-level literal")  # scope: head keeps every module-level assignment
+        # The base holds a value cite that is wrong and untouched. A run that reads no Markdown never reads it.
+        notes = "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 3`\n"
+
+        def change(repo):
+            write(repo, "hooks/guard.py", head_guard)
+            commit(repo)
+        rng = self.make_range(base_files(notes, extra={"hooks/config.py": "LIMIT = 4\n"}), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out, out)
+        self.assertNotIn("ls-tree", subs, subs)  # no tracked Markdown is listed, so the untouched cite is never read
 
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
