@@ -94,16 +94,18 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
-    # Bare "Bearer <token>" with no header name: 20 or more token characters, so "Bearer tokens" prose passes.
-    ("bearer", re.compile(r"(?<![A-Za-z0-9])Bearer[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
-    # An env-style name ending in SECRET, TOKEN, KEY or COOKIE (capitals only) set to a literal that looks random: 8 or
-    # more characters with a letter and a digit. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass.
+    # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
+    # "Bearer tokens" or "Basic idea" passes.
+    ("bearer", re.compile(r"(?<![A-Za-z0-9])(?:Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
+    # A name ending in secret, token, key or cookie in any case (API_SECRET, X-API-Key, token) set to a literal that looks
+    # random: 8 or more characters with a letter and a digit. A number, a "$VAR" or "${{ ... }}" reference and a plain
+    # word pass, and so does a label with a word between, as in "token budget: 200000".
     ("credential-name", re.compile(
-        r"(?<![A-Za-z0-9_])(?:[A-Z0-9]+_)*(?:SECRET|TOKEN|KEY|COOKIE)[\"']?[ \t]*[=:][ \t]*[\"']?"
-        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}")),
+        r"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9]+[_-])*(?:secret|token|key|cookie)[\"']?[ \t]*[=:][ \t]*[\"']?"
+        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}", re.I)),
     # A well-known cookie name set to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
-        r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
+        r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
         r"(?=[A-Za-z0-9+/_.~%-]*\d)[A-Za-z0-9+/_.~%-]{8,}", re.I)),
     # A postal address. Street: a house number, one to three capitalised name words (or an ordinal such as 5th), then a
     # capitalised or all-caps street word, so "step 3 on the road map" and "a 2 way merge" pass. PO box: needs the box number.
