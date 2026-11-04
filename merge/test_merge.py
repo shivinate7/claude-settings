@@ -10017,25 +10017,25 @@ class RedMainBrake(Env):
         """Main's push run 1301 is a re-run in flight of `status`, above the older green push run 1300 of the same file and group."""
         return self.go([main_run(1301, None, status=status, run_attempt=2), main_run(1300, "success")], {}, confirm=confirm)
 
-    def assert_unknown_for_re_run(self, rc, out, before, status):
+    def assert_unknown_for_re_run(self, rc, out, before, status, run_id):
         self.assertEqual(rc, 1, f"a re-run {status} at attempt 2 is passed for the green run beneath it\n" + out)
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out, "the refusal does not say UNKNOWN")
-        self.assertIn("run 1301", out, "the refusal does not name the re-run")
+        self.assertIn(f"run {run_id}", out, "the refusal does not name the re-run")
         self.assertIn("finish", out.lower(), "the refusal does not say to wait for the re-run to finish")
         self.assertNotIn("read failed", out, "the runs were read, so the refusal does not say the read failed")
 
     def test_a_re_run_in_flight_above_an_older_green_run_is_unknown_and_refuses(self):
         rc, out, before = self.re_run_over_green("in_progress")
-        self.assert_unknown_for_re_run(rc, out, before, "in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1301)
 
     def test_a_queued_re_run_above_an_older_green_run_is_unknown_and_refuses(self):
         rc, out, before = self.re_run_over_green("queued")
-        self.assert_unknown_for_re_run(rc, out, before, "queued")
+        self.assert_unknown_for_re_run(rc, out, before, "queued", 1301)
 
     def test_a_re_run_in_flight_with_no_completed_run_in_its_group_is_unknown_and_refuses(self):
         rc, out, before = self.go([main_run(1311, None, status="in_progress", run_attempt=2)], {})
-        self.assert_unknown_for_re_run(rc, out, before, "in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1311)
 
     def test_the_preview_shows_a_re_run_in_flight_as_unknown_and_presses_nothing(self):
         rc, out, before = self.re_run_over_green("in_progress", confirm=False)
