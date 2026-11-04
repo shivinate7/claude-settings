@@ -69,12 +69,12 @@ guard rule, so the watcher does the waiting and the session is told once.
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
   kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
   handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
-  handle. An EXIT trap in the job does the removal. Limits: an original that execs (the exec'd command
-  must stay the job's one process, so the job gets no subshell) or sets its own EXIT trap drops the trap,
-  and a stalled job of that kind leaves its two files; a job killed before it can run its trap leaves
-  them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's `Log:` line says
-  the file is usually removed when the job ends. Cost: two small files created per job and two held handles in the watcher, no new process. The
-  watcher no longer polls for the beat file.
+  handle. An EXIT trap in the job does the removal. Limits: an original that execs drops the trap, and
+  so does one that sets its own EXIT trap. The exec'd command must stay the job's one process, so the job
+  gets no subshell. A stalled job of that kind leaves its two files. A job killed before it can run its
+  trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
+  `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
+  and two held handles in the watcher, no new process. The watcher no longer polls for the beat file.
 
 ## The Stop-time check
 
@@ -86,12 +86,12 @@ the shell or tell the owner.
 
 A job is listed only at the first Stop after its stall crossed. The crossing is its output file's mtime
 (or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the newest
-`stop_hook_summary` record in the transcript, which the harness writes after each Stop run, so the time
-does not depend on how turns open (a queued prompt, a subagent hand-back and a hook's feedback all leave
-turns that no prompt record marks). A summary whose run came right after a blocked Stop (hookErrors not
-empty, or preventedContinuation true) is skipped: that run had `stop_hook_active` true, where the check
-prints nothing, so it listed nothing. A job whose crossing is not later than the previous Stop was listed
-there, so it is silent now. A job that goes quiet again after new output crosses again, and is listed
+`stop_hook_summary` record in the transcript. The harness writes one after each Stop run. So the time
+does not depend on how turns open. A queued prompt, an agent's hand-back and a hook's feedback all leave
+turns that no prompt record marks. A summary whose run came right after a blocked Stop is skipped. That
+Stop has hookErrors not empty, or preventedContinuation true. The next run had `stop_hook_active` true,
+where the check prints nothing, so it listed nothing. A job whose crossing is not later than the
+previous Stop was listed there, so it is silent now. A job that goes quiet again after new output crosses again, and is listed
 again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
 time must be later than the previous Stop. With no summary, or a summary with no readable timestamp,
 every quiet job is listed. The state is the transcript: no file is written and no process is started.
