@@ -413,7 +413,6 @@ copy, so no CI gap.
 
 These items have no lane and no owner question yet. Each needs a lane or an owner call:
 
-- banchi row 1: the reset --merge and --keep part is placed in hooks/guard_shared_tree.py reset_discards by lane guard-reset-merge-keep.
 - banchi row 4: promote the --confirm spelling into hooks/guard_stream.py.
 - banchi row 7: promote the file and bash-c clauses into hooks/guard.py silent_write_hit.
 - banchi row 21 (zeroth hook copy) and row 47 (fixed sleeps in Playwright specs).
