@@ -8080,14 +8080,14 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
 # ---- heredoc false alarm (lane env-heredoc-false-alarm). A quoted delimiter makes the body text, so an
 # env read in it runs nothing. An unquoted body runs its substitutions, and only those are judged.
 _BT = "`"
-# Incident 2 (2026-11-01 23:38 CST): a quoted brief body named a python heredoc header and an env read.
+# Incident 2: a quoted brief body named a python heredoc header and an env read.
 sh("env: heredoc-false-alarm: a quoted cat body names a python heredoc header and an env read, allowed",
    "cat > scratch/brief.md <<'EOF'\nrun python3 - <<X later\ncat " + ENV + " is refused\nEOF",
    "allow", cwd=PROJ)
 # A clean python heredoc later in the call does not put an unrelated quoted cat body under scan.
 sh("env: heredoc-false-alarm: a quoted cat body with an env read, then a clean python heredoc, allowed",
    "cat > b.md <<'A'\ncat " + ENV + "\nA\npython3 - <<'B'\nprint(1)\nB", "allow", cwd=PROJ)
-# Inferred reproduction of incident 1 (2026-11-01 23:41 CST; the exact command is unknown). Bash never
+# Inferred reproduction of incident 1 (the exact command is unknown). Bash never
 # expands a backtick or a `$( )` inside a quoted delimiter, so either one in a python string is text.
 sh("env: heredoc-false-alarm: inferred reproduction, a quoted python body, a backtick env read in a string",
    "python3 - <<'EOF'\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
@@ -10852,6 +10852,23 @@ sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed
 sh("frozen shell: a python heredoc that os.system-runs a cat-write onto the config settings denies "
    "[regression pin: passes on main]",
    "python3 - <<'DOC'\nimport os; os.system('cat > " + CFG_SETTINGS + "')\nDOC", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings, denies "
+   "[regression pin: passes on main, a shell-run body stays in view]",
+   "bash <<'SH'\ncat > " + CFG_SETTINGS + "\nSH", "deny", "frozen-path", cwd=NOGIT)
+
+# Alias bypass: a shell spot reached through an import alias denies or asks, as the spelled-out call does.
+sh("frozen shell: a python heredoc importing run from subprocess, a cp onto the config settings with shell=True, "
+   "denies [alias bypass, main denies]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('cp x " + CFG_SETTINGS + "', shell=True)\nPY",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a python heredoc importing run from subprocess, a cp onto the hook path with shell=True, "
+   "denies [alias bypass, main denies]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('cp x " + CFG_HOOK + "', shell=True)\nPY",
+   "deny", "frozen-path", cwd=NOGIT)
+# A python comment is text, not a shell spot: a body whose only spot is a comment is data.
+sh("frozen data: a python heredoc whose only spot is a comment naming a write onto the config settings, allows "
+   "[comment false alarm, main allows]",
+   "python3 - <<'PY'\n# subprocess.run('echo x > " + CFG_SETTINGS + "', shell=True)\nPY", "allow", cwd=NOGIT)
 
 # The narrowing reads a quoted word as data, a plain word as code. Each shape below is a real write, so each DENIES.
 for _n, _c in (
@@ -11543,7 +11560,7 @@ CAP_STRING_BODY = json.dumps({"tool_name": "Bash", "tool_input": {"command":
 sh("cap data: 1b, a quoted heredoc fed to python3 hooks/guard.py, whose body names a cap write, allows [cap-string-false-alarm]",
    "python3 hooks/guard.py <<'EOF'\n" + CAP_STRING_BODY + "\nEOF", "allow", cwd=PROJ)
 
-# 1c. INFERRED REPRODUCTION of incident 2026-11-03 16:59 CST (lane session cap-string-false-alarm). The
+# 1c. INFERRED REPRODUCTION of the cap-string-false-alarm incident. The
 # exact body was lost. The shape kept: a data heredoc written to probe.py, a python body holding command
 # strings (one a guard call with its own heredoc, one the cap write as text), then `python3 probe.py`.
 _CAP_PROBE_PY = ("CMDS = [\n    " + json.dumps("python3 hooks/guard.py <<'EOF2'\n" + CAP_STRING_BODY + "\nEOF2")
@@ -11552,7 +11569,7 @@ _CAP_PROBE_PY = ("CMDS = [\n    " + json.dumps("python3 hooks/guard.py <<'EOF2'\
 sh("cap data: 1c, inferred reproduction of the 2026-11-03 incident, a data heredoc to probe.py holding a cap write as text, allows [cap-string-false-alarm]",
    "cat > probe.py <<'EOF'\n" + _CAP_PROBE_PY + "EOF\npython3 probe.py", "allow", cwd=PROJ)
 
-# 1d. INFERRED REPRODUCTION of the trial run gd incident of 2026-11-02 01:16 CST: a reviewer's python3 -c
+# 1d. INFERRED REPRODUCTION of the trial run gd incident: a reviewer's python3 -c
 # feeding JSON test payloads to hooks/guard.py, one of them a settings write raising the model to Opus. The
 # exact command was not kept. THIS FORM ALLOWS ON MAIN, so it is a pin, not a red case: a Write-tool payload
 # carrying the cap as text is data for the guard, and the -c script writes nothing itself. The incident's
@@ -11890,8 +11907,42 @@ sh("ask-alone: a one-command python heredoc holding a forced push asks, not deni
    "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
-sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
-   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
+sh("cap data: a one-command python heredoc holding a cap write as text allows "
+   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
+   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "allow", cwd=PROJ)
+sh("cap data: a one-command python heredoc whose os.system runs a cap write asks "
+   "[regression pin: passes on main]",
+   "python3 - <<'PY'\nimport os; os.system('" + CAP_PLAIN + "')\nPY", "ask", "agent-model-cap", cwd=PROJ,
+   carries=(CAP_KEY,))
+
+# Alias bypass: a cap write through an import alias asks, as the spelled-out call does. CAP_ECHO_LOCAL
+# is the cap write every case below names.
+CAP_ECHO_LOCAL = "echo " + CAP_KEY + "=" + OPUS + " > .claude/settings.local.json"
+sh("cap alias: a python heredoc importing run from subprocess, a cap write run with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing subprocess as sp, a cap write run by sp.run with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nimport subprocess as sp\nsp.run('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing os as o, a cap write run by o.system, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nimport os as o\no.system('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing system from os, a cap write run by system, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom os import system\nsystem('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing call from subprocess, a cap write run by call with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom subprocess import call\ncall('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+# A python comment is text, not a shell spot: a body whose only spot is a comment is data.
+sh("cap comment: a python heredoc whose only spot is a comment naming a cap write, allows "
+   "[comment false alarm, main allows]",
+   "python3 - <<'PY'\n# os.system('" + CAP_ECHO_LOCAL + "')\nPY", "allow", cwd=PROJ)
 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.

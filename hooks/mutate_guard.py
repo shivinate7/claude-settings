@@ -230,10 +230,12 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
-     '        return cmd',
-     '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+     '        if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(text, headers, runner):',
+     '        if False:', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    ("shared-tree: keep no heredoc body in the per-body reading",
+     '        keep = [number for number, header in enumerate(headers)\n'
+     '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)]',
+     '        keep = []', "guard", 'frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
@@ -488,7 +490,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_split_heredocs(cmd)[0])',
+     '    return "\\n".join(line for at, line in enumerate(cmd.split("\\n")) if at in show)',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',
@@ -793,16 +795,16 @@ MUTATIONS = [
      '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
-     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    matched = shell_write_hit(raw, cwd, is_settings_file)\n'
      '    if matched:\n'
      '        change = cap_change(raw)\n'
      '        if change:\n'
      '            refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, matched),\n'
      '                   matched + " " + change)\n'
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
