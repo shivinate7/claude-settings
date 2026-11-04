@@ -17,7 +17,7 @@ No hook writes `STE-fallback` or `STE-unchecked` lines (owner, 2026-10-22 10:10 
 
 Reason: the table is the outcome meter for the two owner concerns, prompts the owner did not need and agents refused with no allowed path. Judge a rule by its row here, not by its test count.
 
-There is no volume check. Refusals grew with use, so a fixed count would fire on normal use.
+There is no volume check. Refusals grow with use, so a count jump over a 7-day baseline fires on ordinary days (debt note `daily-note-no-volume-check`).
 
 Kind: process
 Home: lint/guard_log_report.py

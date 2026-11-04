@@ -6,7 +6,7 @@ watches, wakes, sweeps, reaps or logs.
 
 This record holds the model (section 1), the table of mechanisms (section 2), the merges (section 3),
 the deletes (section 4), the lanes (section 5) and the owner questions (section 6). Section 6 is open.
-This change changes no behaviour. It fixes stale prose in Markdown only.
+This change changes no behaviour. It fixes stale prose in Markdown records and in code comments.
 
 ## Method
 
@@ -80,8 +80,8 @@ small, M medium, L large).
 | Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4. | 4 | S |
 | Agent-end reap | Runs on SubagentStop, timeout 60 s (checked: `settings.json`). Its build pass deletes trash in a detached child. That child has no time bound (record `build-dirs-reaped-at-agent-end`; the bound is unchecked). | Bound the child by time. State the cost. Split the record by stage. | no | M |
 | Agent-end payload log | Written under a lock file, one row per run (record `agent-end-reap-stops-what-a-finished-agent-left`). No reader is named. | Q5. | 5 | S |
-| Repo reaper (npm `reap:worktrees`) | `run_repo_reaper` in `janitor/sweep.py` (line 2734) runs the repository's npm script in a full `--confirm` run without `--attended`. This departs from the rule that the sweep never runs repository code (`the-janitor-is-one-machine-wide-sweep`). | Q7. | 7 | S |
-| `install_schtasks.resolve_primary_checkout` | `janitor/install_schtasks.py` line 55 keeps a local copy. Its docstring names `install_launchd.py`, which has no such function. `install_launchd.py` calls `guard.primary_checkout` (line 84). | Both installers call `guard.primary_checkout`. This is code work for a builder. | no | S |
+| Repo reaper (npm `reap:worktrees`) | `run_repo_reaper` in `janitor/sweep.py` runs the repository's npm script in a full `--confirm` run without `--attended`. This departs from the rule that the sweep never runs repository code (`the-janitor-is-one-machine-wide-sweep`). | Q7. | 7 | S |
+| `install_schtasks.resolve_primary_checkout` | `janitor/install_schtasks.py` keeps a local copy. `install_launchd.py` calls `guard.primary_checkout`. | Both installers call `guard.primary_checkout`. This is code work for a builder. | no | S |
 | `sim-lease` (`bin/sim-lease`) | A 2 s poll inside `take` (from the map; unchecked). | Keep it. Add a cost test. Fix the docstring. | no | S |
 | `sim_boot_record` | Its cost is not stated (rows are in the table above). | Record the cost. | no | S |
 | `guard.log` writer | `hooks/guard_core.py` `record()` writes one line per refusal, ask or note. It is called from `refuse()` (checked). No file cap is found by grep. `daily_note` reads its `crash` lines. | Add a rotating cap, never a trim. Record the cost. | no | S |
@@ -140,7 +140,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 ## 6. Owner questions
 
 **Status: open.** Item 180 is on the Cockpit. So are the new items below: Q2 (model-call hooks), Q4
-(SessionEnd scope) and Q5 (unread logs).
+(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is not on the Cockpit yet; the coordinator posts it.
 
 **Q1a. Stall watcher.** Options: (a) delete it, and keep the Stop check and `wait-pid`; (b) keep it with
 a cost cap and a test; (c) leave it as is. Q1b decides between them. Recommendation: (b), until Q1b
@@ -195,9 +195,9 @@ One line each, with the reason the text stays.
 - ci-wait: `ci_wake.py` header matches the record. No stale text.
 - agents-wait: remedy names the CI-wake notice or Monitor. Checked true (`WAITER_REASON`, `hooks/guard_stream.py` line 248).
 - decision-watch: marketplace copy of sec-default. Unchecked, unmeasured.
-- decision-watch.py docstring ("Replaces the type: agent guardrail", "old markdown sweep"). A `.py` file. Another lane.
-- config-watch.py docstring (history words: "used to", "now", "version on main"). A `.py` file. Another lane.
-- daily_note.py docstring (weekly id; volume figure). A `.py` file. Another lane.
+- decision-watch.py docstring ("Replaces the type: agent guardrail", "old markdown sweep"). Fixed in this change.
+- config-watch.py docstring (history words: "used to", "now", "version on main"). Fixed in this change.
+- daily_note.py docstring: volume figure dropped in this change. The weekly id stays, because a slug never changes.
 - daily_note: precompact-handoff item 12. Not read.
 - agent-end reap: "The sweep takes the deepest checkout" names `sweep.py`. True. The Home is the reaper by design.
 - agent-end payload log docstring ("the fields get measured"). A `.py` file. Whether the reason is spent is Q5.
@@ -208,7 +208,7 @@ One line each, with the reason the text stays.
 - session-end record: "owner ask, undated" constant. An undated owner ask. Cannot be dated.
 - session-end record title: already says armed. The file name keeps "disarmed" by design. No change.
 - `session_end_sweep.py` comment on the Windows job. Checked true (`checks-windows-sweep` runs the sweep and mutation suites). A `.py` file.
-- `install_schtasks.py` docstring names `install_launchd.resolve_primary_checkout`, which does not exist. A `.py` file. Another lane.
+- `install_schtasks.py` docstring named a missing `install_launchd` function. Fixed in this change.
 - daily installers: "the job is loaded on any machine". Unmeasured.
 - machine-load-brake: "the memory level is a placeholder" (85 and 95 %). Unmeasured.
 - machine-load-brake: the opening paragraph lists five dated rulings. These are citations the outcomes rule needs. Kept.
