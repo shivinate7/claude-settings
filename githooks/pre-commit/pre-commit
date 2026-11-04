@@ -25,6 +25,7 @@ import sys
 HATCH = "PRE_COMMIT_GUARD=off"
 SYMLINK_MODE = "120000"
 MAIN_REF_INSTALLER = "githooks/main-ref/install.sh"
+MAIN_REF_MARKER = "main-ref-check: 1"
 
 
 def git(*args):
@@ -83,10 +84,21 @@ def check_armed_copy():
     """Hold a repo that ships githooks/main-ref to main: refuse a missing or stale armed copy."""
     try:
         root = git("rev-parse", "--show-toplevel").strip()
-    except (subprocess.CalledProcessError, OSError):
+    except (subprocess.CalledProcessError, OSError) as fault:
+        sys.stderr.write(f"main-ref check: unknown: cannot find the repo root ({type(fault).__name__}).\n")
         return
     installer = os.path.join(root, MAIN_REF_INSTALLER)
     if not os.path.isfile(installer):
+        return
+    # An installer from before --check would re-arm the copy instead of checking it, so run only one
+    # that carries the marker.
+    try:
+        with open(installer, encoding="utf-8", errors="replace") as fh:
+            has_check = MAIN_REF_MARKER in fh.read()
+    except OSError:
+        has_check = False
+    if not has_check:
+        sys.stderr.write(f"main-ref check: unknown: {MAIN_REF_INSTALLER} has no --check; not run.\n")
         return
     try:
         run = subprocess.run(["sh", installer, "--check"], cwd=root, capture_output=True)

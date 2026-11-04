@@ -8,6 +8,9 @@
 #
 # --check compares each armed copy to the main blob of this file's sibling, never to the working
 # tree: a branch that edits the hook must not be told to arm its unmerged edit for every worktree.
+# The base is local main, else origin/main, else unknown. The branch edit is the HEAD blob: only a
+# committed edit counts, so an uncommitted one excuses no stale copy.
+# main-ref-check: 1   (the pre-commit hook runs --check only on an installer that carries this marker)
 # Exit 0: current, or this branch edits the hook (a NOTE, no remedy). Exit 1: a copy is missing or
 # behind main (stderr names the remedy). Exit 2: a read failed (stderr says "unknown").
 # Cost: the shared pre-commit hook runs it once per commit: one sh, about 3 git reads, no files written.
@@ -27,12 +30,17 @@ if [ "$mode" = check ]; then
 else
   cdir="$(git rev-parse --git-common-dir)"
 fi
-dir="$(git config --path --get core.hooksPath)" || dir=""
+# git config exits 1 when the key is unset; any other failure means the setting could not be read.
+dir="$(git config --path --get core.hooksPath)" && rc=0 || rc=$?
+if [ "$rc" -eq 1 ]; then dir=""; elif [ "$rc" -ne 0 ]; then
+  if [ "$mode" = check ]; then unknown "cannot read core.hooksPath (git config exited $rc)"; fi
+  echo "ERROR: cannot read core.hooksPath (git config exited $rc)" >&2; exit 1
+fi
 # Prints each hooks dir that holds an armed copy, one per line. The one home of the placement rule.
 targets() {
   case "$dir" in
     "") printf '%s\n' "$cdir/hooks" ;;
-    /*) printf '%s\n' "$dir" ;;
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) printf '%s\n' "$dir" ;;
     *)
       # The first entry of a bare repo is its git dir, which is where git resolves the path there.
       wts="$(git worktree list --porcelain)" || return 1
@@ -44,15 +52,25 @@ targets() {
 }
 if [ "$mode" = check ]; then
   main_blob="$(git -C "$here" rev-parse --verify --quiet main:githooks/main-ref/reference-transaction)" || main_blob=""
-  [ -n "$main_blob" ] || unknown "no main:githooks/main-ref/reference-transaction to compare against"
-  src_blob="$(git -C "$here" hash-object "$here/reference-transaction")" || src_blob=""
-  [ -n "$src_blob" ] || unknown "cannot read $here/reference-transaction"
+  if [ -z "$main_blob" ]; then
+    main_blob="$(git -C "$here" rev-parse --verify --quiet origin/main:githooks/main-ref/reference-transaction)" || main_blob=""
+  fi
+  [ -n "$main_blob" ] || unknown "no main or origin/main holds githooks/main-ref/reference-transaction to compare against"
+  src_blob="$(git -C "$here" rev-parse --verify --quiet HEAD:githooks/main-ref/reference-transaction)" || src_blob=""
+  [ -n "$src_blob" ] || unknown "HEAD holds no githooks/main-ref/reference-transaction"
   list="$(targets)" || unknown "cannot list the worktrees"
   stale=""; behind=""; unread=""
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     f="$d/reference-transaction"
-    if [ ! -e "$f" ] && [ ! -L "$f" ]; then stale="$stale $f"; continue; fi
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+      # Missing counts as stale only when the nearest existing ancestor is a searchable directory;
+      # a file or an unreadable directory on the way is a stat error, which is unknown.
+      p="$d"
+      while [ ! -e "$p" ] && [ "$p" != / ] && [ "$p" != . ]; do p="$(dirname "$p")"; done
+      if [ -d "$p" ] && [ -x "$p" ]; then stale="$stale $f"; else unread="$unread $f"; fi
+      continue
+    fi
     if [ ! -f "$f" ]; then unread="$unread $f"; continue; fi
     blob="$(git hash-object "$f")" || blob=""
     if [ -z "$blob" ]; then unread="$unread $f"; elif [ "$blob" != "$main_blob" ]; then behind="$behind $f"; fi
@@ -93,6 +111,6 @@ done <<EOT
 $list
 EOT
 case "$dir" in
-  ""|/*) ;;
+  ""|/*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
   *) echo "WARNING: core.hooksPath '$dir' is relative. A worktree added later has no guard until you rerun this installer." >&2 ;;
 esac
