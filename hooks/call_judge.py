@@ -16,7 +16,10 @@ For the rest, question_form.page_item_hit picks the item writes of this repo's w
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
-to that one prompt, once, and no other write changes the prompt. The page and the chat box share the eight judge
+to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
+shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
+uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
+Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share the eight judge
 items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
@@ -35,6 +38,11 @@ shown), the question is refused with the Unvetted remedy, unless its own text ca
 source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
+
+One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
+an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
+calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
+no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
 """
 import json
 import os
@@ -60,6 +68,18 @@ QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed 
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
+
+# The plain Opus ask (opus_ask). The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
+# start-up fits. The owner's text follows the last line.
+OPUS_ASK_TIMEOUT = 20
+OPUS_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
+    "owner's own present request to run Opus agents now (for example `send opus judges` or `use opus for the "
+    "reviewers`). Answer {\"ok\": false} for a question, a hedge such as `maybe opus?`, a negation such as `don't "
+    "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
+    "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
+    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
 
 SPAWN_PROMPT = (
     "Judge this agent spawn: %s\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, "  # glossary-ok: subagent_type is Claude Code's own field name
@@ -141,6 +161,29 @@ NONE_DIRECTION_RULE = (
     "further pick from the owner, block it: the item should close and the note be filed as a step. "
     "The reason names no target."
 )
+# A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
+# NONE_DIRECTION_RULE, only for such a call. The mark's key comes from question_form, the one home, so the text is built
+# where it is used: the light-import exit paths never import question_form for it.
+WIDENING_TEMPLATE = (
+    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
+    "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
+    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
+    "option passes this rule. When unsure, allow."
+)
+
+
+def widening_rule():
+    """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
+    import question_form
+    return WIDENING_TEMPLATE % question_form.WIDENS_KEY
+
+
+def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
+    if name == "WIDENING_RULE":
+        return widening_rule()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
@@ -164,12 +207,18 @@ def writes_an_item(args):
     return args.get("collection") == "items"
 
 
+def sets_options(write):
+    """True for a judged set or update whose data has non-empty `options`."""
+    data = write.get("data") if write.get("op") in ("set", "update") else None
+    return isinstance(data, dict) and bool(data.get("options"))
+
+
 def is_reask(write):
     """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
     choice "none", and a note that is a string, non-empty after strip."""
-    data = write.get("data") if write.get("op") in ("set", "update") else None
-    if not isinstance(data, dict) or not data.get("options"):
+    if not sets_options(write):
         return False
+    data = write["data"]
     answer = data.get("lastAnswer")
     if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
         return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
@@ -181,6 +230,27 @@ def invoke_model(*args, **kwargs):
     """The model call. A module-level name, so a test can replace it."""
     from decision_watch import invoke_model as home
     return home(*args, **kwargs)
+
+
+def opus_ask(text):
+    """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
+    agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
+    {"ok": false} is False with none."""
+    try:
+        import decision_watch  # lazy: the one home of the model's name
+        verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
+                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+        if error:
+            raise ValueError(" ".join(str(error).split()))
+        ok = verdict.get("ok") if isinstance(verdict, dict) else None
+        if ok is True:
+            return True
+        if ok is not False:
+            raise ValueError("the answer has no true or false ok")
+        return False
+    except Exception as exc:
+        print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return False
 
 
 def explore_off_model(tool, args):
@@ -249,7 +319,7 @@ def main():
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
-        reask = False
+        reask = widening = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -269,6 +339,7 @@ def main():
             shown = json.dumps(judged, ensure_ascii=False)
             units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
+            widening = any(sets_options(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
@@ -279,6 +350,8 @@ def main():
         full = prompt % shown
         if reask:
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
+        if widening:
+            full += "\n" + widening_rule()
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),

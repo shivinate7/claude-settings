@@ -45,8 +45,7 @@ is not yet on the ladder.
 
 ## Superseded text
 
-When a fact changes, rewrite the claim in place. Keep only what is true now, in the fewest
-words. Never add a "was X, now Y" line or a history. Git keeps the history
+When a fact changes, rewrite the claim in place and add no "was X, now Y" line
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
 its own record (`git-one-record-per-question`).
 The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale_cites.py`).
@@ -55,9 +54,8 @@ STALE002 fires on a line that cites a Python file and a name the pull request re
 
 ## Proof
 
-Trust a guard only once it goes red on the defect it guards. To prove a guard, break its
-target on a scratch copy, watch the guard fail, then restore the target. Give the verdict of
-each guard in one line. A guard you did not see go red is not proven.
+Proof (`verification-trust-guard-after-red`): break the target on a scratch copy, watch the
+guard fail, restore the target. Give each guard's verdict in one line.
 
 ## README
 
