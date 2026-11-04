@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-04T08:57:00Z",
+  "context": "joyous #74 is CI green but blocked. Ruleset 24853807 (\"main\") requires the checks `ste-lint` and `build`. #74 moves the lint into the shared `checks` job, so no `ste-lint` check runs any more. The shared form requires only all-jobs-passed. Of the 7 child repos, only joyous has such a rule (read 02:56 CST).\n\nWhy yours: the cloud cannot change a ruleset. Your standing grant \"Acts the cloud refuses\" (2026-10-30 16:20 CDT) lets a session on your computer do it, but none is reachable now (no computer folder, no peer session). Opening a computer session works too.\n\nAfter: batch runner 9 runs the merge of #74 again.",
+  "home": "claude-settings standing grant \"Acts the cloud refuses\"",
+  "id": "joyous-ruleset-shared-form",
+  "kind": "task",
+  "links": [
+    {
+      "label": "joyous ruleset \"main\"",
+      "url": "https://github.com/shivinate7/joyous/rules/24853807"
+    }
+  ],
+  "n": 242,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 1,
+  "ref": "joyous #74; joyous ruleset 24853807",
+  "short": "joyous: ruleset to shared form",
+  "status": "open",
+  "steps": [
+    "Open https://github.com/shivinate7/joyous/rules/24853807.",
+    "Under \"Require status checks to pass\", remove `ste-lint` and `build`, add `all-jobs-passed`, and save. Or delete the ruleset: branch protection already requires all-jobs-passed."
+  ],
+  "title": "Set joyous's \"main\" ruleset to the shared form, so joyous #74 can merge"
+}

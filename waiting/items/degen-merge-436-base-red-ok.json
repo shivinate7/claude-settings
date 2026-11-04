@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-04T09:04:00Z",
+  "command": {
+    "mac": "cd ~/Developer/degen\ngh auth switch -u shivinate7\nmerge 436 --confirm --base-red-ok \"main's red milestone run 41747042457 is the DegenKit flakes and iOS 27 build gap that batch #428 fixes; #436 changes CI pins only\""
+  },
+  "context": "The merge tool refuses every degen merge (#436, then #428) because main's latest milestone run, 41747042457 (73f66dbf, 2026-11-03 18:28 CST), is red. It is red on the DegenKit flakes and the iOS 27 build gap that #428 fixes. #436 changes CI pins only.\n\nWhy yours: only your typed `--base-red-ok` lets a merge pass a red main (merge tool, 2026-11-03 18:04 CST). No session may type it for you.\n\nThe cd assumes your degen checkout is ~/Developer/degen; change it if not.",
+  "home": "claude-settings merge tool (--base-red-ok)",
+  "id": "degen-merge-436-base-red-ok",
+  "kind": "task",
+  "n": 243,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 1,
+  "ref": "degen #436, #428; milestone run 41747042457",
+  "short": "degen: merge #436 past red main",
+  "status": "open",
+  "steps": [
+    "Open Terminal on your Mac.",
+    "Paste the command below."
+  ],
+  "title": "Type the red-main override to merge degen #436"
+}

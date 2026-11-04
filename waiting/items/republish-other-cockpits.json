@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-04T06:35:00Z",
+  "context": "Batch 4 (claude-settings main e2e999e8, 00:26 CST) fixes the Status tab: it now builds its phase rail from the steps, so steps outside the five fixed phases show. The claude-settings Cockpit is republished (00:35 CST).\n\nWhy yours: these four Cockpits belong to your other Claude account. This session cannot publish to them: they are not in this account's artifact list (read 00:30 CST).\n\nPages: banchi https://claude.ai/artifact/DCs2UMoFfYKWR4rxKLqv9N; degen https://claude.ai/artifact/BYTcnb2UwtSj5N8bYXJmKe; home https://claude.ai/artifact/WhYLo8BTi56UBFa3zCqQ7Y; mailaudit https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13.",
+  "home": "skill waiting-page, Keep the page on main's code",
+  "id": "republish-other-cockpits",
+  "kind": "task",
+  "links": [
+    {
+      "label": "banchi Cockpit",
+      "url": "https://claude.ai/artifact/DCs2UMoFfYKWR4rxKLqv9N"
+    },
+    {
+      "label": "degen Cockpit",
+      "url": "https://claude.ai/artifact/BYTcnb2UwtSj5N8bYXJmKe"
+    },
+    {
+      "label": "home Cockpit",
+      "url": "https://claude.ai/artifact/WhYLo8BTi56UBFa3zCqQ7Y"
+    },
+    {
+      "label": "mailaudit Cockpit",
+      "url": "https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13"
+    }
+  ],
+  "n": 240,
+  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "rank": 2,
+  "ref": "claude-settings batch 4 (e2e999e8, #1171 roadmap-blank-pages)",
+  "short": "Republish 4 Cockpits",
+  "status": "open",
+  "steps": [
+    "Open a Claude Code session signed in to the account that owns these four pages.",
+    "Paste this prompt and send it: For each of these Cockpit pages, run the waiting-page skill's \"Keep the page on main's code\" against claude-settings main e2e999e8, and keep a copy in each repo first: banchi https://claude.ai/artifact/DCs2UMoFfYKWR4rxKLqv9N; degen https://claude.ai/artifact/BYTcnb2UwtSj5N8bYXJmKe; home https://claude.ai/artifact/WhYLo8BTi56UBFa3zCqQ7Y; mailaudit https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13. Report one line per page: current, republished, or unknown with its cause.",
+    "Reply here when it reports, or let that session's report stand."
+  ],
+  "title": "Republish the banchi, degen, home and mailaudit Cockpits from main, signed in to your other account"
+}

@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T09:04:00Z",
+  "context": "Goal: degen batch #428 ships, proven once on the Mac, and the UI suite becomes trustworthy.\nProblem (risk): the UI step decides whether #428 can merge, but it has never passed and takes over twice as long as the rest.\nBased on (measured): milestone run 41792080302 (runner 9, 03:01 CST): suite + app build PASS in 28 min 34 s; the UI step ran 61 min 33 s, unfinished, with 17 UI test failures (MediaBarUITests 5, KeepHandClaimUITests 2, InfiniteFeedUITests 2, eight others 1 each); the 90 min cap cancelled the run at 02:55 CST. It is the first run ever to reach the UI step, so the UI suite was never green on this runner. No lane caused it.\nDeparts from: main, where milestone-proof runs the UI step after the build \u2014 a moves it out of the proof.",
+  "home": "degen milestone.yml; degen rule tests-once-per-batch",
+  "id": "degen-ui-step-own-job",
+  "kind": "decision",
+  "lastAnswer": "Rewritten 03:04 CST with the final run facts; the old options a/b/c are dropped (coordinator).",
+  "n": 241,
+  "options": [
+    {
+      "gain": "#428 can ship now.",
+      "how": "The native-check line rests on suite + app build, which passed. A degen lane fixes the 17 UI failures and runs them in their own job.",
+      "key": "a",
+      "label": "Split the UI step out of milestone-proof",
+      "lose": "UI flows are unproven until that lane lands."
+    },
+    {
+      "gain": "Full proof before ship.",
+      "how": "#428 stays a draft until a lane fixes the 17 UI failures and the milestone run is green.",
+      "key": "b",
+      "label": "Hold #428 until the UI suite passes",
+      "lose": "#428 and every degen merge wait for 17 UI fixes."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 2,
+  "ref": "item 200; degen #428 (e38a4eef), milestone run 41792080302",
+  "short": "degen: UI suite never green",
+  "status": "open",
+  "title": "degen: the UI test suite has never passed. Ship #428 on suite + build, and fix the UI tests in their own lane?",
+  "why": "Recommended: a. Suite + build passed, the UI failures predate #428, and a hold would stop every degen merge."
+}
