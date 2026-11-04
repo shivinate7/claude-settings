@@ -69,8 +69,8 @@ the desktop app has none.
   Spec: docs/decisions/precompact-handoff.md, item 8.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
-reads the Claude Code binary at env CLAUDE_CODE_EXECPATH in-process, once per new binary (path,
-size, mtime; one cache entry per path), by anchor strings (setting keys, env names, a flag name, never minified names).
+reads the Claude Code binary at env CLAUDE_CODE_EXECPATH, else `claude` on env PATH through its link,
+in-process, once per new binary (path, size, mtime; one cache entry per path), by anchor strings (setting keys, env names, a flag name, never minified names).
 cc_facts() gives each fact or "unknown"; the facts are cached in <config dir>/cc-behavior.json and
 compared with hooks/cc_compaction_baseline.json. A changed fact prints one line, for the
 session to name under Input Needed. Starts no process. Spec: docs/decisions/precompact-handoff.md,
@@ -84,6 +84,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 
@@ -784,7 +785,7 @@ def run_nudge(payload):
             print(json.dumps({"decision": "block", "reason": (
                 "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
                 "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue."
+                "Then continue. (decision precompact-handoff)"
                 % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
@@ -935,11 +936,13 @@ def _cc_line(head, changes):
 
 def cc_version_check(env=None, config=None):
     """The one line to print about the installed Claude Code, or "". It starts no process. The
-    binary at env CLAUDE_CODE_EXECPATH is read once per new binary (path, size, mtime). The cache,
+    binary at env CLAUDE_CODE_EXECPATH is read once per new binary (path, size, mtime). When that
+    variable is missing or its file can not be read, one `claude` lookup on env PATH (never
+    os.environ), followed to its real file, stands in for it. The cache,
     <config dir>/cc-behavior.json, holds one entry per binary path (at most CC_CACHE_PATHS), so two
     apps with two paths do not evict each other. A fact that differs from the baseline
     (CC_BASELINE) prints one line. A baseline that can not be read raises before anything is
-    written, so the next start reads the binary again. A binary that can not be read prints one
+    written, so the next start reads the binary again. A binary that can not be read or found prints one
     "unknown" line per version. With neither CLAUDE_CODE_EXECPATH nor AI_AGENT set, this is no
     Claude Code session: "". The `version` fact alone is not a change; "unknown" on one side
     only is."""
@@ -965,23 +968,39 @@ def cc_version_check(env=None, config=None):
     if not path and not agent:
         return ""
     shown = ".".join(agent.groups()) if agent else "unknown"
-    blob = key = None
-    if path:
+
+    def read_binary(candidate):
+        """(blob, key) for a binary not yet in the cache, ("", None) for one that is, or None."""
         try:
-            st = os.stat(path)
-            key = [path, st.st_size, st.st_mtime_ns]
-            if isinstance(entries.get(path), dict) and entries[path].get("key") == key:
-                return ""
-            with open(path, "rb") as f:
-                blob = f.read()
+            st = os.stat(candidate)
+            key = [candidate, st.st_size, st.st_mtime_ns]
+            if isinstance(entries.get(candidate), dict) and entries[candidate].get("key") == key:
+                return "", None
+            with open(candidate, "rb") as f:
+                return f.read(), key
         except OSError:
-            blob = None
-    if blob is None:
+            return None
+
+    found = read_binary(path) if path else None
+    on_path = None
+    if found is None:
+        # Only the injected env's PATH: os.environ would answer for the hook's own session.
+        search_path = env.get("PATH")
+        on_path = shutil.which("claude", path=search_path) if search_path else None
+        if on_path:
+            path = os.path.realpath(on_path)  # the cache keys on the file, not on the link
+            found = read_binary(path)
+    if found is not None and found[1] is None:
+        return ""
+    if found is None:
         if cache.get("unknown_for") == shown:
             return ""
         save({"paths": entries, "unknown_for": shown})
-        return ("Claude Code %s compaction facts are unknown: CLAUDE_CODE_EXECPATH %s%s" % (
-            shown, "can not be read" if path else "is not set", CC_TAIL))[:CC_MAX_LINE]
+        return ("Claude Code %s compaction facts are unknown: CLAUDE_CODE_EXECPATH %s and %s%s" % (
+            shown, "can not be read" if env.get("CLAUDE_CODE_EXECPATH") else "is not set",
+            "the claude on PATH can not be read" if on_path else "no claude on PATH",
+            CC_TAIL))[:CC_MAX_LINE]
+    blob, key = found
     facts = cc_facts(blob)
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CC_BASELINE),
               encoding="utf-8") as f:
