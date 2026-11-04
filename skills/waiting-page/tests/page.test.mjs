@@ -4980,3 +4980,108 @@ test("a stored park draft whose entry is gone is pruned on load, and a later ent
   assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
   assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
 });
+
+// ---------------------------------------------------------------- what the page says after a send: a wake, a paste in chat, a none key
+// SKILL.md forbids a session to reply in a comment thread, so no line the page shows may send the owner there.
+const NO_THREAD = /thread/i;
+const WRITER = "home-triage-4";
+const NOT_TOLD_TEXT = "No session was told. It waits for " + WRITER + "'s next wake or turn start.";
+// The ask hint says "Telling Claude…" while the wake result is pending. A test waits for that result, not for a clock.
+const askHintSettled = (page) => page.waitForFunction(() => { const h = document.getElementById("askHint").textContent; return h.includes("Sent") && !h.includes("Telling"); });
+// Types an ask and sends it, then returns the hint once the wake result has landed.
+async function askFrom(page, text) {
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", text);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await askHintSettled(page);
+  return (await page.textContent("#askHint")).trim();
+}
+
+test("an ask sent while a session can take a comment says a wake was sent, never that Claude was told", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available" } }); if (!page) return;
+  const hint = await askFrom(page, ASK_TEXT);
+  assert.match(hint, /A wake was sent\./, "the ask hint does not say a wake was sent: " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, /Claude was told/, "the ask hint still says Claude was told: " + JSON.stringify(hint));
+});
+
+test("an ask sent with no session to tell says what happens next, and names no thread", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  const hint = await askFrom(page, ASK_TEXT);
+  assert.ok(hint.includes(NOT_TOLD_TEXT), "the ask hint does not say what happens next: " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, NO_THREAD, "the ask hint names a thread: " + JSON.stringify(hint));
+});
+
+test("an answer sent with no session to tell says what happens next, and names no thread", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await told(page, "No session was told");
+  const status = (await page.textContent("#sentStatus")).trim();
+  assert.ok(status.includes(NOT_TOLD_TEXT), "the sent panel does not say what happens next: " + JSON.stringify(status));
+  assert.doesNotMatch(status, NO_THREAD, "the sent panel names a thread: " + JSON.stringify(status));
+});
+
+test("a failed Send tells the owner to paste the copied answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.ok(bar.includes("Copy the answers and paste them in chat."), "the failed-save note does not say to paste the copied answers in chat: " + JSON.stringify(bar));
+  assert.doesNotMatch(bar, NO_THREAD, "the failed-save note names a thread: " + JSON.stringify(bar));
+});
+
+// One decision whose options are given, with a pick on its first key that is not none. Returns its warning, or null with no browser.
+const optWith = (key, label) => ({ key, label, how: "h", gain: "g", lose: "l" });
+const optNoLabel = (key) => ({ key, how: "h", gain: "g", lose: "l" });
+async function noneKeyWarning(t, options) {
+  const pick = options.find((o) => o.key !== "none").key;
+  const page = await open(t, { items: [], rawItems: { "none-key": { ...DECISION, id: "none-key", n: 33, options, pick } } }); if (!page) return null;
+  return (await warn(page, "none-key").textContent()).trim();
+}
+// The warning names the option by its letter and label, then gives the reason. The head is the part before the reason.
+function assertNoneWarning(text, head) {
+  assert.ok(text.includes(head + ' The page keeps that key for "None of these", so this decision cannot be answered.'), "the none-key warning does not read " + JSON.stringify(head) + ": " + JSON.stringify(text));
+  assert.doesNotMatch(text, /undefined/, "the none-key warning prints undefined: " + JSON.stringify(text));
+}
+
+test("a none key warning names its option by letter and label", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the old way"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the old way", has the key none.');
+});
+
+test("a none key label over 28 characters is cut with an ellipsis in the warning", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the existing layout for every reader"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the existing layout fo…", has the key none.');
+  assert.doesNotMatch(text, /for every reader/, "the none-key warning shows the whole label: " + JSON.stringify(text));
+});
+
+test("a none key with no label names its letter only, and prints no undefined", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optNoLabel("none")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+});
+
+test("a none key with a blank label names its letter only, and prints no empty quotes", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optWith("none", "   ")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+  assert.doesNotMatch(text, /""/, "the none-key warning prints empty quotes: " + JSON.stringify(text));
+});
+
+test("the copy confirmation names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  await page.locator("#barStatus", { hasText: "Copied" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.doesNotMatch(bar, NO_THREAD, "the copy confirmation names a thread: " + JSON.stringify(bar));
+});
+
+test("a parked line with no id says the writer has not prepared it, and names no thread", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_NOID] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_NOID), "the line with no id is not a .pk in .parked .pk-list");
+  const why = (await parkLine(page, PARK_NOID).locator(".pk-why").first().textContent()).trim();
+  assert.match(why, /has not prepared this line yet/, "the no-id line does not say the writer has not prepared it: " + JSON.stringify(why));
+  assert.doesNotMatch(why, NO_THREAD, "the no-id line names a thread: " + JSON.stringify(why));
+});
