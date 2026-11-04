@@ -1164,3 +1164,5 @@
 - page-stale-old-main: until a checkout fetches this merge, its origin/main template is still titled "Queue", and an untouched "Queue" page passes `page-stale`. It ends at the fetch. Decision: page-stale-publish
 - zizmor-env-unset-untested: `ZIZMOR_PATHS` in RUNNER_UNSET (bin/ci-job) has no red case. An exported value reaches only a zizmor step with no `with: paths`, and checks.yml always sets it. Decision: none
 - zizmor-paths-doc-drift: the `paths` input text in actions/zizmor/action.yml says "separated by spaces"; run.sh splits on spaces or newlines. Decision: none
+- run-header-comment-false-fail: `run: | # why` makes `run_body` (lint/workflow_steps.py) return "| # why" as the script, so bin/ci-job gives a false FAIL. `step_map` already drops that comment. Decision: none
+- multiline-value-edges: in `block_scalar` (lint/workflow_steps.py), a body line indented less than the first is cut mid-text, leading blank lines are dropped, an all-blank `|+` body reads "", and `|2` stays as text. GitHub rejects or rarely meets each form. Decision: none
