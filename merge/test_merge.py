@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -9852,19 +9852,57 @@ def main_job(name, conclusion, minutes=1):
             "html_url": f"https://github.com/o/r/actions/runs/1/job/{len(name)}"}
 
 
+# The workflow file a head serves when a case gives none: one job with no if:, so every job name reads as one that may run.
+NO_IF_WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]) + "\n"
+CHECKS_PATH = ".github/workflows/checks.yml"
+REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")  # the file as it is on disk, never a stub
+# The live nightly case: schedule run LIVE_R failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped; the newer push run LIVE_N
+# passed merge-3 and skipped the same two. Their jobs and conclusions are the ones test_action.sh's live case gives too.
+LIVE_R, LIVE_N = 41817705653, 41905916525
+LIVE_N_SHA = f"{LIVE_N:040x}"
+
+
+def real_checks():
+    with open(REAL_CHECKS, encoding="utf-8") as f:
+        return f.read()
+
+
+def live_nightly():
+    """-> (main_runs, jobs) of the live nightly case, newest run first, as GET actions/runs and the jobs read give them."""
+    runs = [main_run(LIVE_N, "success", sha=LIVE_N_SHA, path=CHECKS_PATH), main_run(LIVE_R, "failure", event="schedule", path=CHECKS_PATH)]
+    jobs = {LIVE_R: [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+            LIVE_N: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]}
+    return runs, jobs
+
+
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
+        self.texts, self.text_fail = texts or {}, text_fail
+
+    def file_at_head(self, rel, extra, fields):
+        """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
+        query = re.search(r"[?&]ref=([0-9a-f]+)", rel)
+        ref = fields.get("ref") or (query and query.group(1))
+        if self.text_fail:
+            return 1, self.text_fail
+        text = self.texts.get(ref, NO_IF_WORKFLOW)
+        if any("vnd.github.raw" in a for a in extra):
+            return 0, text
+        return 0, json.dumps({"encoding": "base64", "content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
+        if rel.startswith("contents/"):
+            return self.file_at_head(rel, extra, fields or {})
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -10068,6 +10106,69 @@ class RedMainBrake(Env):
                               main_run(930, "failure", name="links", event="schedule", path=LINKS_PATH)],
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
+
+    # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
+    # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
+    def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
+        runs, jobs = live_nightly()
+        rc, out, _ = self.go(runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        self.merged(rc, out)
+
+    def test_the_live_nightly_is_green_on_the_red_main_read(self):
+        # the same live case as test_action.sh's live case: base_verdict, the red-main check's read, judges it green, with no merge
+        runs, jobs = live_nightly()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "green", detail)
+
+    def test_a_red_job_skipped_in_the_push_run_still_blocks_the_clear_when_its_if_names_no_event(self):
+        # lint failed in the nightly and was skipped in the push run. It has no if:, so it may run and stays needed.
+        sha = "c" * 40
+        lint = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  lint:", "    runs-on: ubuntu-latest", "    needs: checks-windows-merge-3", "    steps:", "      - run: echo ok",
+                          "  all-jobs-passed:", "    runs-on: ubuntu-latest", "    needs: [lint, checks-windows-merge-3]",
+                          "    if: ${{ always() && github.event_name == 'pull_request' }}", "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1211, "success", sha=sha), main_run(1210, "failure", event="schedule")]
+        jobs = {1210: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "failure", 3), main_job("all-jobs-passed", "skipped")],
+                1211: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: lint})
+        self.refused(rc, out, before)
+        self.assertIn("run 1210", out)
+        self.assertIn("lint: fail", out)
+
+    def test_a_red_job_whose_if_excludes_the_push_event_is_never_dropped(self):
+        # all-jobs-passed is pull_request-only, so the push run skips it. It failed in the nightly: it stays needed, and the clear is refused.
+        sha = "d" * 40
+        runs = [main_run(1221, "success", sha=sha), main_run(1220, "failure", event="schedule")]
+        jobs = {1220: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "failure", 2)],
+                1221: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1220", out)
+        self.assertIn("all-jobs-passed: fail", out)
+
+    def test_a_job_whose_if_names_the_push_event_inside_an_or_still_blocks_the_clear(self):
+        # gate's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
+        sha = "e" * 40
+        gate = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  gate:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
+                          "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1231, "success", sha=sha), main_run(1230, "failure", event="schedule")]
+        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("gate", "skipped")],
+                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("gate", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: gate})
+        self.refused(rc, out, before)
+        self.assertIn("run 1230", out)
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_failed_read_of_the_workflow_file_is_unknown_and_refuses_the_clear(self):
+        runs, jobs = live_nightly()
+        rc, out, before = self.go(runs, jobs, text_fail="HTTP 500: Internal Server Error (fake contents read)")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the workflow file is unknown: never red, and never a clear")
+        self.assertIn("the read failed", out)
 
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
