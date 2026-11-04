@@ -37,8 +37,8 @@ rule's settings-write ask, and it reaches agents.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
     - The roles the ask names are granted, two or more as a list. A role word with not, no, don't, never, except
       or without just before it: no grant.
-    - An ask that names no role takes its roles from the owner's earlier typed prompts (owner ruling, Cockpit item
-      226 b, 2026-11-04 08:03 CST: "Scope from context, fall back to every role"). _context_prompts reads them from
+    - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
+      scope from context, fall back to every role). _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
       and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
       and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in

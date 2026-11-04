@@ -45,7 +45,7 @@ calls it, from the prompt hook hooks/local_time.py, only for an owner prompt tha
 no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
 Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
 earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
-because the ruling is "scope from context, fall back to every role" (owner, Cockpit item 226 b, 2026-11-04 08:03 CST).
+because the rule is "scope from context, fall back to every role" (decision owner-override).
 Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, none for any other.
 """
 import json

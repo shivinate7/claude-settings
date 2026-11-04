@@ -316,7 +316,7 @@ def grant_override(raw, at):
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
     that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
     prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
-    role named means every role (owner ruling, Cockpit item 226 b, 2026-11-04 08:03 CST). Those calls are why the
+    role named means every role (decision owner-override). Those calls are why the
     settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
