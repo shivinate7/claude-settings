@@ -2364,15 +2364,19 @@ const steps = listOf("steps").map((s) => ({ ...s, status: ORDER.includes(s.statu
 const topics = hasData ? listOf("topics") : null;
 const meta = bag("meta");
 const phases = meta.phases && typeof meta.phases === "object" ? meta.phases : null;
+/* A phase id is repo text, so it can spell an Object.prototype member ("constructor", "toString", "__proto__"). Every
+   map keyed by a phase id has no prototype, and meta.phases is read by own key only. */
+const phaseMap = () => Object.create(null);
+const phaseMeta = (k) => (phases && Object.prototype.hasOwnProperty.call(phases, k) ? phases[k] : null);
 
 /* The phases the steps use, in the order the work happens: the known four that hold a step, then each other phase id
    by its smallest step order (then by id), then Later, then "No phase" for steps with no phase. A name is
    meta.phases.<id>.name when that is a non-empty string, else the known name, else the id. An empty plan keeps Later,
    so the tab still has a phase to draw. */
 function phaseList() {
-  const used = new Set(steps.map(phaseKey)), first = {};
+  const used = new Set(steps.map(phaseKey)), first = phaseMap();
   for (const s of steps) { const k = phaseKey(s), o = isNum(s.order) ? s.order : 1e9; if (first[k] == null || o < first[k]) first[k] = o; }
-  const name = (k, known) => { const n = phases && phases[k] && phases[k].name; return typeof n === "string" && n.trim() ? n : known || k; };
+  const name = (k, known) => { const pm = phaseMeta(k), n = pm && pm.name; return typeof n === "string" && n.trim() ? n : known || k; };
   const fixed = new Set([...KNOWN_PH.map((p) => p.k), LATER_PH.k, NO_PHASE]);
   const others = [...used].filter((k) => !fixed.has(k)).sort((a, b) => first[a] - first[b] || String(a).localeCompare(String(b)));
   const out = [...KNOWN_PH.filter((p) => used.has(p.k)), ...others.map((k) => ({ k })), ...(used.has(LATER_PH.k) || !steps.length ? [LATER_PH] : [])]
@@ -2384,7 +2388,7 @@ const PH = phaseList();
 const cull = meta.cull && typeof meta.cull === "object" ? meta.cull : null;
 const advisor = meta.advisor && typeof meta.advisor === "object" ? meta.advisor : null;
 
-const ui = { view: "plan", phase: null, page: {}, donePage: {}, logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
+const ui = { view: "plan", phase: null, page: phaseMap(), donePage: phaseMap(), logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
 try { const r = JSON.parse(localStorage.getItem("rm-view") || "null"); if (r && typeof r === "object") { if (["plan", "log", "ref", "rec"].includes(r.v)) ui.view = r.v; if (PH.some((p) => p.k === r.p)) ui.phase = r.p; } } catch (e) { /* nothing remembered */ }
 const saveView = () => { try { localStorage.setItem("rm-view", JSON.stringify({ v: ui.view, p: ui.phase })); } catch (e) { /* not kept */ } };
 
@@ -2536,7 +2540,7 @@ function cullTiles(ci) {
   }).join("");
 }
 function metaTiles(k) {
-  const data = phases && phases[k], list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
+  const data = phaseMeta(k), list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
   if (!list.length) return '<div class="none">No numbers saved for this phase yet.</div>';
   return list.map((m, i) => {
     const of = typeof m.value === "string" && m.value.match(/^\s*(\d+)\s+of\s+(\d+)\s*$/);
@@ -2598,7 +2602,7 @@ function renderPhase() {
     if (ci) asof = ["Clean-up numbers", cull.closed ? "cull ended " + cull.closed : "", ci.batches.length ? "latest reading: " + ci.last.label : "no batch reported yet"].filter(Boolean).map(esc).join(" · ")
       + (cull.note ? ` <button type="button" class="howto" data-how aria-expanded="${ui.how}">${ui.how ? "Hide how these are counted" : "How these are counted"}</button>` : "");
   } else {
-    const pd = phases && phases[k]; tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
+    const pd = phaseMeta(k); tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
   }
   // "Phase 13" for steps with no phase would be false, so that group is headed by its name alone.
   const n = numbered().indexOf(p) + 1;
@@ -2816,8 +2820,8 @@ root.addEventListener("pointermove", (e) => { if (!tip.classList.contains("on"))
 // Rows are measured once they show, so the first draw may change the page size: draw again then.
 let built = false;
 function shown() {
-  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = {}; renderPlan(); } return; }
-  if (hasData && measureRows()) { ui.page = {}; renderPlan(); }
+  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = phaseMap(); renderPlan(); } return; }
+  if (hasData && measureRows()) { ui.page = phaseMap(); renderPlan(); }
 }
 document.addEventListener("statusshown", shown);
 let lastSize = pageSize(), sizeT = null;
@@ -2825,7 +2829,7 @@ window.addEventListener("resize", () => {
   clearTimeout(sizeT);
   sizeT = setTimeout(() => {
     if (!built || $("sPanel").hidden || !hasData) return;
-    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = {}; renderPlan();
+    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = phaseMap(); renderPlan();
   }, 150);
 });
 })();
