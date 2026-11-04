@@ -285,18 +285,25 @@ must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: 
 fresh_mr mr-old-install main "$repo/githooks/test_fixtures/main-ref-install-no-check.sh"; arm_hook "$neutral"; arm
 printf 'x\n' >f.txt; git add -- f.txt
 must_staged f.txt
-before="$(cksum <.git/hooks/reference-transaction)"
+armed_before="$(cksum <.git/hooks/reference-transaction)"
 lands_with "unknown" "ok: vendored installer with no --check, the commit lands and stderr says unknown" git commit -q -m c
-after="$(cksum <.git/hooks/reference-transaction)"
-if [ "$before" = "$after" ]; then echo "ok   pre-commit leaves the armed copy alone when the vendored installer has no --check"; else bad=1; echo "FAIL pre-commit re-armed the copy through a vendored installer that has no --check"; fi
+armed_after="$(cksum <.git/hooks/reference-transaction)"
+if [ "$armed_before" = "$armed_after" ]; then echo "ok   pre-commit leaves the armed copy alone when the vendored installer has no --check"; else bad=1; echo "FAIL pre-commit re-armed the copy through a vendored installer that has no --check"; fi
 
 # Round 2. git rev-parse --show-toplevel fails inside the hook: the verdict is unknown and the commit is allowed.
-# A shim on PATH fails that one call and passes every other git call to the real git.
+# git prepends its exec path (/usr/lib/git-core) to PATH, so a PATH shim alone never runs. GIT_EXEC_PATH at a
+# dir with no git binary puts the shim first. The shim logs each failing call: the case checks that the
+# failure happened before it judges the verdict.
 fresh_mr mr-toplevel main; arm_hook "$repo/githooks/main-ref/reference-transaction"; arm
-shim="$run/shim-toplevel"; mkdir "$shim"; real="$(command -v git)"
-printf '#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then echo "fatal: simulated failure" >&2; exit 128; fi\nexec "%s" "$@"\n' "$real" >"$shim/git"
+shim="$run/shim-toplevel"; noexec="$run/shim-noexec"; mkdir "$shim" "$noexec"; real="$(command -v git)"
+printf '#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then echo hit >>"%s"; echo "fatal: simulated failure" >&2; exit 128; fi\nexec "%s" "$@"\n' "$run/toplevel.hits" "$real" >"$shim/git"
 chmod +x "$shim/git"
 printf 'x\n' >f.txt; git add -- f.txt
-must_staged f.txt && lands_with "unknown" "ok: rev-parse --show-toplevel fails, the commit lands and stderr says unknown" env PATH="$shim:$PATH" "$shim/git" commit -q -m c
+must_staged f.txt
+commit_err env PATH="$shim:$PATH" GIT_EXEC_PATH="$noexec" "$shim/git" commit -q -m c
+if [ ! -s "$run/toplevel.hits" ]; then bad=1; echo "FAIL setup: the shim never failed rev-parse --show-toplevel, so the case proves nothing"
+elif [ "$landed" -ne 1 ]; then bad=1; echo "FAIL ok: rev-parse --show-toplevel fails: the commit did not land, wanted allowed"
+elif grep -qF "unknown" "$run/last.err"; then echo "ok   ok: rev-parse --show-toplevel fails, the commit lands and stderr says unknown"
+else bad=1; echo "FAIL ok: rev-parse --show-toplevel fails: stderr lacks 'unknown'"; fi
 
 exit "$bad"
