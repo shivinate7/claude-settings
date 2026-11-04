@@ -8,6 +8,9 @@ or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when t
 level in that file at base (a def, class, assignment or import) and is not bound there at head. Each finding
 is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
+The report (decision stale-cites-at-merge) prints after the findings and never changes the exit code. It names
+each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and whether
+its holder file changed, and each changed code file with the decisions whose Home names it and the rows that name it.
 
 Each case makes a temp git repo: the base commit on `main`, the head commit on `topic`. The check runs
 with the repo as cwd and the range as commit ids. The step cases run bin/ste-changed, which runs
@@ -16,6 +19,7 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import json
 import os
 import re
 import shutil
@@ -104,15 +108,20 @@ def direct_step_env(rng, fail):
                 DECISIONS_DIR="")
 
 
-def git_subcommands(trace_path):
-    """The git subcommands a run started, read from a GIT_TRACE file: one `built-in: git <sub>` line each."""
-    subs = []
+def git_commands(trace_path):
+    """The git commands a run started, read from a GIT_TRACE file: each `built-in: git <args>` line, args only."""
+    commands = []
     with open(trace_path, encoding="utf-8", errors="replace") as f:
         for line in f:
-            found = re.search(r"trace: built-in: git (\S+)", line)
+            found = re.search(r"trace: built-in: git (.+)$", line)
             if found:
-                subs.append(found.group(1))
-    return subs
+                commands.append(found.group(1).strip())
+    return commands
+
+
+def git_subcommands(trace_path):
+    """The git subcommands a run started: the first word of each command in the GIT_TRACE file."""
+    return [command.split()[0] for command in git_commands(trace_path)]
 
 
 def paths_under(folder):
@@ -681,31 +690,60 @@ class PinTests(unittest.TestCase):
 class CostTests(StaleCase):
     """The check's cost is a contract: a few git starts, no markdown read when nothing was removed, no file written."""
 
-    def run_traced(self, rng):
+    def run_traced_commands(self, rng):
+        """(rc, out, the git commands a run started), read from a GIT_TRACE file."""
         trace = os.path.join(rng.case, "git-trace.txt")
         rc, out = self.run_check(rng, extra_env={"GIT_TRACE": trace})
-        return rc, out, git_subcommands(trace)
+        return rc, out, git_commands(trace)
 
-    def test_a_range_that_removes_nothing_starts_three_git_reads_and_reads_no_markdown(self):
+    def run_traced(self, rng):
+        rc, out, commands = self.run_traced_commands(rng)
+        return rc, out, [command.split()[0] for command in commands]
+
+    def test_a_range_that_removes_nothing_starts_at_most_four_git_reads_with_one_ls_tree(self):
         def change(repo):
             write(repo, "hooks/new.py", "def fresh():\n    return 5\n")
             commit(repo)
         rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
         rc, out, subs = self.run_traced(rng)
         self.assertEqual(rc, 0, out)
-        self.assertLessEqual(len(subs), 3, subs)
-        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff"}, subs)
+        # A changed code file also reads its Home lines: one ls-tree of docs/decisions, the only start it adds.
+        # No decision blob is read here, so the cat-file the .py cases open is not started.
+        self.assertEqual(subs.count("ls-tree"), 1, subs)
+        self.assertLessEqual(len(subs), 4, subs)
+        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "ls-tree"}, subs)
 
-    def test_a_touched_py_that_removes_nothing_starts_four_git_processes_and_lists_no_tree(self):
+    def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
         def change(repo):
             write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
             commit(repo)
         rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
-        rc, out, subs = self.run_traced(rng)
+        rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
-        # ls-tree lists the tracked Markdown, so a run without it reads no .md.
-        self.assertNotIn("ls-tree", subs, subs)
+        subs = [command.split()[0] for command in commands]
+        # The one start a code change adds is the ls-tree of docs/decisions, never of the whole tree: it lists no .md
+        # beyond the decision folder. The cat-file is the one the .py already opened, so it adds no start.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], subs)
+        listing = [command for command in commands if command.startswith("ls-tree")]
+        self.assertTrue(listing, commands)
+        self.assertIn("docs/decisions", listing[0], commands)
+
+    def test_a_changed_non_python_non_markdown_file_starts_one_ls_tree_and_one_cat_file_for_its_decisions(self):
+        extra = decisions(("tool-home-record", "config/tool.toml"))
+
+        def change(repo):
+            write(repo, "config/tool.toml", "mode = 2\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        # Pins the count for a changed file that is neither Markdown nor Python: the Home half starts one ls-tree of
+        # docs/decisions and one cat-file that reads each decision's blob, and no other git start.
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], subs)
+        listing = [command for command in commands if command.startswith("ls-tree")]
+        self.assertTrue(listing, commands)
+        self.assertIn("docs/decisions", listing[0], commands)
 
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
@@ -779,6 +817,257 @@ class ExcludeFolderTests(StaleCase):
                     commit(repo)
                 extra = {".ste-lint-exclude": line + "\n", "vendor/a.md": "- refusal list in `hooks/lib.mjs`\n"}
                 self.assert_passes(self.make_range(base_files(extra=extra), change))
+
+
+CLAUDE = "CLAUDE.md"
+MECH = "lint/rule_mechanisms.json"
+GUARD_EDIT = GUARD.replace("return 1", "return 2")  # a status M change to hooks/guard.py
+TOUCHED = re.compile(r"(?<!un)touched")
+UNTOUCHED = re.compile(r"\buntouched\b")
+GUARD_KIND = re.compile(r"(?<![\w/.-])guard(?![\w/.-])")  # the word, never a part of a path such as hooks/guard.py
+
+
+def named(text, token):
+    """True when `token` appears whole: no word character or hyphen on either side of it."""
+    return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(token), text) is not None
+
+
+def slug_lines(out, slug):
+    """Each report line that names the anchor slug or the decision stem `slug`."""
+    return [line for line in out.splitlines() if named(line, slug)]
+
+
+def mechanisms(rows):
+    """lint/rule_mechanisms.json in the repo's shape: {"rules": {slug: {"mechanism": {...}}}}."""
+    return json.dumps({"rules": {slug: {"mechanism": m} for slug, m in rows.items()}}, indent=2) + "\n"
+
+
+def decisions(*pairs):
+    """docs/decisions records, one per (stem, Home) pair, each with the one Home line the repo writes."""
+    return {"docs/decisions/%s.md" % stem: "# %s\n\n## The ruling\n\nA fixture ruling.\n\nKind: build\nHome: %s\n"
+            % (stem, home) for stem, home in pairs}
+
+
+def touched(rng):
+    """The paths the range changed. A case asserts this first, so the scope it probes is the one it claims."""
+    return set(git(rng.repo, "diff", "--name-only", rng.base, rng.head).split())
+
+
+class ReportTests(StaleCase):
+    """The report: an anchor edit names its guard or check row and whether the row's holder changed; a changed
+    code file lists the decisions whose Home names it. A repo with no mechanisms file gets the Home half only."""
+
+    def test_anchor_edit_names_its_guard_as_untouched_and_leaves_the_anchor_beside_it_unnamed(self):
+        base_claude = ("Never merge failing CI. <!-- rule:git-never-merge-failing-ci --> "
+                       "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n")
+        head_claude = ("Never merge failing CI. <!-- rule:git-never-merge-failing-ci --> "
+                       "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n")
+        mech = mechanisms({
+            "git-never-merge-failing-ci": {"kind": "check", "ref": "lint/x.py", "test": "lint/test_x.py::test_check"},
+            "git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"},
+        })
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed, so the guard's holder is untouched")
+        rc, out = self.run_check(rng)
+        lines = slug_lines(out, "git-main-only-by-pr")
+        ref_lines = [line for line in lines if "main-moves-by-pull-request" in line]
+        self.assertTrue(ref_lines, "the report names no guard for the edited anchor git-main-only-by-pr\n" + out)
+        self.assertTrue(any(GUARD_KIND.search(line) for line in ref_lines),
+                        "the guard line for git-main-only-by-pr does not say its kind is guard\n" + out)
+        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
+                        "the guard line for git-main-only-by-pr does not say its holder is untouched\n" + out)
+        self.assertEqual(slug_lines(out, "git-never-merge-failing-ci"), [],
+                         "an anchor whose sentence did not change is named\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+
+    def test_anchor_edit_says_touched_when_its_check_row_file_changed(self):
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "check", "ref": "hooks/guard.py",
+                                                   "test": "hooks/test_guard.py::test_main"}})
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        self.assertEqual(touched(rng), {CLAUDE, "hooks/guard.py"},
+                         "scope: the range changes the anchor's file and the check row's file")
+        rc, out = self.run_check(rng)
+        lines = slug_lines(out, "git-main-only-by-pr")
+        self.assertTrue(any(TOUCHED.search(line) for line in lines),
+                        "the edited anchor's holder hooks/guard.py changed, yet no line says touched\n" + out)
+        self.assertFalse(any(UNTOUCHED.search(line) for line in lines),
+                         "the holder hooks/guard.py changed, yet a line says untouched\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_code_change_lists_each_decision_whose_home_names_the_file(self):
+        extra = decisions(("guard-home-first", "hooks/guard.py"), ("guard-home-second", "hooks/guard.py"))
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        rc, out = self.run_check(rng)
+        for stem in ("guard-home-first", "guard-home-second"):
+            self.assertTrue(named(out, stem), "the report does not list %s, whose Home names hooks/guard.py\n%s"
+                            % (stem, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_a_home_on_a_longer_path_or_another_file_does_not_list_the_file(self):
+        extra = decisions(("guard-home-exact", "hooks/guard.py"),
+                          ("guard-home-longer", "mods/session-board/hooks/guard.py"),
+                          ("guard-home-core", "hooks/guard_core.py"))
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-home-exact"),
+                        "the report does not list guard-home-exact, Home hooks/guard.py\n" + out)
+        self.assertFalse(named(out, "guard-home-longer"),
+                         "a Home on mods/session-board/hooks/guard.py lists hooks/guard.py\n" + out)
+        self.assertFalse(named(out, "guard-home-core"), "a Home on hooks/guard_core.py lists hooks/guard.py\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_check_row_whose_ref_is_the_changed_file_is_listed_and_another_ref_is_not(self):
+        mech = mechanisms({
+            "guard-row-listed": {"kind": "check", "ref": "hooks/guard.py", "test": "hooks/test_guard.py::test_main"},
+            "guard-row-other": {"kind": "check", "ref": "lint/x.py", "test": "lint/test_x.py::test_check"},
+        })
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra={MECH: mech}), change)
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-row-listed"), "the report does not list the row whose ref is hooks/guard.py\n"
+                        + out)
+        self.assertFalse(named(out, "guard-row-other"), "the report lists a row whose ref is lint/x.py\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_child_repo_without_a_mechanisms_file_lists_the_home_decisions_and_no_error(self):
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        extra = {CLAUDE: base_claude, **decisions(("guard-home-first", "hooks/guard.py"))}
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {CLAUDE, "hooks/guard.py"}, "scope: the anchor's file and a code file changed")
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-home-first"),
+                        "the Home half is not printed in a repo with no rule_mechanisms.json\n" + out)
+        self.assertFalse(named(out, "git-main-only-by-pr"),
+                         "an anchor section prints in a repo with no mechanisms file\n" + out)
+        self.assertNotIn("UNKNOWN", out, out)
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_child_repo_anchor_edit_with_no_mechanisms_file_prints_no_anchor_section_and_no_error(self):
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude}), change)
+        self.assertEqual(touched(rng), {CLAUDE}, "scope: only the anchor's file changed")
+        rc, out = self.run_check(rng)
+        self.assertFalse(named(out, "git-main-only-by-pr"),
+                         "an anchor section prints in a repo with no mechanisms file\n" + out)
+        self.assertNotIn("UNKNOWN", out, out)
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+
+    def test_report_lines_leave_the_finding_list_and_the_exit_code_as_they_were(self):
+        extra = decisions(("guard-home-first", "hooks/guard.py"))
+
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n", extra=extra), change)
+        self.assertIn("hooks/guard.py", touched(rng), "scope: the range removes a path and changes the code file")
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-home-first"),
+                        "the report does not list guard-home-first beside a finding\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE001")],
+                         "the finding list changed: report lines must not match a finding\n" + out)
+        self.assertIn("FAIL, 1 finding(s)", out)
+
+    def test_step_summary_lists_the_home_decisions_on_a_code_only_pr(self):
+        extra = decisions(("guard-home-first", "hooks/guard.py"))
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        git(rng.repo, "update-ref", "refs/remotes/origin/main", rng.base)  # the base the step diffs against
+        done = subprocess.run([BASH, STEP_SH], cwd=rng.repo, env=direct_step_env(rng, "true"),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        summary_path = os.path.join(rng.case, "summary.md")
+        summary = open(summary_path, encoding="utf-8").read() if os.path.exists(summary_path) else ""
+        self.assertTrue(named(summary, "guard-home-first"), "the step summary does not list guard-home-first\n"
+                        + summary + out)
+        self.assertEqual(done.returncode, 0, out)
+
+    def test_a_code_span_anchor_and_a_lone_quote_do_not_hide_the_real_anchor(self):
+        base_claude = ("Write `<!-- rule:fake -->` here. Don't stop there. Main moves only by pull request. "
+                       "<!-- rule:git-main-only-by-pr -->\n")
+        head_claude = ("Write `<!-- rule:fake -->` here. Don't stop there. Main moves only by a reviewed pull request. "
+                       "<!-- rule:git-main-only-by-pr -->\n")
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed")
+        rc, out = self.run_check(rng)
+        ref_lines = [line for line in slug_lines(out, "git-main-only-by-pr") if "main-moves-by-pull-request" in line]
+        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
+                        "the real anchor git-main-only-by-pr is not named as untouched past a code span and a quote\n"
+                        + out)
+        self.assertFalse(named(out, "fake"), "the unchanged anchor in a code span is named\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_backticked_anchor_is_a_mention_and_only_a_real_anchor_is_named(self):
+        base_claude = ("Write `<!-- rule:fake -->` to cite an anchor.\n"
+                       "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n")
+        head_claude = ("Write `<!-- rule:fake -->` to cite an anchor in prose.\n"
+                       "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n")
+        mech = mechanisms({
+            "fake": {"kind": "guard", "ref": "fake-guard"},
+            "git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"},
+        })
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed; the mention's sentence changed too")
+        rc, out = self.run_check(rng)
+        ref_lines = [line for line in slug_lines(out, "git-main-only-by-pr") if "main-moves-by-pull-request" in line]
+        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
+                        "the real anchor git-main-only-by-pr is not named as untouched\n" + out)
+        self.assertFalse(named(out, "fake") or "fake-guard" in out,
+                         "a backticked mention, `<!-- rule:fake -->`, is named as an anchor\n" + out)
+        self.assertEqual(rc, 0, out)
 
 
 if __name__ == "__main__":
