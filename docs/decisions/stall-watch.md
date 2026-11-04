@@ -77,8 +77,9 @@ the shell or tell the owner. It repeats at every Stop while a job stays quiet. N
 debt `stall-message-repeats-every-stop`).
 
 If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
-worse than a missed stall (owner ruling, 2026-10-21). Only the watcher's exit-3 report wakes an idle
-session, so this check does not cover a job that stalls after the turn ends.
+worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
+2026-10-21). For a stalled background job, only the watcher's exit-3 report wakes an idle session. This
+check runs at turn end, so it does not cover a job that stalls after the turn ends.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has

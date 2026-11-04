@@ -259,7 +259,6 @@
 - sb-host-calls-unbounded: session start, end and clear calls to $.session.repo, $.command.register and store deletes have no time bound (mods/session-board)
 - sb-prompt-turn-end: board state at turn end while a prompt is still open is unknown; headless cannot test it (mods/session-board)
 - sb-safe-stop-origin: /safe-stop origin check is a refusal list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
-- schtasks-test-not-in-ci: janitor/test_install_schtasks.py runs in three CI jobs (checks-merge-install, checks-macos-b, checks-windows-rest). Its test at line 204 skips on Windows (`os.name == "nt"`); whether a Windows run executes it is unmeasured. (janitor, CI)
 - sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
 - sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)

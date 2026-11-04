@@ -26,10 +26,10 @@ A simulator is machine-wide. The sweep stops only a device that a session booted
 that is idle, and that the owner did not boot (decision
 `sweep-shuts-down-idle-simulators`, the sweep stops idle simulators).
 
-The sweep runs one piece of your repository's code: its `reap:worktrees` npm
-script, in a full `--confirm` run without `--attended`, when `package.json`
-names it. It reads one file from your repository, `.claude/janitor.json`, as
-data.
+The sweep never runs code that your repository supplies. It reads one file
+from your repository, and it reads that file as data. The npm reaper
+(`reap:worktrees`, run by `run_repo_reaper` in `janitor/sweep.py`) departs
+from this. The owner decides (Cockpit item 180, plan section 6, Q7).
 
 The sweep deletes no branch that holds the only copy of its work.
 
