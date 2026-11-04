@@ -519,7 +519,9 @@ def _take_opus(session_id, spawn_role, at):
         return None
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return OPUS_UNREAD
-    if at >= until or (role is not None and str(spawn_role).lower() not in roles):
+    if isinstance(role, list) and str(spawn_role).lower() in role:
+        role = str(spawn_role).lower()  # a list that names the spawn's role covers it as that one role
+    if at >= until or (role is not None and role != str(spawn_role).lower()):
         return None
     return OPUS_LIFTED
 
