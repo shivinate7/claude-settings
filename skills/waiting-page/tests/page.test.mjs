@@ -42,7 +42,8 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
 // meta docs, which the status part must never read. window.__reads lists every read as
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {} }) {
+// noStore: the page gets no database (a view that cannot reach the store), so use("db") gives null.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {}, noStore = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -85,7 +86,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
@@ -98,7 +99,7 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -112,11 +113,13 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra, noStore });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   await page.goto(ORIGIN);
+  // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
+  if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
@@ -5112,4 +5115,29 @@ test("a two-pick with an option that has no label names that option by its lette
   await page.locator('label[for="o-no-label-two-b"]').click();
   const ready = (await card(page, it).locator(".ready").textContent()).trim();
   assert.equal(ready, "Ready to send: Red and B, your choice.", "the two-pick ready line does not name the unlabelled option by its letter: " + JSON.stringify(ready));
+});
+
+// ---------------------------------------------------------------- pins: a failed withdraw and a view with no store say "in chat"
+// Pins, not red cases: these lines are green on the current page. They hold the wording the page says now, so a
+// thread line coming back fails here.
+test("a withdraw the store refuses says to paste the answer in chat, and names no thread", async (t) => {
+  const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  const note = c.getByText("Not withdrawn (denied)", { exact: false }).first();
+  await note.waitFor();
+  const text = (await note.textContent()).trim();
+  assert.match(text, /in chat/, "the withdraw note does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the withdraw note names a thread: " + JSON.stringify(text));
+});
+
+test("a view that cannot reach the store says to paste its answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { items: [], noStore: true }); if (!page) return;
+  const empty = page.locator("#list .empty").first();
+  await empty.waitFor();
+  const text = (await empty.textContent()).trim();
+  assert.match(text, /in chat/, "the no-store empty state does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the no-store empty state names a thread: " + JSON.stringify(text));
 });
