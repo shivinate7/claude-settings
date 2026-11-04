@@ -59,10 +59,10 @@ RUN_FOLDER = None  # made in setUpModule
 TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
 PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
-IP_CREDENTIAL_URLS = (
-    ("with a port", "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"),
-    ("with a path and no port", "https://svc:" + PASSWORD + "@10.0.0.5/build"),
-)
+DB_IP_URL = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"  # credentials on an IP host, with a port
+BUILD_IP_URL = "https://svc:" + PASSWORD + "@10.0.0.5/build"  # credentials on an IP host, with no port
+DB_NAME_URL = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"  # the control: a host name refuses today
+IP_LINK_SNIPPET = '<a href="https://10.0.0.5:5432/db">db</a>\n'  # an IP host with no credentials is not a secret
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
@@ -200,6 +200,9 @@ def page_snippets():
          TOKEN),
         ("token after a lone quote in text", "<p>Don't paste %s</p>\n" % TOKEN, TOKEN),
         ("email address in text", "<p>Contact %s</p>\n" % MAIL, MAIL),
+        ("URL credentials on an IP host with a port", "<p>Database: %s</p>\n" % DB_IP_URL, PASSWORD),
+        ("URL credentials on an IP host with no port", "<p>Build: %s</p>\n" % BUILD_IP_URL, PASSWORD),
+        ("URL credentials on a host name, the control", "<p>Database: %s</p>\n" % DB_NAME_URL, PASSWORD),
     )
 
 
@@ -630,7 +633,8 @@ class PageScan(Base):
         self.assertEqual(snapshot(out), before, "a refused page changed the old copy")
 
     def test_cdn_script_tags_and_prose_punctuation_are_not_refused(self):
-        cases = (("CDN script tags", CDN_SNIPPET), ("comment openers and a lone quote in prose", PROSE_SNIPPET))
+        cases = (("CDN script tags", CDN_SNIPPET), ("comment openers and a lone quote in prose", PROSE_SNIPPET),
+                 ("an IP host with no credentials", IP_LINK_SNIPPET))
         for index, (label, snippet) in enumerate(cases):
             with self.subTest(label=label):
                 page = write_text(os.path.join(self.tmp.name, "green-%d.html" % index), page_with(snippet))
@@ -670,36 +674,6 @@ class PageScan(Base):
         self.assertEqual(r.returncode, 1, "jane@2x.com was not refused as an email. Output:\n" + shown(r, [address]))
         self.assertNotIn(address, r.stdout + r.stderr, "the address was printed")
         self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
-
-    def test_url_credentials_on_an_ip_host_in_the_page_text_refuse_the_export(self):
-        for index, (label, url) in enumerate(IP_CREDENTIAL_URLS):
-            with self.subTest(label=label):
-                page = write_text(os.path.join(self.tmp.name, "ip-url-%d.html" % index), page_with("<p>Database: %s</p>\n" % url))
-                out = self.out("ip-url-%d" % index)
-                r = self.export(self.fetch(meta={"page": META}), out, page=page)
-                self.assertVerdict(r, "refused", [PASSWORD])
-                self.assertEqual(r.returncode, 1, "%s: URL credentials on an IP host were not refused. Output:\n%s"
-                                 % (label, shown(r, [PASSWORD])))
-                self.assertNotIn(PASSWORD, r.stdout + r.stderr, "%s: the password was printed" % label)
-                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % label)
-
-    def test_url_credentials_on_a_host_name_refuse_the_export(self):
-        """The control for the case above: the same credentials on a host name refuse today, as an email."""
-        url = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"
-        page = write_text(os.path.join(self.tmp.name, "host-url.html"), page_with("<p>Database: %s</p>\n" % url))
-        r = self.export(self.fetch(meta={"page": META}), self.out("host-url"), page=page)
-        self.assertVerdict(r, "refused", [PASSWORD])
-        self.assertEqual(r.returncode, 1, "URL credentials on a host name were not refused. Output:\n" + shown(r, [PASSWORD]))
-        self.assertNotIn(PASSWORD, r.stdout + r.stderr, "the password was printed")
-
-    def test_an_ip_host_without_credentials_is_not_refused(self):
-        """The control for the case above: an IP host in a link with no user and password is an address, not a secret."""
-        page = write_text(os.path.join(self.tmp.name, "ip-host.html"), page_with('<a href="https://10.0.0.5:5432/db">db</a>\n'))
-        out = self.out("ip-host")
-        r = self.export(self.fetch(meta={"page": META}), out, page=page)
-        self.assertFalse(says(r, "refused"), "an IP host with no credentials was refused. Output:\n" + shown(r))
-        self.assertEqual(r.returncode, 0, "an IP host with no credentials failed. Output:\n" + shown(r))
-        self.assertVerdict(r, "changed")
 
 
 class Rebuild(Base):
@@ -1014,8 +988,7 @@ class All(Base):
         self.assert_supporting_file_refused("cp1252-email", "notes/cafe.txt", b"caf\xe9 " + MAIL.encode("ascii"), [MAIL])
 
     def test_url_credentials_on_an_ip_host_in_a_supporting_text_file_refuse_that_artifact(self):
-        url = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"
-        self.assert_supporting_file_refused("ip-url", "notes/db.txt", ("Database: %s\n" % url).encode("ascii"), [PASSWORD])
+        self.assert_supporting_file_refused("ip-url", "notes/db.txt", ("Database: %s\n" % DB_IP_URL).encode("ascii"), [PASSWORD])
 
     def test_a_text_file_under_an_image_or_font_name_is_scanned(self):
         cases = (("font-password", "fonts/x.woff", ("password = " + PASSWORD).encode("ascii"), [PASSWORD]),
