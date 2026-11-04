@@ -1008,11 +1008,9 @@ def keyed_options_hit(writes, cwd=""):
         if op == "str_replace":  # carries no options: its shape, and so its page, is unseen
             continue
         data = _write_data(entry, cwd)
-        if not isinstance(data, dict) or data.get("kind", "decision") != "decision" or data.get("status") == "closed":
-            continue
-        options = data.get("options")
-        if isinstance(options, list) and any(isinstance(o, dict) and o.get("key") == OPTION_NONE_KEY for o in options):
-            return "option-letter-keys", "option keyed none"
+        options = data.get("options") if _open_decision(data) else None
+        if isinstance(options, list) and any(_keyed_none(o) for o in options):
+            return "option-letter-keys", NONE_KEY_HIT
     return PASS
 
 
@@ -1122,14 +1120,26 @@ def key_named_hit(texts) -> str:
     return ""
 
 
+NONE_KEY_HIT = "option keyed none"
+
+
+def _open_decision(data) -> bool:
+    """True for the data of an open decision. A task, a note and a closed item are not judged. The one gate
+    of option_letter_hit and keyed_options_hit."""
+    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+
+
+def _keyed_none(option) -> bool:
+    """True for an option keyed none, the key the page reserves for its own "none of these"."""
+    return isinstance(option, dict) and option.get("key") == OPTION_NONE_KEY
+
+
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
     position's letter, has a label that opens with another letter's tag, or names an option in its text by a
     letter-and-digit key. A task, a note and a
     closed item pass; an update that carries no `options` has no keys to judge."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
-        return ""
-    if data.get("status") == "closed":
+    if not _open_decision(data):
         return ""
     options = data.get("options")
     if isinstance(options, list):
@@ -1138,8 +1148,8 @@ def option_letter_hit(op: str, data) -> str:
             key = o.get("key") if isinstance(o, dict) else None
             if not isinstance(key, str):
                 return "option with no string key"
-            if key == OPTION_NONE_KEY:
-                return "option keyed none"
+            if _keyed_none(o):
+                return NONE_KEY_HIT
             if key in seen:
                 return "option key that repeats"
             seen.add(key)
