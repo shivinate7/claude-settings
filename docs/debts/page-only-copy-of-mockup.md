@@ -1,6 +1,6 @@
-# A mockup's only copy is the waiting page
+# A mockup is never its own file in a design folder
 
-- **What.** The waiting page holds the only copy of a mockup's source. "Add a design" pastes the mockup HTML into the page's `designData` block, and no repo design folder gets the file. The record-branch copy may hold it too, in `page/designData.json`. Unmeasured.
+- **What.** A mockup lives only inside the `designData` block of the waiting page. "Add a design" pastes the mockup HTML into that block, and no repo design folder gets the file. The record branch copies the block to `waiting/page/designData.json`, which holds the page's 33 mockups on origin/roadmap. Measured 2026-11-02 for those 33: 1 exact file on a non-main ref, 8 topic matches on main, 22 `d4` files on origin/roadmap, 2 with an unknown home repo.
 - **Where.** `skills/waiting-page/SKILL.md`: "Add a design", step 3.
 - **Decision.** `waiting-data-in-repo` (git is each artifact's home).
-- **Retire.** "Add a design" finds the mockup's file on origin before it writes the item. Open work: branch `mockup-homes` (the account-switch lane) on origin. It holds decision `mockup-home`, unreviewed, which judges path shape only. Check: none yet.
+- **Retire.** Guard rule `mockup-home` closes it. A waiting item's mockup must name a file in a mockup home: the repo's design folder, or the owner's machine-home folder outside the Claude app folders. The guard judges path shape only. The rule and its decision `mockup-home` are on branch `mockup-on-origin`, unmerged. Check: none yet.

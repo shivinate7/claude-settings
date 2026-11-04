@@ -12,7 +12,7 @@ read with `list_events`. Its scratch files were not carried over. Each quote nam
 
 - fb-1458-1, fb-1458-2 (14:58 CST, event 760534fd-d5f4-4aca-8777-970a479f2647), verbatim, then "A":
 
-  <!-- ste-disable-next-line STE001: verbatim owner and coordinator words -->
+  <!-- ste-disable-next-line STE001, STE008: verbatim owner and coordinator words -->
   > "i've found countless examples of design mockups made by the designer agent not going into my repos' design folders. so that's prboably another gap u need to go look into"
 
   The "A" picks option a of event e7ccdec6-0eed-4233-a037-c02582c324ef, verbatim:
@@ -66,7 +66,7 @@ Line numbers in the quote are as of 2026-11-02 and may have moved.
 ## The 14 step links
 
 Coordinator to owner, 14:56 CST (event 46a1a427-f298-4bbe-9bf1-f17686643fae): "14 roadmap step files hold bare links
-today. A PR's CI doesn't fetch the roadmap branch." Option a: an agent fixes the 14 links, then the check refuses bare
+today. A PR's CI doesn't fetch the roadmap branch." Option a: an agent fixes the 14 links, then the check refuses bare <!-- ste-disable-line STE008: verbatim owner and coordinator words -->
 links at the write to the roadmap branch, in the guard that checks page writes.
 
 Today's list (`python3 lint/check_artifact_cites.py --steps list`, 2026-11-03): c100, c103, c121, c127, c130, c52, c55,
