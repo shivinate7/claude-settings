@@ -1,0 +1,24 @@
+Done
+- OTHER: audited /home/user/joyous/CLAUDE.md at commit 222ef38 (PR #72, "CLAUDE.md cites parent"). Paths below are under /home/user/joyous unless they start with /. The file has 59 lines now, 46 of them non-blank. The size check passes (limit 200). AGENTS.md is a link to CLAUDE.md, and .claude/rules/ holds only a README. Target: about 40 lines, plus a new .claude/rules/staff.md of about 6 lines.
+- OTHER: class counts, in non-blank lines: KEEP 27, DUP 5, MOVE 6, PATH 4, STALE 4. The 4 STALE lines need the owner's grant (see Input Needed).
+- Biggest cuts:
+  - MOVE :40-42, photo consent and the icon exception. They nearly copy docs/decisions/photo-consent.md:7-11 (the photo publishing record), and tests/no-media.test.mjs:2-8 already pins the icon. Keep "Photo files stay out of git", the cite and the Check line.
+  - PATH :50-53, where the staff access checks live and the /lead/release exception. Move them to .claude/rules/staff.md, scoped to src/lib/staff/**, src/pages/staff/**, src/pages/lead/**, src/lib/tour/release.ts and src/middleware.ts. The anchor and the Check line stay in CLAUDE.md. tests/docs.test.mjs:2-4 checks markers and paths only in CLAUDE.md, README.md and docs/**, so that test must widen to .claude/rules/ or the moved paths go unchecked.
+  - MOVE :22 and :24-25, "Where things live". README.md:30-40 and docs/records.md (the records index) already list these. DUP :26 restates rule git-slug-then-claim-number (slug first, number claimed at merge). Replace all of it with one line that points to docs/records.md. That index also lists the debt store docs/debts/, which CLAUDE.md never names.
+  - DUP :32 paraphrases /home/user/claude-settings/docs/decisions/standing-merge-grant.md:47-48 (the merge grant) and rule roles-solo-reviews-logic-diffs-only (a fresh reviewer for logic diffs). DUP: the date on :30, and the "global rules apply" sentence on :4-5. Keep the bare cite and `Check: none`, which tests/docs.test.mjs:2-3 requires.
+- KEEP but unclear:
+  - "the builder" (:30, :42, :51, :59) means the owner. /home/user/claude-settings/GLOSSARY.md:60 says a builder is an agent, and :44 says only the owner makes a grant. Write "the owner", and "the school owners" for the school.
+  - :46-48 says parent-only content sits "behind a parent login", but no parent login exists. docs/debts/parent-portal.md says the choice is deferred and parents use Brightwheel. tests/redirects.test.mjs:64-66 only keeps that content off public pages. Say that, and cite the debt.
+  - :20 says "Phase 0 sets the first values". docs/plans/plan.md:18-30 lists sources, not values, and asks for one month of numbers. docs/launch-runbook.md:17 measures the baseline one week before launch. Point to one home.
+- MISSING: decision no-public-tuition (no page shows a price) has no CLAUDE.md line and no test. The old posts carry tuition offers, and src/lib/posts.js:14-21 strips only some of them. A session porting pages from archive/ could publish a price. Add one KEEP line that cites it and owner-confirmed-facts (the facts the site may state). Also: archive/raw.json (1.0 MB) has no Read deny rule, and no .claude/settings.json exists, which /home/user/claude-settings/lint/check_claude_md_size.py:7-8 asks for.
+- Mechanical check: the size check cannot see this bloat at 59 lines. The restates probe (lint/compliance_probes.py, the check for copied records) does not run in joyous CI: .github/workflows/checks.yml has no claude-md-cites step. Its record says it skips paraphrases and reads only claude-settings records, so it would miss both :32 and :39-42. A version that also reads the repo's own docs/decisions/ would catch the photo copy.
+
+Deviations
+- My local run of the restates probe printed "unknown - cannot read .claude/rules/README.md": the sparse checkout does not have that folder on disk. Its verdict is unknown, not clear.
+- PR #72's diff is unknown, because the shallow clone has no parent commit. If #72 added the cites on :4, :26 or :31, the DUP cuts on :4-5 and :26 undo today's merge. A bare cite is the form that decision child-cites-not-copies asks for. The only reason to cut it is that every session already loads the parent rule.
+
+Input Needed
+- :58-59 says "Every lane follows the skills compliance-check, fresh-prose and ci-hygiene" (owner, 2026-10-10). CLAUDE.md is its only home. /home/user/claude-settings/skills/compliance-check/SKILL.md:3 and /home/user/claude-settings/skills/ci-hygiene/SKILL.md:3 say "Not for ordinary code edits", and each skill fires on its own description. The line protected docs and CI quality in each lane; the skill triggers protect that now. Proposed fix: delete it. This waits for the owner's grant, and I count it as STALE until then.
+
+Next
+- A lane applies the cuts. The docs.test.mjs widening ships in the same lane as the staff move.

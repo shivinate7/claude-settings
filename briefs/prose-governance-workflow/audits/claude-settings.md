@@ -1,0 +1,9 @@
+claude-settings CLAUDE.md audit (Opus Explore, 19:25 CST)
+Verdict: not done well by its own standard; passes 200-line check only via paragraph-long lines; 4 rules hold 31% of words.
+Numbers: 108 lines, 25,354 bytes, 3,967 words, 97 rules; 24 lines >200 chars, 9 >500, 5 >1000; longest line 38 at 2,873 chars. 12 rules of 60+ words = 47% of words. Session always loads 33,266 bytes (file + output style 6,885 + repo CLAUDE.md 1,027). GLOSSARY not imported.
+Size check counts newlines only (check_claude_md_size.py:39).
+Mechanisms: 30 rules guard/check/CI (835 words), 61 none (2,309), 24 judgment (595).
+Six cuts (anchor + one line kept): 1 git-integration-branch-merge 402w -> ~70, move rest to skills/project-ops/templates/operating-model.md (~330 saved). 2 roles-review-cap-three 349 -> ~60, rest already in decision hold-unsafe-after-round-3 (~290). 3 questions-go-to-owner 268: drop box text (in style-question-inside-box), keep-going echo, advisor sentence; page-writer steps to skill waiting-page (~160). 4 reports-batch-pace-numbers 126 -> one line pointing at batch runner template (~105). 5 roles-sonnet-is-the-ceiling: list of 5 Opus exceptions is stale (6th: Explore Audit: marker) -> point at agent-model-cap; "read my words by meaning" stated 3x (CLAUDE.md, shiv-stylisms:33, GLOSSARY:19) (~85). 6 outcomes-mechanize-rules + building-scanner-respects-strings -> one line each; tracking-cost text to path rule for hooks/ lint/ (~110).
+After: ~1,080 words out, ~18.5 KB (27% smaller), ~100 lines.
+Unclear: rule_mechanisms row for roles-sonnet-is-the-ceiling stale (guard.py:4158 refuses Opus); terms missing from glossary: ultracode path, strike, net-value test, load brake; one-checkout-per-agent stated 3x; "Keep a fix under 40 lines, against reading cost alone" unclear; roles-sonnet-is-the-default never says Sonnet is default.
+Constraint: RULE_FLOOR=99 in lint/rule_audit.py:105 with 119 anchors; keep anchors.
