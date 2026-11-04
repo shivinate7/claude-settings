@@ -82,8 +82,8 @@ fields (id, session_status, tags) per session in the live file it already writes
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
-The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
-build already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
+The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
+script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
 already makes.
 """
 import argparse
