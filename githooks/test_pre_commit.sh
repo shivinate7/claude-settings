@@ -213,9 +213,9 @@ fi
 # Each fixture commits a copy of that installer and hook on main before any hook is armed, then commits
 # on feat. The armed reference-transaction is a neutral copy that exits 0, except in the current case.
 neutral="$run/neutral-hook"; printf '#!/bin/sh\n# an older copy\nexit 0\n' >"$neutral"; chmod +x "$neutral"
-fresh_mr() { # name branch: a repo on branch that holds githooks/main-ref, then a feature branch to commit on
+fresh_mr() { # name branch [installer]: a repo on branch that holds githooks/main-ref, then a feature branch to commit on
   cd "$run" && mkdir "$1" && cd "$1" && git init -q -b "$2" . || { bad=1; echo "FAIL setup: cannot make $1"; return 1; }
-  mkdir -p githooks/main-ref && cp "$repo/githooks/main-ref/install.sh" "$repo/githooks/main-ref/reference-transaction" githooks/main-ref/
+  mkdir -p githooks/main-ref && cp "${3:-$repo/githooks/main-ref/install.sh}" githooks/main-ref/install.sh && cp "$repo/githooks/main-ref/reference-transaction" githooks/main-ref/
   git add -A && git commit -q -m "main-ref fixture" && git switch -q -c feat
 }
 arm_hook() { # file: the armed reference-transaction for the repo in the working directory
@@ -273,5 +273,30 @@ must_staged f.txt && lands_with "unknown" "ok: no main ref, the commit lands and
 fresh_mr mr-hatch main; arm_hook "$neutral"; arm
 printf 'x\n' >f.txt; git add -- f.txt
 must_staged f.txt && lands "ok: PRE_COMMIT_GUARD=off lets a stale copy through" env PRE_COMMIT_GUARD=off git commit -q -m c
+
+# Round 2. The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
+fresh_mr mr-uncommitted main; arm_hook "$neutral"; arm
+printf '# an uncommitted edit\n' >>githooks/main-ref/reference-transaction
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: uncommitted edit does not excuse a stale armed copy" git commit -q -m c
+
+# Round 2. A repo that vendors the installer from before --check: the pre-commit must not re-arm the copy
+# through it. The copy stays byte-identical, the verdict is unknown, and unknown lets the commit land.
+fresh_mr mr-old-install main "$repo/githooks/test_fixtures/main-ref-install-no-check.sh"; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt
+before="$(cksum <.git/hooks/reference-transaction)"
+lands_with "unknown" "ok: vendored installer with no --check, the commit lands and stderr says unknown" git commit -q -m c
+after="$(cksum <.git/hooks/reference-transaction)"
+if [ "$before" = "$after" ]; then echo "ok   pre-commit leaves the armed copy alone when the vendored installer has no --check"; else bad=1; echo "FAIL pre-commit re-armed the copy through a vendored installer that has no --check"; fi
+
+# Round 2. git rev-parse --show-toplevel fails inside the hook: the verdict is unknown and the commit is allowed.
+# A shim on PATH fails that one call and passes every other git call to the real git.
+fresh_mr mr-toplevel main; arm_hook "$repo/githooks/main-ref/reference-transaction"; arm
+shim="$run/shim-toplevel"; mkdir "$shim"; real="$(command -v git)"
+printf '#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then echo "fatal: simulated failure" >&2; exit 128; fi\nexec "%s" "$@"\n' "$real" >"$shim/git"
+chmod +x "$shim/git"
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands_with "unknown" "ok: rev-parse --show-toplevel fails, the commit lands and stderr says unknown" env PATH="$shim:$PATH" "$shim/git" commit -q -m c
 
 exit "$bad"
