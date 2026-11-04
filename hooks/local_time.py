@@ -311,11 +311,16 @@ def page_note(raw):
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
-    the session's override and prints one line. Any failure is one stderr line, no override."""
+    the session's override and prints one line. A prompt no keyword form grants goes to
+    override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
+    that carries the word `opus`, none otherwise. That call is why the settings.json row has "timeout": 30.
+    Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
+        if result is None:
+            result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at)
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):

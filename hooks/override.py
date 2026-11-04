@@ -23,6 +23,10 @@ rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
+  A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
+  prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
+  owner prompt that carries the whole word `opus` and starts with neither keyword; none for any other prompt, and
+  none for a machine-tag prompt. It fails closed: an error or an odd answer grants nothing.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -47,6 +51,8 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from shared_names import MACHINE_TAGS  # stdlib only: the one home of the machine-text tags
+
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
 # The first word, then one mark (`,` `.` `!` `;` or a dash) that is dropped, then the rest. A mark counts
@@ -58,6 +64,13 @@ PROMPT = re.compile(
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
+# The plain ask (grant_opus_ask): the whole word, a pasted block, a word that may name a role, a length anywhere in the
+# words (bounded by non-word characters, so `12 mhz` is none), and the length when the words give none.
+OPUS_WORD = re.compile(r"\bopus\b", re.I)
+PASTED = re.compile(r"<pasted_content\b[^>]*>.*?</pasted_content>", re.I | re.S)
+ROLE_WORDS = re.compile(r"[A-Za-z][\w-]*")
+ASK_LENGTH = re.compile(r"(?<![\w-])" + OPUS_LENGTH.pattern + r"(?![\w-])", re.I)
+DEFAULT_ASK_LENGTH = ("2", "h")
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
 # grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
@@ -146,11 +159,58 @@ def _grant_opus(session_id, rest, at):
     length = OPUS_LENGTH.fullmatch(words[-1])
     if not length or len(words) > 2 or (len(words) == 2 and role is None):
         return None  # ambiguous: grants nothing
-    number, unit = length.groups()
+    return _write_opus(session_id, path, at, length.groups(), role)
+
+
+def _write_opus(session_id, path, at, length, role, said=None):
+    """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
+    shape, for the keyword grant and the plain ask. `said` is the owner's words, for the log. Returns ("opus", until,
+    role)."""
+    number, unit = length
     until = at + (timedelta(hours=int(number)) if unit.lower() == "h" else timedelta(minutes=int(number)))
-    _write(path, {"kind": "opus", "until": until.astimezone(timezone.utc).isoformat(), "role": role})
-    _log(session_id, "opus-grant", "%s until %s" % (role or "every role", until.astimezone(timezone.utc).isoformat()))
+    stamp = until.astimezone(timezone.utc).isoformat()
+    _write(path, {"kind": "opus", "until": stamp, "role": role})
+    detail = "%s until %s" % (role or "every role", stamp)
+    if said:
+        detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
+    _log(session_id, "opus-grant", detail)
     return "opus", until, role
+
+
+def _strip_pasted(prompt):
+    """The prompt with each pasted block replaced by a marker: pasted text is not the owner's own words."""
+    return PASTED.sub("[pasted text]", prompt)
+
+
+def grant_opus_ask(session_id, prompt, at, judge=None):
+    """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
+    owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
+    caller passes another. Returns ("opus", until, role) for a new override, else None.
+
+    The judge is not called, and nothing is granted, when: the prompt is no string; the session id cannot name a
+    file; the prompt starts with a machine tag (an agent's text, a notice); its first word is `opus` or `override`
+    (the keyword forms keep the whole-prompt rule of grant()); or no whole word `opus` stays once the pasted blocks
+    are removed. Cost: one model call for an owner prompt that carries the word, none for any other.
+    The role is the one OPUS_ROLES role the words name (none or several: every role). The length is the first
+    `<n>m` or `<n>h` in the words, else DEFAULT_ASK_LENGTH. The guard.log line `opus-grant` holds the owner's words."""
+    if not isinstance(prompt, str):
+        return None
+    path = _path(session_id, "opus")
+    if path is None or prompt.lstrip().startswith(MACHINE_TAGS):
+        return None
+    if OPUS_PROMPT.match(prompt) or PROMPT.match(prompt):
+        return None
+    text = _strip_pasted(prompt)
+    if not OPUS_WORD.search(text):
+        return None
+    if judge is None:
+        from call_judge import opus_ask as judge
+    if judge(text) is not True:
+        return None
+    roles = {opus_role(word) for word in ROLE_WORDS.findall(text)} - {None}
+    found = ASK_LENGTH.search(text)
+    return _write_opus(session_id, path, at, found.groups() if found else DEFAULT_ASK_LENGTH,
+                       roles.pop() if len(roles) == 1 else None, " ".join(text.split()))
 
 
 def grant(session_id, prompt, at):
