@@ -1,6 +1,6 @@
 # An opt-in run checks every tracked cite, not only the range
 
-Owner ask, 2026-11-03 15:58 CST, via the coordinator: promote the child repos' guards up to claude-settings. The promotion plan, lane 1 (prose-path-check-whole-tree), sits on origin/child-guard-promotion until that branch merges.
+Owner ask, 2026-11-03 15:58 CST, through the coordinator: promote the child repos' guards up to claude-settings. The promotion plan, lane 1 (prose-path-check-whole-tree), sits on origin/child-guard-promotion until that branch merges.
 
 ## The ruling
 
@@ -10,7 +10,7 @@ Owner ask, 2026-11-03 15:58 CST, via the coordinator: promote the child repos' g
 - STALE004: a `path:N` or `path:N-M` cite where N is below 1, M is below N, or the last number is past the file's last line.
 - Same leave-outs as range mode: the records page, each file in `.ste-lint-exclude` or the EXCLUDE input, and a line marked `ste-disable-line` with STALE003 or STALE004.
 
-The ste-lint input `tree-cites` turns the mode on. Its default is "false". A repo that sets nothing sees no change.
+The ste-lint input `tree-cites` turns the mode on. Its default is "false". A repo that sets nothing sees no change. The ste-lint step runs tree mode in both scopes, and `fail: false` keeps the exit 0.
 
 Departs from: stale-cites-at-merge range-only — adds an opt-in whole-tree mode that fires on untouched lines
 

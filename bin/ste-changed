@@ -4,6 +4,7 @@
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
 # input default, so an EXCLUDE in the caller's environment is ignored.
+# TREE_CITES=true in the env runs tree mode, as an opted-in repo's CI does; the workflow's tree-cites setting is not read.
 # Pin check: when the repo's CI pins this repo's ste-lint action at a commit whose lint files differ
 # from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves the pin
 # before CI spends a run (decision action-pins-follow-sessions). A pin this clone does not hold is
@@ -129,8 +130,7 @@ def main(argv):
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
                PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
-               DECISIONS_DIR=default(text, "decisions-dir"),
-               TREE_CITES=os.environ.get("TREE_CITES") or default(text, "tree-cites"))  # an opted-in repo runs the same here
+               DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
     rc = subprocess.run([find_bash(), run], env=env).returncode
