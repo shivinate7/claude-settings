@@ -25767,6 +25767,18 @@ def register_simulator_boot_cases():
         env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
     add("lease: an MCP launch of a booted device with no lock is allowed",
         "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=one_cfg)
+    # A name that differs from the device's name only in case or in outer spaces still names that device.
+    add("lease: an MCP launch naming the shut-down device in lowercase is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="gamma mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a leading space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=" Gamma Mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a trailing space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="Gamma Mini ",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("control: an MCP launch of a name no device holds is allowed, the name matches nothing",
+        "allow", tool=SIM_MCP, action="launch", device="Zeta Mini", env_path=one_path, config=one_cfg)
     # Devices unreadable: a failing `simctl list` leaves no device list, so the boot rules fail open, the lease too.
     unreadable = os.path.join(ROOT, "sim_unreadable")
     os.makedirs(unreadable, exist_ok=True)
