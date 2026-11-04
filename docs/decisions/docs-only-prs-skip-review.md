@@ -6,11 +6,11 @@ Owner, 2026-09-26: a pull request that changes only prose or docs, and touches n
 
 Why: a review of a change that simple is wasted. `roles-solo-reviews-logic-diffs-only` says the same for solo mode. This record extends it to every other session shape.
 
-Owner, 2026-11-04 07:56 CST (waiting-page item 205 b, ruling records get a short review): each record that files an owner ruling gets a short reviewer read before it merges. Source: the coordinator's brief. The waiting page is not in this repo.
+Owner, 2026-11-04 07:56 CST (waiting-page item 205 b): each record that files an owner ruling gets a short reviewer read before it merges. This narrows the 2026-09-26 ruling for such a record. Source: the coordinator's brief. The waiting page is not in this repo.
 
 ## The round
 
-When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines.
+When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for 205 b).
 
 The review record is `Kind: normal`, `Guard or check: no`, with one `Round` line. It is never `docs-only`.
 
