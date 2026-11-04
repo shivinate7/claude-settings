@@ -54,7 +54,8 @@ def step(name, run=None, **keys):
     return text + "\n"
 
 
-SUMMARY = re.compile(r"^(?:ran|would run) \d+ of \d+ steps$")  # the last line of a --lint run or plan
+SUMMARY = re.compile(r"^summary: (?:ran|would run) \d+ of \d+ steps$")  # the last line of a --lint run or plan; merge.py reads `would run ` lines, so it never starts with one
+SUMMARY_ANY = re.compile(r"^(?:summary: )?(?:ran|would run) \d+ of \d+ steps$")  # the prefix is checked elsewhere: step helpers skip either form
 NOT_RUN = re.compile(r"^not run(?! locally)\b")  # a step --lint does not run: its own line, never a verdict
 
 
@@ -223,6 +224,23 @@ class Conditions(Job):
         cond = "${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}"
         rc, lines, out = self.run_job(step("scoped", "true", **{"if": cond}))
         self.assertEqual(self.verdicts(lines), ["PASS"], out)
+
+    def test_a_scope_flag_not_equal_to_false_reads_true(self):
+        rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.code != 'false' }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_a_scope_flag_not_equal_to_false_and_a_pull_request_is_skipped_with_no_base(self):
+        cond = "${{ needs.scope.outputs.code != 'false' && github.event_name == 'pull_request' }}"
+        rc, lines, out = self.run_job(step("pr flag", "false", **{"if": cond}))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped"]), out)
+
+    def test_a_scope_flag_equal_to_false_reads_unknown(self):
+        rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.code == 'false' }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+
+    def test_a_scope_flag_not_equal_to_true_reads_unknown(self):
+        rc, lines, out = self.run_job(step("flag", "true", **{"if": "${{ needs.scope.outputs.code != 'true' }}"}))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
 
     def test_not_cancelled_reads_true(self):
         cond = "${{ !cancelled() && needs.scope.outputs.mods == 'true' }}"
@@ -520,7 +538,7 @@ def by_step(lines):
     found = {}
     for ln in lines:
         word = next((w for w in VERDICT_WORDS if ln.startswith(w + " ")), None)
-        if word and not SUMMARY.match(ln):
+        if word and not SUMMARY_ANY.match(ln):
             found[ln[len(word):].strip().split(": ", 1)[0]] = word
     return found
 
@@ -545,7 +563,9 @@ class InstallSteps(Job):
     INSTALL_FORMS = ("npm ci", "pnpm install --frozen-lockfile", "yarn install --frozen-lockfile", "yarn install --immutable",
                      "pip install -r requirements.txt", "python3 -m pip install -r requirements.txt",
                      "npx astro sync", "npx --no-install astro sync", "npx astro generate")
-    NOT_INSTALL_FORMS = ("npm run build", "npx eslint .", "npx astro check", "pip install requests")
+    NOT_INSTALL_FORMS = ("npm run build", "npx eslint .", "npx astro check", "pip install requests",
+                         "pip install -r req.txt&&python3 lint/x.py", "npm ci;echo hi", "pip install -r a.txt|tee x",
+                         "npx astro sync&&curl x")
     NPM_OK = 'touch installed.marker\necho "$*" >> npm-calls.txt'
 
     def setUp(self):
@@ -652,14 +672,16 @@ class NotRunLines(Job):
         rc, lines, out = self.run_job(*self.DEGEN, args=("--lint",))
         self.assertEqual(by_step(lines), {"Checkout": "not run", "Setup node": "not run", "Python lint": "PASS",
                                           "Make lint-py": "not run", "Make gen-check": "not run"}, out)
-        self.assertIn("ran 1 of 5 steps", lines, out)
+        self.assertIn("summary: ran 1 of 5 steps", lines, out)
 
     def test_plan_under_lint_prints_the_same_not_run_lines_with_would_run_counts(self):
         code, lines, out = plan_lint(self.root, workflow(*self.DEGEN))
         self.assertEqual((code, by_step(lines)), (0, {"Checkout": "not run", "Setup node": "not run",
                                                       "Python lint": "would run", "Make lint-py": "not run",
                                                       "Make gen-check": "not run"}), out)
-        self.assertIn("would run 1 of 5 steps", lines, out)
+        self.assertIn("summary: would run 1 of 5 steps", lines, out)
+        would = [ln for ln in lines if ln.startswith("would run ")]  # what merge.py's lint_steps reads
+        self.assertEqual(len(would), 1, "the summary line is read as a step: " + "; ".join(would))
 
     def test_not_run_lines_leave_the_exit_code_and_never_read_as_fail_or_unknown(self):
         rc, lines, out = self.run_job(*self.DEGEN, args=("--lint",))
@@ -670,6 +692,29 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+
+class Progress(Job):
+    """Each step ci-job runs prints one `start:` line to stderr before it runs, and none to stdout: a caller that reads
+    stdout for the verdicts keeps its lines, and a long run shows which step it is on. Each step greps the stderr file
+    itself, so its start line must already be there when the step runs."""
+
+    def test_each_run_step_announces_itself_on_stderr_before_it_runs(self):
+        err_path = os.path.join(self.root, "stderr.txt")
+        argv, env = self.job_call(step("First", 'grep -q "start.*First" "$ERR_FILE"'),
+                                  step("Second", 'grep -q "start.*Second" "$ERR_FILE"'),
+                                  env={"ERR_FILE": err_path})
+        with open(err_path, "w", encoding="utf-8") as err:
+            done = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=err, text=True, env=env, timeout=120)
+        with open(err_path, encoding="utf-8") as f:
+            err_text = f.read()
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS", "PASS"]), done.stdout + err_text)
+        self.assertEqual([ln for ln in lines if ln.startswith("start")], [], done.stdout)
+        starts = [ln for ln in err_text.splitlines() if ln.startswith("start:")]
+        self.assertEqual(len(starts), 2, "the stderr holds %d start lines, want one per run step: %s" % (len(starts), err_text))
+        self.assertIn("First", starts[0], err_text)
+        self.assertIn("Second", starts[1], err_text)
 
 
 class Shallow(Job):
