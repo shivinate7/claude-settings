@@ -42,7 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURE, SKILL, cleanEnv, expected, gitIn, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
+import { FIXTURE, POSIX_ONLY, SKILL, cleanEnv, expected, gitIn, gitShim, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
 const READERS = join(SKILL, 'scripts', 'lib', 'fact-readers.mjs');
@@ -50,9 +50,6 @@ const PY_FACTS = join(SKILL, 'scripts', 'lib', 'py-facts.py');
 const CORE = 'docs/map/core.md';
 const HOMES = 'docs/map/homes.md';
 const TRACE = 'docs/map/traces/home.md';
-const posix = process.platform !== 'win32';
-// The no-python and shim cases need a bin folder with an extensionless git and python3, which only POSIX PATH lookup finds.
-const POSIX_ONLY = { skip: posix ? false : 'the bin folder links an extensionless git and python3, which only POSIX PATH lookup runs' };
 
 const out1500 = (r) => r.out.slice(0, 1500);
 const read = (dir, rel) => readFileSync(join(dir, rel), 'utf8');
@@ -150,18 +147,8 @@ const pyShim = () => {
 };
 const starts = (log) => readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
 
-/** A folder with a git first on PATH. The shim logs each `ls-files` start, then runs the real git. */
-const lsFilesShim = () => {
-  const real = (process.env.PATH ?? '').split(delimiter).map((d) => join(d, 'git')).find((p) => existsSync(p));
-  assert.ok(real, 'git must be on PATH for the cost case');
-  const bin = tmpFolder('pemap-gitshim-');
-  const log = join(bin, 'ls-files.log');
-  const sh = join(bin, 'git');
-  writeFileSync(sh, '#!/bin/sh\ncase "$*" in *ls-files*) echo ls-files >> "$LS_FILES_LOG";; esac\nexec "$LS_FILES_REAL" "$@"\n');
-  chmodSync(sh, 0o755);
-  writeFileSync(log, '');
-  return { log, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, LS_FILES_LOG: log, LS_FILES_REAL: real } };
-};
+/** A git first on PATH that logs each `ls-files` start, then runs the real git. The one git shim is `gitShim` in helpers.mjs. */
+const lsFilesShim = () => gitShim('ls-files');
 
 // ---- Step 2: the fact-line parser and the home lines ----
 

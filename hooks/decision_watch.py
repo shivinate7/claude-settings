@@ -71,7 +71,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -1052,33 +1052,18 @@ def last_human_stamp(records):
     return stamp
 
 
-def _turn_bound(stamp):
-    """Return the last human message time as a naive LOCAL datetime, else None.
-
-    The transcript stamp is UTC, and the reader gives a guard.log line as naive local time (the
-    log stamp carries a UTC offset, or none on an old line), so the bound is converted rather than
-    compared across zones. One second is taken off, because the guard truncates its
-    own stamp to whole seconds and a line written in the same second would otherwise be dropped.
-    """
-    text = (stamp or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        moment = datetime.fromisoformat(text)
-    except Exception:
-        return None
-    if moment.tzinfo is not None:
-        moment = moment.astimezone().replace(tzinfo=None)
-    return moment - timedelta(seconds=1)
-
-
 def collect_unread(stamp):
-    """Return the matched text of each `noted`/`subject-unread` guard line from this turn."""
-    bound = _turn_bound(stamp)
-    if bound is None:
+    """Return the matched text of each `noted`/`subject-unread` guard line from this turn.
+
+    The turn bound and each line time are compared as epoch instants, so the test holds across a
+    clock change; a naive local time has two readings in the fall-back hour. The bound is one
+    second before the last human message, because the guard truncates its own stamp to whole
+    seconds and a line written in the same second would otherwise be dropped.
+    """
+    start = parse_utc_timestamp(stamp)
+    if start is None:
         return []
+    bound = start - 1
     try:
         # The mod runs this script with CLAUDE_CONFIG_DIR set to its own state folder, and hands
         # the real config folder in DW_REAL_CONFIG_DIR. guard.log lives in the real one.
@@ -1110,15 +1095,13 @@ def collect_unread(stamp):
     for line in lines:
         if reader is not None:
             row = reader.parse_line(line)
-            parsed = None if row is None else (row.rule, row.when, row.matched)
+            parsed = None if row is None else (row.rule, (row.at or row.when).timestamp(), row.matched)
         else:
             # Fallback, a second parser on purpose: the first five tab fields, extras ignored.
             fields = line.split("\t")[:5]
             try:
-                moment = datetime.fromisoformat(fields[0])
-                if moment.tzinfo is not None:  # an offset time: naive local, as parse_line gives `when`
-                    moment = moment.astimezone().replace(tzinfo=None)
-                parsed = (fields[3], moment, fields[4])
+                # An offset time is one instant; a zone-less one reads as local time.
+                parsed = (fields[3], datetime.fromisoformat(fields[0]).timestamp(), fields[4])
             except Exception:
                 parsed = None
         if parsed is None or parsed[0] != UNREAD_RULE or parsed[1] < bound:

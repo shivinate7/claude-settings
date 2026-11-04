@@ -46,6 +46,8 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
    `node ~/.claude/skills/plain-english-map/scripts/map-picture.mjs` from the repository root and read the page.
    It writes `map.html` in a new folder under the system temp folder and prints the path.
    Give a path to write there instead. The command refuses a path inside the repository.
+   Then run `node ~/.claude/skills/plain-english-map/scripts/map-stale.mjs` to rank the map lines whose file
+   changed after the line. Read the worst ones first. It is advice: it always exits 0.
 
 ## Formats
 
@@ -71,6 +73,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
   A mapped file's comments cite an id that names a record, and the file's decisions line lacks it. Or an id on a decisions line names no record. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
 - `scripts/map-fix.mjs` adds the ids that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
+- `scripts/map-stale.mjs` is the stale command. It runs 1 `git rev-parse`, 1 `git blame` for each map page and 1 `git log` for all files, never a `git log` for each file. A shallow clone, no repository or no git prints an unknown line, never "nothing stale".
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
 - `scripts/lib/` also holds `decisions.mjs` (which record an id names, and which ids a file cites), `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.

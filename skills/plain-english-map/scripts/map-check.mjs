@@ -68,8 +68,16 @@ const listTokens = (lines) => {
 // With no second argument it reads the validated repo config. A second argument that is present and not a RegExp throws.
 export const mapCodePaths = (text, re) => {
   if (re !== undefined && !(re instanceof RegExp)) throw new TypeError('mapCodePaths: the second argument must be a RegExp');
+  return mapCodeLines(text, re).map((m) => m.path);
+};
+
+/** The map lines of one docs/map/ page that name a code file, as { line (1-based), path }. The one reader behind `mapCodePaths`, with each line's number. */
+export const mapCodeLines = (text, re) => {
   const use = re ?? extRe(repoMapConfig());
-  return listTokens(text.split('\n')).filter((t) => use.test(t));
+  return text.split('\n').flatMap((l, i) => {
+    const m = l.match(LIST_ITEM_TOKEN_RE);
+    return m && use.test(m[1]) ? [{ line: i + 1, path: m[1] }] : [];
+  });
 };
 
 // Reads every table name listed under a docs/map/ file's "Tables" heading.

@@ -9,8 +9,8 @@ import { apply } from '../../../lint/_test_git.mjs';  // test-run signing opt-ou
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { removeRunFolder, runFolder } from './temp-root.mjs';
 
@@ -61,6 +61,31 @@ export const gitIn = (dir, ...a) =>
 
 // The files of `tests/fixture/` that the scratch repository must track.
 const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'];
+/** Commits every change of `dir`. With `epoch` (unix seconds) the author time is that epoch in UTC, which is what `git blame` and `git log %at` read. Without it, the commit has the current time. The commit runs with an empty hooks folder. */
+export const commitAt = (dir, epoch, message) => {
+  gitIn(dir, 'add', '-A');
+  const date = epoch === undefined ? [] : [`--date=${epoch} +0000`];
+  gitIn(dir, '-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', ...date, '-m', message);
+};
+
+/** A case that puts an extensionless POSIX script on PATH skips on win32: CreateProcess runs no such script, and a `.cmd` needs a shell that these commands never use. */
+export const POSIX_ONLY = { skip: process.platform === 'win32' ? 'an extensionless POSIX script on PATH: only POSIX PATH lookup runs it' : false };
+
+/**
+ * A git first on PATH. It appends each call whose arguments contain `match` (every call when `match` is '') to its log, one line per call,
+ * then runs the real git. A cost case counts the lines of `log`. Its env is added to a run's env.
+ */
+export const gitShim = (match = '') => {
+  const real = (process.env.PATH ?? '').split(delimiter).map((d) => join(d, 'git')).find((p) => existsSync(p));
+  assert.ok(real, 'git must be on PATH for the shim');
+  const bin = tmpFolder('pemap-gitshim-');
+  const log = join(bin, 'git-calls.log');
+  const sh = join(bin, 'git');
+  writeFileSync(sh, '#!/bin/sh\ncase "$*" in *"$SHIM_GIT_MATCH"*) echo "$*" >> "$SHIM_GIT_LOG";; esac\nexec "$SHIM_GIT_REAL" "$@"\n');
+  chmodSync(sh, 0o755);
+  writeFileSync(log, '');
+  return { log, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, SHIM_GIT_LOG: log, SHIM_GIT_REAL: real, SHIM_GIT_MATCH: match } };
+};
 
 /**
  * A copy of `fixture` (default `tests/fixture/`) in a fresh git repository in tmp. `track` lists the files the copy must track.
@@ -79,10 +104,8 @@ export const scratchRepo = ({ commit = false, fixture = FIXTURE, track = FIXTURE
   }
   const git = (...a) => gitIn(dir, ...a);
   git('init', '-q');
-  if (commit) {
-    git('add', '.');
-    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture');
-  } else git('add', '-N', '.');
+  if (commit) commitAt(dir, undefined, 'fixture');
+  else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
   for (const f of track)
