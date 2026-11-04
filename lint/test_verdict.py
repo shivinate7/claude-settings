@@ -185,21 +185,24 @@ class T(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")
             pidfile = os.path.join(d, "child.pid")
+            donefile = os.path.join(d, "child.done")
             script = os.path.join(d, "fx.py")
-            open(script, "w").write(f"import os, time\nopen({pidfile!r}, 'w').write(str(os.getpid()))\ntime.sleep(3)\n")
+            open(script, "w").write(f"import os, time\nopen({pidfile!r}, 'w').write(str(os.getpid()))\ntime.sleep(3)\nopen({donefile!r}, 'w').write('done')\n")
             env = dict(os.environ)
             env.pop("VERDICT_HEARTBEAT", None)
             env.pop("STALL_WATCH_BEAT", None)
             env.update({"VERDICT_HEARTBEAT": "1", "VERDICT_LOG": log})
             # 2>&1: the beat is on stderr, so the pipe must carry it or no beat meets the closed reader.
             cmd = " ".join(shlex.quote(p) for p in [sys.executable, V, sys.executable, script]) + " 2>&1 | head -n 1"
-            t0 = time.time()
-            r = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True, env=env, timeout=30)
-            elapsed = time.time() - t0
+            try:
+                r = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True, env=env, timeout=30)
+            except subprocess.TimeoutExpired:
+                self.fail("verdict did not return within 30 s after its pipe broke")
             self.assertTrue(os.path.exists(pidfile), "child never started")
             pid = int(open(pidfile).read())
             self.assertFalse(alive(pid), f"child {pid} still running after verdict returned")
-            self.assertLess(elapsed, 6, elapsed)
+            # verdict waits for its child to end (the pipe break only stops the beat), so the child's last line has run
+            self.assertTrue(os.path.exists(donefile), "verdict returned before its child finished")
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
 

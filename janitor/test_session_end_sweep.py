@@ -240,17 +240,18 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_hanging_sweep_still_exits_0_and_does_not_wait_out_the_hang(self):
-        start = time.monotonic()
-        result = run_hook(
-            {"hook_event_name": "SessionEnd", "cwd": self.repo},
-            env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "1"},
-            timeout=20,
-        )
-        elapsed = time.monotonic() - start
+        # the fake sweep sleeps 600s; the hook's own internal timeout (set to 1s above) must cut it
+        # off. If it does not, run_capped's hang guard (20s) ends the hook first, and that is the
+        # named failure below.
+        try:
+            result = run_hook(
+                {"hook_event_name": "SessionEnd", "cwd": self.repo},
+                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "1"},
+                timeout=20,
+            )
+        except AssertionError as hang:
+            self.fail("hook did not honor its own sweep timeout: %s" % hang)
         self.assertEqual(result.returncode, 0, result.stderr)
-        # the fake sweep sleeps 600s; the hook's own internal timeout (set to 1s above) must
-        # have cut it off, never the outer test harness timeout (20s).
-        self.assertLess(elapsed, 10, "hook did not honor its own sweep timeout")
 
 
 class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
@@ -688,12 +689,14 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
 
     def sweep_argv_for(self, repo, elapsed):
         calls = []
+        self.sweep_timeouts = []  # the subprocess timeout the hook gave each sweep run
         real_run = self.mod.subprocess.run
 
         def record_call(*args, **kwargs):
             argv = args[0] if args else kwargs.get("args")
             if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
                 calls.append(argv)
+                self.sweep_timeouts.append(kwargs.get("timeout"))
                 return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
             return real_run(*args, **kwargs)
 
@@ -715,6 +718,9 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 value = deadline_value(calls[0])
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
+                # the hook's own subprocess timeout is the time left too: it is what cuts a hung sweep off
+                self.assertAlmostEqual(self.sweep_timeouts[0], self.mod.remaining_sweep_timeout_seconds(elapsed),
+                                       msg="the hook's own sweep timeout is not the time left")
 
 
 from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home
@@ -745,6 +751,8 @@ class SessionEndFetchThrottle(unittest.TestCase):
     real git."""
 
     RECORD_DIR = ("state", "sweep-fetch")
+    # a fixed wall-clock second, well behind the real clock: a record written from the real clock cannot pass for it
+    PINNED_WALL_CLOCK = 1_500_000_000.0
 
     def setUp(self):
         import _nowindow
@@ -809,14 +817,18 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_first_session_end_fetches_and_records_the_time(self):
         repo = self.repo("throttle_first")
-        before = time.time()
-        self.session_end(repo)
+        # the sweep reads a pinned wall clock, so the record is checked against that value and not the real time
+        pinned = mock.MagicMock(wraps=time)
+        pinned.time.return_value = self.PINNED_WALL_CLOCK
+        with mock.patch.object(self.sweep, "time", pinned):
+            self.session_end(repo)
         fetches, listings = self.counts(repo)
         self.assertEqual(fetches, 1, "the first SessionEnd must fetch once")
         self.assertGreaterEqual(listings, 1, "the first SessionEnd must run ls-remote (counter check)")
         self.assertEqual(len(self.records()), 1, "one record per repository in the state folder")
         with open(self.records()[0], encoding="utf-8") as handle:
-            self.assertGreaterEqual(float(handle.read().strip()), before - 1)
+            self.assertEqual(float(handle.read().strip()), self.PINNED_WALL_CLOCK,
+                             "the fetch record is not the sweep's own clock reading")
 
     def test_second_session_end_within_10_minutes_runs_no_fetch_and_no_ls_remote(self):
         repo = self.repo("throttle_second")

@@ -2074,6 +2074,9 @@ class OptOutTests(unittest.TestCase):
 
 
 class TombstoneTests(unittest.TestCase):
+    # a fixed wall-clock second: the restore log must hold this value, whatever the real time is
+    PINNED_WALL_CLOCK = 1_900_000_000.0
+
     def test_reap_writes_a_tombstone_and_a_restore_log_line_before_deleting(self):
         root = os.path.join(ROOT, "tomb-repo")
         make_repo(root, {"f.txt": "x\n"})
@@ -2087,7 +2090,11 @@ class TombstoneTests(unittest.TestCase):
         self.assertTrue(tip)
 
         log_path = os.path.join(ROOT, "tomb-restore.jsonl")
-        result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path)
+        # the sweep reads a pinned wall clock, so the log line is checked against that value and not the real time
+        pinned = mock.MagicMock(wraps=time)
+        pinned.time.return_value = self.PINNED_WALL_CLOCK
+        with mock.patch.object(sweep, "time", pinned):
+            result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path)
         self.assertIsNone(result["refused"])
         decision = next(b for b in result["branches"] if b["name"] == "old-topic")
         self.assertEqual(decision["action"], "reap")
@@ -2104,7 +2111,8 @@ class TombstoneTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["commit"], tip)
         self.assertIsInstance(matches[0]["time_ms"], int)
-        self.assertLessEqual(abs(int(time.time() * 1000) - matches[0]["time_ms"]), 60_000)
+        self.assertEqual(matches[0]["time_ms"], int(self.PINNED_WALL_CLOCK * 1000),
+                         "the restore log line is not the sweep's own clock reading")
 
     def test_a_failed_delete_still_leaves_the_tombstone_and_the_branch(self):
         """The tombstone and the log line land BEFORE the delete. If the delete then fails, the
@@ -5163,8 +5171,9 @@ class BuildDirReapTests(unittest.TestCase):
         tree = self.add_agent(primary, "bdrSafe")
         write(os.path.join(tree, "f.txt"), "edited\n")
         write(os.path.join(tree, "Sources", "x.swift"), "let x = 1\n")
-        later = time.monotonic() + 60
-        self.assertIsNotNone(self.reap.edit_idle(tree, later), "control: a readable tree reads")
+        # no clock read: a deadline no walk passes (the control), and one every walk has already passed
+        never, spent = float("inf"), float("-inf")
+        self.assertIsNotNone(self.reap.edit_idle(tree, never), "control: a readable tree reads")
         real = os.lstat
 
         def refused(target, *args, **kwargs):
@@ -5173,9 +5182,9 @@ class BuildDirReapTests(unittest.TestCase):
             return real(target, *args, **kwargs)
 
         with self.subTest(arm="an unreadable stat"), mock.patch.object(os, "lstat", new=refused):
-            self.assertIsNone(self.reap.edit_idle(tree, later))
+            self.assertIsNone(self.reap.edit_idle(tree, never))
         with self.subTest(arm="a walk past the deadline"):
-            self.assertIsNone(self.reap.edit_idle(tree, time.monotonic() - 1))
+            self.assertIsNone(self.reap.edit_idle(tree, spent))
 
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
         # A build that starts after the hook's first process read must still keep its folders.
