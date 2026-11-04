@@ -14,7 +14,7 @@ The sweep deletes a local branch that holds no unique work. It also removes a sp
   - Cost: each `--confirm` run reads the whole file once per repository it appends for. The file is rewritten through a temp file and a replace only past the cap. The lock is in-process only, so a second process that writes at the same moment can lose a line. A preview adds one read and no other work.
 - **The daily job's logs have a reader and no cap.** The daily job runs `janitor/sweep.py --confirm` on macOS. Its stdout goes to `<config>/janitor/launchd-sweep.log`, and its stderr to `<config>/janitor/launchd-sweep.err.log` (`build_plist` in `janitor/install_launchd.py`).
   - Reader: `hooks/daily_note.py` for the err log. The note flags it when it is not empty and was last written in the window. The stdout log is read by the person who follows the note's line.
-  - Cost: the daily job writes both logs once a day. The note adds one stat of the err log, on the first startup of a Central day. Growth per run is unmeasured.
+  - Cost: the daily job writes what it prints to both logs, once a day. The note adds one stat of the err log, on the first startup of a Central day. Growth per run is unmeasured.
   - No cap: launchd writes both logs, and a trim here would race the job.
 - **A branch leaves "checked out" with its worktree, in the same run.** The sweep judges the freed branch by the normal no-unique-work rules. A kept worktree, or a failed removal, keeps its branch held.
 - **`--tier1` is the one mode that acts without `--confirm`.** It prunes stale registrations and deletes husks, and removes only proven junk. `--branches` reaps branches only, holds every worktree's branch, and refuses the repository if git gives no worktree list.
