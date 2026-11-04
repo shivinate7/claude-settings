@@ -38,6 +38,11 @@ shown), the question is refused with the Unvetted remedy, unless its own text ca
 source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
+
+One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
+an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
+calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
+no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
 """
 import json
 import os
@@ -63,6 +68,18 @@ QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed 
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
+
+# The plain Opus ask (opus_ask). The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
+# start-up fits. The owner's text follows the last line.
+OPUS_ASK_TIMEOUT = 20
+OPUS_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
+    "owner's own present request to run Opus agents now (for example `send opus judges` or `use opus for the "
+    "reviewers`). Answer {\"ok\": false} for a question, a hedge such as `maybe opus?`, a negation such as `don't "
+    "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
+    "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
+    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
 
 SPAWN_PROMPT = (
     "Judge this agent spawn: %s\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, "  # glossary-ok: subagent_type is Claude Code's own field name
@@ -213,6 +230,27 @@ def invoke_model(*args, **kwargs):
     """The model call. A module-level name, so a test can replace it."""
     from decision_watch import invoke_model as home
     return home(*args, **kwargs)
+
+
+def opus_ask(text):
+    """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
+    agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
+    {"ok": false} is False with none."""
+    try:
+        import decision_watch  # lazy: the one home of the model's name
+        verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
+                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+        if error:
+            raise ValueError(" ".join(str(error).split()))
+        ok = verdict.get("ok") if isinstance(verdict, dict) else None
+        if ok is True:
+            return True
+        if ok is not False:
+            raise ValueError("the answer has no true or false ok")
+        return False
+    except Exception as exc:
+        print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return False
 
 
 def explore_off_model(tool, args):
