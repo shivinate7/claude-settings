@@ -19,9 +19,9 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Silent:
   - a push to the branch's own upstream;
   - a first push with no upstream;
-  - by this lane's reading, from the coordinator's brief: a `-u` push whose destination is the
-    local branch's own name, which sets the new upstream on purpose (a lane stacked on another
-    lane). No owner ruling covers it yet;
+  - a `-u` push whose destination is the local branch's own name, even when the branch tracks
+    another lane. It sets the new upstream on purpose. Source: coordinator brief, 2026-11-03
+    22:23 CST, as clarified 2026-11-04 01:49 CST;
   - an explicit `HEAD:<branch>` (agents push this way);
   - `archive/*`, and `--tags`;
   - a push to another remote than the upstream's;
