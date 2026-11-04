@@ -13,7 +13,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             removed.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
-            `stale-cites: unknown, <path>:<line> ...` and never fails the run.
+            `stale-cites: unknown, <path>:<line> ...` and never fails the run. Only a run that already reads
+            Markdown prints it; touching such a file never starts that read.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
@@ -25,11 +26,10 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py,
-.mjs, .js, .cjs, .ts or .sh. A touched .py adds one `git cat-file --batch`. A removed path or name, or a touched
-.mjs, .js, .cjs, .ts or .sh, adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read
-once, only when one of those holds. A touched .py also loads the py-facts script once, in-process (no start,
-no .pyc). It writes no file and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
+A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
+--batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
+loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 """
 import argparse
 import ast
@@ -345,12 +345,12 @@ def scan(range_text):
     found = {}
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch)
-    if not removed and not renamed and not rng.py_files and not rng.foreign_files:
+    if not removed and not renamed and not rng.py_files:
         return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     try:
         active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
-        if not active:
-            return found, rng.unknowns
+        if all(getattr(reader, "unknown", False) for reader, _ in active):
+            return found, rng.unknowns  # an unknown line never starts the Markdown read
 
         excludes = exclude_patterns(".")
         tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
