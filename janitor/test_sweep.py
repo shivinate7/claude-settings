@@ -5931,6 +5931,42 @@ class RunLogTests(unittest.TestCase):
         self.assertEqual(_read_run_log(self.log)[-1]["root"], "kept-root",
                          "the appended line did not survive a failed trim")
 
+    def test_a_trim_whose_replace_fails_leaves_no_temp_file_and_the_log_as_appended(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the temp file
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
+        with open(self.log, encoding="utf-8") as handle:
+            before = handle.read()
+
+        def refuse(src, dst, *args, **kwargs):
+            raise OSError("injected: the trim cannot replace the run log")
+
+        with mock.patch.object(os, "replace", refuse), contextlib.redirect_stdout(io.StringIO()):
+            self._append("kept-root")  # must return, not raise
+        leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [], "a failed trim left a temp file behind: %r" % leftovers)
+        with open(self.log, encoding="utf-8") as handle:
+            after = handle.read()
+        self.assertTrue(after.startswith(before), "a failed trim changed lines the append did not write")
+        appended = [json.loads(text)["root"] for text in after[len(before):].splitlines()]
+        self.assertEqual(appended, ["kept-root"], "the log is not the lines as appended: %r" % appended[-3:])
+
+    def test_a_run_under_a_symlinked_root_is_the_last_run_on_the_real_path_and_on_the_link(self):
+        link = os.path.join(self.base, "busy-link")
+        try:
+            os.symlink(self.busy, link)
+        except OSError as err:
+            raise unittest.SkipTest("os.symlink is not allowed on this platform: %s" % err)
+        _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
+        self._main([link, self.idle, "--confirm"])
+        logged = [row["root"] for row in _read_run_log(self.log)] if os.path.isfile(self.log) else []
+        self.assertIn(link, logged, "the confirm run did not log the symlink as the root: %r" % logged)
+        for root in (os.path.realpath(link), link):
+            report = io.StringIO()
+            self._main([root, self.idle], report=report)
+            line = self._last_run_line(report.getvalue(), root)
+            self.assertIn(", 1 worktrees removed, 1 branches reaped", line,
+                          "the preview on %s did not print the real last-run line: %r" % (root, line))
+
 
 @contextlib.contextmanager
 def _process_table(rows):
