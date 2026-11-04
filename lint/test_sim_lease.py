@@ -166,6 +166,16 @@ class Slots(LeaseCase):
         self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"),
                          "slot 2 is refused at a 5-minute load of 59.99")
 
+    def test_a_third_duo_is_not_granted_while_slots_1_and_2_are_held(self):
+        first, second, third = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
+        before = self.load_reads()
+        r = self.take("duo", third.pid, wait=2)
+        self.assertEqual(r.returncode, 1, "a third duo take is granted while slots 1 and 2 are held")
+        self.assertEqual(r.stdout.strip(), "", "a refused third duo take prints a slot")
+        self.assertGreaterEqual(self.load_reads() - before, 2, "the third duo take does not wait before it is refused")
+
     def assert_waits_then_refused(self, device, needle):
         before = self.load_reads()
         r = self.take(device, os.getpid(), wait=2)
@@ -274,6 +284,23 @@ class Queue(LeaseCase):
                          "a holder whose start time is unchanged lost slot 1")
 
 
+    def test_a_timed_out_take_leaves_the_queue(self):
+        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        r = self.take("pro", head.pid, wait=1)
+        self.assertEqual(r.returncode, 1, "a pro take with a duo held is not refused")
+        self.assertFalse(mentions(self.status().stdout, head.pid), "the timed-out pro take is still on the queue")
+        self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
+                         "a timed-out waiter still blocks the next duo take")
+
+    def test_a_holder_recorded_under_one_tz_is_not_reaped_under_another(self):
+        holder, later = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env={"TZ": "UTC0"})), (0, "1"),
+                         "the first duo take under TZ=UTC0 is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", later.pid, env={"TZ": "IST-5:30"})), (0, "2"),
+                         "a holder recorded under TZ=UTC0 is reaped under TZ=IST-5:30")
+
+
 class Give(LeaseCase):
     def test_give_frees_the_lease_and_is_idempotent(self):
         holder, never, later = self.spawn(), self.spawn(), self.spawn()
@@ -283,16 +310,6 @@ class Give(LeaseCase):
         self.assertEqual(self.give(never.pid).returncode, 0, "give of a pid that holds nothing exits non-zero")
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "1"), "give did not free slot 1")
 
-    def test_pid_defaults_to_the_callers_parent(self):
-        other, later = self.spawn(), self.spawn()
-        self.assertEqual(grant(self.run_tool("take", "--device", "duo", "--wait", "1")), (0, "1"),
-                         "a take without --pid is not granted slot 1")
-        self.assertEqual(grant(self.take("duo", other.pid)), (0, "2"),
-                         "a take without --pid does not hold slot 1 for the caller's parent")
-        self.assertEqual(self.run_tool("give").returncode, 0, "give without --pid exits non-zero")
-        self.assertEqual(grant(self.take("duo", later.pid)), (0, "1"),
-                         "give without --pid did not release the caller's parent's lease")
-
 
 class Usage(LeaseCase):
     def test_a_usage_error_exits_2(self):
@@ -300,6 +317,18 @@ class Usage(LeaseCase):
                                                                   ["take", "--device", "nope"])):
             with self.subTest(label):
                 self.assertEqual(self.run_tool(*args).returncode, 2, "%s does not exit 2" % label)
+
+    def assert_usage_error(self, args, label):
+        r = self.run_tool(*args)
+        self.assertEqual(r.returncode, 2, "%s does not exit 2" % label)
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "%s does not print one usage line" % label)
+
+    def test_take_with_no_pid_is_a_usage_error(self):
+        self.assert_usage_error(["take", "--device", "duo"], "a take with no --pid")
+
+    def test_give_with_no_pid_is_a_usage_error(self):
+        self.assert_usage_error(["give"], "a give with no --pid")
 
 
 class Status(LeaseCase):
@@ -338,6 +367,28 @@ class NoOp(LeaseCase):
         pid = self.spawn().pid
         self.assertEqual(grant(self.take("duo", pid, env={"CI": ""})), (0, "1"),
                          "an empty CI turns the lease off: take is not granted slot 1")
+
+    def assert_takes_a_lease_on_darwin(self, name, value):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, env={name: value})), (0, "1"),
+                         "%s=%s turns the lease off on Darwin: take is not granted slot 1" % (name, value))
+        self.assertTrue(os.path.isfile(os.path.join(self.cfg, "state", "sim-lease", "leases.json")),
+                        "%s=%s on Darwin writes no lease file" % (name, value))
+
+    def test_ci_false_on_darwin_takes_a_lease(self):
+        self.assert_takes_a_lease_on_darwin("CI", "false")
+
+    def test_github_actions_false_on_darwin_takes_a_lease(self):
+        self.assert_takes_a_lease_on_darwin("GITHUB_ACTIONS", "false")
+
+    def test_a_no_op_on_darwin_prints_one_stderr_line_saying_no_lease_was_taken(self):
+        pid = self.spawn().pid
+        r = self.take("duo", pid, env={"CI": "true"})
+        self.assertEqual(grant(r), (0, "none"), "CI=true on Darwin is not a no-op that prints none")
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "a no-op take on Darwin does not print one stderr line")
+        self.assertTrue("no lease" in lines[0].lower() and "taken" in lines[0].lower(),
+                        "the no-op stderr line does not say no lease was taken")
 
 
 class Concurrency(LeaseCase):
