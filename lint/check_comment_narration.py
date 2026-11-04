@@ -30,12 +30,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
+class DatedText:
+    """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
+    an optional `date`, `on`, `from` or `through`, and an optional colon come right before it. Such a date says
+    why, so it is not history. A phrase check on the text before the date does what a lookbehind cannot:
+    take a variable run of spaces and any case."""
+    DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
+    EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?\s*:?\s*$", re.I)
+
+    def finditer(self, text):
+        return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
+
+
 PATTERNS = {
-    "review round": re.compile(r"\bround\s*\d|\breview\s+(?:round|finding|points?)\b", re.I),
+    # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
+    # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
+    "review round": re.compile(r"\b(?:in|after|from)\s+round\s*\d"
+                               r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
+                               r"|\breview\s+(?:round|finding|points?)\b", re.I),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
-    "date": re.compile(r"\b20\d\d-\d\d-\d\d\b"),
+    "date": DatedText(),
+    # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
+    # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
+    # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
+    "history phrase": re.compile(
+        r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
+        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
+        r"|\badded\s+after\s+(?:code\s+)?review\b"
+        r"|\bformerly\b"
+        r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I),
     "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
