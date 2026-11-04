@@ -244,12 +244,23 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
         pause(wait)
 
 UNDO_MEMO = {}
+UNDO_FLAG, RED_FLAG = "--undo-check-unknown-ok", "--base-red-ok"  # the reason flags: Claude may type each with a reason (decisions silent-undo-check-design, no-merge-onto-red-main)
+
+def record_lift(lifts, flag, reason):
+    """Keep a reason flag that lifted a check in `lifts` ({flag: reason}), so the merge can carry it. `reason` is what the check returned: None when it passed with no lift.
+    One entry per flag: undo_check runs twice per --confirm."""
+    if reason:
+        lifts[flag] = " ".join(reason.split())
+
+def lift_message(lifts):
+    """-> the merge commit message for the lifts of this run, one line per flag, or None when no check was lifted (GitHub's default message stays)."""
+    return "\n".join(f"Reason flag: {flag}: {reason}" for flag, reason in lifts.items()) or None
 
 def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
-    A finding refuses. An unreadable history refuses too, unless the owner passed
-    --undo-check-unknown-ok "<reason>": that is the way out when the check cannot run (octopus merge,
-    git older than 2.38, shallow clone). It is logged and does not excuse a finding."""
+    A finding refuses. An unreadable history refuses too, unless the run has the reason flag
+    --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
+    git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
@@ -284,9 +295,9 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
     if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
         e = res
         if unknown_ok.strip():
-            say(f"merge: silent-undo check UNKNOWN ({e}). Owner override, reason: {unknown_ok.strip()}")
-            return
-        raise Liftable(f"silent-undo check could not read the history: {e}\nIf the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\". {UNDO_CITE}")
+            say(f"merge: silent-undo check UNKNOWN ({e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            return unknown_ok.strip()
+        raise Liftable(f"silent-undo check could not read the history: {e}\nIf the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {UNDO_CITE}")
     problems, notes = res
     for n in notes:
         say("merge: " + n)
@@ -682,6 +693,7 @@ class Host:
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
 
+    commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
     def gh(self, args, cwd=None):
@@ -1223,7 +1235,7 @@ class Host:
         return False, "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
 
     def merge(self, n, method, sha):
-        """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. Never --admin, never --delete-branch (cut_branch does that).
+        """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
         MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
         or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
@@ -1235,7 +1247,7 @@ class Host:
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
-            c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha})
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
@@ -1927,15 +1939,16 @@ def lane_tips(wt, base_ref, sha):
 def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
-    is claimed. A read that fails refuses too, unless the owner passed --undo-check-unknown-ok "<reason>"."""
+    is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
+    A lift is logged and returns its reason, for record_lift."""
     try:
         _, dropped = read_lanes(wt, base_ref, sha)
     except Exception as e:
         if unknown_ok.strip():
-            say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). Owner override, reason: {unknown_ok.strip()}")
-            return
+            say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            return unknown_ok.strip()
         raise Liftable(f"the dropped-lane check could not read the batch's merge commits ({type(e).__name__}: {e}).\n"
-                   f"If the owner accepts that, run again with --undo-check-unknown-ok \"<reason>\". {DROP_CITE}")
+                   f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {DROP_CITE}")
     if dropped:
         raise Dropped("the batch drops a lane by a revert of its merge (lane tip " + ", ".join(sorted(t[:9] for t in dropped))
                       + "). Main would hold the revert, and the lane would lose its files when it merges main.\n"
@@ -2341,7 +2354,7 @@ def base_verdict(root, host, base):
 
 def red_base(root, host, base, red_ok=""):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
-    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is: the way out for the batch that carries the fix, or for an unknown read. It is logged."""
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix, or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift."""
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
@@ -2349,9 +2362,9 @@ def red_base(root, host, base, red_ok=""):
     what = (f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, a re-run is still running: {detail}" if rerun
             else f"{base}'s runs are UNKNOWN, the read failed: {detail}")
     if red_ok.strip():
-        say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
-        return
-    way = ("Wait for the re-run to finish, then run again. Or, " if rerun else "") + ("if this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
+        say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}")
+        return red_ok.strip()
+    way = ("Wait for the re-run to finish, then run again. Or, " if rerun else "") + (f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\".")
     raise Liftable(f"{what}\nNo batch merges onto a red {base}. {way[0].upper() + way[1:]} {RED_CITE}")
 
 def batch_refusal(host, n, base, head):
@@ -2470,6 +2483,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
         return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
+    lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
@@ -2481,14 +2495,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
-        red_base(root, host, base, red_ok)
+        record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         busy = batch_refusal(host, n, base, info["head"])
         if busy:
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
-        undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
-        refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok)
+        record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
+        record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
@@ -2560,7 +2574,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c:  # never check against a stale base tip
                     stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}:\n" + out)
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                    undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
+                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
                 except Stop as e:
                     stop(str(e), Liftable if isinstance(e, Liftable) else Stop)
                 if not os.path.exists(os.path.join(wt, ".git")):
@@ -2627,6 +2641,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 busy = str(e)
             if busy:
                 fail(busy)
+            host.commit_message = lift_message(lifts)
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused " + REFUSED_CITE + ":\n" + msg)
