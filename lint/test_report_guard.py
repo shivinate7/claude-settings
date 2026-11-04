@@ -1028,7 +1028,7 @@ class NoResendTests(unittest.TestCase):
                 self.assertIn("never send the report again", reason)
                 self.assertNotIn("send the report now", reason)
                 self.assertEqual(reason.count("post only the corrected lines"), 1)
-                self.assertTrue("(decision " in reason or "(rule " in reason, reason)  # a refusal cite, whichever rule
+                self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
@@ -1085,7 +1085,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
         self.assertIn("post only the corrected lines", out["reason"].lower())
-        self.assertTrue("(decision " in out["reason"] or "(rule " in out["reason"], out["reason"])
+        self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
         for reply in ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
@@ -4054,6 +4054,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIsNotNone(out, "the Stop passed with a pending refusal")
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
+                self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
                 self.assertIn("Input Needed", out["reason"])
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
@@ -4086,6 +4087,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "a name in Done passed as the answer to the refusal")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
 
     def test_k_a_plain_word_in_input_needed_does_not_clear_a_built_in_tool(self):
@@ -4120,6 +4122,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "the short name cleared the full MCP name")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("`%s`" % self.ARCHIVE, out["reason"], "the block reason does not quote the full name")
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
         # The reason quotes the full name, so one rewrite that names it clears the entry.
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
@@ -4138,7 +4141,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "the Stop passed with a pending refusal and no transcript")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn(self.ARCHIVE, out["reason"])
-        self.assertIn("decision refusals-reach-the-owner", out["reason"])
+        self.assertEqual(out["reason"].count("decision refusals-reach-the-owner"), 1, out["reason"])
         self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_f_stop_hook_active_does_not_block_on_a_refusal(self):
