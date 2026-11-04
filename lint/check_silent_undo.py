@@ -22,10 +22,13 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               when the lost work is the rebase-base commit or later).
   lane undo   A non-merge commit of the branch (also one under a merge) undoes an earlier commit of
               the same branch. Only lines that no earlier lane state held count as that commit's work,
-              so a restore is no undo. It flags the whole file put back to the blob before the
-              earlier commit (a move, a rename, a re-wrap and a rewrite stay excused), on any path,
-              and a net loss of the earlier commit's lines, or a delete, on a test path only
-              (hooks/guard.py is_test_rel). A hunk reversal is the upstream read's, not this one's.
+              so a restore is no undo. It flags the whole file put back, within one non-blank line,
+              to its text before the earlier commit, when that commit changed BLOCK_LINES (6) lines
+              or more in it, on any path; and a net loss of the earlier commit's lines, or a delete,
+              on a test path only (hooks/guard.py is_test_rel). A move, a rename, a re-wrap and a
+              rewrite stay excused. A rename in the lane is followed: an earlier commit is read at the
+              file's name then, and a commit that renamed the file owns only its edits across the
+              rename. A hunk reversal is the upstream read's, not this one's.
               Or a merge of main drops a line a branch commit added (a conflict taken main's side).
               Only while head still lacks the lines: a later commit that puts them back clears it. A
               branch of one commit has nothing to read. The FAIL names the path, the undoing commit
@@ -33,6 +36,8 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
+A removed line that another file gains is moved, not lost. In a block of BLOCK_LINES or more, one
+line of the move may be reworded (a gained line that reads like it, `rewritten`).
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
@@ -549,9 +554,25 @@ def is_test(path):
     return _is_test(path)
 
 
+_names = {}
+
+
 def name_at(cwd, rev, later, path):
-    """The name `path` of later has at rev: the old name when git pairs it as renamed from rev to later."""
-    return next((old for old, (new, _, _) in renamed(cwd, rev, later, raw_files(cwd, rev, later)).items() if new == path), path)
+    """The name `path` of later has at rev: the old name when git pairs it as renamed from rev to later. One read per pair of revs."""
+    if (cwd, rev, later) not in _names:
+        _names[cwd, rev, later] = {new: old for old, (new, _, _) in renamed(cwd, rev, later, raw_files(cwd, rev, later)).items()}
+    return _names[cwd, rev, later].get(path, path)
+
+
+_own_renames = {}
+
+
+def own_renames(e):
+    """{new path: (old path, old blob, new blob)} for the files commit e itself renamed (git's own pairing, as `renamed`)."""
+    if e.sha not in _own_renames:
+        pairs = renamed(e.cwd, e.parent, e.sha, e.files) if e.parent else {}
+        _own_renames[e.sha] = {new: (old, ob, nb) for old, (new, ob, nb) in pairs.items()}
+    return _own_renames[e.sha]
 
 
 def held_lines(cwd, upstream, base, e_parent, path):
@@ -576,11 +597,26 @@ def head_pool(cwd, head):
     return _pools[cwd, head]
 
 
+def moved(gone, gained):
+    """True when the lines `gone` (a Counter) landed in `gained`, the lines other files gained: every one, as often. A block of
+    BLOCK_LINES or more may miss one line, when a gained line no other gone line used reads like it (a reworded line, `rewritten`)."""
+    short = gone - gained
+    if not short:
+        return True
+    if sum(short.values()) > 1 or sum(gone.values()) < BLOCK_LINES:
+        return False
+    line = next(iter(short))
+    return rewritten(line, [((line,), tuple(gained - gone))], modified=True)
+
+
 def healed(cwd, old, path, head, down):
     """True when head holds again the lines `down` that old->new of path removed (the earlier commit added them): each is at
-    head, in any file, as often as in old. A later commit that restores or moves the work clears the undo (the lane undo read)."""
+    head, in any file, as often as in old, by `moved` against what head holds more of than old. A later commit that restores
+    or moves the work clears the undo (the lane undo read)."""
     pre, now = counts(blob(cwd, old, path)), head_pool(cwd, head)
-    return all(now[l] >= pre[l] for l in down)
+    if all(now[l] >= pre[l] for l in down):
+        return True
+    return moved(collections.Counter({l: pre[l] for l in down}), collections.Counter({l: now[l] for l in down}) | (now - head_pool(cwd, old)))
 
 
 _texts = {}
@@ -598,13 +634,13 @@ def distance(x, y):
     return max(sum((x - y).values()), sum((y - x).values()))
 
 
-def put_back(cwd, old, new, e, path, dst, theirs, test):
+def put_back(cwd, old, new, e, path, dst, theirs, test, prior):
     """True when old->new puts the file back to its text before the earlier commit e (the lane undo read), whatever old holds: the
-    result is within one line of e's parent text, nearer to it than old was, and e changed BLOCK_LINES or more lines in the file.
-    A text that was never there (e made the file), or a delete, counts on a test path only."""
+    result is within one line of e's parent text (the file's name there is `prior`), nearer to it than old was, and e changed
+    BLOCK_LINES or more lines in the file. A text that was never there (e made the file), or a delete, counts on a test path only."""
     if not e.parent or sum(len(o) + len(n) for o, n in theirs) < BLOCK_LINES:
         return False  # a file one or two lines were changed in, and changed back, is an edit, not a dropped block
-    want, got, before = (text_counts(cwd, e.parent, path), text_counts(cwd, new, dst or path), text_counts(cwd, old, path))
+    want, got, before = (text_counts(cwd, e.parent, prior), text_counts(cwd, new, dst or path), text_counts(cwd, old, path))
     if not test and not (want and got):
         return False
     d = distance(got, want)
@@ -624,27 +660,34 @@ def reversals(cwd, old, new, files, earlier, lane=None):
     found = []
     elsewhere = None
     pairs = renamed(cwd, old, new, files)
+    # The lane read follows a lane rename: an earlier commit is read at the name the file had then. Only a lane that deletes
+    # a file can rename one, so a lane with no delete asks git nothing more.
+    follow = bool(lane) and any(nb == ZERO for e in earlier for _, nb in e.files.values())
     for i, (path, (a, b)) in enumerate(sorted(files.items())):
         if progress:
             progress(i + 1, len(files))
-        touched = [e for e in earlier if path in e.files]
+        touched = [(e, name_at(cwd, e.sha, old, path) if follow and path not in e.files else path) for e in earlier]
+        touched = [(e, at) for e, at in touched if at in e.files]
         dst, b = (pairs[path][0], pairs[path][2]) if path in pairs else (None, b)  # the target is the new blob, not 0000
         mine = (hunks(cwd, a, b) if dst else hunks(cwd, old, new, path)) if touched else []
-        for e in touched if mine else []:
-            ea, eb = e.files[path]
+        for e, at in touched if mine else []:
+            ea, eb = e.files[at]
             test = bool(lane) and (is_test(path) or bool(dst and is_test(dst)))
-            theirs = hunks(cwd, e.parent, e.sha, path) if e.parent else []
-            whole = put_back(cwd, old, new, e, path, dst, theirs, test) if lane else ea == b and eb == a and a != b
+            # e's work on a file it renamed is its edits across the rename, as if made in place; the file had its old name before e
+            moved_by_e = own_renames(e).get(at) if lane else None
+            prior = moved_by_e[0] if moved_by_e else at
+            theirs = (hunks(cwd, *moved_by_e[1:]) if moved_by_e else hunks(cwd, e.parent, e.sha, at)) if e.parent else []
+            whole = put_back(cwd, old, new, e, path, dst, theirs, test, prior) if lane else ea == b and eb == a and a != b
             if not whole and not any(undone(o, n, mine, bool(lane), test) for o, n in theirs):
                 continue
             if elsewhere is None:
                 elsewhere = pool_of(cwd, old, new)
             avail = elsewhere - collections.Counter(l for _, n in mine for l in n)  # gains in other files only
             gone = collections.Counter(l for o, _ in mine for l in o if any(l in n for _, n in theirs))
-            if gone and all(avail[l] >= k for l, k in gone.items()):
+            if gone and moved(gone, avail):
                 continue
             if lane:  # a lane undo needs lines the earlier commit added and this one removed, that no lane state held before, and head still lacks
-                owned = set(gone) - held_lines(cwd, lane[1], lane[2], e.parent, path) if gone and e.parent else set()
+                owned = set(gone) - held_lines(cwd, lane[1], lane[2], e.parent, prior) if gone and e.parent else set()
                 if not owned or healed(cwd, old, path, head, owned):
                     continue
             how = "file deleted" if b == ZERO else "whole file restored" if whole else "hunk reversed"

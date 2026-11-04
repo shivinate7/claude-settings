@@ -69,7 +69,8 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 **What is not a loss.**
 
 - Whitespace and blank lines.
-- A move, a rename or a reorder: a removed line that the change adds to another file.
+- A move, a rename or a reorder: a removed line that the change adds to another file. In a block of 6
+  lines or more (`BLOCK_LINES`), one line of the move may be reworded.
 - A rename git pairs (`-M`, 50% similar or more): the new file is judged on its edits, as if made in place. Below that it stays a delete and an add.
 - A re-wrapped prose line. A short line never passes as a re-wrap.
 - A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding
