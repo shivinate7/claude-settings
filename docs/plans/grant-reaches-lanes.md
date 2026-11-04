@@ -22,14 +22,14 @@ Incidents, coordinator-reported, 2026-11-01:
 The guard layer is solved in its own session: `refuse()` in `hooks/guard_core.py` and decision
 owner-override (the typed `override` word). The open problem is the classifier layer only.
 
-The brief cites a notes line `auto-mode-refuses-page-grant`. It is not in `docs/debts/notes.md` on
-main at d8037a44 (merge of PR #1009, batch 60). The step record holds the incident instead.
+Notes line `auto-mode-refuses-page-grant` in `docs/debts/notes.md` holds the coordinator's
+`send_message` refusal of Nov 1 23:05 CST.
 
 ## 1. How the classifier decides today
 
 Source: Claude Code docs, fetched 2026-11-02. The pages carry no version stamp. HTTP
-Last-Modified is 2026-11-01. The highest version the pages cite is v2.1.311. The container runs
-2.1.316. Whether the pages match 2.1.316: unknown.
+Last-Modified is 2026-11-01. The highest version the pages cite is v2.1.311. The container ran
+2.1.316 at writing and 2.1.318 on 2026-11-03. Whether the pages match: unknown.
 
 What it reads:
 
