@@ -11464,6 +11464,30 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
         self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
+    def test_a_round_three_guard_no_with_a_design_fail_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_and_a_round_two_fail_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_yes_net_positive_with_a_design_partial_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="positive"))
+        self.assertEqual(state, "done", "round 3 with a net value of positive is done, so the state must stay done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_is_done_whatever_round_two_is(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no stays done after round 1, whatever round 2 is")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
         # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.
         for verdict in ("FAIL", "PARTIAL"):
