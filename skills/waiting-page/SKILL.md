@@ -305,7 +305,8 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
    `<folder>/<id>/page.html`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
-   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export.
+   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
    the reply, and fix the cause first.
