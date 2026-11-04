@@ -1326,6 +1326,29 @@ def H1_stall_between_a_blocked_stop_and_its_active_run_is_listed_at_the_next_sto
 
 
 @case
+def C6_stall_between_two_blocked_stops_is_listed_after_a_clean_run():
+    """C6. a Stop at 1000 s ago that a hook blocked, its reply, the run at 800 s ago that a hook blocked too, the
+    run at 600 s ago that is clean, then a new prompt. A stall that crossed 900 s ago, between the first and the
+    second blocked run, is listed at this Stop. A stall that crossed 1100 s ago, before the first blocked run, is
+    silent here. A stall that crossed 400 s ago, after the clean run, is listed"""
+    base = new_dir()
+    output_file(base, "bmid6", 1200)  # crossed 900 s ago
+    output_file(base, "bpre6", 1400)  # crossed 1100 s ago
+    output_file(base, "bpost6", 700)  # crossed 400 s ago
+    recs = ([at(prompt("first"), 1500)] + stamped(moved("bmid6"), 1490) + stamped(moved("bpre6"), 1480)
+            + stamped(moved("bpost6"), 1470)
+            + [at(assistant_text("ok"), 1050), stop_summary(1000, blocked=True),
+               meta_wake("Stop hook feedback: send the report now.", 990), at(assistant_text("report"), 950),
+               stop_summary(800, blocked=True), meta_wake("Stop hook feedback: send the report now.", 790),
+               at(assistant_text("report"), 750), stop_summary(600),
+               at(prompt("next"), 500), at(assistant_text("ok"), 450)])
+    problems, msg = stop_listing(recs, base)
+    problems += listed_once(msg, "bmid6")
+    problems += expect("bpre6" not in msg, f"job bpre6 is listed though its stall crossed before the first blocked Stop: {msg!r}")
+    return problems + listed_once(msg, "bpost6")
+
+
+@case
 def C5_newest_summary_with_a_bad_timestamp_fails_open():
     """C5. the newest Stop summary has a timestamp that is not ISO text, and an older summary is readable. The job
     whose stall crossed before the older summary is listed: a bad timestamp lists every quiet job"""
