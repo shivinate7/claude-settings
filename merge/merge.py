@@ -542,7 +542,10 @@ class GitLock(Lock):
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            raise Held("another run took the merge lock first " + LOCK_CITE)
+            now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
+            if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
+                raise Held("another run took the merge lock first " + LOCK_CITE)
+            raise Stop("the remote refused the push that takes the merge lock " + LOCK_CITE + ": " + out)
         self._take(b, sha, tree, msg, now)
         return sha
 
