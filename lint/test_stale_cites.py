@@ -698,6 +698,36 @@ class FlagTests(StaleCase):
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes, extra={PUSH: base_sh}), change))
 
+    def test_a_claude_home_cite_resolves_to_the_repo_path_and_fires(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no flag
+        notes = "# Notes\n\n- report: `python3 ~/.claude/lint/x.py --between START END`\n"
+
+        def change(repo):
+            write(repo, "lint/x.py", head_src)
+            commit(repo)
+        found = self.assert_flags(self.make_range(base_files(notes, extra={"lint/x.py": base_src}), change),
+                                  [(NOTES, 3, "STALE003")])
+        self.assertIn("--between", found[0][3])
+
+    def test_ste_disable_line_names_stale003_and_no_other(self):
+        rows = [
+            ("- report: `tools/report.py --between START END` <!-- ste-disable-line STALE003 -->", False),
+            ("- report: `tools/report.py --between START END` <!-- ste-disable-line STALE001 -->", True),
+            ("- report: `tools/report.py --between START END`", True),
+        ]
+        text, lines = rows_text(rows)
+        base_src = parser_script(["--between"])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+
+        def change(repo):
+            write(repo, REPORT, parser_script([]))
+            write(repo, NOTES, text)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files("", extra={REPORT: base_src}), change),
+                          [(NOTES, n, "STALE003") for n in lines])
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
