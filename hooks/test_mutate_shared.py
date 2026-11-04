@@ -220,8 +220,10 @@ class GuardMutantLayoutTests(unittest.TestCase):
             mutate_guard.run_mutant({}, self.run, entry)
         self.assertEqual(len(copies), 1)
         hooks = os.path.dirname(copies[0])
+        # -I drops the cwd from sys.path, so a lint/ in the working directory cannot satisfy the import.
         result = subprocess.run(
-            [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import guard; guard._layout_module()",
+            [sys.executable, "-I", "-c",
+             "import sys; sys.path.insert(0, sys.argv[1]); import guard; guard._layout_module()",
              hooks],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0,

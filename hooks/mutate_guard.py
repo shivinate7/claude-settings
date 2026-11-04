@@ -2506,8 +2506,9 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint, which
-    # override.py and decision_watch.py read from there. A guard copy carries its own lint folder (run_mutant).
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
+    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 

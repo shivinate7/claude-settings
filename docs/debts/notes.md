@@ -980,6 +980,11 @@
 - lease-reason-carry-weak: the lease cases check that the reason carries "lease", which the rule-name prefix always supplies; only "sim-test" pins the reason text (hooks/test_guard.py). Decision: sim-test-is-the-one-boot-path.
 - sim-name-casefold-xcodebuild: the casefold name match also applies to `xcodebuild -destination name=`; whether xcodebuild matches names without case is unmeasured. Decision: sim-test-is-the-one-boot-path.
 - sim-fixture-folder-silent: test_guard.py `folder_path` does not check that its fake xcrun folder exists, so a misnamed fixture reads as an unreadable device list and the guard allows. Decision: none
+- mcp-launch-before-lock: an MCP `launch` that boots just before a `sim-test` run takes the lock skips the lock rule; both then run on the machine. Decision: sim-test-is-the-one-boot-path.
+- mutate-guard-owner-unclear: hooks/guard.py (AUTHOR_MUTATION_TESTS comment) says builders keep editing hooks/mutate_guard.py and also calls it test code for a test-author. Decision: builders-cannot-edit-tests.
+- mutant-lint-copy-cost: each guard mutant copy now holds lint/ (97 files, 2.6 MB, about 9 ms); copies live until the run ends, so peak temp rises from about 0.6 GB to about 1.8 GB (estimate). Decision: none
+- mutant-watch-tree-lint: the decision-watch and ruling mutant trees in hooks/mutate_guard.py may lack ../lint as the guard copy did; no verdict path to `_layout_module` found, not measured in full. Decision: none
+- red-run-folder-refused: the other-checkout rule refuses an agent's writes into its own agent-<id>-red checkout, so test-authors ran red runs in their main worktree with the old file swapped in (seen 4 times in lane sim-lock-holes). Decision: an-agent-outside-its-home-tree-must-stop
 - route-unread-wrappers: simulator-boot-route and the cap do not read `xcrun xcodebuild` or `arch -arm64 xcodebuild`, and they judge `ssh mac "xcodebuild ..."` against local devices. Decision: sim-test-is-the-one-boot-path.
 - detached-launch-glued-amp: detached-launch passes a `&` glued to a closing quote (`xcodebuild ... "id=U"&`). Decision: sim-test-is-the-one-boot-path.
 - route-remedy-glued-action: simulator-boot-route reads `(cd ios && xcodebuild ... test)` and `test-without-building` as no test action, so the remedy names the generic destination; the verdict is still deny. Decision: sim-test-is-the-one-boot-path.
