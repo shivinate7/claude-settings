@@ -1069,6 +1069,58 @@ class ReportTests(StaleCase):
                          "a backticked mention, `<!-- rule:fake -->`, is named as an anchor\n" + out)
         self.assertEqual(rc, 0, out)
 
+    def test_a_malformed_mechanisms_file_prints_one_unknown_line_and_keeps_the_exit_code(self):
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        base_mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
+        malformed = (
+            ("a top-level list", "[]\n"),
+            ("a row that is a string", json.dumps({"rules": {"git-main-only-by-pr": "guard"}}) + "\n"),
+            ("a row that is null", json.dumps({"rules": {"git-main-only-by-pr": None}}) + "\n"),
+        )
+        for label, text in malformed:
+            with self.subTest(malformed=label):
+                def change(repo, text=text):
+                    write(repo, CLAUDE, head_claude)
+                    write(repo, "hooks/guard.py", GUARD_EDIT)
+                    write(repo, MECH, text)
+                    commit(repo)
+                rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: base_mech}), change)
+                self.assertEqual(touched(rng), {CLAUDE, "hooks/guard.py", MECH},
+                                 "scope: the anchor, a code file and the mechanisms file changed")
+                rc, out = self.run_check(rng)
+                unknown = [line for line in out.splitlines() if line.startswith("stale-cites: unknown")]
+                self.assertEqual(len(unknown), 1, "a malformed mechanisms file must print one unknown line\n" + out)
+                self.assertIn(MECH, unknown[0], "the unknown line does not name the mechanisms file\n" + out)
+                self.assertEqual(rc, 0, "a malformed mechanisms file changed the exit code\n" + out)
+                self.assertNotIn("Traceback", out, out)
+
+    def test_a_reworded_guard_anchor_names_the_module_holding_its_refuse_not_an_unrelated_guard_file(self):
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
+        extra = {CLAUDE: base_claude, MECH: mech, "hooks/guard.py": GUARD_REFUSE, "hooks/guard_stream.py": STREAM}
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            write(repo, "hooks/guard_stream.py", STREAM.replace("return 4", "return 5"))
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {CLAUDE, "hooks/guard_stream.py"},
+                         "scope: hooks/guard.py, which holds the refuse() call, is untouched")
+        rc, out = self.run_check(rng)
+        lines = slug_lines(out, "git-main-only-by-pr")
+        self.assertTrue(any("hooks/guard.py" in line and UNTOUCHED.search(line) for line in lines),
+                        "the guard row's holder is not named as hooks/guard.py untouched\n" + out)
+        self.assertFalse(any("guard_stream.py" in line and TOUCHED.search(line) for line in lines),
+                         "an unrelated guard file is named as the touched holder\n" + out)
+        self.assertEqual(rc, 0, out)
+
+
+# A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
+GUARD_REFUSE = GUARD + "\n\ndef gate(ctx):\n    return refuse(ctx, 'no push to main', 'main-moves-by-pull-request')\n"
+STREAM = "def stream():\n    return 4\n"
+
 
 if __name__ == "__main__":
     unittest.main()
