@@ -6148,7 +6148,7 @@ class LockHolder(Env):
     def test_the_lock_records_the_boot(self):
         self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
 
-    def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows: the stamp is the clock minus the tick count, in whole seconds, so two reads can straddle a second (main's Windows run did); cache_clear keeps a cached real stamp from hiding that
+    def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows stamps are whole seconds, so two reads can straddle a second; cache_clear keeps a cached stamp from hiding that
         reads, now, kernel32 = [], [1000.0], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
         def clock():  # each read steps 0.2 s: the lock's boot read is the second, this assertion's read the third, and they straddle 1000.5
             now[0] = round(now[0] + 0.2, 1)
