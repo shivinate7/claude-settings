@@ -79,7 +79,7 @@ questions of the critique under Input Needed, because a lane cannot chat.
 Deferred (owner, 2026-10-26): whether you run Claude Code's `/design` canvas yourself, or the owner
 runs it. Until the owner rules, draw HTML mockups only.
 
-Before you stop for any reason, commit your work to your own branch and push it. Before the final
+Before you stop for any reason, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit only and report. Before the final
 report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under

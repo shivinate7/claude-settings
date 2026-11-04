@@ -571,6 +571,14 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# PUSHAGENT is the linked worktree an isolated agent works in: branch `worktree-agent-<id>`, under its
+# primary's `.claude/worktrees/agent-<id>` (guard.py's worktree layout note). `_home_fixture` makes it and
+# records its home, so the agent's own calls from it pass the worktree-home rule, and the push rule is what
+# refuses them. COSTREPO is a plain checkout for the in-process cost check, which builds its own folder.
+AGENT_PUSH_ID = "pushagent1"
+PUSHAGENT = os.path.join(ROOT, "wthome_" + AGENT_PUSH_ID + "_primary", ".claude", "worktrees",
+                         "agent-" + AGENT_PUSH_ID)
+COSTREPO = os.path.join(ROOT, "pushcost")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1774,6 +1782,29 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+def _build_push_agent():
+    """The worktree an agent works in: branch `worktree-agent-<id>`, with origin named as _build_push names it.
+
+    `_home_fixture` makes the primary and the worktree, and its first call records the home. The scope is
+    asserted before any case reads the subject: the fixture must be PUSHAGENT, on the agent's own branch.
+    """
+    _, worktree, problems = _home_fixture(AGENT_PUSH_ID)
+    if problems:
+        sys.exit("fixture setup failed in build_fixtures: " + "; ".join(problems))
+    if slash(worktree) != slash(PUSHAGENT):
+        sys.exit("fixture setup failed in build_fixtures: _home_fixture made %r, not PUSHAGENT" % worktree)
+    branch = run_vcs(worktree, "symbolic-ref", "-q", "HEAD").stdout.strip()
+    if branch != "refs/heads/worktree-agent-" + AGENT_PUSH_ID:
+        sys.exit("fixture setup failed in build_fixtures: PUSHAGENT must sit on worktree-agent-%s, not %r"
+                 % (AGENT_PUSH_ID, branch))
+    materialize(BRANCHREMOTE)
+    run_vcs(worktree, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(worktree, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(worktree, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    if run_vcs(worktree, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip() != "refs/remotes/origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHAGENT needs origin/HEAD -> origin/main")
+
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2071,6 +2102,7 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, 
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
+lazy_fixture([PUSHAGENT], _build_push_agent)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
              _build_push)
@@ -6871,6 +6903,144 @@ sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
 
+# THE AGENT BRANCH. A `worktree-agent-*` branch is one agent's own work, and it never reaches origin
+# (decision agent-branch-never-pushed, rule agent-branch-push). The rule reads where a push GOES: a named
+# destination from anywhere, or a bare push and a HEAD spec from the agent's own checkout. A delete, a fetch,
+# a lane slug, an archive name and a name that holds the prefix only inside stay allowed. A refusal names its
+# rule and its record, and never names the branch.
+AGENT_PUSH_RULE = "agent-branch-push"
+AGENT_PUSH_RECORD = "agent-branch-never-pushed"
+AGENT_BRANCH_WORD = "worktree-agent"
+
+
+def agent_push_refused(name, command, **kw):
+    """One push the agent-branch rule refuses: a deny under its rule id, citing its record, naming no branch."""
+    sh(name, command, "deny", AGENT_PUSH_RULE, carries=(AGENT_PUSH_RECORD,), lacks=(AGENT_BRANCH_WORD,), **kw)
+
+
+def agent_push_allowed(name, command, **kw):
+    """One push or fetch the agent-branch rule leaves alone: an allow."""
+    sh(name, command, "allow", **kw)
+
+
+# REFUSED: the destination is a worktree-agent-* branch. PUSHFEAT is a lane checkout on `feat`, so no source
+# in these commands is the agent's own branch.
+agent_push_refused("agent push: a plain push to worktree-agent-x denies, unforced",
+                   VCS + " push origin worktree-agent-x", cwd=PUSHFEAT)
+agent_push_refused("agent push: refs/heads/worktree-agent-x denies",
+                   VCS + " push origin refs/heads/worktree-agent-x", cwd=PUSHFEAT)
+agent_push_refused("agent push: HEAD:worktree-agent-x denies from another branch",
+                   VCS + " push origin HEAD:worktree-agent-x", cwd=PUSHFEAT)
+agent_push_refused("agent push: x:worktree-agent-y denies, the source is not the agent's",
+                   VCS + " push origin x:worktree-agent-y", cwd=PUSHFEAT)
+agent_push_refused("agent push: a bare push from a worktree-agent checkout denies",
+                   VCS + " push", cwd=PUSHAGENT)
+agent_push_refused("agent push: a bare push from the agent's own worktree, home recorded, denies",
+                   VCS + " push", cwd=PUSHAGENT, agent_id=AGENT_PUSH_ID)
+agent_push_refused("agent push: origin HEAD from a worktree-agent checkout denies",
+                   VCS + " push origin HEAD", cwd=PUSHAGENT)
+agent_push_refused("agent push: a forced push to worktree-agent-x denies under the agent rule",
+                   VCS + " push -f origin worktree-agent-x", cwd=PUSHFEAT)
+agent_push_refused("agent push: a mixed push to worktree-agent-x and a delete of other denies",
+                   VCS + " push origin worktree-agent-x :other", cwd=PUSHFEAT)
+
+# ALLOWED: a delete, a fetch, a lane slug and a name that holds the prefix only inside are not the agent's push.
+agent_push_allowed("agent push: --delete of worktree-agent-x allows",
+                   VCS + " push origin --delete worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: -d of worktree-agent-x allows",
+                   VCS + " push origin -d worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: a delete spec :worktree-agent-x allows",
+                   VCS + " push origin :worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: a delete spec :refs/heads/worktree-agent-x allows",
+                   VCS + " push origin :refs/heads/worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: a mixed push with a delete of worktree-agent-x allows",
+                   VCS + " push origin a :worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: HEAD:agent-branch-push from the agent's checkout allows, the lane's own branch",
+                   VCS + " push origin HEAD:agent-branch-push", cwd=PUSHAGENT)
+agent_push_allowed("agent push: a bare push from a lane checkout allows",
+                   VCS + " push", cwd=PUSHFEAT)
+agent_push_allowed("agent push: archive/worktree-agent-x allows, the archive name is not the agent's branch",
+                   VCS + " push origin archive/worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: HEAD:archive/worktree-agent-x from the agent's checkout allows",
+                   VCS + " push origin HEAD:archive/worktree-agent-x", cwd=PUSHAGENT)
+agent_push_allowed("agent push: worktree-agent-x:lane allows, the source is not the destination",
+                   VCS + " push origin worktree-agent-x:lane", cwd=PUSHFEAT)
+agent_push_allowed("agent push: fix-worktree-agent-x allows, the prefix is inside the name",
+                   VCS + " push origin fix-worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: a fetch of worktree-agent-x allows",
+                   VCS + " fetch origin worktree-agent-x", cwd=PUSHFEAT)
+agent_push_allowed("agent push: quoted text naming a push to worktree-agent-x allows",
+                   'echo "git push origin worktree-agent-x"', cwd=PUSHFEAT)
+agent_push_allowed("agent push: a bare push git cannot read the destination of allows, unknown is not a hit",
+                   VCS + " push", cwd=NOGIT)
+agent_push_allowed("agent push: origin HEAD git cannot read allows, unknown is not a hit",
+                   VCS + " push origin HEAD", cwd=NOGIT)
+
+# THE VARIABLE DESTINATION. A destination that holds `$` or a backtick is shell text the guard cannot read.
+# From an agent's own checkout, a push whose source is not HEAD or `@` is refused, since its destination may
+# be the agent's branch. A HEAD or `@` source passes, a delete passes, and a lane checkout is not an agent's.
+agent_push_refused("agent push: a variable destination $BR from an agent checkout denies",
+                   VCS + " push origin $BR", cwd=PUSHAGENT)
+agent_push_refused("agent push: a quoted variable destination from an agent checkout denies",
+                   VCS + ' push origin "$BR"', cwd=PUSHAGENT)
+agent_push_refused("agent push: a braced variable destination with -u from an agent checkout denies",
+                   VCS + " push -u origin ${BR}", cwd=PUSHAGENT)
+agent_push_refused("agent push: a variable source to a variable destination from an agent checkout denies",
+                   VCS + " push origin $BR:$BR", cwd=PUSHAGENT)
+agent_push_refused("agent push: a backtick destination from an agent checkout denies",
+                   VCS + " push origin `" + VCS + " branch --show-current`", cwd=PUSHAGENT)
+agent_push_allowed("agent push: HEAD:$BRANCH from an agent checkout allows, the source is HEAD",
+                   VCS + " push origin HEAD:$BRANCH", cwd=PUSHAGENT)
+agent_push_allowed("agent push: :$BR from an agent checkout allows, a delete spec",
+                   VCS + " push origin :$BR", cwd=PUSHAGENT)
+agent_push_allowed("agent push: --delete $BR from an agent checkout allows, a delete",
+                   VCS + " push origin --delete $BR", cwd=PUSHAGENT)
+agent_push_allowed("agent push: a variable destination $BR from a lane checkout allows",
+                   VCS + " push origin $BR", cwd=PUSHFEAT)
+# A lane source to a lane slug, from an agent's checkout: the source is not HEAD, but the destination holds no
+# `$` or backtick, so the variable test must not fire on it.
+agent_push_allowed("agent push: a lane source to a lane slug from an agent checkout allows, no variable",
+                   VCS + " push origin feat-x:lane-slug", cwd=PUSHAGENT)
+
+
+def agent_push_named_cost_case():
+    """A named destination costs no git read, and its verdict names the agent-branch rule.
+
+    `origin worktree-agent-x` and `origin x:worktree-agent-y` name the destination on the command line, so the
+    rule judges the name and asks git nothing. The git reader is counted in-process, in the module that
+    push_verdict reads through. Each verdict must name the rule, and the reader must answer no call. On main
+    the rule does not exist, so the verdict problem shows there, and the read count stays zero.
+    """
+    make_repo(COSTREPO, {"base.txt": "base\n"})
+    _load_guard_module()
+    push = sys.modules["guard_push_delete"]
+    core = sys.modules["guard_core"]
+    reader = sys.modules["git_reads"]
+    real = reader._git
+    reads = []
+
+    def counting(where, *args):
+        reads.append(args)
+        return real(where, *args)
+
+    problems = []
+    with mock.patch.object(reader, "_git", counting), mock.patch.object(core, "_git", counting):
+        # The scope first: the reader push_verdict reads through must be the counting one.
+        if push.guard_core is not core or core._git is not counting:
+            return False, "the patched git reader is not the one push_verdict calls"
+        for args in (["origin", "worktree-agent-x"], ["origin", "x:worktree-agent-y"]):
+            del reads[:]
+            verdict = push.push_verdict(args, COSTREPO)
+            label = " ".join(args)
+            if AGENT_PUSH_RULE not in str(verdict):
+                problems.append("%s: the verdict names no %s (got %r)" % (label, AGENT_PUSH_RULE, verdict))
+            if reads:
+                problems.append("%s: %d git reads, want none (first %r)" % (label, len(reads), reads[0]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a named worktree-agent destination is refused on its name, with no git read"
+
+
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
@@ -9401,6 +9571,167 @@ def record_push_cost_case():
         return False, "; ".join(problems)
     return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
                  "the transcript is read only at the record branch"
+
+
+# The two push-read cases judge payloads in one fresh interpreter, as main() does. The driver is a string.
+# A stand-in guard_core sits in guard_push_delete's name for it, so only the push path's git reads meet it,
+# and the driver counts the symbolic-ref reads that path makes and the None answers it gives.
+PUSH_READ_DRIVER = r'''
+import contextlib, importlib.util, io, json, subprocess, sys
+guard_path, plan = sys.argv[1], json.loads(sys.argv[2])
+spec = importlib.util.spec_from_file_location("guard_under_test", guard_path)
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+push_delete = sys.modules["guard_push_delete"]
+real_core = push_delete.guard_core
+stats = {"symbolic_ref_reads": 0, "none_answers": 0}
+
+
+class PushCore:
+    def __getattr__(self, name):
+        return getattr(real_core, name)
+
+    def _git(self, cwd, *args):
+        if args[:1] == ("symbolic-ref",):
+            stats["symbolic_ref_reads"] += 1
+            if plan["fail_first_symbolic_ref"] and not stats["none_answers"]:
+                stats["none_answers"] += 1
+                return None
+        return real_core._git(cwd, *args)
+
+
+push_delete.guard_core = PushCore()
+results, memo_holds_head = [], []
+for step in plan["steps"]:
+    if "git" in step:
+        subprocess.run([plan["vcs"], "-C", step["cwd"]] + step["git"], check=True, capture_output=True)
+        continue
+    payload = step["judge"]
+    guard.guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
+    out, error = io.StringIO(), None
+    with contextlib.redirect_stdout(out):
+        try:
+            guard.judge(payload)
+        except SystemExit:
+            pass
+        except Exception as exc:
+            error = type(exc).__name__ + ": " + str(exc)
+    memo_holds_head.append(any(tuple(key[1:]) == ("symbolic-ref", "-q", "HEAD") for key in push_delete.PUSH_READS))
+    if error:
+        results.append(["crash", error])
+        continue
+    text = out.getvalue().strip()
+    if text:
+        block = json.loads(text)["hookSpecificOutput"]
+        results.append([block["permissionDecision"], block["permissionDecisionReason"]])
+    else:
+        results.append(["allow", ""])
+print(json.dumps({"results": results, "memo_holds_head": memo_holds_head, "stats": stats}))
+'''
+
+
+def _push_read_run(steps, fail_first):
+    """Run PUSH_READ_DRIVER over `steps` in a fresh interpreter, with GUARD as the guard under test. Returns
+    (report, None), or (None, why) when the run did not finish. The run's config folder is CFG, never the
+    runner's own, so a refusal writes its log under the run folder."""
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env.update(ROLE_ENV)
+    env["CLAUDE_CONFIG_DIR"] = CFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    plan = {"vcs": VCS, "fail_first_symbolic_ref": fail_first, "steps": steps}
+    done = subprocess.run([sys.executable, "-c", PUSH_READ_DRIVER, GUARD, json.dumps(plan)],
+                          capture_output=True, text=True, env=env, timeout=120)
+    lines = done.stdout.strip().splitlines()
+    if done.returncode != 0 or not lines:
+        return None, "the guard run did not finish: %s" % done.stderr.strip()[-200:]
+    return json.loads(lines[-1]), None
+
+
+def _show(entry):
+    return "%s %r" % (entry[0], entry[1][:90])
+
+
+def _denied_by_record_rule(entry):
+    return entry[0] == "deny" and "roadmap-one-writer" in entry[1]
+
+
+def record_failed_read_case():
+    """roadmap-one-writer: a failed first git read is no answer, so the record-branch rule reads the branch again.
+
+    A HEAD push reads its checkout's branch twice in one call: push_verdict reads it first, then the record-branch
+    rule reads it again. The first read here answers None, as a timeout does. The second must still answer roadmap,
+    so the push is denied. A memo that kept the None would give the record-branch rule None, and the push would pass.
+    The control is the same push with no failed read: it is denied too, so the deny is the rule's, not the flake's.
+    Why: decision session-tiers, the record branch has one writer.
+    """
+    materialize(RECROADMAP)
+    materialize(LANE_TRANSCRIPT)
+    push = {"tool_name": "Bash", "tool_input": {"command": VCS + " push origin HEAD"}, "cwd": RECROADMAP,
+            "transcript_path": LANE_TRANSCRIPT}
+    steps = [{"judge": push}]
+    control, why = _push_read_run(steps, False)
+    if control is None:
+        return False, why
+    if control["results"][0][0] == "crash":
+        return False, "control: judge raised %s" % control["results"][0][1]
+    if not _denied_by_record_rule(control["results"][0]):
+        return False, ("control with no failed read: a HEAD push from the roadmap checkout got %s, "
+                       "want deny under roadmap-one-writer" % _show(control["results"][0]))
+    run, why = _push_read_run(steps, True)
+    if run is None:
+        return False, why
+    if run["stats"]["none_answers"] != 1:
+        return False, ("scope: the first symbolic-ref read on the push path did not answer None (%d reads), "
+                       "so no failed read was tested" % run["stats"]["symbolic_ref_reads"])
+    got = run["results"][0]
+    if got[0] == "crash":
+        return False, "judge raised %s" % got[1]
+    if not _denied_by_record_rule(got):
+        return False, ("after a failed first read, a HEAD push from the roadmap checkout got %s, "
+                       "want deny under roadmap-one-writer" % _show(got))
+    return True, "a failed first read is no answer: the second read names roadmap, and the push is denied"
+
+
+def record_branch_clear_case():
+    """roadmap-one-writer: two judge calls in one process each read their own branch.
+
+    The push-read memo is keyed by folder and git arguments. judge_shell clears it at the start of each call, so a
+    call never reads a branch that an earlier call read. Here one checkout runs two calls with a checkout between
+    them: from feat, a HEAD push is allowed; then from roadmap, the same push is denied by the record-branch rule.
+    A memo that carried feat into the second call would allow the roadmap push. The memo must hold the branch read
+    after the first call, or the second call would prove nothing about the clear.
+    """
+    where = os.path.join(ROOT, "pushclear")
+    if not os.path.isdir(where):
+        make_repo(where, {"base.txt": "base\n"})
+        for args in (("checkout", "-q", "-b", "feat"), ("branch", "roadmap")):
+            done = run_vcs(where, *args)
+            if done.returncode != 0:
+                sys.exit("fixture setup failed in record_branch_clear_case: git %s: %s"
+                         % (args[0], done.stderr.strip()))
+    push = {"tool_name": "Bash", "tool_input": {"command": VCS + " push origin HEAD"}, "cwd": where,
+            "transcript_path": LANE_TRANSCRIPT}
+    materialize(LANE_TRANSCRIPT)
+    steps = [{"judge": push}, {"cwd": where, "git": ["checkout", "-q", "roadmap"]}, {"judge": push}]
+    run, why = _push_read_run(steps, False)
+    if run is None:
+        return False, why
+    first, second = run["results"]
+    if "crash" in (first[0], second[0]):
+        return False, "judge raised %s" % (first[1] if first[0] == "crash" else second[1])
+    if not run["memo_holds_head"][0]:
+        return False, "scope: the first call left no branch read in the memo, so the second call tests no stale read"
+    if first[0] != "allow":
+        return False, "the first call, from feat, got %s, want allow" % _show(first)
+    if not _denied_by_record_rule(second):
+        if second[0] == "allow":
+            return False, ("the second call, from roadmap after a checkout, got allow: "
+                           "it read the first call's branch, feat")
+        return False, ("the second call, from roadmap after a checkout, got %s, "
+                       "want deny under roadmap-one-writer" % _show(second))
+    return True, "each call reads its own branch: feat is allowed, then roadmap is denied after a checkout"
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
@@ -12754,6 +13085,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The agent-branch cost check is appended here, because LOG_CHECKS_EXTRA is defined here. It builds COSTREPO
+# itself and reads no other lazy fixture, so the run loop does not build every fixture for it.
+FIXTURELESS_CHECKS.add(agent_push_named_cost_case)
+AGENT_COST_LABEL = "push-delete: a named worktree-agent destination is refused on its name, with no git read"
+LOG_CHECKS_EXTRA.append((AGENT_COST_LABEL, agent_push_named_cost_case))
+LOG_FAMILY[AGENT_COST_LABEL] = "push-delete"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -20320,6 +20657,10 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
      "only, and reads the transcript only at the record branch", record_push_cost_case),
+    ("roadmap-one-writer: a failed first git read is no answer, so a HEAD push from the record branch still denies",
+     record_failed_read_case),
+    ("roadmap-one-writer: two judge calls in one process each read their own branch after a checkout",
+     record_branch_clear_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
