@@ -12880,6 +12880,42 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
+# verb from each of them. One check per root flag form, called on gh_call_of directly.
+FAMILY = "merge"
+
+
+def gh_root_flag_verb_check(segment, verb):
+    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    guard = _load_guard_module()
+    rest = guard.gh_call_of(segment)
+    if rest is None:
+        return False, "gh_call_of reads no gh call in %r" % segment
+    if rest[:2] != verb:
+        return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
+    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+
+
+def gh_root_dash_r_check():
+    return gh_root_flag_verb_check("gh -R o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_equals_check():
+    return gh_root_flag_verb_check("gh --repo=o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_spaced_check():
+    return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
+                         gh_root_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
+                         gh_root_repo_spaced_check))
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.

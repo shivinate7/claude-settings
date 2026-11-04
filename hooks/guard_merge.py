@@ -53,8 +53,25 @@ def git_call_of(segment: str):
     return tokens[cursor].lower(), tokens[cursor + 1:]
 
 
+def _gh_root_repo_flag(tokens, index):
+    """Return how many tokens the gh root repo flag at `index` takes (0 when it is none):
+    `-R o/r` and `--repo o/r` take two, `--repo=o/r` and `-Ro/r` take one."""
+    token = tokens[index]
+    if token in ("-R", "--repo"):
+        return 2
+    if token.startswith("--repo=") or (token.startswith("-R") and not token.startswith("--")):
+        return 1
+    return 0
+
+
 def gh_call_of(segment: str):
-    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
+    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None.
+
+    A repo flag before the verb (`gh -R o/r pr merge`) is valid gh and hid the verb from every
+    caller, which read the first two words. The flag moves to the end: gh reads `-R` after the
+    verb the same, and the callers that look for the repo (merge_call_of, ci_wake) already read
+    it there.
+    """
     tokens = segment_tokens(segment)
     if not tokens:
         return None
@@ -67,7 +84,12 @@ def gh_call_of(segment: str):
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
-    return tokens[index + 1:]
+    rest, root = tokens[index + 1:], []
+    while rest and _gh_root_repo_flag(rest, 0):
+        taken = _gh_root_repo_flag(rest, 0)
+        root += rest[:taken]
+        rest = rest[taken:]
+    return rest + root
 
 
 # ---- a merge made outside the merge tool
