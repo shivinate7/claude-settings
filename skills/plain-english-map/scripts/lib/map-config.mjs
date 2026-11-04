@@ -45,8 +45,9 @@ const posix = (p) => p.split(/[\\/]/).filter((s) => s && s !== '.').join('/');
 /**
  * Checks the whole shape of one parsed config, and the repo it names. It returns a frozen, normalized copy, or throws an error that
  * names `map.config.json` and the dotted key. Every reader that takes a config takes this object, and no reader checks a key again.
+ * With `{ git: false }` the checks that list tracked files do not run, so no git starts. That result is never marked valid.
  */
-export const validateMapConfig = (cfg, root = process.cwd()) => {
+export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}) => {
   if (VALID.has(cfg)) return cfg;
   const bad = (msg) => { throw new Error(`map.config.json ${msg}`); };
   const text = (obj, key, label) => { if (typeof obj[key] !== 'string' || !obj[key]) bad(`"${label}" must be a non-empty string`); };
@@ -128,7 +129,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     withGit.push(() => { const sites = seamReader; if (sites && !seamHasCallSite(posix(cfg.modelSeam.file), trackedFiles(), readTracked, sites))
       bad(`"modelSeam.file" names ${cfg.modelSeam.file}, and no tracked code file calls a model through it`); });
   }
-  for (const run of withGit) run();
+  if (git) for (const run of withGit) run();
   const out = Object.freeze({
     formatVersion: MAP_FORMAT_VERSION,
     title: cfg.title,
@@ -140,12 +141,12 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     ...('workerStage' in cfg && { workerStage: Object.freeze({ ...cfg.workerStage }) }),
     ...('migrationsDir' in cfg && { migrationsDir: `${posix(cfg.migrationsDir)}/` }),
   });
-  VALID.add(out);
+  if (git) VALID.add(out);
   return out;
 };
 
-/** Reads and validates one config file. A missing, broken or malformed file is an error that names the file, never an empty config. */
-export const loadMapConfig = (file, root = process.cwd()) => {
+/** Reads and validates one config file. `opts` goes to `validateMapConfig`. A missing, broken or malformed file is an error that names the file, never an empty config. */
+export const loadMapConfig = (file, root = process.cwd(), opts) => {
   file ??= path.join(root, 'map.config.json');
   let text, cfg;
   try {
@@ -155,6 +156,7 @@ export const loadMapConfig = (file, root = process.cwd()) => {
     throw new Error(`map.config.json cannot be read (${file}): ${e.message}`);
   }
   // The file is read on every call. The deep checks run again only when its text, its path or the root changes.
+  if (opts?.git === false) return validateMapConfig(cfg, root, opts);
   const key = `${root}\0${file}`, hit = LOADED.get(key);
   if (hit?.text === text) return hit.out;
   const out = validateMapConfig(cfg, root);
