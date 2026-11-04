@@ -320,7 +320,8 @@ def grant_override(raw, at):
         import override
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
         if result is None:
-            result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at)
+            result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                             transcript=hook.get("transcript_path"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):

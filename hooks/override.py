@@ -27,13 +27,16 @@ rule's settings-write ask, and it reaches agents.
   prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
   owner prompt that carries the whole word `opus` and takes the plain path; none for any other prompt. It fails
   closed: an error or an odd answer grants nothing. The plain path's rules:
-    - Strip every MACHINE_TAGS block anywhere, and a pasted block (an unclosed one runs to the end), first.
+    - Strip every MACHINE_TAGS or NOTICE_FRAMES block anywhere, and a pasted block, first. An unclosed block, and a
+      `[SYSTEM NOTIFICATION` line, run to the end.
+    - In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID set), a prompt with no earlier owner turn in the
+      transcript is a seed prompt: no judge call.
     - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
       length. Any other first `opus` is a plain ask.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
     - Two or more distinct roles, or a role word with not, no, don't, never, except or without just before it:
       no grant.
-    - Two or more lengths: no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
+    - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
@@ -56,10 +59,15 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from shared_names import MACHINE_TAGS  # stdlib only: the one home of the machine-text tags
+try:  # stdlib only: the one home of the machine-text tags
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES
+    NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
+except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
+    NOTICE_TAGS = ()
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
@@ -76,16 +84,21 @@ OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its uni
 # role, and a length (bounded by non-word characters, so `12 mhz` is none).
 OPUS_WORD = re.compile(r"\bopus\b", re.I)
 PASTED = r"<pasted_content\b[^>]*>.*?</pasted_content>|<pasted_content\b.*"  # an unclosed block runs to the end
-# One block per tag name in MACHINE_TAGS, so the list stays the one home; an unclosed block runs to the end.
+# One block per tag name in NOTICE_TAGS, so the lists stay the one home; an unclosed block, or a bracket line, runs
+# to the end.
 MACHINE_BLOCKS = "|".join(
-    r"<{0}[\s>].*?(?:</{0}>|$)".format(name)
-    for name in sorted({m for tag in MACHINE_TAGS for m in re.findall(r"<([\w-]+)", tag)}))
+    [r"<{0}[\s>].*?(?:</{0}>|$)".format(name)
+     for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
+    + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
 NEGATION_SPAN = 3  # a negation within this many words before a role word negates it
-ASK_LENGTH = re.compile(
-    r"(?<![\w-])(\d+)(?:([mh])|\s?(h(?:ours?|rs?)|m(?:ins?|inutes?)))(?![\w-])", re.I)
+SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
+ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
+# A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
+UNCLEAR_LENGTH = re.compile(r"[.,]\d+(?:[mh]|\s?(?:{0}))(?![\w-])|\d(?:{0}|[mh])\d".format(SPELLED_UNIT), re.I)
+SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
 KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
 DEFAULT_ASK_LENGTH = ("2", "h")
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
@@ -208,10 +221,10 @@ def _keyword_rest(rest):
 
 
 def _ask_scope(text):
-    """(length, role) a plain ask names, or None when the words are unclear: two lengths, two roles, or a negated
-    role. The role is None for every role."""
+    """(length, role) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
+    length, two roles, or a negated role. The role is None for every role."""
     lengths = ASK_LENGTH.findall(text)
-    if len(lengths) > 1:
+    if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
         return None
     words = ROLE_WORDS.findall(text)
     roles = set()
@@ -231,23 +244,50 @@ def _ask_scope(text):
     return length, roles.pop() if roles else None
 
 
-def grant_opus_ask(session_id, prompt, at, judge=None):
+def _owner_turn_in(transcript):
+    """True when the transcript at path `transcript` holds an owner turn (lint/_transcript.py owner_text). Cost: one
+    open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes; never a full load."""
+    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+        return False
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    try:
+        with open(transcript, "rb") as handle:
+            while handle.tell() < SEED_READ_MAX:
+                line = handle.readline(SEED_READ_MAX)
+                if not line:
+                    return False
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and _transcript.owner_text(rec, NOTICE_TAGS) is not None:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
     caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
     the rules of the words. The judge is not called for a non-string, an id that cannot name a file, a machine-tag
-    start, a keyword form, or text with no whole word `opus` left after _strip_blocks. The guard.log line
+    start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud session's seed prompt
+    (no owner turn in the transcript at path `transcript`). The guard.log line
     `opus-grant` holds the words that were judged."""
     if not isinstance(prompt, str):
         return None
     path = _path(session_id, "opus")
-    if path is None or prompt.lstrip().startswith(MACHINE_TAGS):
+    if path is None or not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS):
         return None
     first = OPUS_PROMPT.match(prompt)
     if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
         return None
     text = _strip_blocks(prompt)
-    if not OPUS_WORD.search(text):
+    if not OPUS_WORD.search(text) or (os.environ.get(LANE_ENV) and not _owner_turn_in(transcript)):
         return None
     if judge is None:
         from call_judge import opus_ask as judge
