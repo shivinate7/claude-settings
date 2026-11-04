@@ -1105,14 +1105,17 @@ def case_opus_ask_minute_length_grants_ninety_minutes():
           "got %r" % (got,))
 
 
-def case_opus_ask_negation_span_reaches_four_words_back():
-    # A negation counts within four words before a role word. In the first prompt `no` is four words back from
-    # `builders`, so it negates. In the second `no` is seven words back, so builder is named. `no problem` reads as
-    # consent in plain English; the first prompt pins the fail-closed reading.
+def case_opus_ask_no_problem_grants_builder():
+    # `no problem` is consent, not a negation of the role, so the first prompt grants builder. The second prompt has
+    # its `no` seven words back from `builders`, outside any negation span, so builder is named there too.
     cfg, calls, _, _ = opus_type("no problem, send opus builders", answer={"ok": True})
     got = opus_override(cfg)
-    check("opus ask: `no problem, send opus builders` names no role and writes no Opus override",
-          got is None and not ov_pass_files(cfg), "got %r" % (got,))
+    check("opus ask: `no problem, send opus builders` names builder, `no problem` is consent",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+    cfg, calls, _, _ = opus_type("no rush. please send the team, opus builders", answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: `no rush. please send the team, opus builders` names builder, its negation is out of span",
+          got is not None and got[2] == "builder", "got %r" % (got,))
     cfg, calls, _, _ = opus_type("no rush. please send the team, opus builders", answer={"ok": True})
     got = opus_override(cfg)
     check("opus ask: `no rush. please send the team, opus builders` names builder, its negation is out of span",
@@ -1165,7 +1168,7 @@ def main():
         case_opus_ask_first_prompt_grants_outside_a_remote_session()
         case_opus_ask_decimal_and_compound_lengths_grant_nothing()
         case_opus_ask_minute_length_grants_ninety_minutes()
-        case_opus_ask_negation_span_reaches_four_words_back()
+        case_opus_ask_no_problem_grants_builder()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
