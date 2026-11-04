@@ -30,7 +30,7 @@ It asks, never allows, when a read cannot answer: no tip resolves (no tracking r
 
 A call that deletes nothing runs none of this.
 
-A remote delete of one design branch, with the remote named in the command, measured 10 git starts: 3 for the push verdict (the reviewer's count), and 7 (measured here) for the design check (tip lookup 1, default-branch read 2, ancestor read 2, design-file read 1, archive-ref read 1). The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 2 starts, because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
+A remote delete of one design branch, with the remote named in the command, measured 10 git starts. The push verdict takes 3 (the reviewer's count). The design check takes 7, measured here: tip lookup 1, default-branch read 2, ancestor read 2, design-file read 1, archive-ref read 1. The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 2 starts, because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
 
 ## Known limits
 

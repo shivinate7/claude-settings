@@ -64,7 +64,7 @@ _ARCHIVE_REMEDY = (
     "with force. Once the archive holds the tip, this rule allows the delete. Nothing is lost, "
     "so this needs no question to the owner."
 )
-DESIGN_DELETE_DENY_REASON = (
+DESIGN_DELETE_REFUSE_REASON = (
     "Archive before delete (rule shared-trees-archive-then-delete): the tip of this remote branch holds a file under "
     "the design folder that the default branch lacks, and no archive branch on origin holds that "
     "tip. Deleting the branch loses the file. " + _ARCHIVE_REMEDY

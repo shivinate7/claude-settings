@@ -305,8 +305,8 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, DESIGN_DELETE_ASK_REASON,
-            DESIGN_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            DESIGN_DELETE_ASK_REASON, DESIGN_DELETE_REFUSE_REASON,
             design_branch_delete_ask, design_push_delete_verdict, worktree_remove_forced,
         )
         _loading = "guard_shared_tree"
@@ -3152,7 +3152,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 if design == "ask":
                     ask_command("shared-trees-archive-then-delete", DESIGN_DELETE_ASK_REASON, "git push " + " ".join(args), "remote branch delete")
                 elif design:
-                    refuse(tool, design, "shared-trees-archive-then-delete", DESIGN_DELETE_DENY_REASON, "git push " + " ".join(args))
+                    refuse(tool, design, "shared-trees-archive-then-delete", DESIGN_DELETE_REFUSE_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
