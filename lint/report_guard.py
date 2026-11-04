@@ -5,9 +5,10 @@ Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.
 
 Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or `git cherry-pick`
-(not with --abort, --quit, -n or --no-commit; --skip and --continue commit), `gh pr merge` or
-`gh pr create` (not with --help or -h), or a landing GitHub MCP tool (LANDING_TOOLS, which includes
-delete_file and update_pull_request_branch) after the last human message, block once unless the reply ends with one blockquote holding
+(not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
+`gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
+or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
+and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
@@ -126,11 +127,20 @@ GIT_LANDING_SUBCOMMANDS = {"commit", "push", "merge"}
 GIT_PICK_SUBCOMMANDS = {"revert", "cherry-pick"}
 # (full flag, shortest prefix git's parse-options accepts for it: no other option of revert or
 # cherry-pick shares it). `--skip` and `--continue` are absent on purpose: both commit.
-PICK_NO_COMMIT_FLAGS = (("--abort", "--ab"), ("--quit", "--q"), ("--no-commit", "--no-c"))
+# `--help` prints and stops, as `-h` does (the short-letter read below).
+PICK_NO_COMMIT_FLAGS = (("--abort", "--ab"), ("--quit", "--q"), ("--no-commit", "--no-c"),
+                        ("--help", "--help"))
 # Short options of revert and cherry-pick that take a value, glued or as the next word: the rest of
 # a cluster after one of them is its value, never more flags (`-Xignore-space-change` holds an n).
 PICK_SHORT_VALUE_FLAGS = "mXS"
-GH_LANDING_PR_VERBS = {"merge", "create"}
+# `update-branch` merges the base into the PR branch: a commit on the remote.
+GH_LANDING_PR_VERBS = {"merge", "create", "update-branch"}
+# Per verb, the flags that make the call write nothing. `gh pr create --dry-run` is absent on
+# purpose: it may still push the branch.
+GH_NO_WRITE_FLAGS = {
+    "merge": {"--disable-auto"},
+    "create": {"--web", "-w"},
+}
 LANDING_TOOLS = {
     "mcp__github__merge_pull_request",
     "mcp__github__create_pull_request",
@@ -138,6 +148,7 @@ LANDING_TOOLS = {
     "mcp__github__create_or_update_file",
     "mcp__github__delete_file",
     "mcp__github__update_pull_request_branch",
+    "mcp__github__enable_pr_auto_merge",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
@@ -191,7 +202,7 @@ def _stops_before_a_commit(args):
                 return True
         elif arg.startswith("-"):
             for letter in arg[1:]:
-                if letter == "n":
+                if letter in "nh":
                     return True
                 if letter in PICK_SHORT_VALUE_FLAGS:
                     break
@@ -199,13 +210,14 @@ def _stops_before_a_commit(args):
 
 
 def _segment_lands_a_gh_write(segment):
-    """True when the segment's command word is `gh` and the call is `pr merge` or `pr create`
-    without `--help` or `-h` (help prints and writes nothing). `guard.gh_call_of` reads the
+    """True when the segment's command word is `gh` and the call is `pr merge`, `pr create` or
+    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`). `guard.gh_call_of` reads the
     command word past wrappers and a subshell, the same read the merge guard takes."""
     rest = guard.gh_call_of(segment)
     if rest is None or rest[:1] != ["pr"] or rest[1:2] == [] or rest[1] not in GH_LANDING_PR_VERBS:
         return False
-    return not any(arg in ("--help", "-h") for arg in rest[2:])
+    no_write = GH_NO_WRITE_FLAGS.get(rest[1], set()) | {"--help", "-h"}
+    return not any(arg in no_write for arg in rest[2:])
 
 
 def _segment_lands_a_git_write(segment):

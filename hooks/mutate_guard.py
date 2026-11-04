@@ -2087,6 +2087,12 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
+    # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
+    ("gh-root-flag: a repo flag before the pr verb goes unread",
+     '    while rest and _gh_root_repo_flag(rest, 0):',
+     '    while False and _gh_root_repo_flag(rest, 0):',
+     "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
 ]
 
 
