@@ -1855,6 +1855,10 @@ def sweep_over_fixture(fx, session_end, before=None):
     return seen
 
 
+def pids_of(decisions):
+    return {d["pid"] for d in decisions or []}
+
+
 class SessionEndScopeTests(unittest.TestCase):
     """`sweep._sweep_roots` for the SessionEnd run, against the daily job on the same fixture."""
 
@@ -1866,6 +1870,29 @@ class SessionEndScopeTests(unittest.TestCase):
         seen = sweep_over_fixture(self.fx, session_end=True)
         self.assertIn(SCOPE_PIDS["primary"], seen["signals"],
                       "the orphan under this repository's primary checkout was not signalled")
+
+    def test_the_session_end_run_signals_a_proven_orphan_in_another_repository(self):
+        """The dead-rooted stop is as wide at SessionEnd as the scheduled job's: a proven orphan
+        whose script sat under another repository is signalled by either run."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["other"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the other repository's "
+                      "orphan, so this case proves nothing")
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"],
+                      "the session-end run left a proven orphan in another repository alone, "
+                      "where the scheduled job signals it")
+
+    def test_the_session_end_run_signals_an_orphan_whose_project_ancestor_is_its_parent(self):
+        """A missing script under a folder that carries `.claude` has that parent as its project
+        ancestor. The scheduled job signals it, so the session-end run does too."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the parent-ancestor orphan")
+        self.assertIn(SCOPE_PIDS["ancestor"], seen["signals"],
+                      "the session-end run left a parent-ancestor orphan alone, where the "
+                      "scheduled job signals it")
 
     def test_the_session_end_run_scans_no_loose_processes(self):
         seen = sweep_over_fixture(self.fx, session_end=True)
