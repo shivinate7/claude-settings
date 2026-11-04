@@ -15,14 +15,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Every needed job passed
+    - name: Every needed job passed, and the wiring holds
       shell: bash
       env:
         NEEDS: ${{ inputs.needs }}
-      run: bash "${{ github.action_path }}/check.sh"
-    - name: Workflow wiring holds
-      if: always()
-      shell: bash
-      env:
         WORKFLOW: ${{ inputs.workflow }}
-      run: bash "${{ github.action_path }}/wiring.sh"
+      run: bash "${{ github.action_path }}/run.sh"
