@@ -91,10 +91,15 @@ SECRET_SHAPES = (
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
-# A value after a password word that names no secret: a word, a mask or a template placeholder. Anything else is refused.
+# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
+# must be the whole value, after one pair of wrapping quotes or brackets is taken off. Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
-PLACEHOLDER_VALUE = re.compile(r"<[^<>\n]*>|\$\{[^}\n]*\}|\{\{[^}\n]*\}\}|\$[A-Za-z_]\w*|%[A-Za-z_]\w*%")
+# `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
+PLACEHOLDER_VALUE = re.compile(
+    r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
+WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
+SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
 SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
 NO_REPLY_NAME = re.compile(r"(?:do[-_.]?not[-_.]?|no[-_.]?)reply", re.I)  # a mailbox that names no person
 PUBLIC_GIT_HOSTS = frozenset(("github.com", "gitlab.com", "bitbucket.org"))  # `git@host:` is their ssh remote, no person
@@ -127,13 +132,25 @@ def is_phone(text):
     return any(shape.search(text) for shape in PHONE_OTHER)
 
 
+def bare_value(value):
+    """`value` without trailing punctuation, a `)` or `]` that closes a wrapper opened before the match, and one
+    pair of wrapping quotes or brackets."""
+    value = value.rstrip(".,;")
+    if value[-1:] in (")", "]") and ("(" if value[-1] == ")" else "[") not in value:
+        value = value[:-1].rstrip(".,;")
+    if value[:1] + value[-1:] in WRAP_PAIRS:
+        value = value[1:-1]
+    return value
+
+
 def password_is_no_secret(found):
-    """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is `PWD=<path>`."""
-    value = found.group(2).rstrip(".,;")
-    if found.group(1) == SHELL_PWD and value.startswith(("/", "~")):
+    """True when the whole value after a password word is a plain word, a mask or a placeholder, or `found` is
+    `PWD=<path>`."""
+    value = bare_value(found.group(2))
+    if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
     return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
-            or bool(PLACEHOLDER_VALUE.match(found.string, found.start(2))))
+            or bool(PLACEHOLDER_VALUE.fullmatch(value)))
 
 
 def email_is_no_person(found):
