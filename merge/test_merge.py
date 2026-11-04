@@ -9655,6 +9655,7 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
         self.assertIn("run 904", out)
+        self.assertNotIn("gh run rerun", out, "the UNKNOWN verdict of a cancelled run names a re-run, though no red run is named\n" + out)
 
     def test_a_newest_run_cancelled_by_a_timeout_is_not_red(self):
         jobs = {904: [main_job("scope", "success"), main_job("checks-macos", "cancelled", 30)]}
@@ -9958,6 +9959,7 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out)
         self.assertNotIn("is red", out, "an unread run is never called red")
         self.assertIn("--base-red-ok", out)
+        self.assertNotIn("gh run rerun", out, "the UNKNOWN verdict of a failed read names a re-run, though no red run is named\n" + out)
 
     def test_unreadable_jobs_are_unknown_and_refuse(self):
         rc, out, before = self.go([main_run(901, "failure")], {}, jobs_fail="HTTP 404")
@@ -10059,6 +10061,44 @@ class RedMainBrake(Env):
         self.assertIn("run 913", out)
         self.assertEqual(re.findall(r"gh run rerun (\d+)( --failed)?", out), [("913", "")],
                          "the refusal does not name the plain `gh run rerun 913` once, without --failed\n" + out)
+
+    def test_the_red_main_refusal_names_the_rerun_before_the_reason_flag(self):
+        # the re-run is the first way out of a red main; --base-red-ok is the second (decision no-merge-onto-red-main)
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        remedy = [l for l in out.splitlines() if l.startswith("No batch merges onto a red")]
+        self.assertEqual(len(remedy), 1, out)
+        self.assertIn("gh run rerun", remedy[0], "the refusal's last line names no re-run\n" + out)
+        self.assertLess(remedy[0].index("gh run rerun"), remedy[0].index("--base-red-ok"),
+                        "the refusal's last line names --base-red-ok before the re-run\n" + out)
+
+    def test_the_red_main_preview_clause_names_the_rerun_before_the_reason_flag(self):
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        clause = line[0].split("--confirm refuses it", 1)
+        self.assertEqual(len(clause), 2, "the preview's main run line has no `--confirm refuses it` clause\n" + out)
+        self.assertIn("gh run rerun", clause[1], "the preview's refusal clause names no re-run\n" + out)
+        self.assertLess(clause[1].index("gh run rerun"), clause[1].index("--base-red-ok"),
+                        "the preview's refusal clause names --base-red-ok before the re-run\n" + out)
+
+    def test_an_unknown_main_names_only_the_reason_flag_as_its_way_out(self):
+        # an UNKNOWN verdict from a failed read names no red run, so no re-run: the refusal and the preview name --base-red-ok alone
+        rc, out, before = self.go([], {}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused(rc, out, before)
+        remedy = [l for l in out.splitlines() if l.startswith("No batch merges onto a red")]
+        self.assertEqual(len(remedy), 1, out)
+        self.assertIn("--base-red-ok", remedy[0], out)
+        self.assertNotIn("gh run rerun", remedy[0], "the UNKNOWN refusal's last line names a re-run\n" + out)
+        rc, out, _ = self.go([], {}, confirm=False, runs_fail="gh: HTTP 500: Server Error")
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        clause = line[0].split("--confirm refuses it", 1)
+        self.assertEqual(len(clause), 2, "the preview's main run line has no `--confirm refuses it` clause\n" + out)
+        self.assertIn("--base-red-ok", clause[1], out)
+        self.assertNotIn("gh run rerun", clause[1], "the UNKNOWN preview's refusal clause names a re-run\n" + out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
