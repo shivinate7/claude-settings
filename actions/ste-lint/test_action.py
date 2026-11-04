@@ -532,9 +532,9 @@ def head(cs):
 def scratch_clone(cs, zizmor_step=False):
     """A claude-settings clone at `cs`: the files bin/ste-changed and install.sh read, copied from what git lists here
     (tracked_tree), so the installed hooks hold every module the command may import. History: A, then C changes the
-    lint, then D changes only README.md. With `zizmor_step`, Z follows D and changes only actions/zizmor/run.sh; the
-    main branch is then at Z, else at D (HEAD, main and origin/main). E, off main on a side branch, changes the lint again.
-    Returns {label: sha}, with "Z" when zizmor_step."""
+    lint, then D changes only README.md. With `zizmor_step`, Z follows D and changes only actions/zizmor/run.sh, and Y
+    follows Z and changes only actions/zizmor/action.yml; the main branch is then at Y, else at D (HEAD, main and
+    origin/main). E, off main on a side branch, changes the lint again. Returns {label: sha}, with "Z" and "Y" when zizmor_step."""
     tracked_tree.copy_tracked(cs, "bin", "hooks", "lint", "actions/ste-lint", "actions/zizmor")
     for rel in (".ste-lint-exclude", "landed-dirs.txt", "install.sh"):
         shutil.copy2(os.path.join(ROOT, rel), os.path.join(cs, rel))
@@ -552,6 +552,9 @@ def scratch_clone(cs, zizmor_step=False):
         write(cs, "actions/zizmor/run.sh", "\n# Z\n", "a")
         git(cs, "add", "."); git(cs, "commit", "-qm", "Z")
         shas["Z"] = head(cs)
+        write(cs, "actions/zizmor/action.yml", "\n# Y\n", "a")
+        git(cs, "add", "."); git(cs, "commit", "-qm", "Y")
+        shas["Y"] = head(cs)
     git(cs, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(cs, "checkout", "-q", "-b", "side")
     write(cs, "lint/ste_lint.py", "\n# E\n", "a")
@@ -587,12 +590,14 @@ def run_ste_changed(cmd, work, home=None):
 
 
 def zizmor_facts(cs, sha):
-    """What the clone holds for the zizmor action's run.sh at `sha` and at HEAD: whether each exists, and whether they differ."""
-    def blob(rev):
-        p = subprocess.run(["git", "show", rev + ":actions/zizmor/run.sh"], cwd=cs, capture_output=True, text=True)
+    """What the clone holds for the zizmor action at `sha` and at HEAD: run.sh exists at each, whether run.sh differs
+    (`differ`), and whether action.yml differs (`yml_differ`)."""
+    def blob(rev, name):
+        p = subprocess.run(["git", "show", rev + ":actions/zizmor/" + name], cwd=cs, capture_output=True, text=True)
         return p.stdout if p.returncode == 0 else None
-    at, now = blob(sha), blob("HEAD")
-    return {"at_pin": at is not None, "at_head": now is not None, "differ": at != now}
+    at, now = blob(sha, "run.sh"), blob("HEAD", "run.sh")
+    return {"at_pin": at is not None, "at_head": now is not None, "differ": at != now,
+            "yml_differ": blob(sha, "action.yml") != blob("HEAD", "action.yml")}
 
 
 def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None, zizmor=None, zizmor_step=False):
@@ -624,6 +629,9 @@ check("pin drift: an older pin's lint differs, so the command exits 3 though the
       rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out and ".github/workflows/ci.yml:5" in out, out)
 check("pin drift: the remedy names claude-settings main and the rule",
       "Move the pin to %s" % shas["D"] in out and "git-integration-branch-merge" in out, out)
+check("pin drift, ste-lint: its older remedy keeps the clause the owner's rule grants for ste-lint pins",
+      any("CI pins ste-lint at %s" % shas["A"][:7] in l and "with no question (rule git-integration-branch-merge)" in l
+          for l in out.splitlines()), out)
 rc, out, shas = pin_case("C")
 check("no drift: a pin whose lint files equal this copy's exits 0, though README.md moved since",
       rc == 0 and "CI pins ste-lint at %s" % shas["C"][:7] in out and "the same lint as this copy" in out, out)
@@ -660,6 +668,20 @@ check("zizmor drift: the command prints one line that names zizmor", len(drift) 
 check("zizmor drift: the line names the pinned commit", shas["D"][:7] in line, out)
 check("zizmor drift: the line points at the workflow line that pins it", ".github/workflows/ci.yml:5" in line, out)
 check("zizmor drift: exit 3, though the lint passed", rc == 3, out)
+check("zizmor older remedy: it names moving the pin to claude-settings main", bool(line) and "Move the pin to %s" % shas["Y"] in line, out)
+check("zizmor older remedy: no 'with no question' clause, which the owner's rule grants for ste-lint pins only",
+      bool(line) and "with no question" not in line and "git-integration-branch-merge" not in line, out)
+
+# Only action.yml moved: run.sh is the same at the pin and at HEAD, so the action.yml file set alone makes the drift.
+facts = {}
+rc, out, shas = pin_case(None, zizmor="Z", zizmor_step=True, proof=facts)
+yml = pin_lines(out, "zizmor")
+line = yml[0] if yml else ""
+check("zizmor action.yml only scope: action.yml differs from the pin's, run.sh is the same",
+      facts.get("yml_differ") is True and facts.get("differ") is False and facts.get("at_pin") is True, str(facts))
+check("zizmor action.yml only: the command prints one line that names zizmor at the pinned commit, not the same",
+      len(yml) == 1 and shas["Z"][:7] in line and "the same" not in line, out)
+check("zizmor action.yml only: exit 3 from the action.yml drift", rc == 3, out)
 
 facts = {}
 rc, out, shas = pin_case(None, zizmor="A", proof=facts)
