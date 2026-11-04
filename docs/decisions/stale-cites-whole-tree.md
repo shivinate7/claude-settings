@@ -1,8 +1,8 @@
 # An opt-in run checks every tracked cite, not only the range
 
-Owner ask, 2026-11-03 15:58 CST, via the coordinator: promote the child repos' guards up to claude-settings. The plan is docs/plans/child-guard-promotion.md. It is on origin/child-guard-promotion until that branch merges. The lane is prose-path-check-whole-tree.
+Owner ask, 2026-11-03 15:58 CST, via the coordinator: promote the child repos' guards up to claude-settings. The promotion plan, lane 1 (prose-path-check-whole-tree), sits on origin/child-guard-promotion until that branch merges.
 
-## Whole-tree mode
+## The ruling
 
 `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. REV defaults to HEAD. It reads no range, so it fires on lines that no change touched.
 
@@ -37,5 +37,5 @@ The plan promotes these child rows to this lane for their path and anchor parts.
 - The hook catalog records list: the degen repo's row 8a in the plan.
 
 Kind: build
-Plan: docs/plans/child-guard-promotion.md#1-prose-path-check-whole-tree (all)
+Plan: docs/decisions/stale-cites-whole-tree.md#the-ruling (all)
 Home: lint/stale_cites.py
