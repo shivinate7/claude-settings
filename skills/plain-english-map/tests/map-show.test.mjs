@@ -427,3 +427,15 @@ test('22c. an absolute path through a symlink to the root prints the same output
   assert.equal(toLink.status, 0, `with the cwd at the real root, an absolute path through a symlink to the root must exit 0\n${dump(toLink)}`);
   assert.equal(toLink.stdout, plain.stdout, `with the cwd at the real root, an absolute path through a symlink to the root must print the same output as src/home.ts\n${dump(toLink)}`);
 });
+
+test('22d. an absolute folder arg that ends in / prints the same output as the relative folder', () => {
+  const dir = scratchRepo();
+  const plain = show(['src/'], dir);
+  // The scope first: the relative folder must print its map lines, or equal output proves nothing.
+  assert.equal(plain.status, 0, `the relative folder src/ must exit 0\n${dump(plain)}`);
+  assert.ok(lineWith(plain.stdout, 'src/home.ts', HOME_LINE), `the relative folder src/ must print the map line of src/home.ts\n${dump(plain)}`);
+  // The root in its real form, then the folder, with the trailing / that a folder arg keeps.
+  const abs = show([`${join(realpathSync.native(dir), 'src')}/`], dir);
+  assert.equal(abs.status, 0, `an absolute folder arg that ends in / must exit 0 and print the folder's map lines\n${dump(abs)}`);
+  assert.equal(abs.stdout, plain.stdout, `an absolute folder arg that ends in / must print the same output as src/\n${dump(abs)}`);
+});
