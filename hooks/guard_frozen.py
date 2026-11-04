@@ -8,10 +8,11 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
+    REDIRECT, SCRIPT_HEADERS, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    basename, dir_before_segment, interpreter_bodies, norm, resolve_command, segment_tokens, split_segments,
+    strip_heredoc_bodies,
 )
-from guard_env import _quoted_words
+from guard_env import _quoted_words, _substitutions, script_spots
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -585,11 +586,12 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False) -> str:
+                     command_position=False, script_data=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told."""
+    when that folder cannot be told. `script_data` reads the script of a `python -c` or a `node -e` as
+    data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -600,11 +602,17 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    inner = []
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
+        found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
+        if found:
+            data.add(found[1])
+            # the shell still runs a substitution in a double-quoted script word
+            inner += [text for text, _ in _substitutions(raw[found[1]])[0][:-1]]
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -636,6 +644,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if predicate(word, at) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
                 return word
+    for text in inner:
+        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
+        if hit:
+            return hit
     return ""
 
 
@@ -653,6 +665,30 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+    """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
+    A shell reads the command with its heredoc bodies dropped, except a body a shell runs
+    (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
+    a file written and then run by one, and the script of a `python -c` or `node -e` are read only at their
+    shell spots (`script_spots`: os.system, subprocess, `%x`, a backtick in ruby). A crash of that reading
+    falls back to reading every body, which refuses more and never less."""
+    try:
+        hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True), cwd, predicate, holds, script_data=True)
+        texts = []
+        for lang, body, quote in interpreter_bodies(raw):
+            texts += script_spots(body, lang)
+            if not quote:
+                texts += [text for text, _ in _substitutions(body, heredoc=True)[0][:-1]]   # bash runs these
+        if _has_inline_flag(raw):
+            for kind, script, *_ in _inline_scripts(raw):
+                texts += script_spots(script, kind)
+        for text in texts:
+            hit = hit or _shell_write_hit(text, cwd, predicate, holds)
+        return hit
+    except Exception:
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+
+
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
     return _shell_write_hit(cmd, cwd, is_project_config)
@@ -665,13 +701,18 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
 # `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
-_PY_HEADER = re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])")
-_NODE_HEADER = re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])")
+_PY_HEADER = SCRIPT_HEADERS["py"]
+_NODE_HEADER = SCRIPT_HEADERS["js"]
 _PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
 _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
 _NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
 _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
+_INLINE_BUNDLE = re.compile(r"(?<![\w-])-[A-Za-z]+[cep](?![\w-])")   # a flag bundle that ends in one: `-Bc`
+
+
+def _has_inline_flag(text: str) -> bool:
+    return any(flag in text for flag in _INLINE_FLAG_WORDS) or bool(_INLINE_BUNDLE.search(text))
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
@@ -844,24 +885,31 @@ def _js_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
+def _inline_script_at(tokens):
+    """(kind, index of the script word) for a `python -c SCRIPT` or `node -e SCRIPT` command, else None."""
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return None
+    name = basename(tokens[index])
+    kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
+    flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
+    for at in range(index + 1, len(tokens) - 1):
+        if kind and flag.match(tokens[at]):
+            return kind, at + 1
+    return None
+
+
 def _inline_scripts(command: str):
     """Yield (kind, script, segment number, segments, ends) for each `python -c` and `node -e` script."""
     ends = []
     segments = split_segments(_strip_heredoc_bodies_unconditionally(command), ends)
     for number, segment in enumerate(segments):
-        if not any(flag in segment for flag in _INLINE_FLAG_WORDS):
+        if not _has_inline_flag(segment):
             continue
         tokens = segment_tokens(segment)
-        index = resolve_command(tokens) if tokens else None
-        if index is None:
-            continue
-        name = basename(tokens[index])
-        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
-        flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
-        for at in range(index + 1, len(tokens) - 1):
-            if kind and flag.match(tokens[at]):
-                yield kind, str(tokens[at + 1]), number, segments, ends
-                break
+        found = _inline_script_at(tokens)
+        if found:
+            yield found[0], str(tokens[found[1]]), number, segments, ends
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:

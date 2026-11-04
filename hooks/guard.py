@@ -333,8 +333,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _shell_write_hit, interpreter_write_hit, is_frozen,
+            is_project_config, project_config_shell_hit, shell_write_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -3187,7 +3187,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
     # 7. A frozen path.
-    matched = frozen_shell_hit(stripped, cwd)
+    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
@@ -3210,7 +3210,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
         change = cap_change(raw)
         if change:
@@ -4052,9 +4052,9 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     if tool in SHELL_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
-        return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+        return bool(git_env_command_hit(raw, stripped) or shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (shell_write_hit(raw, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():

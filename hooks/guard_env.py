@@ -9,7 +9,7 @@ import re
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
-    is_powershell, norm, split_segments,
+    is_powershell, norm, script_language, split_segments,
 )
 
 
@@ -277,6 +277,122 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     return done, False
 
 
+# ------------------------------------------------------------------ a script's shell spots
+#
+# A python, node, perl or ruby script is text to the shell that starts it. It reaches a shell only where it
+# hands a string to one: a call such as os.system or subprocess.run, and in perl and ruby a backtick span,
+# `qx(...)` or `%x(...)`. `script_spots` gives the shell text of those spots. Every other string of the
+# script is data, so a `$(...)` or a backtick in it runs nothing.
+_SPOT_CALLS = {
+    "py": r"(?<![\w.])(?:os\s*\.\s*(?:system|popen|exec\w*|spawn\w*|posix_spawn\w*)|subprocess\s*\.\s*\w+"
+          r"|Popen|check_output|check_call|getoutput|getstatusoutput)",
+    "js": r"(?:(?<![\w$.])|(?<=\)\.)|(?<=\w\.))(?:execSync|execFileSync|spawnSync|execFile|spawn)"
+          r"|(?:(?<![\w$.])|(?<=child_process\.)|(?<=cp\.)|(?<=\)\.))exec",
+    "ruby": r"(?<![\w.$@:])(?:system|exec|spawn)(?!\w)"
+            r"|(?<![\w.])(?:IO\s*\.\s*popen|Open3\s*\.\s*\w+|Kernel\s*\.\s*(?:system|exec|spawn))",
+    "perl": r"(?<![\w.$@:>])(?:system|exec)(?!\w)",
+}
+# A call's name, then its open paren; perl and ruby also take a quote after a space (`system "cmd"`).
+_SPOT_PAREN = r"\s*\("
+_SPOT_BARE = r"|[ \t]+(?=['\"])"
+_KEYWORD_ARG = re.compile(r"\s*(?:\*\*)?[A-Za-z_]\w*\s*(?:=(?!=)|:(?!:))")
+_BRACKETS = {"(": ")", "{": "}", "[": "]", "<": ">"}
+_COMMAND_OPEN = re.compile(r"(?:\bqx|%x)[ \t]*([^\w\s])")
+
+
+def _call_args(script: str, at: int, parens: bool):
+    """The arguments of the call that starts at `at`, split at the commas outside quotes and brackets. A call
+    with parens ends at its own close paren, one without at the end of its statement."""
+    args, depth, quote, start, i = [], 0, "", at, at
+    while i < len(script):
+        char = script[i]
+        if quote:
+            if char == "\\":
+                i += 2
+                continue
+            quote = "" if char == quote else quote
+        elif char in "'\"`":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif char == "," and depth == 0:
+            args.append(script[start:i])
+            start = i + 1
+        elif not parens and depth == 0 and char in ";\n":
+            break
+        i += 1
+    return args + [script[start:i]]
+
+
+def _command_spans(script: str):
+    """The commands inside the backtick pairs, `qx(...)` and `%x(...)` of a perl or ruby script. The span
+    of `qx` and `%x` ends at the bracket that closes the opener (nested pairs count), or at the same
+    character again for a delimiter that is no bracket."""
+    out = [found.group(1) for found in re.finditer(r"`([^`]*)`", script)]
+    at = 0
+    for opener in _COMMAND_OPEN.finditer(script):
+        if opener.start() < at:
+            continue   # inside the span of an earlier one
+        open_char = opener.group(1)
+        close_char = _BRACKETS.get(open_char, open_char)
+        depth, end = 1, opener.end()
+        while end < len(script) and depth:
+            depth += (script[end] == open_char != close_char) - (script[end] == close_char)
+            end += 1
+        if depth == 0:
+            out.append(script[opener.end():end - 1])
+        at = end
+    return out
+
+
+def script_spots(script: str, lang: str = ""):
+    """The shell text of each spot of a script where it hands a string to a shell: the call text of each shell
+    call, and the command of each perl or ruby backtick span, `qx` and `%x`. `lang` is "py", "js", "perl" or
+    "ruby", or '' for a script of unknown language (every language is tried). A call whose arguments hold no
+    quote, a variable handed to a shell, reads the whole script: the string it holds cannot be told."""
+    langs = [lang] if lang else list(_SPOT_CALLS)
+    out = []
+    for each in langs:
+        tail = _SPOT_PAREN + (_SPOT_BARE if each in ("perl", "ruby") else "")
+        for call in re.finditer("(?:" + _SPOT_CALLS[each] + ")(?:" + tail + ")", script):
+            parens = call.group(0).rstrip().endswith("(")
+            args = [arg.strip() for arg in _call_args(script, call.end(), parens)
+                    if arg.strip() and not _KEYWORD_ARG.match(arg) and not arg.lstrip().startswith("{")]
+            if not any(mark in arg for arg in args for mark in "'\"`"):
+                return [script]
+            out.append(re.sub(r"\s*\($", "", call.group(0).rstrip()) + "(" + ", ".join(args) + ")")
+    if lang in ("", "perl", "ruby"):
+        out += _command_spans(script)
+    return out
+
+
+def _elide_substitutions(text: str) -> str:
+    """The text with each closed `$(...)` and backtick pair written as `x`. In the string of a script they are
+    data. An unclosed one stays, so the words after it are still read."""
+    out, i = [], 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            depth, end = 1, i + 2
+            while end < len(text) and depth:
+                depth += (text[end] == "(") - (text[end] == ")")
+                end += 1
+            if depth == 0:
+                out.append("x")
+                i = end
+                continue
+        elif text[i] == "`" and text.find("`", i + 1) >= 0:
+            out.append("x")
+            i = text.find("`", i + 1) + 1
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 # A word that holds a glob. It is an environment word when it could match any name that
 # `names_env_file` holds: a name that starts with `.env`, other than exactly `.env.example`. The test
 # is a sample of the pattern itself (each glob filled in as the shortest and a one letter match), run
@@ -350,6 +466,21 @@ def _plain_escaped_quotes(cmd: str) -> str:
     return cmd
 
 
+def _script_bodies_as_text(cmd: str) -> str:
+    """Write the body of each QUOTED python, node, perl or ruby heredoc as the script it is: bash expands
+    nothing in it, so a `$(...)` or a backtick in one of its strings is data, and the body stands with those
+    spans written as `x`. Its shell spots (`script_spots`) follow as lines of their own, where a substitution
+    runs. Every other word of the body is still read as a shell word."""
+    if "<<" not in cmd:
+        return cmd
+    for quote, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        lang = script_language(header)
+        if quote and body and lang and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, "\n".join([_elide_substitutions(body)] + script_spots(body, lang)), 1)
+    return cmd
+
+
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     """Return (printed reason, logged text) when the command touches an environment file.
 
@@ -368,7 +499,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
-    cmd = _plain_escaped_quotes(cmd)
+    cmd = _script_bodies_as_text(_plain_escaped_quotes(cmd))
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
