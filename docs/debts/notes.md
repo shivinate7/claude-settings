@@ -1317,3 +1317,4 @@
 - export-scan-telegram-width: the `telegram-bot-token` shape takes 8 to 10 digits before the colon, after degen's rule; an id of 7 or 11 digits passes. Real id widths unmeasured. Decision: waiting-data-in-repo.
 - export-scan-encoded-tokens: a Telegram token with its colon URL-encoded (`%3A`) or HTML-escaped (`&#58;`) passes the scan, and so does `@<digits>:<tail>` in page text, since the version-pin blank eats `@<digits>`. Decision: waiting-data-in-repo.
 - export-scan-red-checks-verdict: `assert_refused` in `test_export_page.py` checks the refused verdict, not the kind, so a case can stay red through the wrong shape. Each case hits only its own shape today. Decision: waiting-data-in-repo.
+- ruling-record-kind-unchecked: the merge tool takes the lane's Kind claim, so a ruling-record PR posted as docs-only with zero rounds reads done. No incident yet. Decision: docs-only-prs-skip-review.
