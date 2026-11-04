@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The waiting-page writer's one splice: put a fresh roadmap block into the live page (skill waiting-page).
+"""The page writer's one splice: put a fresh roadmap block into the live page (skill waiting-page).
 
     python3 ~/.claude/skills/waiting-page/splice.py --page LIVE.html --block FILE --out OUT.html
     python3 ~/.claude/skills/waiting-page/splice.py --page TEMPLATE.html --carry LIVE.html --out OUT.html

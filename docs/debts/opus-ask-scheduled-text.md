@@ -1,9 +1,9 @@
-# A seed prompt or a timed check-in may reach the plain Opus ask judge
+# A check-in or seed with no source field may reach the plain Opus ask judge
 
-**What.** `grant_opus_ask` refuses a prompt whose own transcript record has `promptSource` `system`, and in a cloud session a prompt with no earlier owner turn. Both rest on record shapes that are unmeasured at hook time. Is a timed check-in's record (CronCreate, ScheduleWakeup) in the transcript when UserPromptSubmit fires, and does it carry `promptSource` `system`? Is a `create_session` seed's record there, equal to the hook's prompt? If not, a Claude-written Opus ask in that text reaches the judge. The haiku judge granted on 3 of 10 such asks (review, 2026-11-03).
+**What.** A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. Claude Code 2.1.308 sent no `source` on a typed prompt in one hook dump (review, 2026-11-04). 2.1.318 declares the field optional, and is unmeasured. So the normal path is the transcript fallback. That fallback catches a check-in or seed only if its record is in the transcript at hook time, and that is unmeasured. A Claude-written Opus ask in such text then reaches the judge. The haiku judge granted on 3 of 10 such asks, and a grant gives every role Opus for 2h.
 
-**Where.** `hooks/override.py` `_system_prompt_last`, `_owner_turn_in` and `grant_opus_ask`.
+**Where.** `hooks/override.py` `grant_opus_ask`, `_system_prompt_last` and `_owner_turn_in`.
 
 **Decision.** `owner-override` (the owner override and its Opus form).
 
-**Retire.** Read the UserPromptSubmit payload's `source` field, which the Claude Code 2.1.318 schema names: `user`, `sdk`, `system`, `loop_wakeup`, `schedule_wakeup` or `poll_event`. A payload may still omit it. Refuse a plain ask unless `source` is `user` or absent, with a test for each value in `hooks/test_local_time.py`. Keep the transcript read as the fallback when the field is absent. Then close this debt.
+**Retire.** Close it when the installed Claude Code sends `source` on every UserPromptSubmit: check one typed prompt and one check-in with a hook dump. In a cloud session, also check that the owner's typed prompt does not carry `sdk`, which the schema names for the Agent SDK. If it does, the plain ask fails closed there, and `OPUS_ASK_SOURCES` must change. Or measure, from inside the hook, that a check-in's and a seed's records are in the transcript when it fires. Refusing an absent `source` is not a fix: it refuses every typed plain ask.

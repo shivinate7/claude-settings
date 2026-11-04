@@ -6,6 +6,7 @@ a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-re
 None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
+StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -23,10 +24,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+WORKFLOWS = os.path.join(HERE, "..", ".github", "workflows")
 STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
@@ -406,6 +409,142 @@ class GithubBaseRef(Job):
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
 
 
+def mapped(parent, body):
+    """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
+    return "      - name: s\n        %s:\n%s\n" % (parent, body)
+
+
+def words_of(mapping, key):
+    """The words of mapping[key], as run.sh splits a paths value; [] when the key is absent."""
+    return mapping.get(key, "").split()
+
+
+class StepMaps(unittest.TestCase):
+    """A step's with: and env: values as lint/workflow_steps.py reads them for bin/ci-job. A block scalar (`|`, `>`,
+    `|-`) reads as its lines. An inline comment (a space, then `#`) is not part of the value. A `#` inside quotes or
+    inside a block scalar is text."""
+
+    def test_a_literal_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: |\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: | was read as its marker, not its lines")
+
+    def test_a_folded_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: >\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: > was read as its marker, not its lines")
+
+    def test_a_chomping_block_reads_its_lines(self):
+        value = step_with(mapped("with", "          paths: |-\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "b/"], "with: paths: |- was read as its marker, not its lines")
+
+    def test_an_empty_block_reads_as_no_words(self):
+        value = step_with(mapped("with", "          paths: |\n"))
+        self.assertEqual(words_of(value, "paths"), [], "an empty with: paths: | block read its marker as a path")
+
+    def test_an_inline_comment_is_not_part_of_the_value(self):
+        value = step_with(mapped("with", "          paths: .github/ # audit\n"))
+        self.assertEqual(value.get("paths"), ".github/", "the inline comment stayed in the with: paths value")
+
+    def test_a_comment_after_a_quoted_value_is_dropped_and_a_hash_inside_quotes_is_kept(self):
+        value = step_with(mapped("with", '          paths: "a/ # b/" # audit\n'))
+        self.assertEqual(value.get("paths", "").strip("'\""), "a/ # b/", "the inline comment stayed in the with: paths value")
+
+    def test_a_hash_with_no_space_before_it_is_text(self):
+        value = step_with(mapped("with", "          paths: a/#b # note\n"))
+        self.assertEqual(value.get("paths"), "a/#b", "the inline comment stayed in the with: paths value")
+
+    def test_a_lone_quote_in_text_is_kept(self):
+        value = step_with(mapped("with", "          paths: don't/ # note\n"))
+        self.assertEqual(value.get("paths"), "don't/", "the inline comment stayed in the with: paths value")
+
+    def test_a_hash_inside_a_block_is_text(self):
+        value = step_with(mapped("with", "          paths: |\n            a/ # kept\n"))
+        self.assertEqual(words_of(value, "paths"), ["a/", "#", "kept"], "a # inside a with: paths block was dropped")
+
+    def test_an_env_literal_block_reads_its_lines(self):
+        value = step_env(mapped("env", "          ZIZMOR_PATHS: |\n            a/\n            b/\n"))
+        self.assertEqual(words_of(value, "ZIZMOR_PATHS"), ["a/", "b/"], "env: ZIZMOR_PATHS: | was read as its marker")
+
+    def test_an_env_inline_comment_is_not_part_of_the_value(self):
+        value = step_env(mapped("env", "          NOTE: x # y\n"))
+        self.assertEqual(value.get("NOTE"), "x", "the inline comment stayed in the env: NOTE value")
+
+    def test_an_env_literal_block_value_is_exact(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n"))
+        self.assertEqual(value.get("MSG"), "hello\n", "a literal env: block kept a space from its indent")
+
+    def test_an_env_literal_block_keeps_extra_indent_on_a_later_line(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n              world\n"))
+        self.assertEqual(value.get("MSG"), "hello\n  world\n", "a literal env: block lost or added indent on a later line")
+
+    def test_an_env_literal_block_keeps_a_blank_line(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n\n            world\n"))
+        self.assertEqual(value.get("MSG"), "hello\n\nworld\n", "a literal env: block lost its blank line")
+
+    def test_an_env_strip_block_drops_the_final_newline(self):
+        value = step_env(mapped("env", "          X: |-\n            a\n"))
+        self.assertEqual(value.get("X"), "a", "env: X: |- kept the final newline its header strips")
+
+    def test_a_with_folded_block_value_is_exact(self):
+        value = step_with(mapped("with", "          paths: >\n            a/\n            b/\n\n            c/\n"))
+        self.assertEqual(value.get("paths"), "a/ b/\nc/\n", "with: paths: > is not folded as YAML folds it")
+
+    def test_a_quoted_value_with_an_escaped_quote_keeps_its_hash_and_drops_the_comment(self):
+        value = step_env(mapped("env", '          MSG: "a \\" # b" # c\n'))
+        self.assertEqual(value.get("MSG"), '"a \\" # b"', "the quoted env: value was cut at its inner # or kept the comment")
+
+    def test_a_single_quoted_value_with_a_doubled_quote_keeps_its_hash_and_drops_the_comment(self):
+        value = step_env(mapped("env", "          MSG: 'it''s # x' # y\n"))
+        self.assertEqual(value.get("MSG"), "'it''s # x'", "the quoted env: value was cut at its inner # or kept the comment")
+
+
+def run_as_yaml_reads_it(step):
+    """(kind, text) of a step's run: as YAML reads it. A literal `run: |` body is its lines indented 10 or more, or
+    blank, with the 10 spaces removed, the blank lines at each end dropped, and one final newline. A one-line run is its
+    text. kind is None when the step has no run:, and "other" for a header this reading does not cover."""
+    lines = step.split("\n")
+    for i, line in enumerate(lines):
+        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
+        if not m:
+            continue
+        head = m.group(1)
+        if not head.startswith(("|", ">")):
+            return "line", head
+        if head != "|":
+            return "other", None
+        body = []
+        for ln in lines[i + 1:]:
+            if ln.strip() and not ln.startswith(" " * 10):
+                break
+            body.append(ln[10:] if ln.strip() else "")
+        while body and not body[0]:
+            body.pop(0)
+        while body and not body[-1]:
+            body.pop()
+        return "literal", "\n".join(body) + "\n"
+    return None, None
+
+
+class RunBodiesOfWorkflows(unittest.TestCase):
+    """run_body reads each run: block of the repo's workflows as YAML reads it. The reading is written out in
+    run_as_yaml_reads_it, from the YAML definition, so a change to run_body's text for a real workflow fails here."""
+
+    def test_every_workflow_run_block_reads_as_yaml_reads_it(self):
+        literal = 0
+        for name in sorted(os.listdir(WORKFLOWS)):
+            if not name.endswith(".yml"):
+                continue
+            with open(os.path.join(WORKFLOWS, name), encoding="utf-8") as f:
+                text = f.read()
+            for step in step_blocks(text):
+                kind, expected = run_as_yaml_reads_it(step)
+                if kind is None:
+                    continue
+                self.assertNotEqual(kind, "other", "%s: a run: header this reading does not cover" % name)
+                literal += kind == "literal"
+                self.assertEqual(run_body(step), expected, "%s: run_body's text for a run: block changed" % name)
+        self.assertGreater(literal, 0, "no literal run: block was read, so the check covered nothing")
+
+
 class RealChecks(unittest.TestCase):
     def test_every_checks_step_gets_one_line(self):
         sys.path.insert(0, HERE)
@@ -603,6 +742,22 @@ class LintTools(Job):
         self.git("add", ".")
         self.git("commit", "-qm", "change")
 
+    def run_with_stub_pipx(self, *steps):
+        """Runs one job under --lint with a stub pipx first on PATH. The stub writes its argv, one word a line, to a file.
+        Returns (rc, lines, out, argv): argv is None when pipx was never called."""
+        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
+        argv_file = os.path.join(bin_dir, "argv.txt")
+        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
+        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
+        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        rc, lines, out = self.run_job(*steps, args=("--lint",), env=env)
+        argv = None
+        if os.path.exists(argv_file):
+            with open(argv_file, encoding="utf-8") as f:
+                argv = f.read().splitlines()
+        return rc, lines, out, argv
+
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
     def test_an_f541_in_a_tracked_py_fails_the_code_check(self):
         self.lane({"a.py": 'print(f"no placeholders")\n'})
@@ -655,23 +810,25 @@ class LintTools(Job):
     def test_the_zizmor_action_under_lint_runs_with_no_base(self):
         # A literal uses: step, not checks_step(ZIZMOR): checks.yml's step has the run: form on this branch, and the
         # old run: path needs no base, so it could not show red here. The fixture has no origin/main, so no base resolves.
-        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
-        argv_file = os.path.join(bin_dir, "argv.txt")
-        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
-            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
-        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
-        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
         no_main = subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", "origin/main"],
                                  env=ENV, capture_output=True)
         self.assertNotEqual(no_main.returncode, 0, "the fixture must have no origin/main, so no base resolves")
-        rc, lines, out = self.run_job(step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}}),
-                                      args=("--lint",), env=env)
+        rc, lines, out, argv = self.run_with_stub_pipx(
+            step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}}))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
-        self.assertTrue(os.path.exists(argv_file), "pipx was never called, so the action did not run zizmor\n" + out)
-        with open(argv_file, encoding="utf-8") as f:
-            argv = f.read().splitlines()
+        self.assertIsNotNone(argv, "pipx was never called, so the action did not run zizmor\n" + out)
         self.assertEqual(argv[0], "run", out)
         self.assertEqual(argv[2:], [".github/", "actions/"], out)
+
+    def test_a_zizmor_paths_block_passes_each_path_to_pipx(self):
+        # paths: | over two lines, as a repo that lists its paths one a line writes it. The stub pipx records its argv.
+        block = ("      - name: %s\n        uses: $/actions/zizmor\n        with:\n"
+                 "          paths: |\n            a/\n            b/\n\n") % ZIZMOR
+        rc, lines, out, argv = self.run_with_stub_pipx(block)
+        self.assertIsNotNone(argv, "pipx was never called, so the action did not run zizmor\n" + out)
+        self.assertEqual(argv, ["run", "zizmor==1.30.1", "a/", "b/"],
+                         "with: paths: | over two lines reached pipx as its marker, not as the two paths\n" + out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_an_unpinned_or_chained_pipx_run_is_not_a_lint_step(self):
         code, lines, out = plan_lint(self.root, workflow(step("loose", "pipx run zizmor .github/"),
