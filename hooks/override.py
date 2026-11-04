@@ -42,7 +42,8 @@ rule's settings-write ask, and it reaches agents.
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
       and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
       and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
-      ASK_ROLES: every role for the length, and it never asks.
+      ASK_ROLES: every role for the length, and it never asks. The every-role file is written before the scope read
+      and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
@@ -205,14 +206,17 @@ def _grant_opus(session_id, rest, at):
     return _write_opus(session_id, path, at, length.groups(), role)
 
 
-def _write_opus(session_id, path, at, length, role, said=None):
+def _write_opus(session_id, path, at, length, role, said=None, log=True):
     """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
     shape, for the keyword grant and the plain ask. `role` is None, one role, or a sorted list of 2 or more roles.
-    `said` is the owner's words, for the log. Returns ("opus", until, role)."""
+    `said` is the owner's words, for the log; `log` False writes the file and no log line. Returns ("opus", until,
+    role)."""
     number, unit = length
     until = at + (timedelta(hours=int(number)) if unit.lower() == "h" else timedelta(minutes=int(number)))
     stamp = until.astimezone(timezone.utc).isoformat()
     _write(path, {"kind": "opus", "until": stamp, "role": role})
+    if not log:
+        return "opus", until, role
     detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", stamp)
     if said:
         detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
@@ -386,7 +390,9 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     file, a machine-tag start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud
     session's seed prompt (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in
     the transcript, has promptSource "system". The scope read is called once, only after a yes, for an ask that names
-    no role and has an earlier owner prompt in the tail. The guard.log line `opus-grant` holds the words that were
+    no role and has an earlier owner prompt in the tail. The every-role file is written before that call and a valid
+    answer rewrites it narrowed (same end), so a kill during the call (the prompt hook's timeout) leaves every role.
+    The one `opus-grant` line logs the final scope; an interrupt or exit in the call logs the every-role line. The guard.log line `opus-grant` holds the words that were
     judged."""
     if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
         return None
@@ -414,13 +420,20 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     if scope is None:
         return None
     length, roles = scope
-    if not roles:
-        context = _context_prompts(found, prompt)
-        if context:
-            if scope_judge is None:
-                from call_judge import opus_scope as scope_judge
+    said = " ".join(text.split())
+    context = [] if roles else _context_prompts(found, prompt)
+    if context:
+        # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
+        # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
+        _write_opus(session_id, path, at, length, None, said, log=False)
+        if scope_judge is None:
+            from call_judge import opus_scope as scope_judge
+        try:
             roles = _scoped_roles(scope_judge, text, context)
-    return _write_opus(session_id, path, at, length, _file_role(roles), " ".join(text.split()))
+        except BaseException:  # an interrupt or an exit during the read: log the every-role grant that stands
+            _write_opus(session_id, path, at, length, None, said)
+            raise
+    return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
 def grant(session_id, prompt, at):
