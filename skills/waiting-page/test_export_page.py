@@ -1078,6 +1078,44 @@ class All(Base):
         self.assertEqual(read_bytes(landed), png, "img/logo@2x.png is not byte-identical")
         self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
 
+    def test_the_switch_steps_out_dir_fetch_exports_each_artifact_changed(self):
+        # Step 2 of "Before you switch Claude accounts" sets out_dir from backticks in the skill's own text. ArtifactData
+        # writes each doc to <out_dir>/<collection>/<doc_id>.json, and the marker goes in <folder>/<id>/<collection>.
+        # The template is read from SKILL.md, never copied here, so a change to that step is what this case checks.
+        sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Before you switch Claude accounts", 1)
+        self.assertEqual(len(sections), 2, "SKILL.md has no 'Before you switch Claude accounts' section")
+        steps = sections[1].split("\n## ", 1)[0].split("\n2. ", 1)
+        self.assertEqual(len(steps), 2, "the 'Before you switch Claude accounts' section has no step 2")
+        found = re.search(r"`out_dir` set to `([^`]+)`", steps[1].split("\n3. ", 1)[0])
+        self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
+        template = found.group(1)
+        self.assertTrue("<folder>" in template and "<id>" in template,
+                        "step 2's out_dir %r lacks <folder> or <id>" % template)
+
+        root = self.repo()
+        registry = json.loads(read_text(os.path.join(root, ".claude", "layout-extras.json")))["artifacts"]
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        docs = self.docs()
+        fetched = os.path.join(self.tmp.name, "switch")
+        for entry in registry:
+            artifact_id = entry["id"]
+            for collection in entry.get("collections", COLLECTIONS):
+                names = {"folder": fetched, "id": artifact_id, "collection": collection}
+                out_dir = re.sub(r"<(folder|id|collection)>", lambda m: names[m.group(1)], template)
+                for doc_id, data in (docs[artifact_id].get(collection) or {}).items():
+                    write_text(os.path.join(out_dir, collection, doc_id + ".json"), canonical(data))
+                write_text(os.path.join(fetched, artifact_id, collection, MARKER), "")
+            write_bytes(os.path.join(fetched, artifact_id, "page.html"), pages[artifact_id])
+
+        worktree = self.out("worktree")
+        r = self.run_all(root, fetched, worktree)
+        for entry in registry:
+            artifact_id = entry["id"]
+            line = self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
+            self.assertRegex(line, r"changed\s+\d+",
+                             "%s: not changed after the switch step's out_dir %r. Its line:\n%s" % (artifact_id, template, line))
+        self.assertEqual(r.returncode, 0, shown(r))
+
 
 class NoExport(Base):
     """`"export": false` (decision waiting-data-in-repo): an artifact the repo holds and does not export, such as a page in
