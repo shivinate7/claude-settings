@@ -328,7 +328,7 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
-WIDENS_KEY = "widens"  # the one home of the mark's key; call_judge.WIDENING_RULE names it too
+WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
 
 
 def widens_pick_hit(data) -> str:

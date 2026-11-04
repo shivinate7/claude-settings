@@ -18,7 +18,7 @@ context or steps (question_form.judged_item_writes) go into one prompt, so the c
 many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
 to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
 shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
-uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on first read (module `__getattr__`), so an
+uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
 Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share the eight judge
 items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
@@ -149,7 +149,7 @@ NONE_DIRECTION_RULE = (
 # where it is used: the light-import exit paths never import question_form for it.
 WIDENING_TEMPLATE = (
     "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
-    "entry, a per-repo exception) must carry `%s: true`. Block an unmarked widening option, and name its option key in "
+    "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
     "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
     "option passes this rule. When unsure, allow."
 )
