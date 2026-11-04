@@ -117,7 +117,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the CI step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a public repo.
     Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    `lint/test_windows_split.py` checks that each suite runs in exactly one job.
+    `lint/test_windows_split.py` checks that each suite runs in exactly one job, for the Windows, Linux and macOS splits.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's CI step `if:`,
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
