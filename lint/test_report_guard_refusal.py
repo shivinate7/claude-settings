@@ -237,6 +237,25 @@ class SettleTests(unittest.TestCase):
                 self.assertEqual(left, [], "the phrase directly after the name did not clear the row: %r" % line)
                 self.assertFalse(os.path.exists(self.refusals_file()), "the row was cleared but the file stayed")
 
+    def test_b10_a_hedge_in_the_clause_keeps_the_row(self):
+        # A hedge in the clause, after the phrase or before the name, is no verdict that the refusal was right.
+        cases = (
+            ("or wrong after the phrase", "`%s`: refusal was right or wrong" % CREATE),
+            ("a question after the phrase", "`%s`: refusal was right?" % CREATE),
+            ("unsure before the name, in the clause", "If unsure, `%s`: refusal was right" % CREATE),
+        )
+        for label, line in cases:
+            with self.subTest(label):
+                self.check_scope([CREATE])
+                left = self.settle(reply("Done", line))
+                self.assertEqual(left, [CREATE], "a hedged line cleared the row: %s" % label)
+
+    def test_b11_a_hedge_in_an_earlier_sentence_does_not_keep_the_row(self):
+        self.check_scope([CREATE])
+        left = self.settle(reply("Done", "Unsure. `%s`: refusal was right" % CREATE))
+        self.assertEqual(left, [], "a hedge in an earlier sentence kept the row")
+        self.assertFalse(os.path.exists(self.refusals_file()), "the row was cleared but the file stayed")
+
     # ---- an agent's row: an agent record's tool_use_id, or an agent_id that an orchestrator record does not share
 
     def test_r1_an_agent_id_row_stays_when_its_tool_use_is_in_the_orchestrator_transcript(self):
@@ -305,6 +324,30 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(self.pending_tools(), [CREATE], "scope: the fixture file does not hold the row")
         left = self.settle(NEUTRAL, transcript)
         self.assertEqual(left, [CREATE], "a row whose tool_use_id is also an orchestrator record was dropped")
+
+    def test_r9_an_agent_id_row_whose_id_is_in_no_transcript_is_dropped(self):
+        transcript = self.transcript([HUMAN, tool_use("toolu_orch_r9", INTERRUPT)])
+        self.write_rows([{"tool_name": CREATE, "tool_use_id": "toolu_gone_r9", "agent_id": AGENT_ID},
+                         {"tool_name": INTERRUPT}])
+        self.assertEqual(self.pending_tools(), [CREATE, INTERRUPT], "scope: the fixture file does not hold the rows")
+        left = self.settle(NEUTRAL, transcript)
+        self.assertEqual(left, [INTERRUPT],
+                         "an agent_id row whose tool_use_id is in no transcript still blocked the Stop")
+
+    def test_r10_an_agent_id_row_with_no_tool_use_id_is_dropped(self):
+        transcript = self.transcript([HUMAN, tool_use("toolu_orch_r10", INTERRUPT)])
+        self.write_rows([{"tool_name": CREATE, "agent_id": AGENT_ID}, {"tool_name": INTERRUPT}])
+        self.assertEqual(self.pending_tools(), [CREATE, INTERRUPT], "scope: the fixture file does not hold the rows")
+        left = self.settle(NEUTRAL, transcript)
+        self.assertEqual(left, [INTERRUPT], "an agent_id row with no tool_use_id still blocked the Stop")
+
+    def test_r11_an_agent_id_row_with_an_unreadable_transcript_is_dropped(self):
+        self.write_rows([{"tool_name": CREATE, "tool_use_id": "toolu_orch_r11", "agent_id": AGENT_ID},
+                         {"tool_name": INTERRUPT}])
+        self.assertEqual(self.pending_tools(), [CREATE, INTERRUPT], "scope: the fixture file does not hold the rows")
+        missing = os.path.join(self.scratch, "no-such-transcript.jsonl")
+        left = self.settle(NEUTRAL, missing)
+        self.assertEqual(left, [INTERRUPT], "an agent_id row with an unreadable transcript still blocked the Stop")
 
 
 if __name__ == "__main__":
