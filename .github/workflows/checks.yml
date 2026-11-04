@@ -745,7 +745,8 @@ jobs:
     # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps (the 80% target was
     # already met): slowest 37.1 min is 67% of it (range 25.6-37.1, median 31.1, n 15 green runs of 20,
     # 2026-11-01 23:17 to 2026-11-02 08:33 UTC). Those figures are from before the split into checks-macos and
-    # checks-macos-b: about 1180 s fewer on a push and 1110 s on a pull request, projected from run 41730427997 and unmeasured.
+    # checks-macos-b: about 1180 s fewer, a projection from run 41730427997 and unmeasured. The pull request figure is
+    # unmeasured too: the moved steps carry the same `if:` on a push and a pull request, so no push/PR gap is assumed.
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -914,7 +915,9 @@ jobs:
 
   # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
   # in 2 shards, one per job, and the slow CI steps are shared out so each job takes about 20 min. Same scope flag, same `if:`
-  # on every CI step as checks-macos, so a pull request runs both jobs or neither.
+  # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
+  # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, now starts a
+  # second, idle macOS runner that it did not start before.
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
