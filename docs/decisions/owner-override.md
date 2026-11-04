@@ -27,7 +27,7 @@ Orchestrator's call, not an owner grant:
 - A one-act override that nothing uses ends after 10 minutes.
 - A bare number is minutes: `override 15` is 15 minutes. The units are `m` and `h`.
 - `override off` ends any override at once.
-- The keyword counts only as the first word of the owner prompt, after leading whitespace, in any case. `override` alone, or with a reason (`override: use opus for that one review agent`), is a one-act override. One punctuation mark may follow the word (`,` `.` `!` `;` `:` or a dash). It is dropped before the reason, so `override, yes` is `override yes`. All marks but `:` count only with whitespace or the end after them: `override.py is broken` and `override-15m` grant nothing. The reason keeps its case, folds newlines and tabs to spaces, and goes to `guard.log` through the guard's own locked log writer. `override <n>[m|h]` and `override off` keep their meaning only as the whole prompt after that mark: a word after a length or after `off` (`override 15m please`) is ambiguous and grants nothing, so an intended "off" never becomes a grant. A word that only starts with the keyword (`overrides`, `override15m`), a later line that starts with it, a notice tag, tool output, a file or text from an agent grants nothing.
+- The keyword counts only as the first word of the owner prompt, after leading whitespace, in any case. `override` alone, or with a reason (`override: use opus for that one review agent`), is a one-act override. One punctuation mark may follow the word (`,` `.` `!` `;` `:` or a dash). It is dropped before the reason, so `override, yes` is `override yes`. All marks but `:` count only with whitespace or the end after them: `override.py is broken` and `override-15m` grant nothing. The reason keeps its case, folds newlines and tabs to spaces, and goes to `guard.log` through the guard's own locked log writer. `override <n>[m|h]` and `override off` keep their meaning only as the whole prompt after that mark: a word after a length or after `off` (`override 15m please`) is ambiguous and grants nothing, so an intended "off" never becomes a grant. A word that only starts with the keyword (`overrides`, `override15m`), a later line that starts with it, a notice tag, tool output, a file or text from an agent grants nothing. The plain ask below grants nothing from these either, nor from `<pasted_content>` blocks.
 - An override file that is missing, unreadable or corrupt is no override.
 - `override` also lifts the Opus spawn refusal of `agent-model-cap`, and a refusal of a spawn above its role's row (`agent-role-model`; owner, 2026-11-01 17:25 CST, item 127, pick a, same for Sonnet and Opus). It never lifts that rule's settings-write ask, nor the no-model refusal of `agent-role-model`.
 - The override check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask.
@@ -39,10 +39,16 @@ Orchestrator's call, not an owner grant:
 - It lifts nothing else: not the settings-write ask of `agent-model-cap`, and no other rule.
 - It reaches agents, as a timed `override` does. It covers only the session where the owner typed it.
 - The unit is required. `opus 4` may name a model, so it grants nothing.
-- The word counts only as the whole prompt, in any case. Any other text after `opus` grants nothing.
+- The keyword counts only as the whole prompt, in any case. Any other text after `opus` grants nothing on this route. The plain ask below is the other route.
 - The file is `state/override/opus/<session>.json`. It has the format of the override, with kind `opus` and one more field, `role`. It sits in its own folder, so an Opus override and an override do not replace each other, and `override off` leaves an Opus override in place. `state/` is frozen against Claude's writes, so a session cannot grant itself an override.
 - An Opus spawn that both overrides cover uses the Opus override, so a one-act `override` stays unspent.
 - `guard.log` gets one line per grant (`opus-grant`, with the role and the end), per lift (`opus-override`), per end (`opus-off`), and per unreadable file (`opus-unread`).
+- The plain ask (owner, 2026-11-03 19:47 CST, chat, "a read plain asks"): a plain Opus ask in the owner's own typed prompt, such as `send opus judges`, lifts the Opus spawn refusal with no keyword. The step grant route stays.
+- `hooks/local_time.py` calls `override.grant_opus_ask` only when the keyword forms granted nothing. It reads only the owner's typed prompt. These grant nothing: a prompt that starts with a `shared_names.MACHINE_TAGS` notice; a prompt whose first word is `opus` or `override` (the whole-prompt rule holds); text inside `<pasted_content>` blocks.
+- A model judge, `call_judge.opus_ask` (haiku), answers yes or no. A question, a hedge, a negation or quoted agent text grants nothing. Any judge error grants nothing (fails closed).
+- The role is the one `OPUS_ROLES` role the words name, else every role. The length is a length in the words, else 2h.
+- A plain-ask grant writes the same Opus override file. Its `opus-grant` line in `guard.log` carries the owner's words.
+- Cost: at most one model call per owner prompt with the word `opus`, none otherwise.
 
 Orchestrator's call, not an owner grant: the required unit, the role list, and the `general-purpose` default.
 
