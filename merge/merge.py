@@ -86,6 +86,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
@@ -2699,10 +2700,10 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS; or round 3 is done and Guard or check
-    is no; or round 3 is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only, Guard or check is no and round 1
-    is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after round 3 whatever the verdict, and owes
-    rounds 2 and 3 when round 1 fails, even if it only deletes. Net value negative holds the change."""
+    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS; or the final allowed round is done
+    and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
+    Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
+    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -2711,7 +2712,7 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
-    if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a round 3 PASS on a guard or check change still owes the net-value test
+    if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
         if rec["guard"] == "no":
             return "done", "round 3 is done, no guard or check changed"
         if rec["net"] in ("zero", "positive"):
@@ -2875,27 +2876,28 @@ def main(argv, host=None, lock=None):
                 b = head.split("/", 1)[1] if not c and "/" in head else host_default_branch(root)
             say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
+        h = host or Host()
+        if not a.reviewed:
+            a.pr = int(a.pr)
+            info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
+        if a.review_record:
+            if info["state"] != "OPEN":
+                raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
+            if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
+                raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value).rstrip("\n"))
+            print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
+            return 0
+        if not a.reviewed:
+            refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
+        if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
+            cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
         if a.reviewed:
-            h = host or Host()
             if not host:
-                cfg = load_config(root, h.base, a.config)
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
             say(*reviewed_lines(h))
             return 0
-        h = host or Host()
-        a.pr = int(a.pr)
-        info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
-        if a.review_record:
-            if info["state"] != "OPEN":
-                raise Stop(f"the pull request is {info['state']}")
-            if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
-                raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record.")
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value).rstrip("\n"))
-            print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
-            return 0
-        refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
-        cfg = load_config(root, info["base"], a.config)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
         ignore = ignore_checks(cfg)
