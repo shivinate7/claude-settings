@@ -6969,6 +6969,10 @@ agent_push_allowed("agent push: --delete $BR from an agent checkout allows, a de
                    VCS + " push origin --delete $BR", cwd=PUSHAGENT)
 agent_push_allowed("agent push: a variable destination $BR from a lane checkout allows",
                    VCS + " push origin $BR", cwd=PUSHFEAT)
+# A lane source to a lane slug, from an agent's checkout: the source is not HEAD, but the destination holds no
+# `$` or backtick, so the variable test must not fire on it.
+agent_push_allowed("agent push: a lane source to a lane slug from an agent checkout allows, no variable",
+                   VCS + " push origin feat-x:lane-slug", cwd=PUSHAGENT)
 
 
 def agent_push_named_cost_case():
