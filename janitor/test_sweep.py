@@ -1746,16 +1746,19 @@ class LooseProcessTests(unittest.TestCase):
 # real folders, so `sweep._project_ancestor` decides exactly as it does on a live machine.
 
 SCOPE_PIDS = {"primary": 900101, "removed": 900102, "other": 900103, "ancestor": 900104,
-              "sibling": 900105, "loose": 900106}
+              "sibling": 900105, "loose": 900106, "stale": 900107}
 
 
-def build_scope_fixture(name):
+def build_scope_fixture(name, stale_worktree=False):
     """One base folder under ROOT, holding:
       proj          this session's primary checkout, a real repository
       other         another repository, never a root of the run
       wt-gone       a worktree the run removed: a sibling of proj, outside it, and absent now
       proj-sibling  a folder that starts with proj's name and is no checkout
       .claude       so a missing script directly under base resolves to base as its project ancestor
+    `stale_worktree` adds `wt-stale`: a worktree git REGISTERED outside proj, whose folder was then
+    deleted, so only the run's own prune (`git worktree prune`) drops the registration. proj gets
+    a remote, so a real `sweep_repo` gets past its base read.
     Every script is missing under a missing folder, so each is a dead-rooted candidate on a live
     machine. Returns the paths and `rows` (pid -> argv) for `fake_process_table`."""
     base = os.path.join(ROOT, "scope-" + name)
@@ -1774,7 +1777,24 @@ def build_scope_fixture(name):
         SCOPE_PIDS["loose"]: "zsh -c source %s && true" % os.path.join(
             base, ".claude", "shell-snapshots", "snapshot-zsh-1"),
     }
-    return {"base": base, "proj": proj, "other": other, "wt_gone": wt_gone, "rows": rows}
+    fx = {"base": base, "proj": proj, "other": other, "wt_gone": wt_gone, "rows": rows}
+    if stale_worktree:
+        give_remote(proj)
+        stale = os.path.join(base, "wt-stale")
+        made = run_vcs(proj, "worktree", "add", "-q", stale, "-b", "lane-stale")
+        require(made.returncode == 0, "fixture: worktree add failed: %s" % made.stderr.strip())
+        shutil.rmtree(stale)
+        require(os.path.realpath(stale) in registered_paths(proj),
+                "fixture: git no longer registers the stale worktree")
+        rows[SCOPE_PIDS["stale"]] = "sh " + os.path.join(stale, "serve.sh")
+        fx["stale"] = stale
+    return fx
+
+
+def registered_paths(root):
+    """Every worktree path git lists for `root`, as realpaths, so a spelling never decides a match."""
+    entries = sweep.parse_worktree_list(root) or []
+    return {os.path.realpath(e["path"]) for e in entries}
 
 
 @contextlib.contextmanager
@@ -1833,11 +1853,13 @@ def fake_result(root, removed=()):
                           for path in removed]}
 
 
-def sweep_over_fixture(fx, session_end, removed=(), before=None):
+def sweep_over_fixture(fx, session_end, removed=(), before=None, real_repos=False):
     """One `sweep._sweep_roots` run over the fixture machine, the way `main` calls it for the
     SessionEnd hook (`session_end`) or the daily job (not `session_end`). `before`, when given, is
     called first, inside the same stubs, to read the scope the case starts from; its value comes
-    back as `before`. Returns what the run read and signalled."""
+    back as `before`. `real_repos` runs the real `sweep_repo` (its own prune and worktree list),
+    so no fake result names a worktree; otherwise each repository answers `fake_result`, whose
+    `removed` paths name the worktrees. Returns what the run read and signalled."""
     seen = {"loose": 0, "sim": 0, "temp": 0, "before": None}
     real_loose = sweep.find_loose_processes
 
@@ -1859,8 +1881,13 @@ def sweep_over_fixture(fx, session_end, removed=(), before=None):
            "JANITOR_RUN_LOG": os.path.join(fx["base"], "run.log")}
     with fake_process_table(fx["rows"]) as table, contextlib.ExitStack() as stack:
         stack.enter_context(mock.patch.dict(os.environ, env))
-        stack.enter_context(mock.patch.object(
-            sweep, "sweep_repo", lambda root, *a, **k: fake_result(root, removed)))
+        if real_repos:
+            # the module globals `main` sets for one run; the real sweep_repo reads them
+            stack.enter_context(mock.patch.object(sweep, "_LIVE_HEADS", {}))
+            stack.enter_context(mock.patch.object(sweep, "_FETCH_FAILED", set()))
+        else:
+            stack.enter_context(mock.patch.object(
+                sweep, "sweep_repo", lambda root, *a, **k: fake_result(root, removed)))
         stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
         stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
         stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
@@ -1897,6 +1924,23 @@ class SessionEndScopeTests(unittest.TestCase):
         seen = sweep_over_fixture(self.fx, session_end=True, removed=[self.fx["wt_gone"]])
         self.assertIn(SCOPE_PIDS["removed"], seen["signals"],
                       "the orphan under a worktree this run removed was not signalled")
+
+    def test_the_session_end_run_signals_the_orphan_under_a_worktree_it_pruned(self):
+        """The worktree is registered with git, outside the repository, and its folder was deleted
+        before the run. The run's own prune drops the registration, so a worktree list read after
+        the prune no longer names it. Its orphan's script sat under that folder, so the session end
+        must still signal it: the run has to read the list before the prune. The run is the real
+        `sweep_repo`, so no fake result names the path."""
+        fx = build_scope_fixture("session-end-pruned", stale_worktree=True)
+        seen = sweep_over_fixture(fx, session_end=True, real_repos=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["stale"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the pruned worktree's orphan")
+        self.assertNotIn(os.path.realpath(fx["stale"]), registered_paths(fx["proj"]),
+                         "precondition: the run did not prune the stale registration, so this case "
+                         "proves nothing")
+        self.assertIn(SCOPE_PIDS["stale"], seen["signals"],
+                      "the orphan under a worktree this run pruned was not signalled")
 
     def test_the_session_end_run_leaves_another_repos_orphan_alone(self):
         seen = sweep_over_fixture(self.fx, session_end=True,

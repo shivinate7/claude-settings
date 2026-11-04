@@ -756,8 +756,11 @@ class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
         starts = hook_starts(self.mod, repo, 0.0, every_call=True)
         sweeps = [a for a in starts if isinstance(a, list) and self.mod.SWEEP_PATH in a]
         ps = [a for a in starts if isinstance(a, list) and a and a[0] == "ps"]
+        git = [a for a in starts if isinstance(a, list) and a and a[0] == "git"]
         self.assertEqual(len(sweeps), 1, "the hook started %d sweep subprocesses" % len(sweeps))
         self.assertEqual(len(ps), 0, "the hook started %d ps reads with no scratchpad" % len(ps))
+        self.assertEqual(len(git), 2, "the hook started %d git reads, expected the 2 of "
+                                      "git_reads.primary_checkout" % len(git))
 
 
 from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home
