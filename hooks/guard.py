@@ -263,6 +263,8 @@ refuse() too, so an override lifts them.
 """
 
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -3736,10 +3738,35 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
+def sim_lease_holds(session: str, udids: list) -> bool:
+    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
+    the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
+    if not session or not udids:
+        return False
+    keep = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "bin", "sim-lease")
+        loader = importlib.machinery.SourceFileLoader("sim_lease", path)
+        spec = importlib.util.spec_from_loader("sim_lease", loader)
+        lease = importlib.util.module_from_spec(spec)
+        loader.exec_module(lease)
+        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+    except Exception:
+        return False
+    finally:
+        sys.dont_write_bytecode = keep
+    return all(u.casefold() in held for u in udids)
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch as simulator-boot-lease."""
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3776,9 +3803,11 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
-        shut_down.append(name)
-    for name in shut_down:
+        shut_down.append((name, [h["udid"] for h in hits]))
+    for name, udids in shut_down:
         if tool == SIM_MCP:
+            if sim_lease_holds(session, udids):
+                continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
                    "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
@@ -4539,7 +4568,8 @@ def judge(payload) -> None:
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
         if tool_input.get("action") == "launch" and names:
-            sim_boot_refusal(tool, names)
+            sid = payload.get("session_id") if isinstance(payload, dict) else ""
+            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
         return
 
     if tool not in WRITE_TOOLS:

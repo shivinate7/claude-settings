@@ -60,6 +60,7 @@ RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
+SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -70,6 +71,8 @@ TARGETS = {
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
     "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override"),
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
+    # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
+    "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2114,6 +2117,48 @@ MUTATIONS = [
      '        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
      '        hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
+    # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
+    ("simulator-boot-lease: the lease's session is not compared",
+     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}',
+     '                if e.get("slot") in lease.SLOT_UDID}', "guard",
+     "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
+    ("simulator-boot-lease: an empty session may match an empty lease session",
+     '    if not session or not udids:\n        return False',
+     '    if not udids:\n        return False', "guard",
+     "lease: a lease with an empty session does not match a payload with no session", "posix"),
+    ("simulator-boot-lease: every slot maps to Duo 1",
+     'held = {lease.SLOT_UDID[e["slot"]].casefold()',
+     'held = {lease.SLOT_UDID["1"].casefold()', "guard",
+     "lease allow: this session's live slot 2 lease", "posix"),
+    ("simulator-boot-lease: any held device allows a launch of any device",
+     '    return all(u.casefold() in held for u in udids)',
+     '    return bool(held)', "guard",
+     "lease: this session's slot 1 lease does not allow a launch of Duo 2", "posix"),
+    ("simulator-boot-lease: a lease that cannot be read allows",
+     '    except Exception:\n        return False\n    finally:\n        sys.dont_write_bytecode = keep',
+     '    except Exception:\n        return True\n    finally:\n        sys.dont_write_bytecode = keep', "guard",
+     "lease: a lease file that is not JSON keeps the refusal", "posix"),
+    ("sim-lease: a pid that is alive counts as live whatever its start time",
+     '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
+     '    return bool(entry.get("start")) and isinstance(pid, int) and bool(start_time(pid))', "simlease",
+     "lease: a reused pid (its start differs from the lease's) is refused", "posix"),
+    ("sim-lease: a pid that is dead counts as live",
+     '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
+     '    return bool(entry.get("start")) and isinstance(pid, int)', "simlease",
+     "lease: a dead lease (its pid is not alive) is refused", "posix"),
+    ("sim-lease: the live read takes the queue for the leases",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    return [e for e in data["queue"] if isinstance(e, dict) and is_live(e)]', "simlease",
+     "lease: this session only queued, not granted, is refused", "posix"),
+    ("sim-lease: the live read creates the lock file",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    open(os.path.join(state_dir(), "lock"), "a").close()\n'
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
+     "the lease read writes nothing", "posix"),
+    ("sim-lease: the pro slot maps to another device",
+     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3",',
+     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B4",', "simlease",
+     "lease allow: this session's live pro lease", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -2384,7 +2429,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target == "guard":
+    if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -2393,7 +2438,14 @@ def run_mutant(sources, work: str, entry):
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        mutate_shared.apply_mutant(tree, old, new)
+        # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
+        os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+        if target == "simlease":
+            with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        else:
+            mutate_shared.apply_mutant(tree, old, new)
+            shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
@@ -2433,7 +2485,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target != "guard":
+    elif target not in ("guard", "simlease"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
