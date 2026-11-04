@@ -16,7 +16,10 @@ For the rest, question_form.page_item_hit picks the item writes of this repo's w
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
-to that one prompt, once, and no other write changes the prompt. The page and the chat box share the eight judge
+to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
+shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
+uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on first read (module `__getattr__`), so an
+Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share the eight judge
 items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
@@ -141,6 +144,29 @@ NONE_DIRECTION_RULE = (
     "further pick from the owner, block it: the item should close and the note be filed as a step. "
     "The reason names no target."
 )
+# A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
+# NONE_DIRECTION_RULE, only for such a call. The mark's key comes from question_form, the one home, so the text is built
+# where it is used: the light-import exit paths never import question_form for it.
+WIDENING_TEMPLATE = (
+    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
+    "entry, a per-repo exception) must carry `%s: true`. Block an unmarked widening option, and name its option key in "
+    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
+    "option passes this rule. When unsure, allow."
+)
+
+
+def widening_rule():
+    """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
+    import question_form
+    return WIDENING_TEMPLATE % question_form.WIDENS_KEY
+
+
+def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
+    if name == "WIDENING_RULE":
+        return widening_rule()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
@@ -164,12 +190,18 @@ def writes_an_item(args):
     return args.get("collection") == "items"
 
 
+def sets_options(write):
+    """True for a judged set or update whose data has non-empty `options`."""
+    data = write.get("data") if write.get("op") in ("set", "update") else None
+    return isinstance(data, dict) and bool(data.get("options"))
+
+
 def is_reask(write):
     """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
     choice "none", and a note that is a string, non-empty after strip."""
-    data = write.get("data") if write.get("op") in ("set", "update") else None
-    if not isinstance(data, dict) or not data.get("options"):
+    if not sets_options(write):
         return False
+    data = write["data"]
     answer = data.get("lastAnswer")
     if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
         return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
@@ -249,7 +281,7 @@ def main():
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
-        reask = False
+        reask = widening = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -269,6 +301,7 @@ def main():
             shown = json.dumps(judged, ensure_ascii=False)
             units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
+            widening = any(sets_options(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
@@ -279,6 +312,8 @@ def main():
         full = prompt % shown
         if reask:
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
+        if widening:
+            full += "\n" + widening_rule()
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),

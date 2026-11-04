@@ -328,6 +328,9 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+WIDENS_KEY = "widens"  # the one home of the mark's key; call_judge.WIDENING_RULE names it too
+
+
 def widens_pick_hit(data) -> str:
     """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
     `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
@@ -340,7 +343,7 @@ def widens_pick_hit(data) -> str:
         return ""  # an absent or null pick picks nothing, so it never matches a keyless option
     keys = {p for p in pick if isinstance(p, str)}
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
-           and o.get("widens") is True for o in options):
+           and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
     return ""
 
