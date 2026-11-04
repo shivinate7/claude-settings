@@ -24,7 +24,8 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
+`item-field-rendered` (a field the page draws), `parked-line-id` (a meta/page write whose parked line has
+no usable id), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
@@ -944,6 +945,7 @@ def item_hit(op, entry):
 # check) and hooks/call_judge.py (the model review) both read it, so the two never disagree on a write.
 WAITING_ITEMS = "items"
 ITEM_OPS = ("set", "update", "str_replace")
+META_COLLECTION, META_PAGE = "meta", "page"
 
 
 def _git_root_of(cwd):
@@ -976,7 +978,8 @@ def is_waiting_page(tool_input, cwd) -> bool:
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page. The hit is the first
-    write that a rule refuses, else ("", "")."""
+    write that a rule refuses, else ("", ""). A write of the page's meta doc is judged for its parked list
+    but is no item write, so it is never in `writes`."""
     if not isinstance(tool_input, dict):
         return PASS, []
     if tool_input.get("action") == "batch":
@@ -984,12 +987,18 @@ def page_item_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
-    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+    metas = [(op, e) for op, e in entries
+             if op in ("set", "update") and e.get("collection") == META_COLLECTION and e.get("doc_id") == META_PAGE]
+    if not (writes or metas) or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return PASS, []
     for op, entry in writes:
         hit = item_hit(op, entry)
         if hit[0]:
             return hit, writes
+    for op, entry in metas:
+        hit = park_id_hit(op, entry, _write_data(entry))
+        if hit:
+            return (PARK_RULE, hit), writes
     return PASS, writes
 
 
@@ -1170,15 +1179,15 @@ ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that
                      "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
-def _item_fields(path):
-    """The list in the page's itemFields block, found with an HTML parser (script text is data, so a
-    string or a template literal holds no block). None when the file, the block or the list does not read,
-    and when the list is empty: a block that names no field is not a list to judge by."""
+def _page_block(path, block_id):
+    """The JSON value of the page's `<script type="application/json" id=block_id>` block, found with an HTML
+    parser (script text is data, so a string or a template literal holds no block). None when the file, the
+    block or its JSON does not read. The one reader of every block the guard takes from page.html."""
     class Block(HTMLParser):
         text, done = None, False
 
         def handle_starttag(self, tag, attrs):
-            if tag == "script" and self.text is None and dict(attrs).get("id") == "itemFields":
+            if tag == "script" and self.text is None and dict(attrs).get("id") == block_id:
                 self.text = []
 
         def handle_data(self, data):
@@ -1194,9 +1203,15 @@ def _item_fields(path):
             block = Block()
             block.feed(f.read())
             block.close()
-        fields = json.loads("".join(block.text or []))
+        return json.loads("".join(block.text or []))
     except Exception:
         return None
+
+
+def _item_fields(path):
+    """The list in the page's itemFields block. None when the block does not read as a list of strings, and
+    when the list is empty: a block that names no field is not a list to judge by."""
+    fields = _page_block(path, "itemFields")
     return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
@@ -1217,6 +1232,63 @@ def item_field_hit(op, entry, data) -> str:
         if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
             continue
         return "field " + str(key)
+    return ""
+
+
+# ------------------------------------------------------------------ a parked line's id
+#
+# docs/decisions/parked-line-id.md, rule `parked-line-id`, built against a named incident (incident in the
+# record): two parked lines with no id turned off Unpark and Drop on the page. The page takes a line live only
+# with a string id that fullmatches the pattern in its parkId block and is unique in the list (page.html, symbol
+# parkItems). That block is the one home of the pattern: the page and this code read it, nothing holds a copy.
+PARK_ID_SEAM = "PARK_ID_SEAM"
+PARK_ID_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html")
+PARK_RULE = "parked-line-id"
+PARK_REASON = ("The waiting page turns off Unpark and Drop on a parked line whose id is missing, not a string, "
+               "outside the pattern in its parkId block (skills/waiting-page/page.html) or repeated. Give every "
+               "line in this write a slug id, unique in the list; a write that removes one line carries the ids "
+               "of all the rest. "
+               "(decision parked-line-id, a parked line carries a unique id the page takes)")
+
+
+def _park_pattern(path):
+    """The compiled pattern in the page's parkId block, or None when the block is not a non-empty JSON string
+    that compiles: a block that does not read is unknown, not a pattern to judge by."""
+    text = _page_block(path, "parkId")
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        return re.compile(text)
+    except re.error:
+        return None
+
+
+def park_id_hit(op, entry, data) -> str:
+    """The matched text when this write of the page's meta doc sets a `parked` the page cannot take live.
+    A set judges `parked` when the data has it; an update only when it carries `parked`, and `{"__delete__":
+    true}` removes the list and passes. A str_replace and a page with no readable block pass."""
+    if op not in ("set", "update") or not isinstance(data, dict) or "parked" not in data:
+        return ""
+    parked = data["parked"]
+    if op == "update" and isinstance(parked, dict) and parked.get("__delete__") is True:
+        return ""
+    pattern = _park_pattern(os.environ.get(PARK_ID_SEAM) or PARK_ID_PAGE)
+    if pattern is None:
+        return ""
+    if not isinstance(parked, list):
+        return "parked is not a list"
+    seen = set()
+    for i, line in enumerate(parked):
+        if not isinstance(line, dict):
+            return "parked line %d is not an object" % i
+        pid = line.get("id")
+        if not isinstance(pid, str):
+            return "parked line %d has %s" % (i, "no id" if "id" not in line else "an id that is not a string")
+        if not pattern.fullmatch(pid):
+            return "parked line %d id %r does not match the parkId pattern" % (i, pid)
+        if pid in seen:
+            return "parked id %r repeats" % pid
+        seen.add(pid)
     return ""
 
 
@@ -1273,7 +1345,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
-                DEPARTS_RULE: PAGE_DEPARTS_REASON,
+                PARK_RULE: PARK_REASON, DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "

@@ -4221,6 +4221,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "parked-line-id":
+            refuse(tool, "deny", "parked-line-id", question_form.PAGE_REASONS["parked-line-id"], matched)
         if item_writes:
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:

@@ -496,6 +496,10 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 - Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
   With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
+To park a line: add `{id, ref, note}` to `meta/page.parked` in one update pinned with `if_version`. Set `id` to a slug of the `ref`
+(lowercase letters, digits and hyphens, 32 characters or fewer), unique in the list. The update carries the whole list, so keep each
+other line and its `id`. A line with no usable `id` has Unpark and Drop off, and the guard refuses the write (rule `parked-line-id`, its pattern is the page's `parkId` block).
+
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
