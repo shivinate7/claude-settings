@@ -24,9 +24,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.append(os.path.join(HERE, "..", "lint"))  # append: no lint module shadows a hook this suite imports
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -272,6 +277,19 @@ def case_local_time_fails_open_on_bad_shared_names():
     return not bad, "bad states: %s" % (bad or "none")
 
 
+def case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one():
+    """test-temp-standard: the first request of a run removes sibling run folders older than a day, and keeps newer ones."""
+    root = os.path.join(RUN_FOLDER, "sweep")
+    own, old, new = (os.path.join(root, "%d-%s" % (pid, uuid.uuid4().hex)) for pid in (1, 2, 3))
+    for folder in (own, old, new):
+        os.makedirs(folder)
+    stale = time.time() - 2 * 24 * 60 * 60
+    os.utime(old, (stale, stale))
+    _test_temp.sweep(root, own)
+    left = [os.path.isdir(folder) for folder in (own, old, new)]
+    return left == [True, False, True], "own, old, new kept: %s, want [True, False, True]" % left
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -292,6 +310,8 @@ CASES = [
      case_local_time_output_unchanged),
     ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
      case_local_time_fails_open_on_bad_shared_names),
+    ("(p) the run folder sweep removes an old sibling and keeps a new one",
+     case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one),
 ]
 
 
@@ -306,6 +326,7 @@ def main() -> int:
         failed += 0 if ok else 1
         print("%s  %s  (%s)" % ("PASS" if ok else "FAIL", name, note))
     print()
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
     if failed:
         print("test_shared_names FAIL: %d of %d cases wrong" % (failed, len(CASES)))
         return 1

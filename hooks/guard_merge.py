@@ -519,9 +519,10 @@ def role_call_of(segment: str):
 
 
 def _own_session_read(transcript: str, own_id: str):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
-    uses, newest, tagged_after = set(), None, False
+    """(tags, tagged_after, own_tags): the tags of the newest get_session result whose ccr.id is own_id, else
+    None, whether a set_session_tags call follows that result, and own_id's tags now: that result's tags (none
+    with no result), plus each tag a later set_session_tags call on own_id adds, minus each tag one removes."""
+    uses, newest, tagged_after, own_tags = set(), None, False, set()
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -537,6 +538,10 @@ def _own_session_read(transcript: str, own_id: str):
                     uses.add(block.get("id"))
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
                     tagged_after = True
+                    given = block.get("input")
+                    if isinstance(given, dict) and isinstance(given.get("session_ids"), list) and own_id in given["session_ids"]:
+                        own_tags |= {t for t in given.get("add") or () if isinstance(t, str)}
+                        own_tags -= {t for t in given.get("remove") or () if isinstance(t, str)}
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     body = block.get("content")
                     if isinstance(body, list):
@@ -545,15 +550,30 @@ def _own_session_read(transcript: str, own_id: str):
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
                             newest, tagged_after = ccr["tags"], False
+                            own_tags = {t for t in newest if isinstance(t, str)}
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest, tagged_after
+    return newest, tagged_after, own_tags
 
 
 def _own_get_session_tags(transcript: str, session_id: str):
     """The tags of the newest get_session result in this session's own transcript whose ccr.id is
     session_id (the session's own id, or a target's id for lane-closes-after-records), else None."""
     return _own_session_read(transcript, session_id)[0]
+
+
+def own_tier_tagged(transcript: str, own_id: str, tier: str) -> bool:
+    """True when this session's own tags carry cs-build:<tier>: the tags of its newest get_session record of
+    own_id, plus own set_session_tags adds and minus own removes since that record (with no record, the own adds
+    minus the own removes). False with no transcript or no own id, and on any read error (fails open: the
+    coordinator-scope rule judges only a proved coordinator)."""
+    try:
+        if not transcript or not own_id:
+            return False
+        _tags, _after, own_tags = _own_session_read(transcript, own_id)
+        return ROLE_TAG_PREFIX + tier in own_tags
+    except Exception:
+        return False
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -596,7 +616,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
+            tags, tagged_after, _own_tags = _own_session_read(transcript, own_id)
             if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
                 return ""
     except Exception:
