@@ -60,7 +60,7 @@ Check for:
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 
-If the repo has screens, the orchestrator runs design-review after a screen change. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
+If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. In round 2 and later, check that the design findings of round 1 still hold on the new head (decision `design-agents`). When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, sonnet`. Then list each finding with file, line
