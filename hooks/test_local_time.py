@@ -49,6 +49,8 @@ MODULE_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "loc
 ROOT = tempfile.mkdtemp(prefix="local_time_cases_")
 EMPTY_TZPATH = os.path.join(ROOT, "empty_tzpath")
 os.makedirs(EMPTY_TZPATH, exist_ok=True)
+NO_MODEL_PATH = os.path.join(ROOT, "no_model_path")  # an empty folder: no `claude` is found on it
+os.makedirs(NO_MODEL_PATH, exist_ok=True)
 FAILED = []
 
 LINE_FULL = re.compile(
@@ -316,6 +318,11 @@ def ov_type(cfg, prompt, session=OV_SESSION):
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=OV_NOW.isoformat())
+    # No model in these cases: the judge runs `claude` from PATH, so an empty PATH makes a plain Opus ask fail
+    # closed. The key is matched without case, because Windows keeps `Path` and a second key would race it.
+    for name in [key for key in env if key.upper() == "PATH"]:
+        del env[name]
+    env["PATH"] = NO_MODEL_PATH
     payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session,
                           "prompt": prompt, "cwd": HERE})
     try:
@@ -831,7 +838,7 @@ def case_opus_ask_two_roles_is_every_role():
           "take() returned %r for a reviewer spawn" % (took,))
 
 
-def case_opus_ask_logs_the_owner_words():
+def case_opus_ask_logs_the_grant_text():
     cfg, calls, _, _ = opus_type("use opus reviewers\nfor the audit", answer={"ok": True})
     grants = [line for line in ov_log(cfg) if "opus-grant" in line]
     check("opus ask: a judge-approved grant writes one opus-grant line to guard.log", len(grants) == 1,
@@ -880,7 +887,7 @@ def main():
         case_opus_ask_builders_only_lifts_builders()
         case_opus_ask_length_and_role_from_the_words()
         case_opus_ask_two_roles_is_every_role()
-        case_opus_ask_logs_the_owner_words()
+        case_opus_ask_logs_the_grant_text()
         case_opus_ask_full_size_prompt()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
