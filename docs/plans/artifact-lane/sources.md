@@ -24,7 +24,9 @@ read with `list_events`. Its scratch files were not carried over. Each quote nam
   one capability; its secret scan raised 5 false alarms, so degen cut its scan to secrets only. A later review says
   this repo's scan refuses 4 of those 5 strings (event 31f89299-0895-4716-aa51-d39823b17299). The 5 strings were not
   recovered.
-- fb-1512-1 (15:12 CST, event 300825af-c8df-44eb-a3ae-41d2d069eefa): "wb". Every repo's artifact copy lives on its
+- fb-1512-1 (15:12 CST, event 300825af-c8df-44eb-a3ae-41d2d069eefa): "wb". It answers the coordinator's revised
+  question (event f02abcb7-7474-4390-9b96-16384e4ee314, 15:12 CST), which recommended Wb and said: "the export should
+  save the HTML only when it actually changed". Every repo's artifact copy lives on its
   record branch (`roadmap`), pushed by the page writer with no PR. Degen moves its copy there and retires its export to
   call this repo's.
 - fb-1510-1: no owner message. The coordinator's standing note, quoted below.
