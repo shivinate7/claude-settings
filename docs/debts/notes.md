@@ -1176,6 +1176,8 @@
 - dropped-start-same-sha-silent: after the draft-and-ready remedy, a second dropped start on the same head sha posts nothing, since the marker is per sha (actions/ci-alarm/dropped.sh). Decision: opt-in-ci-templates-composite
 - dropped-start-fork-approval: a first-time fork PR waiting for approval has no run, so the alarm may call it dropped (actions/ci-alarm/dropped.sh). Decision: opt-in-ci-templates-composite
 - dropped-start-check-name-copy: dropped.sh holds its own copy of DRAFT_SKIP_CHECK; test_action.sh pins the two equal (actions/ci-alarm/dropped.sh). Decision: opt-in-ci-templates-composite
+- zizmor-env-unset-untested: `ZIZMOR_PATHS` in RUNNER_UNSET (bin/ci-job) has no red case. An exported value reaches only a zizmor step with no `with: paths`, and checks.yml always sets it. Decision: none
+- zizmor-paths-doc-drift: the `paths` input text in actions/zizmor/action.yml says "separated by spaces"; run.sh splits on spaces or newlines. Decision: none
 - scope-playwright-test-action-cost: an edit to actions/playwright-setup/test_action.py starts checks-guard and checks-shoot, though neither reads it; the `checks` job runs it. Cost: one guard job per edit. A `test_action.py` arm setting only `code` would drop it (.github/scripts/ci-scope.sh).
 - scope-shoot-md-no-carve-out: a .md under .github/shoot/ (none exists) would start checks-shoot and checks-guard; only actions/playwright-setup has the .md carve-out (.github/scripts/ci-scope.sh).
 - scope-playwright-comment-md: ci-scope.sh line 3 and lint/test_ci_scope.py lines 29-30 say the playwright-setup arm sets checks_guard without naming its .md exception; ci-scope.sh line 57 states it.
