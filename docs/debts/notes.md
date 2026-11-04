@@ -1177,3 +1177,5 @@
 - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
 - opus-plain-ask: `<child-session-event>`, `<standing_owner_message>`, `<channel>`, `<message>` and `<event>` frames are not cut before the plain Opus ask judge (`hooks/shared_names.py` `NOTICE_FRAMES`). Their text is rarely an Opus ask.
 - opus-plain-ask: `ASK_LENGTH` in `hooks/override.py` reads `1:30h` as 30h, and "an hour" as the 2h default. These are the owner's own words, so no hole.
+- opus-plain-ask: `_owner_turn_in` in `hooks/override.py` reads the record-level `origin` only. A `queued_command` attachment carries `attachment.origin`. Every one seen starts with `<task-notification>`, so no live path.
+- opus-plain-ask: a compaction summary and "[Request interrupted by user]" count as owner turns in `_owner_turn_in`. They matter only for the seed check.
