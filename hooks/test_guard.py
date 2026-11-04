@@ -24522,7 +24522,7 @@ FAMILY = "load-brake"
 #   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
 #         passes busy only when run_in_background is absent or exactly false. Any other value (true, a string,
 #         null, a number) is refused. Any Workflow is refused. The refusal says to wait for the load to drop, or
-#         to start the lane as an Agent call that leaves run_in_background out or sets it false. A disk reading
+#         to make this an Agent call that leaves run_in_background out or sets it false. A disk reading
 #         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
 #         an Agent or Task call too.
@@ -24720,7 +24720,9 @@ try:
                 # case reads each pair they return, not only the decision.
                 body = json.loads(sys.stdin.read())
                 out["hit"] = list(g.load_hit(body.get("tool_name"), body.get("tool_input")))
-                out["running"] = list(g.running_lane_hit(body, body.get("tool_name")))
+                # A guard with no running_agent_hit records None, which the check reports as a missing name.
+                running_hit = getattr(g, "running_agent_hit", None)
+                out["running"] = list(running_hit(body, body.get("tool_name"))) if running_hit else None
             else:
                 g.main()
         except SystemExit:
@@ -24751,10 +24753,13 @@ LB_ALL_HIGH = {"memory_pct": 99.0, "disk_free_gb": 1.0, "disk_total_gb": 926.0}
 LB_SPAWNS = (("Agent", "Agent"), ("Task", "Task"))
 LB_BG = ((True, "run_in_background true"), (None, "run_in_background left out"),
          (False, "run_in_background false"))
-LB_REMEDY = re.compile(re.escape("Wait until the load drops, or start this lane as an Agent call that leaves "
+LB_REMEDY = re.compile(re.escape("Wait until the load drops, or make this an Agent call that leaves "
                                  "run_in_background out or sets it false."), re.I)
 LB_FREE_DISK = re.compile(r"free disk space", re.I)   # the disk reading's remedy
 LB_FOREGROUND = re.compile(r"foreground", re.I)   # a busy refusal of an Agent or Task call never says this
+LB_BUSY_CITE = re.compile(r"starts no new lane or agent")   # the decision cite of a busy or full refusal
+LB_NO_NEW = re.compile(r"No new lane or agent starts")   # the first sentence of a full refusal
+LB_RUN_CITE = re.compile(r"stops a running agent")   # the decision cite of a running agent's full refusal
 
 
 def lb_gb(free, total):
@@ -25104,13 +25109,16 @@ for _short, _tool in LB_SPAWNS:
         if _bg is True:
             lb_add("%s, memory 91.7%%, %s: busy, refused, names the reading, gives the wait or Agent-call remedy"
                    % (_short, _say),
-                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY + (LB_REMEDY,),
-                                     background=_bg, lacks=(LB_FOREGROUND,)))
+                   lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny",
+                                     LB_MEM_BUSY + (LB_REMEDY, LB_BUSY_CITE), background=_bg,
+                                     lacks=(LB_FOREGROUND,)))
         else:
             lb_add("%s, memory 91.7%%, %s: busy, allowed" % (_short, _say),
                    lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=_bg))
-        lb_add("%s, memory 97.2%%, %s: full, refused, names the reading" % (_short, _say),
-               lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg))
+        lb_add("%s, memory 97.2%%, %s: full, refused, names the reading, says no new lane or agent starts"
+               % (_short, _say),
+               lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_NO_NEW,),
+                                 background=_bg))
         lb_add("%s, a read that raises, %s: allowed" % (_short, _say),
                lb_decision_check(_tool, "raise", "allow", background=_bg))
 
@@ -25272,18 +25280,18 @@ lb_add("a SubagentStop reads no load under the worst reading",
 # A RUNNING LANE. An agent's own shell or file write reads the load once, so a lane stops at full even while
 # its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls above read nothing.
 LB_AGENT = "a64a7f84210a8721d"
-LB_STOP_LANE = re.compile(r"Stop this lane now")
+LB_STOP_AGENT = re.compile(r"Stop this agent now")
 LB_WRITES = (("Bash", {"command": "echo hi"}), ("PowerShell", {"command": "Write-Output hi"}),
              ("Edit", {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}),
              ("Write", {"file_path": "{cwd}/notes.txt", "content": "a"}),
              ("MultiEdit", {"file_path": "{cwd}/notes.txt", "edits": [{"old_string": "a", "new_string": "b"}]}),
              ("NotebookEdit", {"notebook_path": "{cwd}/n.ipynb", "new_source": "a"}))
 for _tool, _given in LB_WRITES:
-    lb_add("an agent's %s, 3.1 GB free of 926 GB: full, refused, names the reading, tells the lane to stop" % _tool,
+    lb_add("an agent's %s, 3.1 GB free of 926 GB: full, refused, names the reading, tells the agent to stop" % _tool,
            lb_decision_check(_tool, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
-                             (lb_gb(3.1, 926), LB_STOP_LANE), tool_input=_given, agent=LB_AGENT))
+                             (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE), tool_input=_given, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 97.2%: full, refused, names the reading",
-       lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+       lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 91.7% and 9.4 GB free of 926 GB: busy, allowed, one read",
        lb_decision_check("Bash", lb_reading(memory_pct=91.7, disk_free_gb=9.4, disk_total_gb=926.0), "allow",
@@ -25393,7 +25401,7 @@ LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95
 
 
 def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads=1, agent=None):
-    """A direct call of load_hit (which "load_hit") or running_lane_hit (which "running_lane_hit") on the call's
+    """A direct call of load_hit (which "load_hit") or running_agent_hit (which "running_agent_hit") on the call's
     own payload, under a forced reading and `remote`. `deny` is None for the empty pair ("", ""), or the patterns
     the refusal's reason must name. `reads` is how many times the reader ran across the probe's two calls."""
     key = "hit" if which == "load_hit" else "running"
@@ -25404,6 +25412,8 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
         if got == "error":
             return False, reason
         called, pair = side.get("reads"), side.get(key)
+        if pair is None:
+            return False, "guard.py defines no %s" % which
         if not isinstance(pair, list) or len(pair) != 2:
             return False, "%s returned %r, want a pair" % (which, pair)
         if deny is None:
@@ -25428,9 +25438,9 @@ lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: loa
        lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
 lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
        lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_lane_hit returns the empty pair, "
+lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_agent_hit returns the empty pair, "
        "the reader never runs",
-       lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
+       lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
                     agent=LB_AGENT))
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
        lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
@@ -25449,18 +25459,18 @@ for _remote, _say in ((None, "unset"), ("false", "false")):
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: load_hit refuses, names the memory" % _say,
            lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote=_remote,
                         deny=LB_MEM_FULL))
-    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_lane_hit refuses, names the memory, "
-           "tells the lane to stop" % _say,
-           lb_hit_check("running_lane_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
-                        deny=LB_MEM_FULL + (LB_STOP_LANE,), agent=LB_AGENT))
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_agent_hit refuses, names the memory, "
+           "tells the agent to stop" % _say,
+           lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
+                        deny=LB_MEM_FULL + (LB_STOP_AGENT,), agent=LB_AGENT))
     lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: refused, names the memory, "
            "one read" % _say,
            lb_decision_check("Agent", LB_FULL_READING, "deny", LB_MEM_FULL, background=True, remote=_remote))
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: refused, names the memory" % _say,
            lb_decision_check("Workflow", LB_FULL_READING, "deny", LB_MEM_FULL, remote=_remote))
-    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the lane to stop"
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the agent to stop"
            % _say,
-           lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+           lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                              tool_input={"command": "echo hi"}, agent=LB_AGENT, remote=_remote))
 
 for _short, _tool in LB_TOOLS:

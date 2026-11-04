@@ -7,7 +7,7 @@ Run it from the repository root:
 
 Contract (the module's own docstring):
 - `brief_faults(text, current=())` lists the faults of one blind brief. A clean brief has none.
-  A brief must follow skills/design-explore/blind-brief.md: a `Lane kind: blind` line, a `Lane:` line,
+  A brief must follow skills/design-explore/blind-brief.md: a `Designer kind: blind` line, a `Designer:` line,
   the free sections Job and Device, and the fixed sections House rules and Deliver word for word. A
   free section may not name the current product, a screenshot or mockup, a path or link, the spec or
   tokens, or a keep or match rule, and holds no colour, font or spacing value. A Palette section, or any
@@ -16,7 +16,7 @@ Contract (the module's own docstring):
   each blind brief's faults, and a run with no blind lane unless the owner's words for none are given.
 - `--run DIR` checks every *.md brief in DIR: exit 0 clean, 1 with one line per fault, 2 unreadable.
 - As a PreToolUse hook on Agent and Task, a designer spawn is judged by its brief. A blind brief with
-  a fault, or an informed or directed brief with no `Blind lanes:` line of 1 or more (or `none` with
+  a fault, or an informed or directed brief with no `Blind designers:` line of 1 or more (or `none` with
   the owner's quoted words), is refused with rule `blind-brief`. Any other spawn passes. Junk input
   passes with no output.
 
@@ -85,7 +85,7 @@ def fixed(name):
     return body.split("\n## ", 1)[0].strip()
 
 
-def brief(job=JOB, device=DEVICE, palette=None, header="Lane kind: blind\nLane: packages-blind-1",
+def brief(job=JOB, device=DEVICE, palette=None, header="Designer kind: blind\nDesigner: packages-blind-1",
           extra=""):
     return "\n".join([
         header, "",
@@ -130,7 +130,7 @@ class BriefFaults(unittest.TestCase):
             self.assertIn("placeholder", codes(self.m.brief_faults(handle.read())))
 
     def test_duo_brief_is_refused(self):
-        found = codes(self.m.brief_faults("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        found = codes(self.m.brief_faults("Designer kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
         self.assertTrue({"outside", "section-missing"} <= found, found)
 
     def test_duo_keep_rule_is_refused(self):
@@ -273,9 +273,9 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn(key, codes(self.m.brief_faults(brief(device=DEVICE + "\n" + line))))
 
     def test_text_on_the_kind_line_or_a_second_kind_line_is_refused(self):
-        for header in ("Lane kind: blind, accent #3d5af1\nLane: packages-blind-1",
-                       "Lane kind: blind\nLane kind: blind #3d5af1\nLane: packages-blind-1",
-                       "Lane kind: blind\nLane kind: blind\nLane: packages-blind-1"):
+        for header in ("Designer kind: blind, accent #3d5af1\nDesigner: packages-blind-1",
+                       "Designer kind: blind\nDesigner kind: blind #3d5af1\nDesigner: packages-blind-1",
+                       "Designer kind: blind\nDesigner kind: blind\nDesigner: packages-blind-1"):
             with self.subTest(header=header):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
@@ -308,11 +308,11 @@ class BriefFaults(unittest.TestCase):
         self.assertIn("section-empty", codes(self.m.brief_faults(brief(device=""))))
 
     def test_text_outside_the_template_is_refused(self):
-        header = "Lane kind: blind\nLane: packages-blind-1\nSee the app before you start."
+        header = "Designer kind: blind\nDesigner: packages-blind-1\nSee the app before you start."
         self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
     def test_missing_lane_line_is_refused(self):
-        self.assertIn("lane", codes(self.m.brief_faults(brief(header="Lane kind: blind"))))
+        self.assertIn("lane", codes(self.m.brief_faults(brief(header="Designer kind: blind"))))
 
     def test_sub_heading_inside_job_passes(self):
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n### On mail day\nHe sorts by seller.")), [])
@@ -327,10 +327,17 @@ class BriefFaults(unittest.TestCase):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
 
     def test_lane_name_with_capitals_and_underscore_passes(self):
-        self.assertEqual(self.m.brief_faults(brief(header="Lane kind: blind\nLane: Pack_view-blind-1")), [])
+        self.assertEqual(self.m.brief_faults(brief(header="Designer kind: blind\nDesigner: Pack_view-blind-1")), [])
 
     def test_wrong_kind_line_is_refused(self):
-        self.assertIn("kind", codes(self.m.brief_faults(brief(header="Lane kind: informed\nLane: packages-blind-1"))))
+        self.assertIn("kind", codes(self.m.brief_faults(brief(header="Designer kind: informed\nDesigner: packages-blind-1"))))
+
+    def test_old_lane_kind_header_is_not_read_as_a_kind(self):
+        # Before the designer rename the header was `Lane kind: blind` and `Lane:`. kind_of reads only
+        # `Designer kind:`, so the old header names no kind, and run_faults refuses it for that.
+        old = brief(header="Lane kind: blind\nLane: packages-blind-1")
+        self.assertIsNone(self.m.kind_of(old))
+        self.assertIn("kind", codes(self.m.run_faults([old])))
 
 
 class RunFaults(unittest.TestCase):
@@ -340,18 +347,18 @@ class RunFaults(unittest.TestCase):
 
     def test_duo_run_with_no_blind_lane_is_refused(self):
         # The incident run: one brief, no blind lane.
-        found = codes(self.m.run_faults(["Lane kind: informed\nBlind lanes: 0\n\n" + DUO_BRIEF]))
+        found = codes(self.m.run_faults(["Designer kind: informed\nBlind designers: 0\n\n" + DUO_BRIEF]))
         self.assertIn("no-blind-lane", found)
 
     def test_run_with_a_brief_with_no_kind_is_refused(self):
         self.assertIn("kind", codes(self.m.run_faults([brief(), DUO_BRIEF])))
 
     def test_run_with_a_clean_blind_lane_passes(self):
-        informed = "Lane kind: informed\nBlind lanes: 1\n\nDraw the packages screen from the spec."
+        informed = "Designer kind: informed\nBlind designers: 1\n\nDraw the packages screen from the spec."
         self.assertEqual(self.m.run_faults([brief(), informed]), [])
 
     def test_run_with_only_informed_lanes_passes_on_owner_words(self):
-        informed = "Lane kind: informed\nBlind lanes: none\n\nDraw it."
+        informed = "Designer kind: informed\nBlind designers: none\n\nDraw it."
         self.assertEqual(self.m.run_faults([informed], owner_none="only informed lanes this time"), [])
 
     def test_run_with_a_bad_blind_lane_is_refused(self):
@@ -375,7 +382,7 @@ class Cli(unittest.TestCase):
     def test_duo_folder_exits_1_and_names_the_fault(self):
         with tempfile.TemporaryDirectory() as folder:
             with open(os.path.join(folder, "duo-informed-1.md"), "w", encoding="utf-8") as h:
-                h.write("Lane kind: informed\nBlind lanes: 0\n\n" + DUO_BRIEF)
+                h.write("Designer kind: informed\nBlind designers: 0\n\n" + DUO_BRIEF)
             done = run_cli("--run", folder)
             self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
             self.assertIn("no-blind-lane", done.stdout)
@@ -391,7 +398,7 @@ class Cli(unittest.TestCase):
     def test_owner_none_reaches_the_check(self):
         with tempfile.TemporaryDirectory() as folder:
             with open(os.path.join(folder, "packages-informed-1.md"), "w", encoding="utf-8") as h:
-                h.write("Lane kind: informed\nBlind lanes: none\n\nDraw it.")
+                h.write("Designer kind: informed\nBlind designers: none\n\nDraw it.")
             done = run_cli("--run", folder, "--owner-asked-none", "informed only")
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
@@ -567,7 +574,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.spawn(brief()), "")
 
     def test_duo_blind_designer_spawn_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("Designer kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
 
     def test_blind_spawn_with_keep_rule_is_refused_on_task_too(self):
         self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), tool="Task"))
@@ -576,32 +583,32 @@ class Hook(unittest.TestCase):
         self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), role="kit:designer"))
 
     def test_informed_spawn_with_no_blind_lanes_line_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: informed\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("Designer kind: informed\n\n" + DUO_BRIEF))
 
     def test_informed_spawn_with_zero_blind_lanes_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: directed, denser\nBlind lanes: 0\n\nDraw it."))
+        self.assertRefused(self.spawn("Designer kind: directed, denser\nBlind designers: 0\n\nDraw it."))
 
     def test_informed_spawn_with_blind_lanes_passes(self):
-        self.assertEqual(self.spawn("Lane kind: informed\nBlind lanes: 2\n\n" + DUO_BRIEF), "")
+        self.assertEqual(self.spawn("Designer kind: informed\nBlind designers: 2\n\n" + DUO_BRIEF), "")
 
     def test_informed_spawn_with_owner_none_passes(self):
-        self.assertEqual(self.spawn('Lane kind: informed\nBlind lanes: none, owner: "informed only"\n\nDraw it.'), "")
+        self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
     def test_owner_none_with_no_words_is_refused(self):
-        self.assertRefused(self.spawn("Lane kind: informed\nBlind lanes: none\n\nDraw it."))
+        self.assertRefused(self.spawn("Designer kind: informed\nBlind designers: none\n\nDraw it."))
 
     def test_blind_kind_after_a_preamble_is_judged(self):
-        self.assertRefused(self.spawn("You are the designer.\nLane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("You are the designer.\nDesigner kind: blind\nDesigner: duo-blind-1\n\n" + DUO_BRIEF))
 
     def test_informed_kind_after_a_preamble_is_judged(self):
-        self.assertRefused(self.spawn("You are the designer.\nLane kind: informed\n\nDraw it."))
+        self.assertRefused(self.spawn("You are the designer.\nDesigner kind: informed\n\nDraw it."))
 
     def test_designer_spawn_with_no_kind_passes(self):
         # A small change to one screen skips design-explore and names no kind.
         self.assertEqual(self.spawn(DUO_BRIEF), "")
 
     def test_other_role_passes(self):
-        self.assertEqual(self.spawn("Lane kind: blind\n" + DUO_BRIEF, role="builder"), "")
+        self.assertEqual(self.spawn("Designer kind: blind\n" + DUO_BRIEF, role="builder"), "")
 
     def test_other_tool_passes(self):
         self.assertEqual(self.hook({"tool_name": "Bash", "tool_input": {"command": "true"}}), "")
@@ -611,7 +618,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.hook("[]"), "")
 
     def test_refusal_is_logged(self):
-        self.spawn(brief(job=JOB + "\nKeep the current layout."))
+        self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout.")))
         with open(os.path.join(self.config.name, "guard.log"), encoding="utf-8") as handle:
             self.assertIn("blind-brief", handle.read())
 
@@ -704,17 +711,19 @@ class IosApps(unittest.TestCase):
         self.assertIn("ios-skill", reason_of(out))
 
     def test_informed_spawn_without_ios_apps_gets_ios_skill(self):
-        prompt = "Lane kind: informed\nBlind lanes: 2\n\nDraw the packages screens: the iPhone Duo, folded, then unfolded."
+        prompt = "Designer kind: informed\nBlind designers: 2\n\nDraw the packages screens: the iPhone Duo, folded, then unfolded."
         out = spawn_in(self.ios, prompt)
         self.assertTrue(out, "want a refusal, got no output")
         self.assertIn("ios-skill", reason_of(out))
 
     def test_informed_spawn_still_needs_its_blind_lanes_line(self):
-        prompt = "Lane kind: informed\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
-        self.assertIn("Blind lanes", reason_of(spawn_in(self.ios, prompt)))
+        prompt = "Designer kind: informed\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+        out = spawn_in(self.ios, prompt)
+        self.assertTrue(out, "want a refusal, got no output")
+        self.assertIn("Blind designers", reason_of(out))
 
     def test_informed_spawn_with_blind_lanes_and_ios_apps_passes(self):
-        prompt = "Lane kind: informed\nBlind lanes: 2\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+        prompt = "Designer kind: informed\nBlind designers: 2\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
         self.assertEqual(spawn_in(self.ios, prompt), "")
 
     def test_valid_ios_blind_brief_has_zero_faults(self):
