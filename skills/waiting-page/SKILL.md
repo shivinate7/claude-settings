@@ -179,8 +179,8 @@ project with a triage thread, it is triage. The page's name for it is `writer` i
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers").
 
-- Every other session sends its question to the writer, which writes the item. A lane's question
-  reaches the writer through its report to its orchestrator ("Add an item", step 0).
+- Every other session sends its question to the writer, which writes the item. A lane sends its question
+  to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -191,12 +191,12 @@ into `meta/page`. The writer watches the page ("Read the answers").
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
 (decision questions-go-to-owner, "Same turn to the page", owner 2026-11-01 23:31 CST). The chat ask is
-the reply, or, with nothing running, the terminal question box, which also counts as the send. The
+the reply. A repo with no waiting page asks in the reply or, with nothing running, the terminal question box. The
 writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 - The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
-  asks a yes/no. It passes only when the same turn sent the question to the writer, wrote a page item,
-  or opened the box. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
+  asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.
+  The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's

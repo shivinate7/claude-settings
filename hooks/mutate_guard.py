@@ -2112,7 +2112,8 @@ MUTATIONS = [
 # take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
-    ("lint/report_guard.py", ["lint/test_report_guard.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
+    ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
