@@ -1015,8 +1015,8 @@ def case_none_choice_with_note_holds_rule_once():
 
 # ------------------------------------------------------------------ the widening rule (decision uniform-over-variants)
 #
-# The owner's ruling (2026-11-03 22:28 CST): an option that widens what a shared tool accepts is marked `widens: true`,
-# and an unmarked widening option is refused. The judge is told in call_judge.WIDENING_RULE, appended once to the
+# An option that widens what a shared tool accepts is marked `widens: true`, and an unmarked widening option is
+# refused. The judge is told in call_judge.WIDENING_RULE, appended once to the
 # formatted PAGE_PROMPT for a judged write that sets or updates options. The mark's key is question_form.WIDENS_KEY.
 # A build without that name gets the sentinel, so a marked option carries no mark and the scope check fails on its cause.
 WIDENS_SENTINEL = "__no-WIDENS_KEY-in-question_form__"
