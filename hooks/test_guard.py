@@ -571,7 +571,7 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
-# Owner rulings 206 a and 207 a (2026-11-03 22:23 CST). PUSHSTRAY sits on `mylocal`, which tracks
+# Owner rulings 206 a and 207 a. PUSHSTRAY sits on `mylocal`, which tracks
 # origin/lane/x, with a `fork` remote the upstream does not name and push.default simple. PUSHLANE and
 # PUSHLANEMASTER sit on lanes cut from origin/main and origin/master: their upstreams are inherited, so
 # the stray-branch rule stays silent there. PUSHSELF sits on `feat`, which tracks origin/feat.
@@ -6906,7 +6906,7 @@ sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 
 # FALSE ALARMS: a guard that cries wolf is spent.
-# Re-pointed from allow by ruling 207 a (2026-11-03 22:23 CST): a non-forced push of main asks.
+# Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
 push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
 # PUSHMAIN has no upstream, so git refuses a bare push itself ("has no upstream branch"): no ask is needed.
 push_case("a bare push on main with no upstream is git's refusal, allows", "", "allow", cwd=PUSHMAIN)
@@ -6930,7 +6930,7 @@ sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
 
-# ASK, ruling 206 a (owner, 2026-11-03 22:23 CST). An implied destination (a bare push, HEAD, @, or a
+# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
 # colon-less refspec naming the current branch) that lands off the branch's upstream asks. PUSHSTRAY is
 # `mylocal`, whose upstream is origin/lane/x.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
@@ -6946,7 +6946,7 @@ push_case("stray branch, a second refspec that names the current branch asks",
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
-# ASK, ruling 207 a (owner, 2026-11-03 22:23 CST). A non-forced push whose destination is the literal
+# ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
@@ -6988,6 +6988,14 @@ push_case("another remote than the upstream's is silent", "fork HEAD", "allow", 
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
+# A dry run moves nothing, so it stays silent even at main. The dry-run check before push_ask_hit in
+# guard.py is what keeps these silent.
+push_case("a dry run to main, --dry-run origin HEAD:main, is silent", "--dry-run origin HEAD:main", "allow",
+          silent=True)
+push_case("a dry run to main, -n origin main, is silent", "-n origin main", "allow", silent=True)
+# Tags move no branch. On main tracking origin/main a bare push would ask main, so the tags check is what
+# keeps this one silent.
+push_case("--tags on main tracking origin/main is silent", "origin --tags", "allow", cwd=PUSHMAINUP, silent=True)
 # The main rule reads literal names. trunk is the default here, so a push to it is ordinary.
 push_case("trunk, named by origin/HEAD, is ordinary for the main rule", "origin HEAD:trunk", "allow",
           cwd=PUSHTRUNK, silent=True)
@@ -9490,8 +9498,10 @@ record_allow("a commit message that names a push to roadmap is text",
 
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
-    `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
-    `git config` read of push.default, and a HEAD push reads no push.default. The layout and extras files
+    `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
+    `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9523,9 +9533,12 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 1, "config": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
@@ -20463,8 +20476,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
-     "only, and reads the transcript only at the record branch", record_push_cost_case),
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
+     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+     record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
@@ -22566,7 +22580,7 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The two new asks of rulings 206 a and 207 a (2026-11-03 22:23 CST) are lifted by an owner override like any ask.
+    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
