@@ -908,10 +908,13 @@ public static class FileIdentity
     Check "read1: a read of a missing file still throws" ($R1Missing -eq 'threw')
 
     # ---- retry1: a file that Resolve-Failures recovers on retry leaves no failure behind -----------
-    # A first install: no install marker, and person files already sit at two names. A reader holds
-    # guard_pointer.py open with no delete sharing for 5 s. Move-OverFile gives up after about 2.5 s, and
-    # Resolve-Failures retries after 2 s, when the lock is gone. Such a run must exit 0, print the retry,
-    # write no 'failed' to the install log, and write the install marker.
+    # A first install: no install marker, and person files already sit at two names. The case holds
+    # guard_pointer.py open with no delete sharing until the run prints 'retrying in'. Resolve-Failures
+    # prints that line only after Move-OverFile has given up on the locked file. The case then releases
+    # the lock and waits for the run. The hold ends at that line, at the run's exit, or after 120 s, so
+    # the case does not depend on how fast the copy starts. Resolve-Failures retries after 2 s, when the
+    # lock is gone. Such a run must exit 0, print the retry, write no 'failed' to the install log, and
+    # write the install marker.
     $T1 = New-Scratch 'retry-install' @('hooks')
     $T1Hooks = Join-Path $T1.Cfg 'hooks'
     Write-FixtureFile (Join-Path $T1.Clone 'hooks\guard.py') '# guard v1'
@@ -928,7 +931,14 @@ public static class FileIdentity
         $pT1 = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $T1.Clone 'install.ps1') + '"') -PassThru -NoNewWindow -RedirectStandardOutput $T1Out -RedirectStandardError ($T1Out + '.err')
         # Reading Handle now keeps the exit code reachable after the process ends.
         $null = $pT1.Handle
-        Start-Sleep -Milliseconds 5000
+        # Holds the lock until the run prints its retry line, the run exits, or the deadline passes.
+        # The deadline only bounds the wait; no check reads the clock.
+        $T1Deadline = (Get-Date).AddSeconds(120)
+        $T1Retry = $false
+        while (-not $pT1.HasExited -and -not $T1Retry -and (Get-Date) -lt $T1Deadline) {
+            try { $T1Retry = (Test-Path -LiteralPath $T1Out) -and ((Get-RunText $T1Out) -match 'retrying in') } catch { $T1Retry = $false }
+            if (-not $T1Retry) { Start-Sleep -Milliseconds 100 }
+        }
         $T1Held.Dispose()
         $pT1.WaitForExit()
         $pT1.Refresh()
