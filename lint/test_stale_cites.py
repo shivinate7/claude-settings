@@ -794,7 +794,10 @@ class PinTests(unittest.TestCase):
 
 
 class CostTests(StaleCase):
-    """The check's cost is a contract: a few git starts, no markdown read when nothing was removed, no file written."""
+    """The check's cost is a contract. A range that removes or renames no path, and changes only Markdown outside
+    the rule files, starts three git processes and reads no blob. A removed or renamed path makes the check read the
+    tracked Markdown files. So does a name that a touched .py no longer defines. A changed file that is not Markdown
+    also reads the repo's decision records for its Home line, even when nothing was removed. No run writes a file."""
 
     def run_traced(self, rng):
         rc, out, commands = self.run_traced_commands(rng)
@@ -812,6 +815,18 @@ class CostTests(StaleCase):
         self.assertEqual(subs.count("ls-tree"), 1, subs)
         self.assertLessEqual(len(subs), 4, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "ls-tree"}, subs)
+
+    def test_a_range_that_edits_only_a_non_rule_markdown_file_starts_three_git_processes_and_reads_no_blob(self):
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- a debt note, edited\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # The findings and the report both return before a blob read for a Markdown file outside the rule files.
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"],
+                         "a Markdown edit outside the rule files started a git process beyond the check's three: %s" % subs)
 
     def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
         def change(repo):
