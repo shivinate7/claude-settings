@@ -622,9 +622,7 @@ publishes the page file, so the repo has one page and one publisher. The skill r
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
-The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
-never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
-publishes.
+Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 ## Update a repo's pages
 
