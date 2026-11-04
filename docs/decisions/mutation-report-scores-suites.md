@@ -76,7 +76,6 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 
 Open items, each a debt:
 
-- `banchi-replay-no-select`: a profile with no `select` runs every changed suite, and its rows do not say so.
 - `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
 
 On 2026-11-02 no CI check reads the replay. The owner rules on one.

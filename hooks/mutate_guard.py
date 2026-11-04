@@ -2241,8 +2241,8 @@ if not passed:
     print(result.detail)
     sys.exit(1)
 """
-# banchi's per-file selector (scripts/tests-for.py), named by both parts. A pull request older than the script has no
-# copy in its checkout, so a replay reads main's copy (`_select_suites`, hooks/mutate_shared.py).
+# banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
+# copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
 BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
     "q_max": {
