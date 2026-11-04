@@ -101,8 +101,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
     A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
     command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
-    (guard rule `command-in-item`). Each shell in `command` opens with its own `gh auth switch -u shivinate7`, or
-    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
+    (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
@@ -383,11 +382,8 @@ live page.
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
-3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
-   item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
-   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
-   session until the owner answers. Running work continues with no one to brake it. You may end the
-   turn: each agent's end wakes the session.
+3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
+   (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -629,9 +625,7 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
-The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
-never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
-publishes.
+Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 ## Update a repo's pages
 

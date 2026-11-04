@@ -16,7 +16,7 @@ The form comes from the `domain-modeling` skill in
 [mattpocock/skills](https://github.com/mattpocock/skills/tree/main/skills/engineering/domain-modeling):
 one name for each thing, and a list of names to avoid.
 
-The owner may use any word for a thing; a session reads it by meaning and writes the term, and the glossary gains no synonyms.
+The owner may use any word for a thing (`speak-one-name-per-thing`); the glossary gains no synonyms.
 
 ## Terms
 
