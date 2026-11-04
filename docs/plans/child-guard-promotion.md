@@ -81,7 +81,7 @@ Target for every row: 0 DUPLICATE copies left in a child.
 |---|---|---|---|---|---|---|---|
 | banchi (public, 52 rows) | 14 | 14 | 19 | 4 | 1 | 20 | target: 0 DUPLICATE copies left in a child; gap 17 |
 | mailaudit (public, 27 rows) | 6 | 1 | 17 | 0 | 3 | 11 | target: 0 DUPLICATE copies left in a child; gap 4 (1 guard, 3 prose) |
-| q_max (private, 30 rows) | 7 | 8 | 14 | 0 | 1 | 8 | target: 0 DUPLICATE copies left in a child; gap 8 |
+| q_max (private, 30 rows) | 6 | 8 | 15 | 0 | 1 | 8 | target: 0 DUPLICATE copies left in a child; gap 8 |
 | degen (private, 26 rows) | 5 | 3 | 14 | 1 | 3 | 13 | target: 0 DUPLICATE copies left in a child; gap 3 |
 | joyous (private, 19 rows) | 3 | 1 | 11 | 0 | 4 | 7 | target: 0 DUPLICATE copies left in a child; gap 1 |
 
@@ -212,7 +212,7 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 | 15 | harness/tests/all-jobs-passed.test.mjs | PROMOTE ? | lint/test_all_jobs_passed.py (lane all-jobs-passed-wiring) |
 | 16 | harness/ci-changes.mjs | STAYS | none |
 | 17 | harness/assert-node-floor.mjs | STAYS | none |
-| 18 | harness/load-files.mjs | PROMOTE | actions/code-check (lane mjs-load-files) |
+| 18 | harness/load-files.mjs | STAYS, partly | actions/code-check (lane mjs-load-files, PR #1135) |
 | 19 | tiers.yml, harness/probes/*, browser.yml | STAYS | none |
 | 20 | harness/browser/* | STAYS | none |
 | 21 | harness/specimen/* | STAYS | none |
@@ -406,7 +406,7 @@ copy, so no CI gap.
 - **cs files:** actions/code-check covers .mjs imports. Its standard.json skips the javascript
   typecheck (line 53: checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
 - **Done check:** a .mjs file with a broken import is red on the current code, green after.
-- **Child removals:** q_max row 18 (harness/load-files.mjs).
+- **Child removals:** q_max row 18 (harness/load-files.mjs) stays, partly. PR #1135 (lane mjs-load-files) found that the shared check misses a bare package absent from node_modules, and .ts files run through tsx. The child keeps its own check for those until its own tsc covers them.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 
 ### Not placed in a lane
