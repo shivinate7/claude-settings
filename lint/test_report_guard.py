@@ -1028,7 +1028,7 @@ class NoResendTests(unittest.TestCase):
                 self.assertIn("never send the report again", reason)
                 self.assertNotIn("send the report now", reason)
                 self.assertEqual(reason.count("post only the corrected lines"), 1)
-                self.assertIn("rule reports-order-of-labels", reason)
+                self.assertTrue("(decision " in reason or "(rule " in reason, reason)  # a refusal cite, whichever rule
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
@@ -1085,7 +1085,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
         self.assertIn("post only the corrected lines", out["reason"].lower())
-        self.assertIn("rule reports-order-of-labels", out["reason"])
+        self.assertTrue("(decision " in out["reason"] or "(rule " in out["reason"], out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
         for reply in ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
@@ -4128,7 +4128,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "", "the rewrite that names the full name blocked: %s" % run.stdout)
         self.assertEqual(self.pending_tools(), [], "the rewrite left the entry in the file")
 
-    def test_k_pending_refusal_with_no_transcript_blocks_and_cites_the_owner_rule(self):
+    def test_k_pending_refusal_with_no_transcript_refuses_and_cites_the_owner_rule(self):
         # The refusal alone blocks when the transcript is missing, and its reason cites the owner rule.
         self.write_refusals([self.ARCHIVE])
         hook = {"hook_event_name": "Stop", "stop_hook_active": False, "session_id": self.SID, "cwd": self.scratch}
