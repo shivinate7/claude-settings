@@ -96,8 +96,9 @@ python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --
 On a branch with a check rule, the script sets only the check list, with a PATCH. `strict` and every
 other rule stay. `merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no
 edit. A repo that pins a list there edits it too. The write needs an admin login. Push rights are
-not enough. A branch with protection but no check rule is refused. `protect.py` names its rules and
-sets nothing.
+not enough. A branch with protection but no check rule is refused. `protect.py` names the
+protection's keys and sets nothing. Do not add the check with `gh api` by hand: a PUT replaces the
+other rules. Ask the owner.
 
 ## 4. Cancel superseded runs
 
