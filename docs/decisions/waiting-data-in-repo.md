@@ -20,7 +20,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - The id `waiting-data-in-repo` names this decision. The page writer's step lives in the waiting-page skill, not in a rule.
 - The waiting page's copy is folder `waiting/` on the record branch. It holds five collections: `items`, `answers`, `groups`, `asks` and `meta`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind).
 - The mockups live in the page's `designData` block. The export saves that block as `waiting/page/designData.json`.
-- A kept mockup lands in the target repo's design folder on main, by PR (layout kind `design`, `docs/design` by default). The record branch holds the artifact page copies. Process-only: the artifact lane's reading of the owner's words "my repos' design folders" (fb-1458-1). The debt is `kept-mockup-never-merged`, which names the gap this closes.
+- A kept mockup lands in the repo's design folder on main, by PR (layout kind `design`, `docs/design` by default). The record branch holds the artifact page copies. Process-only: the artifact lane's reading of the owner's words "my repos' design folders" (fb-1458-1). The debt is `kept-mockup-never-merged`, which names the gap this closes.
 - Files use sorted keys, two-space indent and a final newline. An unchanged document stays byte-identical, so a commit shows only real change.
 - The page writer (skill `waiting-page`) copies the page at each wake and before each republish. It commits and pushes only when a file changed.
 - The export scans every value and key before it writes. It refuses when it finds a token, a key, a cookie or auth header, a password, an email address or a phone number. The refusal prints each find's file, path and kind. It never prints the value. The page writer fixes the item on the page first.
@@ -36,7 +36,7 @@ Known limits:
 - The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes.
 - A truncated fetch, such as a missed page of results, deletes the missed documents from the copy. Git history keeps them.
 
-Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's ruling of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.
+Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.
 
 Incidents:
 
