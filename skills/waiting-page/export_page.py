@@ -24,7 +24,7 @@ Verdict, one line, then exit:
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass.
-A personal fact in plain words passes too.
+A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
 
@@ -72,6 +72,10 @@ BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
 REFUSED, UNKNOWN, CRASH = 1, 2, 3
 
+STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
+                "Court", "Ct", "Place", "Pl", "Circle", "Terrace", "Parkway", "Pkwy", "Highway", "Hwy")
+STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
+               "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
@@ -90,6 +94,26 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
+    # Bare "Bearer <token>" with no header name: 20 or more token characters, so "Bearer tokens" prose passes.
+    ("bearer", re.compile(r"(?<![A-Za-z0-9])Bearer[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
+    # An env-style name ending in SECRET, TOKEN, KEY or COOKIE (capitals only) set to a literal that looks random: 8 or
+    # more characters with a letter and a digit. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass.
+    ("credential-name", re.compile(
+        r"(?<![A-Za-z0-9_])(?:[A-Z0-9]+_)*(?:SECRET|TOKEN|KEY|COOKIE)[\"']?[ \t]*[=:][ \t]*[\"']?"
+        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}")),
+    # A well-known cookie name set to a value of 8 or more characters with a digit in it.
+    ("cookie-value", re.compile(
+        r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
+        r"(?=[A-Za-z0-9+/_.~%-]*\d)[A-Za-z0-9+/_.~%-]{8,}", re.I)),
+    # A postal address. Street: a house number, one to three capitalised name words (or an ordinal such as 5th), then a
+    # capitalised or all-caps street word, so "step 3 on the road map" and "a 2 way merge" pass. PO box: needs the box number.
+    ("address", re.compile(
+        r"(?<![A-Za-z0-9_.-])\d{1,5}[ \t]+(?:(?:[A-Z][A-Za-z]*\.?|\d+(?:st|nd|rd|th))[ \t]+){1,3}"
+        r"(?:" + "|".join(w + "|" + w.upper() for w in STREET_WORDS) + r")\b(?![\w-])")),
+    ("address", re.compile(r"(?<![A-Za-z])P\.?[ \t]?O\.?[ \t]*Box[ \t]+\d+", re.I)),
+    # City, a USPS state code and a ZIP or ZIP+4, after a comma: "Austin, TX 78701".
+    ("address", re.compile(
+        r"(?<![A-Za-z0-9])[A-Z][A-Za-z.]*(?:[ \t][A-Z][A-Za-z.]*)*,[ \t]*(?:" + STATE_CODES + r")[ \t]+\d{5}(?:-\d{4})?(?!\d)")),
 )
 # A phone in a string has a country code and separated groups, or the "(xxx) xxx-xxxx" form, or groups of 3, 3 and 4
 # digits joined by one separator. A bare run of digits is never one: a PO number or a timestamp is not a phone.
@@ -122,7 +146,7 @@ def is_phone(text):
 
 def kinds_in(text):
     """The kinds of secret or personal data that `text` has the shape of, each once."""
-    found = [name for name, shape in SECRET_SHAPES if shape.search(text)]
+    found = list(dict.fromkeys(name for name, shape in SECRET_SHAPES if shape.search(text)))  # address has three shapes
     if is_phone(text):
         found.append("phone")
     return found

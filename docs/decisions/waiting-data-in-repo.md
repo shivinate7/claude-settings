@@ -11,7 +11,7 @@ The owner said not to take the ask verbatim, but the gripe is real. The id `wait
 - The page's design data is one file, `waiting/page/designData.json`. The mockups stay in the page HTML.
 - Files use sorted keys, two-space indent and a final newline. An unchanged document stays byte-identical, so a commit shows only real change.
 - The page writer (skill `waiting-page`) copies the page at each wake and before each republish. It commits and pushes only when a file changed.
-- The export script scans every value and key before it writes. It refuses when it finds a token, a key, a cookie or auth header, a password, an email address or a phone number. The refusal prints each find's file, path and kind. It never prints the value. The writer fixes the item on the page first.
+- The export script scans every value and key before it writes. It refuses when it finds a token, a key, a cookie or auth header, a password, a credential name set to a literal, a cookie value, a bare bearer token, an email address, a phone number or a postal address. The refusal prints each find's file, path and kind. It never prints the value. The writer fixes the item on the page first.
 - Recovery needs no live page. The rebuild mode writes batch files of at most 50 writes each. The writer sends them to a new page, then puts the design data back into the page.
 - The lint check flags a repo that has a waiting page but no `waiting/` folder on its record branch. It reads git refs. A missing ref, such as in a shallow clone, prints `unknown`. The check never passes or fails on that.
 - Tools read the folder name through `lint/layout.py`, never as a literal.
