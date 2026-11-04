@@ -9,7 +9,7 @@ An entry fires on a source when its matcher is `""`, `*` or missing, or when the
 - The refresh hook passes the hook input to `install.sh` in `CS_HOOK_INPUT`. `install.sh` reads `.source` from it, and with no readable input it takes `startup`.
 - A dropped entry runs only when it fires on that source, in the order of the repo `settings.json`. Its output is part of the refresh hook's output.
 - Its stdin is the text of `CS_HOOK_INPUT`, or empty when that is unset, as Claude Code gives a hook its input. It is never `install.sh` itself, which `bash -s` reads from stdin.
-- Each entry is bounded by its own `timeout` field, default 10 seconds, with `timeout`. A cut entry is logged as a WARNING, and the next entry runs. Without `timeout` on the machine, an entry runs unbounded.
+- Each entry is bounded by its own `timeout` field, default 10 seconds, with `timeout`. A cut entry is logged as a WARNING, and the next entry runs. Without `timeout` on the machine (macOS), a shell watchdog bounds the entry the same way: it runs the entry in its own process group and kills the group at the bound, so a grandchild does not outlive the cut.
 - Each run has `CLAUDE_CODE_REMOTE=true`: the install is in the cloud by definition. The repo's pull hook keeps its own cloud exit, and `actions/ste-lint/test_action.py` starts no background fetch.
 - A failing entry is logged and never fails the install. Matchers are anchored, so `startup` does not fire on `resume`, and `startup_x` does not fire on `startup`. If `install.sh` cannot read the entries, it logs a WARNING and runs none.
 - Without `jq`, `settings.json` is copied whole, nothing is dropped, and nothing runs here.

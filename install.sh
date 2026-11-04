@@ -1035,6 +1035,28 @@ if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
 fi
 
+# Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
+# sleeper each start under job control, so each leads its own process group (`set +m` inside keeps a
+# pipeline from splitting off into a group of its own): the sleeper's TERM then reaches
+# the entry and every grandchild it started, and a hook that forked cannot outlive the cut. The job-control
+# messages go to /dev/null. A TERM or KILL death status (143, 137) is returned as 124, the status `timeout`
+# gives, so the caller logs a cut the same way on both paths.
+start_entry_watchdog() {
+  sw_tmo=$1; sw_cmd=$2
+  set -m 2>/dev/null || :
+  ( set +m; printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true sh -c "$sw_cmd" ) &
+  sw_pid=$!
+  ( set +m; sleep "$sw_tmo"; kill -TERM -"$sw_pid" 2>/dev/null || kill -TERM "$sw_pid" 2>/dev/null ) >/dev/null 2>&1 &
+  sw_dog=$!
+  set +m 2>/dev/null || :
+  sw_rc=0
+  { wait "$sw_pid"; } 2>/dev/null || sw_rc=$?
+  kill -TERM -"$sw_dog" 2>/dev/null || kill -TERM "$sw_dog" 2>/dev/null
+  { wait "$sw_dog"; } 2>/dev/null || :
+  case "$sw_rc" in 143|137) sw_rc=124 ;; esac
+  return "$sw_rc"
+}
+
 # ---- cloud startup entries ---------------------------------------------------------------------
 # Decision cloud-start-hooks-run-fresh. The cloud settings.json above dropped each SessionStart entry
 # that fires on startup. Run those here, from "$SRC/settings.json" in file order, now that the hooks they
@@ -1069,9 +1091,9 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
     if command -v timeout >/dev/null 2>&1; then
       printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true timeout "$START_TMO" sh -c "$START_CMD" || START_RC=$?
     else
-      printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true sh -c "$START_CMD" || START_RC=$?
+      start_entry_watchdog "$START_TMO" "$START_CMD" || START_RC=$?
     fi
-    if [ "$START_RC" = 124 ] && command -v timeout >/dev/null 2>&1; then
+    if [ "$START_RC" = 124 ]; then
       log "WARNING: a startup entry from $SRC/settings.json was cut after ${START_TMO}s, and the next one runs: $START_CMD"
     elif [ "$START_RC" != 0 ]; then
       log "WARNING: a startup entry from $SRC/settings.json exited $START_RC and was skipped: $START_CMD"
