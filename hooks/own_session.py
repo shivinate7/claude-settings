@@ -8,8 +8,10 @@ Cost: one transcript read per call, no file written.
 import json
 import re
 
-# A get_session result for another session can arrive as that session's untrusted text, wrapped in one tag.
-_OTHER_SESSION = re.compile(r'<other-session nonce="[^"]*" untrusted="true">(.*)</other-session>', re.DOTALL)
+# A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
+# the record, then a closing tag. Only a closing tag with the opening nonce ends the wrapper.
+_OTHER_SESSION = re.compile(
+    r'<other-session nonce="([0-9A-Fa-f]+)" untrusted="true">(.*)</other-session nonce="\1">', re.DOTALL)
 _CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
 
 
@@ -28,6 +30,20 @@ def _created_session_id(body):
                 return parsed[key]
     found = _CREATED_ID.search(body)
     return found.group(0) if found else None
+
+
+def _record_json(body):
+    """The record a get_session body holds: bare JSON, or the one JSON object a nonce-matched wrapper holds.
+    Anything else raises ValueError: text after the object, a closer with another nonce, an open wrapper."""
+    wrapped = _OTHER_SESSION.fullmatch(body.strip())
+    if not wrapped:
+        return json.loads(body)
+    inner = wrapped.group(2)
+    start = inner.index("{")  # ValueError when the wrapper holds no object
+    record, end = json.JSONDecoder().raw_decode(inner, start)
+    if inner[end:].strip():
+        raise ValueError("text after the record")
+    return record
 
 
 def own_session_read(transcript, own_id, created=False):
@@ -70,11 +86,8 @@ def own_session_read(transcript, own_id, created=False):
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
                         continue
-                    if isinstance(body, str):  # only the body the wrapper holds is parsed
-                        wrapped = _OTHER_SESSION.fullmatch(body.strip())
-                        body = wrapped.group(1).strip() if wrapped else body
                     try:
-                        ccr = json.loads(body)["ccr"]
+                        ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
                             newest, tagged_after = ccr["tags"], False
                             found = ccr.get("parent_session_id")
