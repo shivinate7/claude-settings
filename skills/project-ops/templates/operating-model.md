@@ -68,7 +68,7 @@ parent, or miss a message while busy.
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
 - A standing session runs until autocompact. The coordinator rotates one only when it goes stale
-  or breaks: at once after a slip. A slip is a re-asked question, a reply that contradicts the
+  or breaks. A session breaks when it slips: a re-asked question, a reply that contradicts the
   roadmap, or a missed ruling (claude-settings decision `session-tiers`, owner, 2026-11-01 17:56 CST).
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
