@@ -57,6 +57,23 @@ opens no window. Never drive Device Hub to fold.
 - `hinge` uses private Apple APIs, so an Xcode update can break it. Then the owner folds by hand:
   Xcode > Open Developer Tool > Device Hub has Closed, Partial and Open buttons.
 
+## Sharing the Mac
+
+Every session on this Mac shares its builds, its simulators and its disk. Each rule here holds in every repo on the Mac. Degen and home each copied these rules. This section is their one home.
+
+- **One build at a time** (the one-build rule, degen `one-xcode-build-at-a-time`). Each session runs at most one Xcode build or test at a time, across all its agents. An Xcode build, `swift test` and `make native-check` each count. Load average is not the build gate (owner, 2026-11-02 21:28 CST). The owner then dropped the CPU and memory checks (owner, 2026-11-02 21:54 and 21:55 CST). A simulator crash means the Mac is overloaded: slow down and queue, and never retry at once (owner, 2026-10-27 19:33 CDT).
+- **Leased simulators** (the lease rule, degen `shared-sim-lease`). No repo creates a simulator. Each session leases a phone simulator from the Mac sim gatekeeper, which runs one queue for all sessions (owner, 2026-11-02 13:49 CST).
+- **Phone simulators.** Claude may use three. Optimize every app for Duo 1 and the 18 Pro, Duo first (owner, 2026-10-26).
+  - Slot 1, Duo 1: `3553660D-315C-4B9C-8614-039D7A5B637E`, iOS 27.1 (owner, 2026-11-02 14:47 CST). Fold it with `hinge`, as above.
+  - Slot 2, Duo 2: `801F55F4-F666-4C6D-AB04-7DF77C953974`.
+  - iPhone 18 Pro: `8787FE1C-48CC-4213-9B5C-8605AFE7F9B3`. It takes one of the two phone slots.
+- **Boot bars** (degen `shared-sim-lease`). At most two phone simulators boot, one per slot (owner, 2026-11-02 14:23 CST). A phone simulator boots only while the 5-minute load is under 100. Slot 2 boots only while the 5-minute load is under 60 and slot 1 is in use (owner, 2026-11-02 14:28 CST). Boots go one at a time, and each needs a 1-minute load under 60 (Mac sim gatekeeper, 14:34 CST, process only). The 18 Pro boots only when no iPhone is booted (owner, 2026-11-02 13:51 CST). `bin/sim-test` does the same.
+- **Holder's duties.** A session that holds a phone simulator messages the Mac sim gatekeeper when it starts and when it ends. It shuts down each simulator it boots, after its check. It leaves each Duo as it found it, with no app running. It deletes and erases nothing. If a boot fails with "Data Migration Failed" while the 5-minute load is under 100, it shuts the device down and sends the gatekeeper the load (owner, 2026-11-02 14:28 CST). A session whose turn is busy passes its place to the next session that answers (owner, 2026-11-02 14:31 CST).
+- **Boot path.** Boot a simulator through `bin/sim-test`. It reuses a booted iPhone. With no iPhone booted, it boots the 18 Pro, unless two or more simulators are already booted. Then it boots nothing and exits. It takes one lock for the whole Mac, so a second run waits. It runs the tests, then shuts down what it booted. The guard rule `simulator-boot-bypass` refuses a raw boot (decision `sim-test-is-the-one-boot-path`, which names two boot paths that still skip the lock).
+- **Use sparingly.** Test in code first. Boot a simulator only for the one short Mac check per batch, or for a screen check of a large finished piece of work. A compile check that opens no simulator is always allowed: `xcodebuild build-for-testing -destination 'generic/platform=iOS Simulator'`. Phone installs on the real device stay allowed.
+- **Disk floor** (home's disk-floor ruling, owner, 2026-10-20 21:45 CDT). Keep at least 15 GB free on the Mac (`df -h /System/Volumes/Data`). Check it before each build. Delete each lane's derived data and worktrees when its build or merge is done.
+- **Checks.** No check enforces the one-build rule, the boot bars or the slot rules. The 15 GB floor has no check. Guard rule `simulator-boot-cap` refuses a boot past the cap of two booted devices, or one that duplicates an idle device.
+
 ## Mockups
 
 This section is the one home of the iOS drawing rules. The designer, skill `design-explore` and skill
