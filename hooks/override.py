@@ -246,15 +246,21 @@ def _ask_scope(text):
     return length, roles.pop() if roles else None
 
 
-def _owner_turn_in(transcript):
-    """True when the transcript at path `transcript` holds an owner turn (lint/_transcript.py owner_text), not an isMeta
-    record, a `/effort`-style command record or a record whose origin kind is not human. Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes; never a full load."""
-    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
-        return False
+def _text_of(rec):
+    """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript
+    return _transcript.owner_text(rec, NOTICE_TAGS)
+
+
+def _owner_turn_in(transcript, prompt):
+    """True when the transcript at path `transcript` holds an owner turn, not an isMeta record, a `/effort`-style
+    command record, a record whose origin kind is not human, a promptSource "system" record, or a record whose text is
+    the prompt itself. Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes."""
+    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+        return False
     try:
         with open(transcript, "rb") as handle:
             while handle.tell() < SEED_READ_MAX:
@@ -265,17 +271,33 @@ def _owner_turn_in(transcript):
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("isMeta"):
+                if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system":
                     continue
                 origin = rec.get("origin")
                 if isinstance(origin, dict) and origin.get("kind", "human") != "human":
                     continue
-                text = _transcript.owner_text(rec, NOTICE_TAGS)
-                if text is not None and not text.lstrip().startswith(COMMAND_RECORDS):
+                text = _text_of(rec)
+                if text is not None and text.strip() != prompt.strip() and not text.lstrip().startswith(COMMAND_RECORDS):
                     return True
     except OSError:
         pass
     return False
+
+
+def _system_prompt_last(transcript, prompt):
+    """True when the transcript's last record is the prompt itself with promptSource "system": a timed check-in or
+    other harness turn. Cost: one open, the last SEED_READ_MAX bytes."""
+    if not isinstance(transcript, str):
+        return False
+    try:
+        with open(transcript, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - SEED_READ_MAX))
+            lines = handle.read().splitlines()
+        rec = json.loads(lines[-1])
+    except (OSError, ValueError, IndexError):
+        return False
+    return isinstance(rec, dict) and rec.get("promptSource") == "system" and (_text_of(rec) or "").strip() == prompt.strip()
 
 
 def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
@@ -284,7 +306,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
     caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
     the rules of the words. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a file, a machine-tag
     start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud session's seed prompt
-    (no owner turn in the transcript at path `transcript`). The guard.log line
+    (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in the transcript, has
+    promptSource "system". The guard.log line
     `opus-grant` holds the words that were judged."""
     if not isinstance(prompt, str):
         return None
@@ -297,7 +320,9 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
     text = _strip_blocks(prompt)
     if FIRED_TASK.search(prompt):  # a stored task, not typed words
         return None
-    if not OPUS_WORD.search(text) or (os.environ.get(LANE_ENV) and not _owner_turn_in(transcript)):
+    if not OPUS_WORD.search(text) or _system_prompt_last(transcript, prompt):
+        return None
+    if os.environ.get(LANE_ENV) and not _owner_turn_in(transcript, prompt):
         return None
     if judge is None:
         from call_judge import opus_ask as judge
