@@ -1033,7 +1033,8 @@ def refusal_reason(tools):
     return (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it." % names)
+        "and a line in the repo's debt notes file (notes.md) that names it "
+        "(decision refusals-reach-the-owner)." % names)
 
 
 def _marker_path(hook):
@@ -1307,7 +1308,7 @@ def main():
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1317,11 +1318,12 @@ def main():
         pass
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
-    refusal = refusal_reason(pending_refusals(hook, last_reply(hook)))
+    pending = pending_refusals(hook, last_reply(hook))
+    refusal = refusal_reason(pending)
 
     def stop_for_refusal():
         if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal}))
+            print(json.dumps({"decision": "block", "reason": refusal_reason(pending)}))
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
@@ -1386,7 +1388,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
             elif note:
                 print(json.dumps({"systemMessage": note}))
@@ -1436,10 +1438,8 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons)
-        if shape_ok:
-            reason += CORRECTION_TAIL
-        else:
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
+        if not shape_ok:
             write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))
     elif note:
