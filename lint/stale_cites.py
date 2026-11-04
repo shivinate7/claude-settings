@@ -7,14 +7,16 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
   STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
-            in that file at base (read with `ast`) and is not bound at head. A name counts when a module-level
-            def, class, assignment or import binds it, also under a module-level if or try, or when it is a
-            def directly in a module-level class. A name that moved but is still bound in the file is not
-            removed.
+            in that file at base (read with `ast`) and is not bound at head. `names_in` walks each module-level
+            statement, also inside a module-level if, try, with, for, while or match, never inside a def or
+            class. A name counts when a def, class, import or assignment binds it there, also a tuple, for,
+            with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
+            but is still bound in the file is not removed.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
-            `stale-cites: unknown, <path>:<line> ...` and never fails the run. Only a run that already reads
-            Markdown prints it; touching such a file never starts that read.
+            `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
+            removes a path or a Python name, since only then is Markdown read. A range that touches only such
+            files prints nothing and passes.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
@@ -206,16 +208,61 @@ def module_statements(body):
             yield from module_statements(part.body)
 
 
+def target_names(target):
+    """Each name one binding target binds: a name, or each name inside a tuple, list or starred target."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from target_names(target.value)
+
+
+def statement_expressions(node):
+    """Each expression node of one module-level statement. Nested statements are left out, since
+    `module_statements` yields them on their own, and so is a lambda body, which is its own scope."""
+    stack = [child for child in ast.iter_child_nodes(node) if not isinstance(child, ast.stmt)]
+    while stack:
+        child = stack.pop()
+        yield child
+        if not isinstance(child, ast.Lambda):
+            stack.extend(c for c in ast.iter_child_nodes(child) if not isinstance(c, ast.stmt))
+
+
+def target_bindings(statements):
+    """Names the module-level statements bind that py-facts `defined_names` does not read: each name in a
+    tuple, list or starred assignment target, a for target, a with-as target, and a walrus target."""
+    names = set()
+    for node in statements:
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            targets = [item.optional_vars for item in node.items if item.optional_vars is not None]
+        else:
+            targets = []
+        for target in targets:
+            names.update(target_names(target))
+        names.update(e.target.id for e in statement_expressions(node) if isinstance(e, ast.NamedExpr))
+    return names
+
+
 def names_in(source):
-    """Names a prose line can cite: each name py-facts `defined_names` finds in the module-level statements
-    (def, class, assignment, import; also under a module-level if or try), plus each def directly in a
-    module-level class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
+    """Names a prose line can cite, read from every module-level statement (`module_statements`): each name
+    py-facts `defined_names` finds (def, class, plain-name assignment, import), each name `target_bindings`
+    finds, and each def directly in a module-level class. A def nested in a function is no public name. Read
+    with `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
     flat = list(module_statements(tree.body))
     names = py_facts().defined_names(ast.Module(body=flat, type_ignores=[]))  # defined_names reads `.body` only
+    names.update(target_bindings(flat))
     for node in flat:
         if isinstance(node, ast.ClassDef):
             names.update(m.name for m in module_statements(node.body) if isinstance(m, FUNCTIONS))
@@ -313,7 +360,8 @@ class NameReader:
 
 class ForeignReader:
     """STALE002 unknown: a line that cites `file.mjs name` of a JavaScript or shell file the range touched. Those
-    names are not read, so the line is reported as unknown, never as a pass. Reports through `unknown`."""
+    names are not read, so the line is reported as unknown. Reports through `unknown`, and only when another
+    reader made the run read Markdown."""
     code = "STALE002"
     unknown = True
 
