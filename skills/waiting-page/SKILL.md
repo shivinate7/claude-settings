@@ -609,6 +609,7 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 
 The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
+The Status tab draws each phase id that its steps use, and a step with no phase goes under "No phase".
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
