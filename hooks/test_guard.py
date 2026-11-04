@@ -25514,9 +25514,10 @@ FAMILY = "simulator"
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
 #   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
 #                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
-#   simulator-boot-lease   refuses an MCP launch of a shut-down device with no lease, the sim-test lock held or
-#                          not (owner ruling shared-sim-lease, 2026-11-02). Judged after cap and twin. The reason
-#                          names sim-test and the lease. A booted device is never refused.
+#   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
+#                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
+#                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
+#                          device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -25609,12 +25610,12 @@ def register_simulator_boot_cases():
                  [twin_idle_rec]),
         "twin_recent": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_recent"), twin_rows()),
                         [dict(twin_idle_rec, at=sim_iso(10 * 60))]),
-        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrec"), twin_rows()),
+        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrecorded"), twin_rows()),
                             []),
-        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rt"),
+        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_runtime"),
                                                twin_rows(state_of_ut0_runtime=SIM_RT_OLD)),
                                [dict(twin_idle_rec, runtime=SIM_RT_OLD)]),
-        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_type"),
+        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_type"),
                                             twin_rows(type_of_ut0=SIM_TYPE_AIR)),
                             [dict(twin_idle_rec, deviceTypeIdentifier=SIM_TYPE_AIR)]),
         # The twin was booted 2 hours ago and shut down, then booted by hand: the live launchd_sim
@@ -25755,9 +25756,9 @@ def register_simulator_boot_cases():
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
     # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
     # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
-    # device would be refused by it before the cap or twin rule is read. Under the lease rule (owner ruling
-    # shared-sim-lease, 2026-11-02) every MCP launch of a shut-down device is refused by simulator-boot-lease
-    # once cap and twin pass, so the refusal here is the lease: it shows that cap and twin did not fire.
+    # device would be refused by it before the cap or twin rule is read. Every MCP launch of a shut-down device
+    # is refused by simulator-boot-lease once cap and twin pass, so the refusal here is the lease: it shows
+    # that cap and twin did not fire.
     add("lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease",
         "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
         env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
@@ -25912,9 +25913,9 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
        "allow", env_path=os_two_path, config=os_two_cfg)
 
-    # The sim-test lock does not decide an MCP launch (owner ruling shared-sim-lease, 2026-11-02): a shut-down
-    # device is refused by the lease whether the lock is held or free. So the held case names the lease, and
-    # no case reads the lock's age or its holder's liveness. The lock is one fixture, built just before its case.
+    # The sim-test lock does not decide an MCP launch: a shut-down device is refused by the lease whether the
+    # lock is held or free. So the held case names the lease, and no case reads the lock's age or its holder's
+    # liveness. The lock is one fixture, built just before its case.
     def lock_config(name, pid_text):
         cfg = os.path.join(ROOT, "simcfg_lock_" + name)
         lock = os.path.join(cfg, "state", "sim-test.lock")
