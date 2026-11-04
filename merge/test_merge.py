@@ -10011,6 +10011,47 @@ class RedMainBrake(Env):
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
 
+    # The way out of a red main is a one-time re-run of each red run (the owner's ruling of 2026-11-03 18:16 CST, item 166): no cap, and no run
+    # reads red or green differently. A run id is named only for a red run; an UNKNOWN verdict from a failed read has no run to re-run.
+    RERUN = re.compile(r"gh run rerun (\d+) --failed")
+
+    def reruns(self, text):
+        """-> the run ids that `text` names a one-time re-run for, in order."""
+        return self.RERUN.findall(text)
+
+    def test_a_red_main_refusal_names_one_rerun_of_the_red_run(self):
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        self.assertIn("run 901", out)
+        self.assertEqual(self.reruns(out), ["901"], "the refusal does not name `gh run rerun 901 --failed` once for the red run 901\n" + out)
+
+    def test_each_of_two_red_runs_of_two_workflow_files_names_its_own_rerun(self):
+        runs = [main_run(901, "failure"), main_run(902, "failure", name="links", event="schedule", path=LINKS_PATH)]
+        jobs = {901: self.OCT14[901], 902: [main_job("readme-links", "failure", 20)]}
+        rc, out, before = self.go(runs, jobs)
+        self.refused(rc, out, before)
+        self.assertIn("run 902 of links", out)
+        self.assertEqual(sorted(self.reruns(out)), ["901", "902"],
+                         "the refusal does not name one `gh run rerun <id> --failed` for each of the red runs 901 and 902\n" + out)
+
+    def test_an_unknown_verdict_from_a_failed_read_names_no_rerun(self):
+        for variant, (runs, jobs, read_fail) in {
+            "the runs read fails": ([], {}, {"runs_fail": "gh: HTTP 500: Server Error"}),
+            "the jobs read fails": ([main_run(901, "failure")], {}, {"jobs_fail": "HTTP 404"}),
+        }.items():
+            with self.subTest(variant=variant):
+                rc, out, before = self.go(runs, jobs, **read_fail)
+                self.refused(rc, out, before)
+                self.assertIn("UNKNOWN", out)
+                self.assertNotIn("gh run rerun", out, "the UNKNOWN refusal names a re-run where no red run is named, so no run id is there to re-run\n" + out)
+
+    def test_the_preview_line_of_a_red_main_names_the_same_rerun(self):
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertEqual(self.reruns(line[0]), ["901"], "the preview's main run line does not name `gh run rerun 901 --failed` once\n" + out)
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
