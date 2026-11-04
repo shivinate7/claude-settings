@@ -25,7 +25,7 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | lane | The unit of work. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. In a coordinator build a lane session runs it. In a solo or one-lane session an agent runs it. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | `workstream` |
 | batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
-| integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge` | — |
+| integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge`, `skills/ci-hygiene/SKILL.md` | — |
 | worktree | A linked git working tree under `.claude/worktrees/`, for one agent. The Agent tool's isolation or the EnterWorktree tool makes it. | `docs/decisions/lanes-start-in-tool-worktrees.md` | — |
 | handoff | Notes one holder writes so the next reader can continue. Two cases: a session's notes file, outside git, at `~/.claude/handoffs/<session_id>.md`, rewritten whole at each checkpoint and read by the session itself after a compaction; and a project-ops role's note to its successor. | `docs/decisions/precompact-handoff.md`, `skills/project-ops/SKILL.md` | `handover` |
 | ruling | The owner's answer to a question, or an arbiter's inside its own repo. | `rule:output-answer-has-a-home` | — |
