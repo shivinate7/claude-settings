@@ -1,6 +1,6 @@
 ---
 name: ci-hygiene
-description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene". Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
+description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene", or when a session batches lane PRs into one integration branch, or a batch's integration run is red. Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
 ---
 
 Written for GitHub Actions. The same ideas apply to other CI systems. Commands and YAML are in
