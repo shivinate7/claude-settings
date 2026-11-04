@@ -1,0 +1,9 @@
+{
+ "title": "One workflow tightens all governance prose in every repo, and binds prose to the code it describes",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 536,
+ "why": "Owner chat Nov 3 19:25-19:30 CST: a full Sonnet workflow with Opus judges at the end, for all repos, \"similar vibe to the run1 run2 audit of alignment\"; scope is \"any prose governance, rules (pointers) pulled into repos like their decisions, etc\", not CLAUDE.md alone; it should also \"develop the whole pointer/reference system ... to ensure our code is good at properly editing out all parts that touch or affect a piece of prose and vice versa\". Run in its own session that the coordinator starts, not in triage.",
+ "note": "Scope: CLAUDE.md, .claude/rules, docs/decisions, docs/rules, debts, skills and output style text in claude-settings, q_max, mailaudit, degen, joyous, home, ios-adblock and banchi (banchi CLAUDE.md stays with lane banchi-claude-md-cut). Parts: (1) the content check (page item 224 pick a: judge content, count bytes, cite the docs figure as a pointer; home decision claude-md-shrink); (2) per-repo cuts on draft PRs: restated parent rules become cites, folder-only text becomes path rules, stale text is fixed; (3) the pointer system: a change to code, a constant or a path finds each prose line that names it, and a change to a prose rule finds the code and checks that hold it. Builds on step stale-prose-standing (lane session_013NEJL29WWWGpGKkCXuFwhb, Nov 1) and step drift-audit-lanes; the new session reads both first. Inputs: 8 Opus audits in triage scratchpad /tmp/claude-0/-home-user/f60ae040-bcc1-59c6-a510-bc946ee428bc/scratchpad/audits/. The Opus judges need the owner's typed override in that session (guard agent-role-model).",
+ "updatedAt": "2026-11-04T01:32:00Z"
+}
