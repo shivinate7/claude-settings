@@ -3706,9 +3706,10 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        # Growth, in one process: the generic-heavy text at 600 blocks and at 1200 blocks, best of
-        # three each. Linear lint doubles with its input (ratio near 2, measured 2.0); a quadratic
-        # scan quadruples (near 4). The bound 3.0 sits between them.
+        # Growth, in one process: the generic-heavy text at 600 blocks and at 2400 blocks, best of
+        # three each, the two sizes alternated inside the loop so load hits both alike. Linear lint
+        # quadruples with its input (ratio near 4); a quadratic scan grows sixteenfold (near 16). The
+        # bound 8 sits between them.
         import time
 
         def text_with(blocks):
@@ -3719,23 +3720,23 @@ class UICopyRoundTwoTests(unittest.TestCase):
             lines.append("const y = <p>In order to go.</p>;")
             return "\n".join(lines) + "\n"
 
-        def best(text):
-            times = []
-            for _ in range(3):
-                started = time.perf_counter()
-                codes = self.check("a.tsx", text)
-                times.append(time.perf_counter() - started)
-            return min(times), codes
+        def timed(text):
+            started = time.perf_counter()
+            codes = self.check("a.tsx", text)
+            return time.perf_counter() - started, codes
 
         text = text_with(600)
         self.assertGreaterEqual(text.count("\n"), 4800)
-        once, codes = best(text)
+        longer = text_with(2400)
+        once = quadrupled = float("inf")
+        for _ in range(3):
+            elapsed, codes = timed(text)
+            once = min(once, elapsed)
+            quadrupled = min(quadrupled, timed(longer)[0])
         self.assertEqual(codes, ["STE011"])
-        longer = text_with(1200)
-        doubled, _ = best(longer)
-        self.assertLess(doubled / once, 3.0,
+        self.assertLess(quadrupled / once, 8.0,
                         "generic-heavy text of %d lines takes %.1fx as long as %d lines"
-                        % (longer.count("\n"), doubled / once, text.count("\n")))
+                        % (longer.count("\n"), quadrupled / once, text.count("\n")))
 
 
 class TurnReaderTests(unittest.TestCase):

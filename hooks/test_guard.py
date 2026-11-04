@@ -1111,25 +1111,21 @@ def _verify_fake_gh_delay(ghdir, delay):
             "fixture check failed in _verify_fake_gh_delay: no 'gh' fake resolvable on "
             "PATH=%r" % env["PATH"]
         )
-    # The same process times the fake and a bare interpreter start. Their difference is the delay alone,
-    # so a loaded machine slows both readings alike (a same-process difference, test-practices P5).
+    # Load can only lengthen a real wait, so the absolute bound cannot refuse a sound fake.
     started = time.perf_counter()
     result = subprocess.run([program], capture_output=True, text=True, env=env, timeout=60)
-    fake_s = time.perf_counter() - started
-    started = time.perf_counter()
-    subprocess.run([sys.executable, "-c", "pass"], capture_output=True, timeout=60)
-    bare_s = time.perf_counter() - started
+    elapsed = time.perf_counter() - started
     if result.stderr.strip():
         sys.exit(
             "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r wrote to "
             "stderr instead of delaying %ds (PATH=%r): %r"
             % (ghdir, delay, env["PATH"], result.stderr.strip())
         )
-    if fake_s - bare_s < delay / 2:
+    if elapsed < delay:
         sys.exit(
-            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r ran %.3fs, a "
-            "bare interpreter start %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to "
-            "nothing real on this PATH" % (ghdir, fake_s, bare_s, delay, env["PATH"])
+            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r ran %.3fs, under "
+            "its %ds delay (PATH=%r) -- the delay tool resolved to nothing real on this PATH"
+            % (ghdir, elapsed, delay, env["PATH"])
         )
 
 
@@ -14117,6 +14113,36 @@ def run_folder_sweep_case():
 FIXTURELESS_CHECKS.add(run_folder_sweep_case)
 LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and keeps a new one",
                          run_folder_sweep_case))
+
+
+def verify_fake_gh_delay_case():
+    """_verify_fake_gh_delay refuses a delayed gh fake that answers before its delay, and passes one that waits it.
+
+    The clock and the child run are injected, so each verdict reads only the timing it is given.
+    """
+    folder = os.path.join(ROOT, "short-gh-fake")
+    make_fake_gh(folder, "main")
+
+    def accepted(elapsed):
+        ticks = iter([0.0, elapsed])
+        with mock.patch("time.perf_counter", side_effect=lambda: next(ticks, elapsed)), \
+                mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            try:
+                _verify_fake_gh_delay(folder, delay=1)
+            except SystemExit:
+                return False
+        return True
+
+    if accepted(0.6):
+        return False, "a gh fake that answers in 0.6s under its 1s delay passes the fixture check"
+    if not accepted(1.0):
+        return False, "a gh fake that waits its full 1s delay is refused by the fixture check"
+    return True, "a gh fake that answers before its delay is refused, one that waits it passes"
+
+
+FIXTURELESS_CHECKS.add(verify_fake_gh_delay_case)
+LOG_CHECKS_EXTRA.append(("fixture: _verify_fake_gh_delay refuses a gh fake that answers before its delay",
+                         verify_fake_gh_delay_case))
 
 
 # --------------------------------------------------------------------------- git_reads.branch_is_ancestor: the registration
