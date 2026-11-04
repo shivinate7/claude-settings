@@ -62,8 +62,6 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the join. A red lane does not join. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
-   Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
-   Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
@@ -72,23 +70,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    no line was lost either. Run `lint/check_silent_undo.py` before the merge.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
-   Batch across sessions too. Before you open a PR, list the repo's open PRs. When another session's
-   lane passes its local checks at about the same time, offer one integration branch. A repo may
-   name one session to batch PRs and run each merge, on the owner's grant.
+   Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
    Monitor tool (decision `agents-wait-with-monitor`, agents wait with the Monitor tool). See
    `snippets.md`, section 9.
-   A cloud session waits on its PR subscription. At the start of a wait, it sets a `send_later`
-   check-in. It sets another after each red job, each wider apart. A run with a red job sends no
-   "all checks done" wake. Rule `git-ci-wait-checks-in` (a timed check-in while a run waits) holds
-   that rule. A red run posts one PR comment from its last job, the `ci-done-comment` template. That
-   comment wakes the session that watches the PR. Rule `git-ci-done-comment-wakes` (a red run's
-   comment wakes the watcher) holds that rule.
-10. **Prove each new check red once.** Break the check's target on a scratch copy. Watch the check
-    fail. Restore the target. A check you did not see go red is not proven. A pipe hides a check's
+   A cloud session waits on its PR subscription, with a `send_later` check-in (`git-ci-wait-checks-in`).
+   A red run's `ci-done-comment`, from the last job, wakes it (`git-ci-done-comment-wakes`).
+10. **Prove each new check red once** (`verification-trust-guard-after-red`; recipe: skill `fresh-prose`,
+    Proof). A pipe hides a check's
     exit code. `lint | tail -1` exits 0 when lint fails. So a commit after it runs on a red check.
     Decide on the command's own exit code. See `snippets.md`, section 10.
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
@@ -202,7 +194,9 @@ The seven opt-in templates of that decision:
 - `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
   claude-settings record text instead of naming the record. The caller needs checkout first.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
-  `sh githooks/main-ref/install.sh` in each clone.
+  `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
+  nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
+  while a copy is missing or behind main.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally,
   and fails when `CI` is set.
 
