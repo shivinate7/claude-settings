@@ -847,7 +847,8 @@ const choiceText = (k) => (k === NONE ? "none of these" : k === OVERTURN ? "over
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
-const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
+// A missing or blank label gives "", never "undefined", so a caller names the letter only.
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o && o.label != null && String(o.label).trim() ? shorten(String(o.label), 28) : ""; };
 // A multi item takes a list of option keys: `multi`, or `ranked`, which also orders them. A list is valid when it holds distinct keys of the item's options.
 const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
 const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
@@ -1089,7 +1090,11 @@ function problem(it) {
     if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
     const dup = ks.find((k, i) => ks.indexOf(k) !== i);
     if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
-    if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+    if (ks.includes(NONE)) {
+      // Name the option so the owner knows which one to send back for a fix. The letter is the one its card shows.
+      const lab = pickName(it, NONE), who = "Option " + letterOf(it, NONE) + (lab ? ', "' + lab + '",' : "");
+      return { text: who + ' has the key none. The page keeps that key for "None of these", so this decision cannot be answered.' + fix, blocks: true };
+    }
     const pic = pictureProblem(it); if (pic) return { text: pic + fix, blocks: true };
   }
   // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
@@ -1787,8 +1792,11 @@ function renderBar() {
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
 
-const TOLD = "Claude was told.";
-const NOT_TOLD = "No session was told; reply in the thread to wake one.";
+// Each says only what the page knows. The comment send is "a wake was sent": no session is known to have woken, and only a
+// record's `read` confirms a read. The writer reads asks/ at each wake and turn start (SKILL.md), so the unsent case says that.
+// SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
+const TOLD = "A wake was sent.";
+const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1845,7 +1853,7 @@ async function sendAll() {
     for (const it of st) {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
-      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
+      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
@@ -1856,7 +1864,7 @@ async function sendAll() {
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : NOT_TOLD);
+      setSentStatus(told ? TOLD : NOT_TOLD());
     }
   } finally { state.sending = false; renderBar(); }
 }
@@ -2067,7 +2075,7 @@ async function sendAsk() {
   const sent = s.sent;
   const cut = plain(text);
   const told = await notifyClaude("Asked on the waiting page. Writer: " + askWriter() + ". Ask " + id + ": " + cut.slice(0, ASK_NOTICE) + (cut.length > ASK_NOTICE ? "…" : "") + ".", can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD; renderAskForm(); }
+  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderAskForm(); }
 }
 // Undo deletes the record and puts the words back in the box, ahead of anything typed since. The window is read from the clock, as undoLeft does.
 async function undoAsk() {
