@@ -2092,6 +2092,8 @@ MUTATIONS = [
      '                    if not isinstance(ids, list) or own_id in ids:',
      '                    if isinstance(ids, list) and own_id in ids:', "guard",
      "a triage record then a tag call that names no sessions is refused"),
+    ("roadmap-one-writer: the push read memo is not cleared at the start of a call, so a second call reads the first call's branch",
+     '    PUSH_READS.clear()', '    pass', "guard", "two judge calls in one process"),
     ("roadmap-one-writer: HEAD as a destination is not resolved to the current branch",
      '    if target in ("HEAD", "@"):\n        return _push_current_branch(cwd)',
      '    if False:\n        return _push_current_branch(cwd)', "guard",

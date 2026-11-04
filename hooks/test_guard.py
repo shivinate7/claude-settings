@@ -9694,6 +9694,46 @@ def record_failed_read_case():
     return True, "a failed first read is no answer: the second read names roadmap, and the push is denied"
 
 
+def record_branch_clear_case():
+    """roadmap-one-writer: two judge calls in one process each read their own branch.
+
+    The push-read memo is keyed by folder and git arguments. judge_shell clears it at the start of each call, so a
+    call never reads a branch that an earlier call read. Here one checkout runs two calls with a checkout between
+    them: from feat, a HEAD push is allowed; then from roadmap, the same push is denied by the record-branch rule.
+    A memo that carried feat into the second call would allow the roadmap push. The memo must hold the branch read
+    after the first call, or the second call would prove nothing about the clear.
+    """
+    where = os.path.join(ROOT, "pushclear")
+    if not os.path.isdir(where):
+        make_repo(where, {"base.txt": "base\n"})
+        for args in (("checkout", "-q", "-b", "feat"), ("branch", "roadmap")):
+            done = run_vcs(where, *args)
+            if done.returncode != 0:
+                sys.exit("fixture setup failed in record_branch_clear_case: git %s: %s"
+                         % (args[0], done.stderr.strip()))
+    push = {"tool_name": "Bash", "tool_input": {"command": VCS + " push origin HEAD"}, "cwd": where,
+            "transcript_path": LANE_TRANSCRIPT}
+    materialize(LANE_TRANSCRIPT)
+    steps = [{"judge": push}, {"cwd": where, "git": ["checkout", "-q", "roadmap"]}, {"judge": push}]
+    run, why = _push_read_run(steps, False)
+    if run is None:
+        return False, why
+    first, second = run["results"]
+    if "crash" in (first[0], second[0]):
+        return False, "judge raised %s" % (first[1] if first[0] == "crash" else second[1])
+    if not run["memo_holds_head"][0]:
+        return False, "scope: the first call left no branch read in the memo, so the second call tests no stale read"
+    if first[0] != "allow":
+        return False, "the first call, from feat, got %s, want allow" % _show(first)
+    if not _denied_by_record_rule(second):
+        if second[0] == "allow":
+            return False, ("the second call, from roadmap after a checkout, got allow: "
+                           "it read the first call's branch, feat")
+        return False, ("the second call, from roadmap after a checkout, got %s, "
+                       "want deny under roadmap-one-writer" % _show(second))
+    return True, "each call reads its own branch: feat is allowed, then roadmap is denied after a checkout"
+
+
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
@@ -20619,6 +20659,8 @@ LOG_CHECKS = (
      "only, and reads the transcript only at the record branch", record_push_cost_case),
     ("roadmap-one-writer: a failed first git read is no answer, so a HEAD push from the record branch still denies",
      record_failed_read_case),
+    ("roadmap-one-writer: two judge calls in one process each read their own branch after a checkout",
+     record_branch_clear_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
