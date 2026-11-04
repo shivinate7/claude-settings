@@ -11258,9 +11258,12 @@ def parse_text(test, text):
     test.assertIsNotNone(rec, "parse_review refused a well-formed record:\n" + text)
     return rec
 
+def record_verdict(test, text, head=REVIEW_HEAD):
+    """-> (state, why) of the record, as review_state gives them."""
+    return review_fn(test, "review_state")(parse_text(test, text), head)
+
 def record_state(test, text, head=REVIEW_HEAD):
-    state, _why = review_fn(test, "review_state")(parse_text(test, text), head)
-    return state
+    return record_verdict(test, text, head)[0]
 
 def posted_body(test, out):
     """The record printed in `out`, from its marker line through its CI line: the text a lane posts."""
@@ -11403,7 +11406,46 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
         # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("design", why, f"why does not name the design-reviewer failure: {why!r}")
+
+    def test_a_reviewer_pass_in_the_last_round_does_not_clear_a_design_fail_in_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("design", why, f"why does not name the design-reviewer failure: {why!r}")
+
+    def test_a_design_fail_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("design", why, f"why does not name the design-reviewer failure: {why!r}")
+
+    def test_a_design_partial_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is PARTIAL, so the record must not read done")
+        self.assertIn("design", why, f"why does not name the design-reviewer failure: {why!r}")
+
+    def test_a_design_pass_in_a_later_round_after_a_design_fail_is_done(self):
+        # Pinning: the last design-reviewer line is PASS, so the design rule holds and the record reads done.
+        rounds = ("Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 2: design-reviewer, opus, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds)), "done")
+
+    def test_a_reviewer_fail_then_a_reviewer_pass_with_no_design_line_is_done(self):
+        # Pinning: no design-reviewer line at all, so the design rule does not apply to the record.
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
         self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
+
+    def test_a_design_reviewer_role_with_a_space_or_capitals_does_not_parse(self):
+        # Pinning: the role is exactly "design-reviewer". A misspelled role makes the record bad, so it can never read as done.
+        for role in ("design reviewer", "Design-Reviewer"):
+            with self.subTest(role=role):
+                text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: {role}, opus, FAIL"))
+                rec = review_fn(self, "parse_review")(text)
+                self.assertIsNone(rec, f"parse_review accepted the role {role!r}")
+                self.assertEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "bad", f"a record with the role {role!r} did not read bad")
 
     def test_a_delete_only_change_passed_in_round_one_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
@@ -11413,6 +11455,12 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
                 self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_guard_no_change_with_a_design_fail_in_round_one_is_done_and_names_design(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("design", why, f"why does not name the design-reviewer failure: {why!r}")
 
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
         # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.
