@@ -437,6 +437,8 @@ GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run report
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
+HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
+HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
@@ -8740,9 +8742,11 @@ sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y
 add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
     owner="y", env_path=NEED_ON, config=MERGECFG)
-sh("merge-checks: a gh slower than the guard waits is unknown, and denies",
-   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
-   env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+# max_seconds ends a guard that never times out its read at the ceiling, not after every slow call
+# (4 calls x 20 s): its mutant died in 98 s. Off Windows only: a `.cmd` fake cannot be killed on time there.
+add("merge-checks: a gh slower than the guard waits is unknown, and denies", "deny", "merge-checks",
+    carries="could not run", cwd=NOGIT, env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG,
+    max_seconds=HANG_CEILING_S if os.name != "nt" else None, command="gh pr merge 12 --squash")
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
 # so a settled, all-green head still reads as unknown and the guard cries wolf on passing CI.
 # c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
@@ -16532,10 +16536,17 @@ def decide(case):
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
-    result = subprocess.run(
-        command, input=payload, capture_output=True, text=True, env=env,
-        timeout=120, cwd=case.get("process_cwd") or None,
-    )
+    limit = case.get("max_seconds")
+    try:
+        # A case with a limit stops its guard at the limit, so a guard too slow fails at once, not at 120 s.
+        result = subprocess.run(
+            command, input=payload, capture_output=True, text=True, env=env,
+            timeout=min(120, limit + 1) if limit else 120, cwd=case.get("process_cwd") or None,
+        )
+    except subprocess.TimeoutExpired:
+        if not limit:
+            raise
+        return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
@@ -18176,8 +18187,6 @@ def merge_import_exits_case():
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
 
 
-HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
-HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
 
 
 def guard_merge_read_timeout():
