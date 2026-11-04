@@ -57,12 +57,11 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 4. **Compare.** Only now read the repo's design spec, tokens and design decisions. Spawn one
    design reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
    changed pages, the screenshots, the step's mockup in the design folder, and the full list. A
-   text-only change has no mockup, so its brief names the main screenshots from step 1 instead, plus
-   the lane's branch to diff against main. It judges each screen against the mockup, or against those
-   main screenshots when there is none, and against the repo's design rules, and sets each finding
-   against them. Do not change the list. Until the kept pair's PR merges, the mockup sits on the
-   step's design branch, which the brief names; the reviewer does not wait for that PR. The design
-   reviewer is not blind, so it never takes the place of Reviewer A or B.
+   text-only change has no mockup, so its brief names the main screenshots from step 1 instead, plus the lane's branch to diff against main. It
+   judges each screen against the mockup, or against those main screenshots when there is none, and
+   against the repo's design rules, and sets each finding against them. Do not change the list. The design reviewer is not blind, so it never takes the
+   place of Reviewer A or B.
+   Until the kept pair's PR merges, the mockup sits on the step's design branch, which the brief names; the reviewer does not wait for that PR.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
      before merge. The reviewers never fix. Send the fix to the builder.
