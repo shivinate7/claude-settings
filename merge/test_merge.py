@@ -2046,7 +2046,7 @@ class CutLanes(Env):
         self.assertFalse(self.lock_ref())
 
     def test_a_failed_dropped_lane_read_names_its_flag_not_the_no_override_line(self):
-        # the owner's flag lifts this stop, so the line that no override lifts is false here (plan row merge:dropped-lane-unread)
+        # the reason flag lifts this stop, so the line that no override lifts is false here (plan row merge:dropped-lane-unread)
         lane_batch(self, "lane1", "lane2")
         rc, out = self.unreadable_lane_log()
         self.assertEqual(rc, 1, out)
@@ -2110,7 +2110,7 @@ class CutLanes(Env):
             self.assertIn("reason flag", line)
 
     def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
-        # c110: the cleanup's kept line is the fallback when the owner overrides a failed first read.
+        # c110: the cleanup's kept line is the fallback when a reason flag lifts a failed first read.
         lane_batch(self, "lane1", "lane2")
         self.revert_on_batch(self.merge_of("lane1"))
         with self.first_lane_log_fails():
@@ -3459,6 +3459,18 @@ class GhHalf(Env):
         fields = self.gh_state("merge_fields") or []
         self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
         self.assertNotIn("commit_message", fields[0], "no flag was given, so the merge carries no commit message")
+
+    def test_the_dropped_lane_lift_is_written_into_the_merge_commit_message(self):
+        # the dropped-lane check's read is lifted by the same flag, so its line goes into the merge call too
+        lane_batch(self, "lane1", "lane2")
+        with CutLanes.first_lane_log_fails(self):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("dropped-lane check UNKNOWN", out)  # the scope: the lift happened
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertIn("commit_message", fields[0], "the dropped-lane lift is written into the merge commit message")
+        self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --undo-check-unknown-ok: octopus read it"})
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
         # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
@@ -5970,7 +5982,7 @@ class UnknownOverride(Env):
         self.assertIn("silently undoes", out)
 
     def test_the_pre_claim_unknown_stop_names_the_flag_not_the_no_override_line(self):
-        # the owner's flag lifts this stop, so the line that no override lifts is false here (before any claim is pushed)
+        # the reason flag lifts this stop, so the line that no override lifts is false here (before any claim is pushed)
         before = self.refs()
         with self.unreadable():
             rc, out = self.run_merge("7", "--confirm")
