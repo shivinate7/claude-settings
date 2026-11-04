@@ -848,7 +848,8 @@ const choiceText = (k) => (k === NONE ? "none of these" : k === OVERTURN ? "over
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
-const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
+// A missing or blank label gives "", never "undefined", so a caller names the letter only.
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o && o.label != null && String(o.label).trim() ? shorten(String(o.label), 28) : ""; };
 // A multi item takes a list of option keys: `multi`, or `ranked`, which also orders them. A list is valid when it holds distinct keys of the item's options.
 const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
 const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
@@ -856,7 +857,9 @@ const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size
 const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? (it.ranked === true ? it.pick : (it.options || []).map((o) => o.key).filter((k) => it.pick.includes(k))) : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
 const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
-const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
+// A ready line names an option by its title, or by its letter when the title is missing, as its chip does. The none-key block keeps pickName's "".
+const optName = (it, key) => pickName(it, key) || letterOf(it, key);
+const namesOf = (it, l) => { const n = l.map((k) => optName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
@@ -1103,7 +1106,11 @@ function problem(it) {
     if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
     const dup = ks.find((k, i) => ks.indexOf(k) !== i);
     if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
-    if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+    if (ks.includes(NONE)) {
+      // Name the option so the owner knows which one to send back for a fix. The letter is the one its card shows.
+      const lab = pickName(it, NONE), who = "Option " + letterOf(it, NONE) + (lab ? ', "' + lab + '",' : "");
+      return { text: who + ' has the key none. The page keeps that key for "None of these", so this decision cannot be answered.' + fix, blocks: true };
+    }
     const pic = pictureProblem(it); if (pic) return { text: pic + fix, blocks: true };
   }
   // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
@@ -1204,7 +1211,7 @@ function readyText(it) {
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
-  return "Ready to send: " + pickName(it, d.choice) + ", your choice.";
+  return "Ready to send: " + optName(it, d.choice) + ", your choice.";
 }
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
@@ -1548,7 +1555,7 @@ async function withdrawAll() {
       const ref = state.db.collection("answers").doc(it.id), cur = await ref.get();
       if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
       await ref.delete();
-    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
+    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Paste it in chat instead: " + it.n + " withdraw"; continue; }
     delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
     done.push({ it, prior, draft: null, changing: false, withdrawn: true, act: prior.act });
   }
@@ -1709,7 +1716,7 @@ function answeredEl(items, place) {
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
-    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Paste your answers in chat instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
   let wordsShown = false;
@@ -1750,7 +1757,7 @@ function renderList() {
 }
 const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
 // Only a line with no id is off. A view with no store has no meta/page, so it draws no parked block.
-const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.";
+const WHY_NOID = "The page's writer has not prepared this line yet. Paste your answer in chat instead.";
 // Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
 // No page id has the form "pk-<part>-<key>", so a parked id such as "h" meets no id of the page.
 function pkToggle(p, it, act, why, key) {
@@ -1846,8 +1853,13 @@ function renderBar() {
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
 
-const TOLD = "Claude was told.";
-const NOT_TOLD = "No session was told; reply in the thread to wake one.";
+// Each says only what the page knows. The comment send is "a wake was sent": no session is known to have woken, and only a
+// record's `read` confirms a read. The writer reads asks/ at each wake and turn start (SKILL.md), so the unsent case says that.
+// SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
+const TOLD = "A wake was sent.";
+const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1904,7 +1916,7 @@ async function sendAll() {
     for (const it of st) {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
-      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
+      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
@@ -1915,7 +1927,7 @@ async function sendAll() {
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : NOT_TOLD);
+      setSentStatus(told ? TOLD : ANSWER_NOT_TOLD);
     }
   } finally { state.sending = false; renderBar(); }
 }
@@ -2005,7 +2017,7 @@ function answerLine() {
 async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
-  if (await copyText(text)) { state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
   else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
   renderBar();
 });
@@ -2126,7 +2138,7 @@ async function sendAsk() {
   const sent = s.sent;
   const cut = plain(text);
   const told = await notifyClaude("Asked on the waiting page. Writer: " + askWriter() + ". Ask " + id + ": " + cut.slice(0, ASK_NOTICE) + (cut.length > ASK_NOTICE ? "…" : "") + ".", can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD; renderAskForm(); }
+  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderAskForm(); }
 }
 // Undo deletes the record and puts the words back in the box, ahead of anything typed since. The window is read from the clock, as undoLeft does.
 async function undoAsk() {
