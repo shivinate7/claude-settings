@@ -1182,3 +1182,4 @@
 - opus-plain-ask: in a cloud session, an owner's first Opus ask that is refused as a seed is refused again when he repeats it, because `_own_record` skips the earlier copy. Any other owner turn first lets it through.
 - opus-plain-ask: a seed record with more than one text block has joined text that differs from the prompt, so `_own_record` misses it and the seed counts as an owner turn.
 - opus-plain-ask: the check-in fixtures in `hooks/test_local_time.py` put the record in the transcript, the unmeasured shape, and none sets `isMeta`.
+- opus-plain-ask: while Claude Code omits the UserPromptSubmit `source` field, the plain Opus ask falls back to the transcript read, whose seed and check-in shapes at hook time are unmeasured.
