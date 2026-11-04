@@ -21,7 +21,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `docs/design/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`, `playwright-setup`). Callers pin them by commit SHA. |
@@ -281,6 +281,7 @@ Run it from the folder that holds the project: `sim-test <xcodebuild test args w
 It reuses the first booted iPhone. With none booted, it boots the shared iPhone 18 Pro, runs the tests, and shuts that simulator down, also on failure, INT and TERM.
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
 It never shuts down a simulator it did not boot. The exit code is xcodebuild's. It holds one Mac-wide lock for the whole run (`state/sim-test.lock` under the config folder). A second run waits for it, up to `SIM_TEST_LOCK_WAIT` seconds (default 300), then exits 1. It also stops a simulator whose SpringBoard crash-loops.
+On its own boot it first takes the pro lease from `bin/sim-lease`, the Mac-wide simulator queue: `sim-lease take --device duo|pro`, `give` and `status`. A take waits for its turn and the load bars (5-minute load under 100, 1-minute load under 60; slot 2 under 60), up to `SIM_LEASE_WAIT` seconds (default 300), then exits 1. A holder that dies is reaped by pid. It does nothing off macOS or under `CI`.
 
 ## Session tiers and a roadmap record for a repo
 

@@ -37,9 +37,7 @@ The record homes (decisions, debts, debt notes, plans, specs) come from the chec
 ## Publish the roadmap block
 
 The page writer alone publishes the page (skill waiting-page, "Update the roadmap block").
-It reads the live page first, splices this roadmap block in with `splice.py`, and publishes one at a time,
-never with `force`, with the capabilities `db` and `{comments: {}}`. This skill never calls
-`Artifact` for a page.
+This skill never calls `Artifact` for a page.
 
 ## Lane and grants
 

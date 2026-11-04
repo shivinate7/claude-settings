@@ -21,11 +21,9 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 ## Procedure
 
 1. **List the changed pages.** Name each changed page and route. Capture a screenshot of each
-   one at every size and theme it ships in. Use a headless or isolated browser. For a text-only change,
-   also capture the same screens on main at every size and theme. If a
-   page needs the owner's login, use it; otherwise use none
-   (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
-   owner's screen, say so in one line (`verification-announce-own-screen`). `bin/shoot` also writes
+   one at every size and theme it ships in. Use a headless or isolated browser
+   (`verification-browser-login-only-needed`, `verification-announce-own-screen`). For a text-only change,
+   also capture the same screens on main at every size and theme. `bin/shoot` also writes
    each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
    give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
@@ -97,10 +95,7 @@ It is not a review of a built screen.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- A change gets at most three review rounds (`roles-review-cap-three`). A change that only
-  deletes and adds nothing gets one round. A round is steps 2 to
-  5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
-  is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
-  note. Each points to its decision (`roles-review-cap-three`, `roles-findings-are-debts-or-notes`).
+- A round is steps 2 to 5, with a new pair of blind reviewers. Round cap and open findings:
+  `roles-review-cap-three`, `roles-findings-are-debts-or-notes`.
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
 - Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, a control beside its area, container queries, fluid tokens).
