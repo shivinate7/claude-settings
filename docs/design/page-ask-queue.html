@@ -972,7 +972,7 @@ function stackRow(a, n, mode, lab, labText) {
   if (mode === "failed") return `<li class="failed"${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts">${btn(a.id + "-copy", "Copy ask")}${ed}${rm}</span><p class="serr" role="alert">Not saved (permission-denied). Your words are kept here.</p></li>`;
   return `<li${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts">${ed}${rm}</span></li>`;
 }
-const stackList = (rows, lab, labText) => `<p class="stackh" id="stackH">Not sent yet</p><ol class="stack" aria-labelledby="stackH"${lbl(lab, labText)}>${rows.join("")}</ol>`;
+const stackList = (rows, lab, labText, head = "Not sent yet") => `<p class="stackh" id="stackH">${head}</p><ol class="stack" aria-labelledby="stackH"${lbl(lab, labText)}>${rows.join("")}</ol>`;
 
 // The line that answers Send and Undo: at the box, under the buttons.
 function sline(kind, o = {}) {
@@ -988,7 +988,8 @@ function sline(kind, o = {}) {
 
 // The box. `stackN` counts the asks in the list; the typed box adds one more to Send.
 function askForm({ hint, val = "", stackN = 0, busy = false, tray = "", lab, labText }) {
-  const n = stackN + (val.trim() ? 1 : 0);
+  // While a batch saves, Send counts only what it would send next: the box.
+  const n = (busy ? 0 : stackN) + (val.trim() ? 1 : 0);
   const go = n > 1 ? `Send ${n} asks` : "Send ask";
   const addOff = !val.trim() ? " disabled" : "", goOff = !n || busy ? " disabled" : "";
   return `<form class="askform" onsubmit="return false"${lbl(lab, labText, labText ? "new" : "today")}>
@@ -1004,9 +1005,9 @@ const KBD = '<span class="kbd"> Ctrl+Enter sends.</span>';
 const H = {
   empty: `<span>Add to list and Send ask turn on once you type. Asks go to ${WRITER}, which answers here or passes them on.${KBD}</span>`,
   typed: `<span>Asks go to ${WRITER}, which answers here or passes them on.${KBD}</span>`,
-  waiting: (n) => `<span>${n === 1 ? "1 ask is" : n + " asks are"} not sent yet. Add more, or send.${KBD}</span>`,
+  waiting: (n) => `<span>${n === 1 ? "Add more, or send it." : "Add more, or send them together."}${KBD}</span>`,
   withBox: (n) => `<span>Send takes the ${n} in the list and the one in the box.${KBD}</span>`,
-  retry: `<span>1 ask is not sent yet. Send ask tries it again.${KBD}</span>`,
+  retry: `<span>Send ask tries the one not saved again.${KBD}</span>`,
 };
 
 // Three sent asks, newest first, as the list draws them after the batch. One `at` for the batch.
@@ -1021,7 +1022,7 @@ function asksBody(s, lab, hide) {
   if (s === "several") return askForm({ hint: H.withBox(3), val: BOX4, stackN: 3, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, "idle", lab && i === 0, "Edit and Remove on each"))), lab, labText: "Send counts the list and the box" }) + ol(older());
   if (s === "edit") return askForm({ hint: H.waiting(3), stackN: 3, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, i === 1 ? "edit" : "idle", lab && i === 1, "edits in place, keeps its number"))) }) + ol(older());
   if (s === "removed") return askForm({ hint: H.waiting(2), stackN: 2, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, i === 2 ? "gone" : "idle", lab && i === 2, "Remove keeps the place, with Undo remove"))) }) + ol(older());
-  if (s === "send") return askForm({ hint: H.typed, val: "Also: can the", busy: true, stackN: 3, tray: sline("saving", { lab, labText: "the answer to Send, at the box" }) + stackList([stackRow(ASKS[0], 1, "saved"), stackRow(ASKS[1], 2, "saved"), stackRow(ASKS[2], 3, "saving", lab, "each write shows on its row")]), lab: false }) + ol(older());
+  if (s === "send") return askForm({ hint: H.typed, val: "Also: can the", busy: true, stackN: 3, tray: sline("saving", { lab, labText: "the answer to Send, at the box" }) + stackList([stackRow(ASKS[0], 1, "saved"), stackRow(ASKS[1], 2, "saved"), stackRow(ASKS[2], 3, "saving", lab, "each write shows on its row")], false, "", "Sending"), lab: false }) + ol(older());
   if (s === "sent") return askForm({ hint: H.empty, tray: sline("told", { undo: 7, lab, labText: "one Undo for the whole batch" }) }) + ol([...sentRows(["wait", "wait", "wait"], { o: {} }), ...older()]);
   if (s === "untold") return askForm({ hint: H.empty, tray: sline("untold", { undo: 5, lab, labText: "today's NOT_TOLD words, for the batch" }) }) + ol([...sentRows(["wait", "wait", "wait"]), ...older()]);
   if (s === "reach") {

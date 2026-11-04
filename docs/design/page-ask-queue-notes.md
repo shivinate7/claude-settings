@@ -57,6 +57,7 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
 
 - State `send`. `canTell` runs once, then one write per ask. Each row shows "Saving…" or "Saved". Send is off while the batch
   saves, as `s.busy` does today. The box and Add to list stay on, so the owner can type the next ask.
+- While the batch saves, the list's head reads "Sending", and the Send label counts only the box, so no ask is counted twice.
 - Every record of the batch gets the same `at`, as `sendAll` gives one `at` to each answer. So one clock serves the Undo
   (`undoLeft`), and a session's 10 s wait holds for each record.
 - One comment per Send, after the writes: "Asked on the waiting page. Writer: <writer>. 3 asks: <id>: <text>; …".
@@ -126,7 +127,8 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
 ## 14. Measured verdicts
 
 Headless Chrome, every state at 390, 800 and 1280, in light and dark. Checks: no sideways scroll, no element past the
-page edge, every Ask button at least 44 px high, the 390 hint at 66 px or less, and one Send box size at every state.
+page edge, and every Ask button at least 44 px high. Also: the 390 hint at 66 px or less, and one Send box size at every state.
+The edge and button checks went red on a broken copy, with a 900 px box and 30 px stack buttons.
 
 | State | 390 | 800 | 1280 |
 |---|---|---|---|
