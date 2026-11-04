@@ -1478,9 +1478,9 @@ def case_opus_ask_source_absent_falls_back_to_the_transcript():
 
 
 def case_opus_ask_loop_wakeup_check_in_without_its_record_never_grants():
-    # A check-in's record is not in the transcript when the hook fires, so the transcript reads see only the earlier owner
-    # turn. The source field alone must refuse the check-in's ask, short and full-size, local and cloud. The control is
-    # the same transcript with source "user": T2 is the Claude-written ask a check-in carries, and it grants.
+    # The fixture holds no record of the check-in, so the transcript reads see only the earlier owner turn. The source
+    # field alone must refuse the check-in's ask, short and full-size, local and cloud. The control is the same transcript
+    # with source "user": T2 is the Claude-written ask a check-in carries, and it grants.
     for shape, full in (("a short transcript", False), ("a full-size transcript", True)):
         for where, remote in (("a local session", None), ("a cloud session", CLOUD_SESSION)):
             first = owner_turn("set up the lane")
