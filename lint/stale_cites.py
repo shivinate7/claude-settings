@@ -25,15 +25,27 @@ Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAI
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
+The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
+line starts `stale-cites: report, `. It has two halves.
+  Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
+            code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test) and whether this range
+            touched its holder. A repo with no lint/rule_mechanisms.json prints no anchor line and no error.
+  Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
+            names it, and each mechanism row whose ref or test is it.
+
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
 A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
 --batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
 loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+The report adds, for a changed non-Markdown file, one `ls-tree` of docs/decisions and the mechanisms file (none when
+the run already listed the whole tree) and the `cat-file --batch`, which reads each decision's Home line and the
+mechanisms file once. A changed RULE_FILES file adds its base and head blobs and the mechanisms file to that read.
 """
 import argparse
 import ast
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -42,6 +54,7 @@ import sys
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
@@ -155,9 +168,9 @@ def parse_range(text):
 
 
 def changed_paths(diff_args):
-    """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
+    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, and added paths."""
     tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
-    removed, renamed, modified = [], {}, []
+    removed, renamed, modified, added = [], {}, [], []
     i = 0
     while i < len(tokens) and tokens[i]:
         status = tokens[i][0]
@@ -170,8 +183,10 @@ def changed_paths(diff_args):
             removed.append(tokens[i + 1])
         elif status == "M":
             modified.append(tokens[i + 1])
+        elif status == "A":
+            added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified
+    return removed, renamed, modified, added
 
 
 PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
@@ -246,9 +261,11 @@ def path_cites(line, gone, exotic):
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
-    def __init__(self, base, head, removed, renamed, modified, batch):
+    def __init__(self, base, head, removed, renamed, modified, batch, added=()):
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.unknowns = []
+        self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+        self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
@@ -338,45 +355,186 @@ class ForeignReader:
 READERS = (PathReader(), NameReader(), ForeignReader())
 
 
-def scan(range_text):
-    """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
-    diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified = changed_paths(diff_args)
+def find_stale(rng):
+    """{(path, line, code): [messages]}: the findings. Fills `rng.unknowns`."""
     found = {}
-    batch = BlobReader()
-    rng = Range(base, head, removed, renamed, modified, batch)
-    if not removed and not renamed and not rng.py_files:
-        return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
-    try:
-        active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
-        if all(getattr(reader, "unknown", False) for reader, _ in active):
-            return found, rng.unknowns  # an unknown line never starts the Markdown read
+    if not rng.removed and not rng.renamed and not rng.py_files:
+        return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
+    active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
+    if all(getattr(reader, "unknown", False) for reader, _ in active):
+        return found  # an unknown line never starts the Markdown read
 
-        excludes = exclude_patterns(".")
-        tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
-        tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
-        tracked = [t for t in tracked if t.endswith(".md")]
+    excludes = exclude_patterns(".")
+    rng.tree = head_tree(rng.head)
+    tracked = [t for t in tree_paths(rng.tree) if t.endswith(".md")]
 
-        for md in tracked:
-            if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
+    for md in tracked:
+        if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
+            continue
+        blob = rng.batch.get("%s:%s" % (rng.head, md))
+        if blob is None:
+            raise Unknown("%s is in the tree at %s but cannot be read" % (md, rng.head))
+        text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
+        for number, line in enumerate(text.split("\n"), 1):
+            off = disabled(line) if "ste-disable-line" in line else set()
+            claimed = set()
+            for reader, state in active:
+                if reader.code not in off:
+                    for message in reader.line(state, line, claimed):
+                        if getattr(reader, "unknown", False):
+                            rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                        else:
+                            found.setdefault((md, number, reader.code), []).append(message)
+    return found
+
+
+def head_tree(head, *paths):
+    """Entries `<mode> <type> <sha>\t<path>` of the head tree, or of the named folders and files, from one
+    `git ls-tree`."""
+    listing = git("ls-tree", "-r", "-z", head, *(["--"] + list(paths) if paths else []))
+    return [e for e in listing.decode("utf-8", "replace").split("\0") if "\t" in e]
+
+
+def tree_paths(entries):
+    """The tracked file paths of ls-tree entries: regular files only, no symlink or submodule."""
+    return [e.split("\t", 1)[1] for e in entries if e.split(" ", 1)[0] in ("100644", "100755")]
+
+
+# The report (decision stale-cites-at-merge). Its lines are no finding and never set the exit code.
+REPORT = "stale-cites: report, "
+MECHANISMS = "lint/rule_mechanisms.json"
+LAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.json")  # the one home of the folder name
+GUARD_MODULE = re.compile(r"hooks/guard[^/]*\.py\Z")  # the guard modules rule_audit.guard_paths reads
+WORKFLOW = ".github/workflows/checks.yml"
+HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+
+
+def anchor_sentences(text):
+    """{slug: the prose since the previous anchor, or the paragraph start, spaces collapsed}. An anchor inside a
+    code span is a mention of the form, not an anchor."""
+    found = {}
+    for block in re.split(r"\n[ \t]*\n", text.replace("\r\n", "\n")):
+        spans = [m.span() for m in CODE_SPAN.finditer(block)]
+        start = 0
+        for match in ANCHOR_RE.finditer(block):
+            if any(a <= match.start() < b for a, b in spans):
                 continue
-            blob = batch.get("%s:%s" % (head, md))
-            if blob is None:
-                raise Unknown("%s is in the tree at %s but cannot be read" % (md, head))
-            text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
-            for number, line in enumerate(text.split("\n"), 1):
-                off = disabled(line) if "ste-disable-line" in line else set()
-                claimed = set()
-                for reader, state in active:
-                    if reader.code not in off:
-                        for message in reader.line(state, line, claimed):
-                            if getattr(reader, "unknown", False):
-                                rng.unknowns.append("%s:%d: %s" % (md, number, message))
-                            else:
-                                found.setdefault((md, number, reader.code), []).append(message)
+            found[match.group(1)] = " ".join(block[start:match.start()].split())
+            start = match.end()
+    return found
+
+
+def decisions_dir():
+    with open(LAYOUT, encoding="utf-8") as f:
+        return json.load(f)["kinds"]["decisions"]["path"].strip("/")
+
+
+def mechanism_rows(rng):
+    """The `rules` object of lint/rule_mechanisms.json at head, or None for a repo that has none. One read."""
+    blob = rng.batch.get("%s:%s" % (rng.head, MECHANISMS))
+    if blob is None:
+        return None
+    rules = json.loads(blob.decode("utf-8", "replace")).get("rules")
+    if not isinstance(rules, dict):
+        raise Unknown("%s holds no rules object" % MECHANISMS)
+    return rules
+
+
+def holder_note(rng, mechanism):
+    """The holder of a mechanism row and whether the range touched it, as one phrase."""
+    kind, ref = mechanism.get("kind"), mechanism.get("ref")
+    if kind == "guard":
+        hit = sorted(p for p in rng.changed if GUARD_MODULE.match(p))
+        return "holder %s %s" % (", ".join(hit) if hit else "hooks/guard*.py", "touched" if hit else "untouched")
+    if kind == "check" and isinstance(ref, str):
+        return "holder %s %s" % (ref, "touched" if ref in rng.changed else "untouched")
+    if kind == "ci":
+        return "holder %s %s" % (WORKFLOW, "touched" if WORKFLOW in rng.changed else "untouched")
+    return "no holder file"
+
+
+def anchor_report(rng, rules):
+    """One line per anchor whose sentence differs between base and head in a rule file the range changed."""
+    lines = []
+    for path in (p.replace(os.sep, "/") for p in RULE_FILES):
+        if path not in rng.changed:
+            continue
+        old, new = rng.batch.get("%s:%s" % (rng.base, path)), rng.batch.get("%s:%s" % (rng.head, path))
+        before = anchor_sentences(old.decode("utf-8", "replace")) if old is not None else {}
+        after = anchor_sentences(new.decode("utf-8", "replace")) if new is not None else {}
+        for slug in sorted(s for s in set(before) | set(after) if before.get(s) != after.get(s)):
+            what = "added" if slug not in before else "removed" if slug not in after else "changed"
+            row = (rules.get(slug) or {}).get("mechanism")
+            if not isinstance(row, dict):
+                lines.append("%sanchor %s %s in %s; no row in %s" % (REPORT, slug, what, path, MECHANISMS))
+                continue
+            ref = row.get("ref")
+            lines.append("%sanchor %s %s in %s; kind %s%s%s; %s" % (
+                REPORT, slug, what, path, row.get("kind"), ", ref %s" % ref if ref else "",
+                ", test %s" % row["test"] if row.get("test") else "", holder_note(rng, row)))
+    return lines
+
+
+def home_report(rng, rules, entries):
+    """One line per changed code file that a decision's Home line or a mechanism row names."""
+    code = sorted(p for p in rng.changed if not p.endswith(".md"))
+    folder = decisions_dir()
+    homes = {}  # file -> decision stems whose Home names it
+    for path in tree_paths(e for e in entries if e.split("\t", 1)[1].startswith(folder + "/")):
+        if path.endswith(".md"):
+            blob = rng.batch.get("%s:%s" % (rng.head, path))
+            for home in HOME_LINE.findall((blob or b"").decode("utf-8", "replace")):
+                homes.setdefault(home, []).append(os.path.basename(path)[:-3])
+    lines = []
+    for path in code:
+        parts = []
+        if homes.get(path):
+            parts.append("Home of decision %s" % ", ".join(sorted(homes[path])))
+        named_by = sorted(slug for slug, row in (rules or {}).items()
+                          if isinstance(row.get("mechanism"), dict)
+                          and path in (row["mechanism"].get("ref"), str(row["mechanism"].get("test", "")).split("::")[0]))
+        if named_by:
+            parts.append("named by row %s" % ", ".join(named_by))
+        if parts:
+            lines.append("%s%s changed; %s" % (REPORT, path, "; ".join(parts)))
+    return lines
+
+
+def report(rng):
+    """The report lines. A repo with no lint/rule_mechanisms.json gets the Home half only, and no error.
+    A changed code file lists the decision folder and the mechanisms file in one `ls-tree`, or reuses the whole-tree
+    listing the findings read already; the mechanisms file is read only when that listing says it exists."""
+    rule_files = [p.replace(os.sep, "/") for p in RULE_FILES]
+    code = any(not p.endswith(".md") for p in rng.changed)
+    if not code and not rng.changed & set(rule_files):
+        return []
+    entries = None
+    if code:
+        entries = rng.tree if rng.tree is not None else head_tree(rng.head, decisions_dir() + "/", MECHANISMS)
+    present = entries is None or any(e.split("\t", 1)[1] == MECHANISMS for e in entries)
+    rules = mechanism_rows(rng) if present else None
+    lines = anchor_report(rng, rules) if rules is not None else []
+    return lines + (home_report(rng, rules, entries) if code else [])
+
+
+def scan(range_text):
+    """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
+    report lines. The report adds no finding, and a report read that fails is one unknown."""
+    diff_args, base, head = parse_range(range_text)
+    removed, renamed, modified, added = changed_paths(diff_args)
+    batch = BlobReader()
+    rng = Range(base, head, removed, renamed, modified, batch, added)
+    lines = []
+    try:
+        found = find_stale(rng)
+        try:
+            lines = report(rng)
+        except (Unknown, OSError, ValueError) as exc:  # ValueError: a rule_mechanisms.json that is not JSON
+            rng.unknowns.append("report not read, %s" % exc)
     finally:
         batch.close()
-    return found, rng.unknowns
+    return found, rng.unknowns, lines
 
 
 def main(argv):
@@ -386,7 +544,7 @@ def main(argv):
     try:
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
-        found, unknowns = scan(args.range)
+        found, unknowns, lines = scan(args.range)
     except BaseUnknown as exc:
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
@@ -398,6 +556,8 @@ def main(argv):
         print("%s:%d: %s %s" % (path, number, code, "; ".join(texts)))
     for text in unknowns:
         print("stale-cites: unknown, %s" % text)
+    for line in lines:
+        print(line)
     print("stale-cites: %s" % ("FAIL, %d finding(s)" % len(found) if found else "PASS"))
     return 1 if found else 0
 

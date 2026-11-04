@@ -110,11 +110,25 @@ LOG_OUT="$(mktemp)"
 # keeps the exit 0, as it does for the STE findings.
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
+  STALE_OUT="$(mktemp)"
   set +e
-  python3 "$STALE_CITES" --range "$RANGE"
+  python3 "$STALE_CITES" --range "$RANGE" > "$STALE_OUT"
   STALE_EXIT=$?
   set -e
+  cat "$STALE_OUT"
   [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
+  # The report lines (anchors that changed, decisions whose Home is a changed file) join the step summary, in
+  # a fence so a `*` or `_` in a path stays literal. They never change the exit.
+  if grep -q '^stale-cites: report, ' "$STALE_OUT"; then
+    {
+      echo "### Stale-cites report"
+      echo
+      echo '```text'
+      grep '^stale-cites: report, ' "$STALE_OUT" | sed 's/^stale-cites: report, //'
+      echo '```'
+      echo
+    } >> "$SUMMARY"
+  fi
 fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
