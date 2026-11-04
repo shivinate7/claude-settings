@@ -1,0 +1,21 @@
+# Handoff: one-lane-one-step lane
+
+- Session: session_013NEJL3UdjLrF2aRbgCEfjo (lane). Coordinator: session_013NEJL2hB1pLZPDpzas7VgB. Batch runner: session_013NEJL2vsmyKzJm8jUDt6za.
+- Goal: owner ask ask-mw19oqeg4w (2026-11-03 16:36 CST), corrected at 16:40 CST. A lane holds one topic. Finished lanes get archived.
+- PR: #1136 (draft), head f97c2dff7, branch one-lane-one-step. `merge --lane-lint 1136`: PASS.
+- Built:
+  - Rule lane-one-topic: hooks/guard_merge.py `brief_hit`, marker `LANE_BRIEF_MARKER`.
+  - `archive_hit` passes a draft based on the default branch when main holds its head.
+  - hooks/own_session.py reads a record wrapped in `<other-session>`, and a create_session record.
+  - The settings.json matcher adds the remote send_message tool.
+- Rulings and homes:
+  - One topic per lane, the cs-topic tag, and the batch runner archives: decision session-tiers.
+  - The cloud cannot close PRs. At 16:45 CST, batch runner 8 ran `gh pr close 1070`, and auto mode refused it as "[External System Writes]".
+- Review:
+  - Round 1 FAIL (reviewer haiku): the stacked-draft safety hole, now fixed.
+  - Round 2 PASS (reviewer sonnet).
+  - Debt brief-no-topic-wrong-steer. Notes lane-one-topic-slug-dots, lane-one-topic-new-step-reread and archive-rebased-lane-commit.
+- Open:
+  - docs/records.md is stamped at merge.
+  - Owner question: does the standing grant "Acts the cloud refuses" cover coordinators in child repos?
+- Local leftover: branch ad9309-pre-round2, the test-author's backup. Its patch is on the lane branch.
