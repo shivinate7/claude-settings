@@ -105,6 +105,12 @@ RED = [
     ("SESSION_COOKIE assignment", "SESSION_COOKIE=" + "abcdefgh" + "12345678", "abcdefgh" + "12345678"),
     ("bare Bearer token with no header name", "Bearer " + "abcdefghijkl" + "mnopqrstuvwx", "abcdefghijkl" + "mnopqrstuvwx"),
     ("TCG_TRACKING_KEY assignment", "TCG_TRACKING_KEY=" + "k9Qx7vLm" + "2Npw4Rt8", "k9Qx7vLm" + "2Npw4Rt8"),
+    ("X-API-Key header", "X-API-Key: " + "abcdef" + "1234567890", "abcdef" + "1234567890"),
+    ("secret: value", "secret: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("token: value", "token: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("bare Basic credential", "Basic " + "abcdefghij" + "klmnopqrst", "abcdefghij" + "klmnopqrst"),
+    ("csrftoken cookie value", "csrftoken=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("sid cookie value", "sid=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -152,6 +158,12 @@ GREEN = [
     ("a count of cards", "5 cards in this lane"),
     ("a join key label with a colon", "join key:"),
     ("a JSX key prop", "key={item.id}"),
+    ("a token label with a plain word", "token: budget"),
+    ("a secret label with no value", "secret: none"),
+    ("the word Basic in prose", "Basic idea: keep it short"),
+    ("the word sid in prose", "sid is the session id"),
+    ("a token budget label with a number", "token budget: 200000"),
+    ("a KEY label with prose", "KEY: see the record"),
 ]
 
 
