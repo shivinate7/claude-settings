@@ -978,6 +978,7 @@
 - mutate-guard-owner-unclear: hooks/guard.py (AUTHOR_MUTATION_TESTS comment) says builders keep editing hooks/mutate_guard.py and also calls it test code for a test-author. Decision: builders-cannot-edit-tests.
 - mutant-lint-copy-cost: each guard mutant copy now holds lint/ (97 files, 2.6 MB, about 9 ms); copies live until the run ends, so peak temp rises from about 0.6 GB to about 1.8 GB (estimate). Decision: none
 - mutant-watch-tree-lint: the decision-watch and ruling mutant trees in hooks/mutate_guard.py may lack ../lint as the guard copy did; no verdict path to `_layout_module` found, not measured in full. Decision: none
+- red-run-folder-refused: the other-checkout rule refuses an agent's writes into its own agent-<id>-red checkout, so test-authors ran red runs in their main worktree with the old file swapped in (seen 4 times in lane sim-lock-holes). Decision: an-agent-outside-its-home-tree-must-stop
 - route-unread-wrappers: simulator-boot-route and the cap do not read `xcrun xcodebuild` or `arch -arm64 xcodebuild`, and they judge `ssh mac "xcodebuild ..."` against local devices. Decision: sim-test-is-the-one-boot-path.
 - detached-launch-glued-amp: detached-launch passes a `&` glued to a closing quote (`xcodebuild ... "id=U"&`). Decision: sim-test-is-the-one-boot-path.
 - route-remedy-glued-action: simulator-boot-route reads `(cd ios && xcodebuild ... test)` and `test-without-building` as no test action, so the remedy names the generic destination; the verdict is still deny. Decision: sim-test-is-the-one-boot-path.
