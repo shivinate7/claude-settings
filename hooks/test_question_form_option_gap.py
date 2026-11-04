@@ -13,6 +13,10 @@ Controls, green on main, beside each red: the same write on the cwd's own page i
 an absolute path is refused (so the relative read is the cause of (c)), letter keys pass in each shape, a
 closed item passes, and a write to another collection passes.
 
+Pins of the narrowed scope: off the cwd's own waiting page, keyed_options_hit reads only the key none. An items
+write there passes with the keys e2, a and c, with the keys "None" and " none", and from a cwd with no page key
+with the key e2. Each goes red on a mutant that widens the check to any non-letter key.
+
 Standard library only, no test runner. Run it from the repository root:
 
     python3 hooks/test_question_form_option_gap.py
@@ -30,6 +34,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_call_judge as tcj  # noqa: E402  the fixture home: PAGE_URL, PAGE_ITEMS, make_repo, good_page_item
 import test_question_form as tqf  # noqa: E402  the verdict step, and guard and question_form under the run's config
+LINT = os.path.join(HERE, "..", "lint")
+if LINT not in sys.path:
+    sys.path.append(LINT)
+import layout  # noqa: E402  waiting_page(root) reads the repo's page key, "unknown" when it has none
 
 check, FAILED = tcj.check, tcj.FAILED
 guard, question_form = tqf.guard, tqf.question_form
@@ -170,11 +178,65 @@ def case_non_items_write_with_none_passes():
                items_write("set", {"options": [{"key": "none", "label": "x"}]}, collection="answers"), cwd, PASS)
 
 
+# ------------------------------------------------------------------ the pins of the narrowed scope
+#
+# keyed_options_hit refuses, off the cwd's own waiting page, only an option keyed exactly none. These pins hold
+# that scope: off the cwd's page, every other key passes. A widening to any non-letter key goes red on each.
+
+def narrowed_item(*keys):
+    """A waiting-page decision whose options carry `keys` in order. Its labels open with no letter tag and its
+    text names no key, so the none check is the only one that reads it."""
+    labels = ("Ship it", "Hold it", "Wait a day")
+    options = [{"key": k, "label": labels[i], "gain": "The change lands on a plain day.",
+                "lose": "Nobody reads it first."} for i, k in enumerate(keys)]
+    return tcj.good_page_item(options=options)
+
+
+def check_scope(name, call, cwd, cwd_page, on_page):
+    """Scope before subject: the cwd's page reads as cwd_page, and the write is or is not that page. Asserted
+    before any verdict is read, so a pass here cannot come from a write on the cwd's own page."""
+    read = layout.waiting_page(cwd)
+    check("scope: %s, the cwd's page reads as %s" % (name, cwd_page), read == cwd_page,
+          "layout.waiting_page reads %r" % (read,))
+    check("scope: %s, the write is %s the cwd's own page" % (name, "on" if on_page else "not on"),
+          question_form.is_waiting_page(call, cwd) == on_page)
+
+
+def case_other_page_passes_letter_and_digit_keys():
+    """Pin, green on head: an items write to another repo's waiting page passes with option keys e2, a and c. Off
+    the cwd's own page only the key none is read, so e2, which is no letter, passes."""
+    cwd = tcj.make_repo("gap-other", page=OTHER_URL)
+    call = items_write("set", narrowed_item("e2", "a", "c"))
+    check_scope("another repo's page", call, cwd, OTHER_URL, on_page=False)
+    judge_both("pass: another page's items write with keys e2, a, c passes", call, cwd, PASS)
+
+
+def case_no_page_passes_key_e2():
+    """Pin, green on head: an items write from a cwd with no page key passes with the key e2. The cwd's page
+    reads as unknown, so the write is off the cwd's page and only the key none is read."""
+    cwd = tcj.make_repo("gap-nopage", page=None)
+    call = items_write("set", narrowed_item("e2", "b"))
+    check_scope("no page key", call, cwd, "unknown", on_page=False)
+    judge_both("pass: a cwd with no page key, items write with key e2 passes", call, cwd, PASS)
+
+
+def case_none_lookalike_keys_pass():
+    """Pin, green on head: the keys "None" and " none" pass off the cwd's own page. The page reserves exactly
+    "none", and the check compares exactly that key."""
+    cwd = tcj.make_repo("gap-other", page=OTHER_URL)
+    for key in ("None", " none"):
+        call = items_write("set", narrowed_item(key, "b"))
+        check_scope("another repo's page, key %r" % key, call, cwd, OTHER_URL, on_page=False)
+        judge_both("pass: another page's items write with key %r passes" % key, call, cwd, PASS)
+
+
 def main():
     for case in (case_other_repo_page_refuses_none_key, case_no_page_key_refuses_none_key,
                  case_relative_file_path_refuses_none_key, case_own_page_refuses_none_key,
                  case_absolute_path_refuses_none_key, case_letter_keys_pass_in_each_shape,
-                 case_closed_none_key_passes, case_non_items_write_with_none_passes):
+                 case_closed_none_key_passes, case_non_items_write_with_none_passes,
+                 case_other_page_passes_letter_and_digit_keys, case_no_page_passes_key_e2,
+                 case_none_lookalike_keys_pass):
         try:
             case()
         except Exception as exc:
