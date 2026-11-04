@@ -73,7 +73,10 @@ parent, or miss a message while busy.
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page): `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
-     the time, then answers each comment still open at that time on those pages.
+     the time, then answers each comment still open at that time on those pages. From step 1 to
+     step 5, `writer` in `meta/page` still names the old writer, and no writer watches the page.
+     Asks sent then reach the new writer through its step-5 catch-up read and its first-turn read
+     of `asks/`.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
      `role-handoff.md`, with that time. The file names each wait it handed over, the home of
@@ -88,9 +91,9 @@ parent, or miss a message while busy.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
      that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
      the writer role, it also sets `writer` in `meta/page` to its own session name, as the roster
-     gives it (`ArtifactData` `update` on `meta/page`, pinned with `if_version`). It rewrites `owner`
-     to itself on each ask with no `reply` whose `owner` is the old writer (`update`, never `set`).
-     The incoming writer makes the `writer` write, not the outgoing one: the outgoing one is
+     gives it (`ArtifactData` `update` on `meta/page`, pinned with `if_version`). For each ask with
+     no `reply` whose `owner` is the old writer, it reads the ask, then updates `owner` to itself,
+     pinned with `if_version`. Only the incoming writer writes `writer`, since the outgoing one is
      archived at step 4.
 - The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 

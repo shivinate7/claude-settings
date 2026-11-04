@@ -180,19 +180,8 @@ into `meta/page`. The writer watches the page ("Read the answers").
 
 ## Rotate the writer
 
-When the writer's session rotates (project-ops `templates/operating-model.md`, "Rotation of standing
-sessions", steps 1 and 5), the page follows the new session:
-
-1. The old writer stops its watch: `ArtifactComments` action `watch` with `on: false` and the page URL.
-2. The new writer watches the page first: `ArtifactComments` action `watch` on the page URL from the
-   `Watch:` line of its hand-off. No other page act comes before it.
-3. The new writer sets `writer` in `meta/page` to its own session name, as the roster gives it
-   (`ArtifactData` `update` on `meta/page`, pinned with `if_version`).
-4. It rewrites `owner` to itself on each inherited open item, and on each ask with no `reply` whose
-   `owner` is the old writer (`update`, never `set`).
-
-Until step 2 runs, no session watches the page, so a comment sent then wakes nobody. The new writer
-reads `asks/` at its first turn start, so an ask sent in that gap is still read.
+A rotation moves the writer role to a new session, and the page and its open asks must follow it.
+The steps are in project-ops `templates/operating-model.md`, "Rotation of standing sessions", steps 1 and 5.
 
 ## Chat first
 
@@ -515,8 +504,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
-holds its subject:
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, takes each ask with no `reply` whose `owner` rotated
+away ("Rotate the writer"), or routes it to the session that holds its subject:
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
