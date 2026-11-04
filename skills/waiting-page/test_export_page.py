@@ -51,6 +51,7 @@ MARKER = ".complete"  # the session touches it in each collection folder after t
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
 TAIL = "aB3" * 12  # 36 characters, the body of a GitHub token
+TG_TAIL = "aB3" * 11 + "Qz"  # 35 characters, the body of a Telegram bot token
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
@@ -94,6 +95,16 @@ RED = [
     ("Slack token", "xoxb-" + "123456789012-abcdefABCDEF", "xoxb-" + "123456789012-abcdefABCDEF"),
     ("Google API key", "AIzaSy" + "aB3" * 11, "AIzaSy" + "aB3" * 11),
     ("Stripe live key", "sk_live_" + "aB3" * 8, "sk_live_" + "aB3" * 8),
+    ("Stripe test key", "sk_test_" + "aB3" * 6, "sk_test_" + "aB3" * 6),
+    ("Stripe restricted test key", "rk_test_" + "aB3" * 6, "rk_test_" + "aB3" * 6),
+    ("Stripe test key of 16 characters", "sk_test_" + "aB3" * 5 + "a", "sk_test_" + "aB3" * 5 + "a"),
+    ("Docker Hub PAT", "dckr_pat_" + "aB3" * 7, "dckr_pat_" + "aB3" * 7),
+    ("Docker Hub PAT of 20 characters", "dckr_pat_" + "aB3" * 6 + "aB", "dckr_pat_" + "aB3" * 6 + "aB"),
+    # A Telegram token is digits, a colon and 35 characters. In the bot API URL the digits follow `bot` with no word boundary.
+    ("Telegram bot token of 10 digits", "1234567890:" + TG_TAIL, "1234567890:" + TG_TAIL),
+    ("Telegram bot token after a label", "Bot token: " + "12345678:" + TG_TAIL, "12345678:" + TG_TAIL),
+    ("Telegram bot API URL", "https://api.telegram.org/bot" + "123456789:" + TG_TAIL + "/getMe",
+     "123456789:" + TG_TAIL),
     ("GitLab token", "glpat-" + "aB3" * 6 + "Qz", "glpat-" + "aB3" * 6 + "Qz"),
     ("PEM private key header", "-----BEGIN " + "RSA " + "PRIVATE KEY-----", "-----BEGIN " + "RSA " + "PRIVATE KEY-----"),
     ("PEM OpenSSH key header", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"),
@@ -204,6 +215,15 @@ GREEN = [
     ("single-quoted optional after a password word", "password: " + "'optional'"),
     ("parenthesized none after a password word", "password: " + "(none)"),
     ("none with a period after a password word", "password: " + "none."),
+    # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
+    ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
+    ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
+    ("Telegram token with a 36-character tail", "123456789:" + TG_TAIL + "x"),
+    ("a clock time", "standup at 10:30"),
+    ("Docker Hub PAT with 19 characters", "dckr_pat_" + "aB3" * 6 + "a"),
+    ("Stripe test key with 15 characters", "sk_test_" + "aB3" * 5),
+    ("a word that holds the Stripe test prefix", "risk_test_coverage_plan"),
+    ("a word that holds the Stripe test prefix before a long body", "risk_test_" + "aB3" * 7),
 ]
 
 
