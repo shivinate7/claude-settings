@@ -168,6 +168,47 @@ class LandingToolTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assert_quiet([(tool, {})], tool)
 
+    def test_lt_red_gh_root_flag_forms_block(self):
+        # Catches: a root flag before the verb (-R, --repo=, --repo, or GH_REPO= ahead of gh) hides
+        # pr merge or pr create from the gh guard, so the turn passes with no report.
+        commands = [
+            "gh -R o/r pr merge 12",
+            "gh --repo=o/r pr merge 12",
+            "gh --repo o/r pr create --fill",
+            "GH_REPO=o/r gh -R o/r pr merge 12",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_blocks([("Bash", {"command": command})], command)
+
+    def test_lt_red_gh_update_branch_and_dry_run_create_block(self):
+        # Catches: gh pr update-branch merges the base into the PR branch, which is a commit. A dry-run
+        # create may still push the branch, so it lands too.
+        for command in ("gh pr update-branch 12", "gh pr create --dry-run --fill"):
+            with self.subTest(command=command):
+                self.assert_blocks([("Bash", {"command": command})], command)
+
+    def test_lt_red_enable_auto_merge_tool_blocks(self):
+        # Catches: enable_pr_auto_merge queues the merge, so a turn that calls it lands and must report.
+        tool = "mcp__github__enable_pr_auto_merge"
+        self.assert_blocks([(tool, {})], tool)
+
+    def test_lt_green_gh_disable_web_and_help_flags_pass(self):
+        self.assert_scope(WITNESS_BASH)
+        # Catches: --disable-auto turns auto-merge off, and --web opens a browser; neither merges or creates.
+        # Catches: -h on revert or cherry-pick prints help, as --help does, and makes no commit.
+        commands = [
+            "gh pr merge 12 --disable-auto",
+            "gh pr create --web",
+            "gh pr create -h",
+            "gh pr create --help",
+            "git revert -h",
+            "git cherry-pick -h",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_quiet([("Bash", {"command": command})], command)
+
 
 if __name__ == "__main__":
     unittest.main()
