@@ -10,6 +10,7 @@ actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
 import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -6146,6 +6147,24 @@ class LockHolder(Env):
 
     def test_the_lock_records_the_boot(self):
         self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
+
+    def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows: the stamp is the clock minus the tick count, in whole seconds, so two reads can straddle a second (main's Windows run did); cache_clear keeps a cached real stamp from hiding that
+        reads, now, kernel32 = [], [1000.0], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # each read steps 0.2 s: the lock's boot read is the second, this assertion's read the third, and they straddle 1000.5
+            now[0] = round(now[0] + 0.2, 1)
+            reads.append(now[0])
+            return now[0]
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                msg = merge.lock_message(600, 1000, {"pr": 7, "branch": "b"})
+                self.assertTrue(reads, "the Windows branch of boot_stamp never read the clock")
+                stamp = merge.boot_stamp()
+                self.assertTrue(stamp, "the Windows branch gave no boot stamp")
+                self.assertIn("boot: " + stamp, msg.splitlines(), f"the lock's boot line is not the stamp read after it, {stamp}:\n{msg}")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "the pid namespace link is Linux's")
     def test_the_linux_boot_stamp_names_the_pid_namespace(self):  # the same boot id runs under any container's own pid numbers
