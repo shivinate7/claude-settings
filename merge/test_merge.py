@@ -11370,10 +11370,10 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
-    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
-    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
-    The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
+    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
+    with Guard or check yes and a Net value of zero or positive. Net value negative is held. The third round with Guard or check yes and no
+    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
