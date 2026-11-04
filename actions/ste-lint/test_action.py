@@ -8,6 +8,8 @@ Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo 
 Also asserts the command's pin check: a CI pin whose lint differs exits 3 and names the pin and the remedy,
 an unrelated commit is no drift, an unknown pin changes no exit code, a shallow clone that cuts the history above a pin
 says unknown and never "not on main", and LINT_FILES holds every file the step runs.
+Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with the same verdict lines, compared on
+actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback."""
@@ -527,12 +529,13 @@ def head(cs):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
 
 
-def scratch_clone(cs):
+def scratch_clone(cs, zizmor_step=False):
     """A claude-settings clone at `cs`: the files bin/ste-changed and install.sh read, copied from what git lists here
     (tracked_tree), so the installed hooks hold every module the command may import. History: A, then C changes the
-    lint, then D changes only README.md (HEAD, main and origin/main). E, off D on a side branch, changes the lint again.
-    Returns {label: sha}."""
-    tracked_tree.copy_tracked(cs, "bin", "hooks", "lint", "actions/ste-lint")
+    lint, then D changes only README.md. With `zizmor_step`, Z follows D and changes only actions/zizmor/run.sh; the
+    main branch is then at Z, else at D (HEAD, main and origin/main). E, off main on a side branch, changes the lint again.
+    Returns {label: sha}, with "Z" when zizmor_step."""
+    tracked_tree.copy_tracked(cs, "bin", "hooks", "lint", "actions/ste-lint", "actions/zizmor")
     for rel in (".ste-lint-exclude", "landed-dirs.txt", "install.sh"):
         shutil.copy2(os.path.join(ROOT, rel), os.path.join(cs, rel))
     write(cs, "CLAUDE.md", "# claude-settings fixture\n")  # install.sh takes a folder with these two as its source
@@ -545,6 +548,10 @@ def scratch_clone(cs):
             write(cs, rel, "\n# %s\n" % label, "a")
         git(cs, "add", "."); git(cs, "commit", "-qm", label)
         shas[label] = head(cs)
+    if zizmor_step:
+        write(cs, "actions/zizmor/run.sh", "\n# Z\n", "a")
+        git(cs, "add", "."); git(cs, "commit", "-qm", "Z")
+        shas["Z"] = head(cs)
     git(cs, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(cs, "checkout", "-q", "-b", "side")
     write(cs, "lint/ste_lint.py", "\n# E\n", "a")
@@ -554,11 +561,16 @@ def scratch_clone(cs):
     return shas
 
 
-def pin_child(d, shas, pin, change=lambda work: None, dead=None):
-    """A child repo under `d` whose CI pins ste-lint at `pin`: a label of `shas`, or a sha. `dead` is a label
-    that is pinned in a comment only. Returns its working folder."""
-    wf = ("on: pull_request\njobs:\n  l:\n    steps:\n      - uses: o/claude-settings/actions/ste-lint@%s # main\n"
-          % shas.get(pin, pin))
+def pin_child(d, shas, pin, change=lambda work: None, dead=None, zizmor=None):
+    """A child repo under `d` whose CI pins ste-lint at `pin` and zizmor at `zizmor`: each a label of `shas`, or a sha,
+    or None for no pin of that action. The ste-lint pin is written first, so it is line 5. `dead` is a label that is
+    pinned in a comment only. Returns its working folder."""
+    uses = []
+    if pin is not None:
+        uses.append("o/claude-settings/actions/ste-lint@%s # main" % shas.get(pin, pin))
+    if zizmor is not None:
+        uses.append("o/claude-settings/actions/zizmor@%s # main" % shas.get(zizmor, zizmor))
+    wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + "".join("      - uses: %s\n" % u for u in uses)
     if dead:
         wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
     return make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
@@ -574,10 +586,20 @@ def run_ste_changed(cmd, work, home=None):
     return p.returncode, p.stdout + p.stderr
 
 
-def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None):
-    """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
-    commit label of the scratch clone. Returns (rc, output, {label: sha}). `shallow` runs the command from a
-    shallow clone that holds the pin's object and cuts the history above it. `proof`, a dict, takes that clone's facts."""
+def zizmor_facts(cs, sha):
+    """What the clone holds for the zizmor action's run.sh at `sha` and at HEAD: whether each exists, and whether they differ."""
+    def blob(rev):
+        p = subprocess.run(["git", "show", rev + ":actions/zizmor/run.sh"], cwd=cs, capture_output=True, text=True)
+        return p.stdout if p.returncode == 0 else None
+    at, now = blob(sha), blob("HEAD")
+    return {"at_pin": at is not None, "at_head": now is not None, "differ": at != now}
+
+
+def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None, zizmor=None, zizmor_step=False):
+    """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin` and zizmor at `zizmor`. A pin
+    may name a commit label of the scratch clone, or be None. Returns (rc, output, {label: sha}). `shallow` runs the
+    command from a shallow clone that holds the pin's object and cuts the history above it. `zizmor_step` adds the Z
+    commit (see scratch_clone). `proof`, a dict, takes that clone's facts."""
     with scratch("pin") as d:
         cs = os.path.join(d, "claude-settings")
         if shallow:
@@ -589,8 +611,11 @@ def pin_case(pin, change=lambda work: None, dead=None, shallow=False, proof=None
             if proof is not None:
                 proof.update(shallow_clone.facts(cs, shas[pin]))
         else:
-            shas = scratch_clone(cs)
-        rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"), pin_child(d, shas, pin, change, dead))
+            shas = scratch_clone(cs, zizmor_step)
+            if proof is not None and zizmor is not None:
+                proof.update(zizmor_facts(cs, shas.get(zizmor, zizmor)))
+        rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"),
+                                  pin_child(d, shas, pin, change, dead, zizmor))
         return rc, out, shas
 
 
@@ -616,6 +641,54 @@ check("unknown pin: a commit this clone does not hold is unknown and exits 0",
 rc, out, _ = pin_case("A", default_change)
 check("lint red and drift: the lint's exit code wins, and the drift line still prints",
       rc == 1 and "older than this copy's lint" in out, out)
+
+# The zizmor pin. The check reads `<owner>/claude-settings/actions/zizmor@<sha>` pins in the same workflows and compares
+# actions/zizmor/run.sh at each pinned commit with this copy's, with the same verdict lines, each naming its action.
+# Each line is found by its prefix, so one action's line never answers for the other's (zizmor_step: see scratch_clone).
+def pin_lines(out, action):
+    """The output lines that name a pin of `action`."""
+    return [l for l in out.splitlines() if "CI pins %s at " % action in l]
+
+
+facts = {}
+rc, out, shas = pin_case(None, zizmor="D", zizmor_step=True, proof=facts)
+drift = pin_lines(out, "zizmor")
+line = drift[0] if drift else ""
+check("zizmor drift scope: run.sh exists at the pin and at HEAD, and the two differ",
+      facts.get("at_pin") is True and facts.get("at_head") is True and facts.get("differ") is True, str(facts))
+check("zizmor drift: the command prints one line that names zizmor", len(drift) == 1, out)
+check("zizmor drift: the line names the pinned commit", shas["D"][:7] in line, out)
+check("zizmor drift: the line points at the workflow line that pins it", ".github/workflows/ci.yml:5" in line, out)
+check("zizmor drift: exit 3, though the lint passed", rc == 3, out)
+
+facts = {}
+rc, out, shas = pin_case(None, zizmor="A", proof=facts)
+same = pin_lines(out, "zizmor")
+line = same[0] if same else ""
+check("zizmor same scope: run.sh at the pin equals HEAD's, so an equal result is not a missing file",
+      facts.get("at_pin") is True and facts.get("at_head") is True and facts.get("differ") is False, str(facts))
+check("zizmor same: the command prints one line that names zizmor at the pinned commit",
+      len(same) == 1 and shas["A"][:7] in line, out)
+check("zizmor same: the line says the same, its zizmor files equal this copy's though the lint differs",
+      "the same" in line, out)
+check("zizmor same: exit 0, no drift from the zizmor pin", rc == 0, out)
+
+rc, out, shas = pin_case("D", zizmor="C", zizmor_step=True)
+ste, zz = pin_lines(out, "ste-lint"), pin_lines(out, "zizmor")
+check("both pins, different commits: one line per action", len(ste) == 1 and len(zz) == 1, out)
+check("both pins, ste-lint: its line names D and says the same lint, judged on its own files",
+      len(ste) == 1 and shas["D"][:7] in ste[0] and "the same lint as this copy" in ste[0], out)
+check("both pins, zizmor: its line names C and does not say the same, judged on its own files",
+      len(zz) == 1 and shas["C"][:7] in zz[0] and "the same" not in zz[0], out)
+check("both pins, different commits: exit 3 comes from the zizmor drift", rc == 3, out)
+
+rc, out, shas = pin_case("D", zizmor="D", zizmor_step=True)
+ste, zz = pin_lines(out, "ste-lint"), pin_lines(out, "zizmor")
+check("both pins, same commit: each action keeps its own line", len(ste) == 1 and len(zz) == 1, out)
+check("both pins, same commit: the ste-lint line says the same lint", len(ste) == 1 and "the same lint as this copy" in ste[0], out)
+check("both pins, same commit: the zizmor line is its own, at ci.yml:6, after the ste-lint pin",
+      len(zz) == 1 and ".github/workflows/ci.yml:6" in zz[0] and shas["D"][:7] in zz[0], out)
+check("both pins, same commit: exit 3 from the zizmor drift", rc == 3, out)
 
 # The shallow clone: the command's clone holds the pin's object but cuts the history between the pin and HEAD, so
 # `merge-base --is-ancestor` exits 1 there. That answer is unknown, never "not on main" (verification-report-unknown-reads).
