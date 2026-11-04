@@ -222,7 +222,7 @@ def main():
                    "this call launched." % ", ".join(notes)) if notes else ""
             if broken:
                 print(json.dumps({"decision": "block", "reason": "Simulator %s is broken: it failed "
-                                  "the boot check twice. Stop using it. %s"
+                                  "the boot check twice. Stop using it. %s (decision sim-boot-is-verified)"
                                   % (", ".join(broken), msg)}))
             elif notes:
                 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
