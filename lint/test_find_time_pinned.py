@@ -42,7 +42,7 @@ SWIFT_CLOCKS = [
     "ContinuousClock.now", "SuspendingClock.now",
     "start.timeIntervalSinceNow", "start.duration(to: .now)",
 ]
-SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0); 0 unread"
+SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0, calendar 0); 0 unread"
 
 
 def src(*lines):
@@ -191,7 +191,9 @@ class PythonCategoriesTest(FinderCase):
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
             "tests/test_clocks.py", text,
-            *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS]))
+            *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS],
+            ("t = datetime.now()", "calendar"), ("t = datetime.datetime.now()", "calendar"),
+        ), "calendar not listed")
 
     def test_elapsed_assert_on_a_bare_imported_clock(self):
         text = src(
@@ -528,8 +530,8 @@ class JsCategoriesTest(FinderCase):
             ("expect(dt)", "elapsed-assert"), ("assert(new Date()", "elapsed-assert"),
             ("assert.ok(process.hrtime.bigint()", "elapsed-assert"),
             ("expect(Date.now()).toBeGreaterThan", "elapsed-assert"),
-            ("assert.strictEqual(hr.length", "elapsed-assert"),
-        ))
+            ("assert.strictEqual(hr.length", "elapsed-assert"), ("assert(new Date()", "calendar"),
+        ), "calendar not listed")
 
     def test_elapsed_taint_repeats_in_js(self):
         text = src(
@@ -1014,12 +1016,13 @@ class OutputTest(FinderCase):
             lines)
         self.assertEqual(
             lines[-1],
-            "2 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 1); 0 unread")
+            "2 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 1, calendar 0); 0 unread",
+            "calendar not listed in the summary")
 
     def test_summary_line_for_an_empty_root(self):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO)
+        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO, "calendar not listed in the summary")
 
     def test_summary_counts_each_category(self):
         text = src(
@@ -1038,10 +1041,12 @@ class OutputTest(FinderCase):
         self.put("tests/test_all.py", text)
         proc = run(self.root, "--json")
         out = json.loads(proc.stdout)
-        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 1, "wait-cap": 1})
+        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 1, "wait-cap": 1, "calendar": 0},
+                         "calendar not listed in the counts")
         proc = run(self.root)
         self.assertEqual(proc.stdout.splitlines()[-1],
-                         "4 time-pinned in 1 files (sleep 1, elapsed-assert 1, test-cap 1, wait-cap 1); 0 unread")
+                         "4 time-pinned in 1 files (sleep 1, elapsed-assert 1, test-cap 1, wait-cap 1, calendar 0); "
+                         "0 unread", "calendar not listed in the summary")
 
     def test_line_text_is_trimmed_and_capped_at_120(self):
         long_line = "    time.sleep(1)  # " + "x" * 200
@@ -1064,7 +1069,8 @@ class OutputTest(FinderCase):
                          ("tests/test_ok.py", 2, "time.sleep(1)"))
         self.assertEqual(out["unread"][0]["path"], "tests/test_bad.py")
         self.assertEqual(set(out["unread"][0]), {"path", "reason"})
-        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 0, "test-cap": 0, "wait-cap": 0})
+        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 0, "test-cap": 0, "wait-cap": 0, "calendar": 0},
+                         "calendar not listed in the counts")
 
 
 # ---- exit codes -----------------------------------------------------------------------------------
