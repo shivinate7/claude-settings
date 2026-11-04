@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.357,
   "why": "Your gripe, Oct 26 (waiting page, item 27): you could not unselect an answer, and none of the three options was right.",
-  "note": "Done Oct 27: PR #646 merged in batch #649 (main 2ad85de6, checked by triage). Every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the skill reads \"none\" as a request for new options and a cleared answer as no answer; 8 browser tests run in the gates-shoot job. Pilot page fixed Oct 26 (https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8). Port: yes, every repo's page comes from the skill; a page already published keeps its old copy until it is republished.",
+  "note": "Done Oct 27: PR #646 merged in batch #649 (main 2ad85de6, checked by triage). Every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the skill reads \"none\" as a request for new options and a cleared answer as no answer; 8 browser tests run in the gates-shoot job. Pilot page fixed Oct 26 (artifact:old-queue). Port: yes, every repo's page comes from the skill; a page already published keeps its old copy until it is republished.",
   "updatedAt": "2026-10-27T00:25:00Z"
 }

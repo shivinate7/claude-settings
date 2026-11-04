@@ -5,6 +5,6 @@
  "order": 103.1,
  "why": "Your idea, Oct 26: the goal of the advisor setup was something that answers your questions and pushes the backlog along; this cloud project can edit code.",
  "note": "Done, Nov 1 (coordinator, 17:22 CST: no objection). The frame it set up is in effect: cloud lanes build claude-settings, CI proves each PR on ubuntu, macos and windows, reviewed green lanes join one integration branch, and the batch runner merges on green. Its rulings live on in the root CLAUDE.md rules and decision session-tiers: merge only on green; act only on claude-settings unless checked in; only triage writes steps, order and closes; portability is always weighed.",
- "ask": "Pilot brief: briefs/c46-pilot-merge-keeps-dropped-lane.md (full text on c46). Plan: https://claude.ai/artifact/U4jM83VeaTVmePCDig78fD.",
+ "ask": "Pilot brief: briefs/c46-pilot-merge-keeps-dropped-lane.md (full text on c46). Plan: artifact:c52-plan.",
  "updatedAt": "2026-11-01T23:30:00Z"
 }
