@@ -18,7 +18,7 @@ import { POSIX_ONLY, SKILL, cleanEnv, commitAt, gitIn, gitShim, run, scratchRepo
 
 const STALE = join(SKILL, 'scripts', 'map-stale.mjs');
 const DAY = 86400;
-const T0 = Date.UTC(2026, 9, 1, 12) / 1000; // 2026-10-01 12:00 UTC: the day the map is written
+const T0 = Date.UTC(2026, 9, 1, 12) / 1000; // The author time of the fixture's base commit, from which every map line is dated
 const iso = (epoch) => new Date(epoch * 1000).toISOString().slice(0, 10);
 const head = (r) => r.out.slice(0, 1500);
 
