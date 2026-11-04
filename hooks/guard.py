@@ -3602,17 +3602,18 @@ def _xcodebuild_boot_names(rest: list) -> list:
     for i, token in enumerate(rest):
         value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
             token[len("-destination="):] if token.startswith("-destination=") else "")
+        # The tokens keep no quote marks, so a shell operator glued after the closing quote
+        # (`'id=X'&`, `"id=X">/dev/null`, `(cd ios && xcodebuild ... 'OS=17.0')`) is read into the value.
+        # Cut it at the first `&`, `<`, `>`, `|` or `;`, then drop each trailing `)` that no `(` opens,
+        # so "iPhone SE (3rd generation)" keeps its own paren.
+        value = re.split(r"[&<>|;]", value, maxsplit=1)[0]
+        while value.endswith(")") and value.count(")") > value.count("("):
+            value = value[:-1]
         fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
         if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
             os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
             os_ = "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_
-            name = fields.get("id") or fields["name"]
-            found.append((name, os_))
-            if name.endswith(")"):
-                # Bandaid: a `)` glued to the quote, `(cd ios && xcodebuild ... 'id=X')`, is read into the value.
-                # A device name can end in `)` ("iPhone SE (3rd generation)"), so judge both. A name no device
-                # holds is not a boot.
-                found.append((name[:-1], os_))
+            found.append((fields.get("id") or fields["name"], os_))
     return found
 
 
@@ -3657,25 +3658,44 @@ SIM_BYPASS_REASON = (
 )
 
 
-SIM_ROUTE_BOOLEAN_FLAGS = frozenset({"-quiet", "-verbose", "-json", "-dry-run", "-allowProvisioningUpdates",
-                                     "-allowProvisioningDeviceRegistration", "-skipUnavailableActions"})
+# The xcodebuild options that take the next word as their value (`man xcodebuild`, Xcode 16). Any other dash
+# word is a flag with no value, so the word after it can be the action. A colon or `=` form
+# (`-only-testing:X`, `-scheme=X`) holds its value in the same word and is in no list.
+SIM_ROUTE_VALUE_FLAGS = frozenset({
+    "-project", "-workspace", "-target", "-scheme", "-configuration", "-xcconfig", "-arch", "-sdk", "-toolchain",
+    "-destination", "-destination-timeout", "-jobs", "-derivedDataPath", "-resultBundlePath", "-resultBundleVersion",
+    "-resultStreamPath", "-archivePath", "-exportPath", "-exportOptionsPlist", "-testPlan", "-xctestrun",
+    "-testProductsPath", "-only-testing", "-skip-testing", "-only-test-configuration", "-skip-test-configuration",
+    "-testLanguage", "-testRegion", "-test-iterations", "-parallel-testing-enabled", "-parallel-testing-worker-count",
+    "-maximum-parallel-testing-workers", "-maximum-concurrent-test-device-destinations",
+    "-maximum-concurrent-test-simulator-destinations", "-test-timeouts-enabled",
+    "-default-test-execution-time-allowance", "-maximum-test-execution-time-allowance",
+    "-test-repetition-relaunch-enabled", "-collect-test-diagnostics", "-enableCodeCoverage",
+    "-enableAddressSanitizer", "-enableThreadSanitizer", "-enableUndefinedBehaviorSanitizer",
+    "-enablePerformanceTestsDiagnostics", "-localizationPath", "-exportLanguage", "-clonedSourcePackagesDirPath",
+    "-packageCachePath", "-scmProvider", "-defaultPackageRegistryURL", "-packageAuthorizationProvider",
+    "-authenticationKeyPath", "-authenticationKeyID", "-authenticationKeyIssuerID", "-framework", "-library",
+    "-headers", "-debug-symbols", "-output", "-find-executable", "-find-library", "-importPlatform",
+    "-downloadPlatform", "-buildVersion", "-architectureVariant", "-exportPlatform", "-platform",
+})
 
 
 def _sim_route_remedy(rest: list) -> str:
     """The remedy for an `xcodebuild -destination` command with arguments REST: `sim-test` with its arguments (no
     -destination, no `test` action: sim-test adds it) when the action is `test`, else the generic
-    destination. The action is the word `test` that no option takes as its value. An option with a
-    colon (`-only-testing:X`) holds its value in the same word."""
+    destination. The action is the word `test` that no option takes as its value. The shell's redirects
+    (`2>&1`, `> out.log`) and a lone `&` are no xcodebuild arguments, so the remedy drops them."""
     args, action, skip = [], False, False
     for i, token in enumerate(rest):
         if skip:
             skip = False
-        elif token == "-destination":
-            skip = True
-        elif token.startswith("-destination="):
+        elif token in ("-destination", "&") or token.startswith("-destination="):
+            skip = token == "-destination"
+        elif re.fullmatch(r"\d*[<>&|]+", token):
+            skip = True  # a bare redirect operator (`>`, `2>`, `>&`, `&>`): its target is the next word
+        elif REDIRECTION.fullmatch(token):
             pass
-        elif token == "test" and not (i and rest[i - 1].startswith("-") and rest[i - 1] not in SIM_ROUTE_BOOLEAN_FLAGS
-                                      and "=" not in rest[i - 1] and ":" not in rest[i - 1]):
+        elif token == "test" and not (i and rest[i - 1] in SIM_ROUTE_VALUE_FLAGS):
             action = True
         else:
             args.append(token)
