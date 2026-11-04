@@ -45,7 +45,11 @@ slugs replace the numbers.
 - Fires only when the pull request removed the flag from that file.
 - Red cases: a removed `--between` in a cited span fires. No fire for: a kept flag; `git push --force`;
   a flag in another script's span; a shim path (`bin/merge`, whose flags live in `merge/merge.py`).
-- Cost: no new process. Reads touched blobs through the open `cat-file` process.
+- A flag that another touched `.py` file declares as an `add_argument` literal at head, or another touched
+  `.sh` file holds as a whole word, moved there and does not fire.
+- Cost: no new process beyond the one `cat-file`, and no `ls-tree` unless a flag was removed. A touched `.py`
+  or `.sh` adds that `cat-file`; the flag reader reads blobs through it. The decision `stale-cites-at-merge`
+  has the full cost line and the named limits.
 
 ### value-cites (planned)
 

@@ -17,7 +17,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
             named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
             `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
-            fires.
+            fires. A flag another touched .py declares (or another touched .sh holds) at head moved there.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
@@ -164,23 +164,27 @@ def parse_range(text):
 
 
 def changed_paths(diff_args):
-    """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
+    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, added paths."""
     tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
-    removed, renamed, modified = [], {}, []
+    removed, renamed, modified, added = [], {}, [], []
     i = 0
     while i < len(tokens) and tokens[i]:
         status = tokens[i][0]
         if status == "R" or status == "C":
             if status == "R":
                 renamed[tokens[i + 1]] = tokens[i + 2]
+            else:
+                added.append(tokens[i + 2])
             i += 3
             continue
         if status == "D":
             removed.append(tokens[i + 1])
         elif status == "M":
             modified.append(tokens[i + 1])
+        elif status == "A":
+            added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified
+    return removed, renamed, modified, added
 
 
 PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
@@ -327,9 +331,10 @@ def path_cites(line, gone, exotic):
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
-    def __init__(self, base, head, removed, renamed, modified, batch):
+    def __init__(self, base, head, removed, renamed, modified, batch, added=()):
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.unknowns = []
+        self.added = set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
@@ -435,7 +440,24 @@ class FlagReader:
                 continue  # a .py that does not parse is already reported as unknown by NameReader
             if before - after:
                 removed_flags[files[path]] = before - after
+        for script in list(removed_flags):
+            # A flag another touched file of the same kind declares at head moved there; it is not removed.
+            removed_flags[script] -= self.declared_elsewhere(rng, script, files)
+            if not removed_flags[script]:
+                del removed_flags[script]
         return removed_flags or None
+
+    def declared_elsewhere(self, rng, script, files):
+        """The flags the other touched .py (or .sh) files declare at head, read through the open blob reader."""
+        suffix = ".py" if script.endswith(".py") else ".sh"
+        others = {p for p in list(files.values()) + sorted(rng.added) if p.endswith(suffix) and p != script}
+        read = argument_flags if suffix == ".py" else shell_flags
+        declared = set()
+        for path in sorted(others):
+            src = rng.batch.get("%s:%s" % (rng.head, path))
+            flags = read(src.decode("utf-8", "replace")) if src is not None else None
+            declared |= flags or set()
+        return declared
 
     def line(self, state, text, claimed):
         if "--" not in text:
@@ -464,10 +486,10 @@ READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader())
 def scan(range_text):
     """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified = changed_paths(diff_args)
+    removed, renamed, modified, added = changed_paths(diff_args)
     found = {}
     batch = BlobReader()
-    rng = Range(base, head, removed, renamed, modified, batch)
+    rng = Range(base, head, removed, renamed, modified, batch, added)
     if not removed and not renamed and not rng.py_files and not rng.shell_files:
         return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     try:
