@@ -196,6 +196,22 @@ def transcript(items):
     return path
 
 
+def prompt(text):
+    """A user prompt that opens a turn: a user message whose content is plain text."""
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def at(rec, ago):
+    """The record with the timestamp the transcript gives it: `ago` seconds before NOW, as ISO text
+    ending in Z."""
+    return dict(rec, timestamp=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(NOW - ago)))
+
+
+def stamped(records, ago):
+    """Each record of a list, stamped `ago` seconds before NOW."""
+    return [at(rec, ago) for rec in records]
+
+
 def output_file(base, job_id, idle):
     """Write <base>/<job_id>.output, its mtime set idle seconds before NOW."""
     os.makedirs(base, exist_ok=True)
@@ -207,16 +223,17 @@ def output_file(base, job_id, idle):
 
 
 def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
-             module=None):
+             module=None, now=None):
     """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
-    given, is the script run in place of MODULE."""
+    given, is the script run in place of MODULE. now, when given, is the clock of this Stop (epoch
+    seconds), so a case can run an earlier Stop than the others."""
     mod = module or MODULE
     if not os.path.isfile(mod):
         raise Fail(f"{mod} is missing")
     env = {k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")}
     if module is not None:
         env.pop("PYTHONPATH", None)  # a copy must not import its siblings from another checkout
-    env["STALL_WATCH_NOW"] = str(NOW)
+    env["STALL_WATCH_NOW"] = str(NOW if now is None else now)
     if base is not None:
         env["STALL_WATCH_OUTPUT_BASE"] = base
     if quiet is not None:
@@ -1104,6 +1121,95 @@ def named_log_with_odd_cwd_keeps_the_report():
     msg = system_message(out, problems)
     problems += listed_once(msg, "bmodd600")
     problems += expect("bmflag600" not in msg, f"a job whose --log= log grows is listed: {msg!r}")
+    return problems
+
+
+@case
+def job_listed_at_one_stop_is_silent_at_the_next():
+    """B1. a job started in a prior turn, quiet since 1400 s ago, so its stall crossed 1100 s ago, after that
+    turn's Stop (its last record, 1200 s ago). The first Stop, at the end of the next turn, lists it. The second
+    Stop, with no new output, is silent about it: its stall crossed before the first Stop. A job started in
+    the turn after is listed at the second Stop, the control that shows the second Stop still lists"""
+    base = new_dir()
+    output_file(base, "bcross", 1400)
+    turn0 = [at(prompt("first"), 1500)] + stamped(moved("bcross"), 1490) + [at(assistant_text("first answer"), 1200)]
+    turn1 = [at(prompt("start"), 1000), at(assistant_text("started"), 900)]
+    rc1, out1, err1 = run_stop(transcript(turn0 + turn1), base, now=NOW - 900)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, "bcross")
+    output_file(base, "bctl1", 600)  # the control: quiet since 600 s ago, so its stall crossed 300 s ago
+    turn2 = [at(prompt("next"), 800)] + stamped(moved("bctl1"), 800) + [at(assistant_text("ok"), 700)]
+    rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2), base)
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += expect("bcross" not in msg2, f"job bcross is listed again at the second Stop: {msg2!r}")
+    problems += listed_once(msg2, "bctl1")
+    return problems
+
+
+@case
+def job_that_stalls_again_is_listed_again():
+    """B2. a job listed at the first Stop, whose output file or whose named log moves after it and goes quiet
+    again: the second Stop lists it again. The named-log job keeps its output file quiet, so a rule that reads
+    only the output file misses that re-stall"""
+    base, d = new_dir(), new_dir()
+    output_file(base, "bagain", 1300)
+    output_file(base, "bnlog", 1300)
+    log = log_at(os.path.join(d, "merge.log"), 1300)
+    turn1 = ([at(prompt("start"), 1400)] + stamped(moved("bagain"), 1390)
+             + stamped(log_job("bnlog", "python3 merge.py 586 > '%s' 2>&1" % log), 1390)
+             + [at(assistant_text("started"), 900)])
+    rc1, out1, err1 = run_stop(transcript(turn1), base, now=NOW - 900)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, "bagain")
+    problems += listed_once(msg1, "bnlog")
+    output_file(base, "bagain", 600)  # its output file moves after the first Stop, then goes quiet
+    log_at(log, 600)  # the named log of bnlog moves after the first Stop, then goes quiet
+    turn2 = [at(prompt("next"), 800), at(assistant_text("ok"), 700)]
+    rc2, out2, err2 = run_stop(transcript(turn1 + turn2), base)
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += listed_once(msg2, "bagain")
+    problems += listed_once(msg2, "bnlog")
+    return problems
+
+
+@case
+def unknown_job_is_reported_at_the_first_stop_after_it_starts():
+    """B3. a job with no output file, started in turn 1, after the turn 0 Stop 1300 s ago: the first Stop after it
+    lists it as unknown, and the next Stop does not. A job started in turn 2 is listed at the next Stop. Its start
+    is 1000 s before NOW. Both readings of its stall crossing (the start, or the start plus the quiet age) fall after
+    the turn 0 Stop and before the first Stop's end, so the case does not pick one"""
+    base = new_dir()  # empty: every job here is unknown
+    turn0 = [at(prompt("first"), 1500), at(assistant_text("first answer"), 1300)]
+    turn1 = [at(prompt("start"), 1200)] + stamped(moved("bunk1"), 1000) + [at(assistant_text("started"), 600)]
+    rc1, out1, err1 = run_stop(transcript(turn0 + turn1), base, now=NOW - 600)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, "bunk1")
+    problems += expect("unknown" in line_of(msg1, "bunk1"), f"bunk1 is not listed as unknown: {msg1!r}")
+    turn2 = [at(prompt("next"), 550)] + stamped(moved("bunk2"), 500) + [at(assistant_text("ok"), 400)]
+    rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2), base)
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += expect("bunk1" not in msg2, f"unknown job bunk1 is listed again at the second Stop: {msg2!r}")
+    problems += listed_once(msg2, "bunk2")
+    return problems
+
+
+@case
+def first_stop_lists_a_quiet_job_as_before():
+    """B4. a transcript with no prior turn, the first Stop: a quiet job is listed with its age, as before"""
+    base = new_dir()
+    output_file(base, "bfirst", 600)
+    recs = [at(prompt("start"), 1000)] + stamped(moved("bfirst"), 990) + [at(assistant_text("started"), 900)]
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bfirst")
+    problems += expect("600s" in msg, f"age 600s is not in the listing: {msg!r}")
     return problems
 
 
