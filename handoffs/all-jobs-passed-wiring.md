@@ -21,6 +21,6 @@ Written by the lane session at wind-down, 2026-11-03, for its coordinator. This 
 
 ## Open
 
-- No child job runs this script yet, and the action does not call it. Proposed: a follow-up lane where a child job runs the script from a pinned cs checkout.
-- Child removals wait on that lane: mailaudit row 5, q_max row 15 (PROMOTE ?), banchi row 46 (PROMOTE ?).
-- Notes: five all-jobs-passed lines in docs/debts/notes.md.
+- PR #1138 (draft), branch all-jobs-passed-action-wiring, head 7a78da67, stacked on #1124. Lane lint PASS, sent to the batch runner. The action's one step runs run.sh: the needs check, then the wiring rules on the optional `workflow` input. Review: round 2 PASS (reviewer sonnet).
+- Child removals start on the owner's ask: the child sets `workflow:` and checks out the repo in its all-jobs-passed job, then removes its copy. Mailaudit row 5, q_max row 15 (PROMOTE ?), banchi row 46 (PROMOTE ?).
+- Notes: nine lane lines in docs/debts/notes.md.
