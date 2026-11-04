@@ -20,6 +20,9 @@
   non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
   The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
   the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
+  A net loss of one line counts, with no line-count floor. Each is cleared by one reason line (owner,
+  2026-11-04 17:44 CST, page item 220, pick b). Measured: 62 flags in 16 of the 31 batches, about 41
+  reason lines. A floor of 6 lines would miss a weakened test, and 6 is the size of the 3297d8fa hunk.
   A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
   A line that head holds again in any file, as often as before, is moved, not lost (one reworded line
   per block of 6 or more, as below). A merge of main that drops the branch's own lines counts too: a
