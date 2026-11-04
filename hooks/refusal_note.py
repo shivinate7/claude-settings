@@ -8,7 +8,7 @@ an agent's row, and blocks until the reply raises each other refused tool (decis
 - A reason that starts with "Auto mode could not evaluate this action" or "Classifier unavailable"
   is a classifier outage with no verdict. It writes nothing.
 - A tool_name already pending in the file is not written again. An agent's row (one with agent_id)
-  does not count as pending: the Stop side drops it, so it must not hide the main session's refusal of
+  does not count as pending: the Stop side drops it, so it must not hide the orchestrator's refusal of
   the same tool.
 - Prints nothing and never the `retry` decision (the only output the event reads). Exits 0 on
   every path, so a failure here never changes the refusal.

@@ -990,31 +990,47 @@ def names_tool(section, tool):
     return ("`%s`" % tool) in section
 
 
-PHRASE_RE = re.compile(r"refusal (?:was|is) right", re.I)
+PHRASE = r"`?\s*:?\s*refusal (?:was|is) right"
+HEDGE_RE = re.compile(r"\?|\bor\b|\bnot sure\b|\bunsure\b|\bmaybe\b|\bwhether\b|\bif\b", re.I)
 
 
 def says_refusal_right(text, tool):
-    """True when one line of the reply names `tool` (as names_tool counts a name) and says the refusal
-    was right, wherever in the reply that line is."""
-    return any(PHRASE_RE.search(line) and names_tool(line, tool) for line in text.splitlines())
+    """True when the reply says "refusal was right" or "refusal is right" directly after `tool`'s name
+    (as names_tool counts a name; an optional colon may sit between), on any line. A hedge in the same
+    clause, before the name or after the phrase ("not sure", "or wrong", "?"), does not clear. The
+    guard's own block reason never clears: it puts the phrase after the placeholder `<tool_name>`. A
+    plural ("refusals were right") does not clear."""
+    if "__" in tool:
+        pattern = re.compile(r"(?<!\w)" + re.escape(tool) + r"(?!\w)" + PHRASE + r"(?!\w)", re.I)
+    else:
+        pattern = re.compile("`" + re.escape(tool) + PHRASE + r"(?!\w)", re.I)
+    for line in text.splitlines():
+        for hit in pattern.finditer(line):
+            before = re.split(r"[.;]", line[:hit.start()])[-1]
+            after = re.split(r"[.;]", line[hit.end():], maxsplit=1)[0]
+            if not HEDGE_RE.search(before) and not HEDGE_RE.search(after):
+                return True
+    return False
 
 
 def _tool_use_ids(records):
     return {u.get("id") for r in records for u in tool_uses(r)}
 
 
-def agent_tool_use_ids(transcript_path):
-    """The tool_use ids of agent calls, or None when the main transcript cannot be read.
+def tool_use_sources(transcript_path):
+    """(ids of agent calls, ids of orchestrator calls) in the session's transcripts, or None when the
+    transcript cannot be read.
 
     An agent's calls are sidechain records. Claude Code writes them to
-    <session>/subagents/agent-<id>.jsonl beside the main transcript <session>.jsonl (measured on a real
-    session's transcripts), and a sidechain record in the main file counts too. An id also in a main
-    record is not an agent's. An agent file that cannot be read adds nothing."""
+    <session>/subagents/agent-<id>.jsonl beside the transcript <session>.jsonl (measured on a real
+    session's transcripts), and a sidechain record in the transcript itself counts too. The orchestrator's
+    calls are the transcript's other records. An agent file that cannot be read adds nothing."""
     try:
-        main = read_transcript(transcript_path)
+        records = read_transcript(transcript_path)
     except Exception:
         return None
-    side = _tool_use_ids(r for r in main if r.get("isSidechain"))
+    agent = _tool_use_ids(r for r in records if r.get("isSidechain"))
+    orchestrator = _tool_use_ids(r for r in records if not r.get("isSidechain"))
     folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
@@ -1022,21 +1038,22 @@ def agent_tool_use_ids(transcript_path):
         names = []
     for name in names:
         try:
-            side |= _tool_use_ids(read_transcript(os.path.join(folder, name)))
+            agent |= _tool_use_ids(read_transcript(os.path.join(folder, name)))
         except Exception:
             continue
-    return side - _tool_use_ids(r for r in main if not r.get("isSidechain"))
+    return agent, orchestrator
 
 
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
-    A row leaves the file when the reply names its tool under Input Needed, or on one line with
-    "refusal was right" / "refusal is right" anywhere; or when the refused call was an agent's (the
-    row has agent_id, or its tool_use_id is a tool_use only in a sidechain). A row with no tool_use_id, a
-    tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays. The file goes when
-    none is left. One stat per Stop when the session had no refusal. Fails open: [] on any error.
-    Spec: docs/decisions/refusals-reach-the-owner.md."""
+    A row leaves the file when the reply names its tool under Input Needed, or says "refusal was right" /
+    "refusal is right" directly after its name (says_refusal_right); or when the refused call was an
+    agent's: the row has agent_id, or its tool_use_id is a tool_use in an agent record. A row whose
+    tool_use_id is in an orchestrator record stays, even with agent_id. A row with no tool_use_id, a
+    tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays, unless it has agent_id.
+    The file goes when none is left. One stat per Stop when the session had no refusal. Fails open: [] on
+    any error. Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names
@@ -1053,15 +1070,16 @@ def pending_refusals(hook, text):
                 if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
                     rows.append((line.rstrip("\n"), row))
         section = input_needed_section(text)
-        side = None
+        agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
-        if transcript and any(r.get("tool_use_id") and not r.get("agent_id") for _, r in rows):
-            side = agent_tool_use_ids(transcript)
+        if transcript and any(r.get("tool_use_id") for _, r in rows):
+            agent_ids, orchestrator_ids = tool_use_sources(transcript) or (set(), set())
         kept = []
         for line, row in rows:
             tool = row["tool_name"]
-            if (row.get("agent_id") or (side and row.get("tool_use_id") in side)
-                    or names_tool(section, tool) or says_refusal_right(text, tool)):
+            use_id = row.get("tool_use_id")
+            from_agent = (row.get("agent_id") or use_id in agent_ids) and use_id not in orchestrator_ids
+            if from_agent or names_tool(section, tool) or says_refusal_right(text, tool):
                 continue
             kept.append((line, tool))
         if len(kept) != len(rows):
