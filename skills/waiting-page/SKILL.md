@@ -144,9 +144,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
-  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
-  (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
+- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The owner stacks asks with Add to list (nothing is
+  written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. The asks
+  of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
+  id is the last typed. One Undo (8 seconds) deletes every ask of that Send. One wake comment tells of the whole Send: "N asks:
+  <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
@@ -509,7 +512,7 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
+undone ask is gone, and nothing is routed. Several asks may share one `at`: route each on its own, never as one. The writer takes each ask with no `owner`, or routes it to the session that
 holds its subject:
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
