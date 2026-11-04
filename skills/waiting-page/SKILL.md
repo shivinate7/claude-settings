@@ -504,8 +504,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, takes each ask with no `reply` whose `owner` rotated
-away ("Rotate the writer"), or routes it to the session that holds its subject:
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, takes each ask with no `reply` whose `owner` is the old
+writer ("Rotate the writer"), or routes it to the session that holds its subject:
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
