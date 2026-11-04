@@ -150,6 +150,23 @@ class LineScope(unittest.TestCase):
         self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
         self.assertEqual(hits(repo, self.OLD), [])
 
+    def test_marker_inside_a_string_on_one_line_is_not_a_marker(self):
+        # A comment opener inside a string opens no comment, so the marker there marks nothing.
+        repo = make_repo({self.FILE: 'old = brief(header="Lane kind: blind  # glossary-ok: quoted")\n'})
+        self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
+        self.assertEqual(hits(repo, self.OLD), [self.FILE])
+
+    def test_marker_inside_a_multi_line_string_is_not_a_marker(self):
+        repo = make_repo({self.FILE: 'doc = """\nold = brief(header="Lane kind: blind")  # glossary-ok: quoted\n"""\n'})
+        self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
+        self.assertEqual(hits(repo, self.OLD), [self.FILE])
+
+    def test_lone_quote_in_a_comment_keeps_its_marker(self):
+        # Green control: the apostrophe sits in the comment, so the comment still holds the marker.
+        repo = make_repo({self.FILE: 'old = "Lane kind: blind"  # don\'t drop this glossary-ok: quoted\n'})
+        self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
+        self.assertEqual(hits(repo, self.OLD), [])
+
     def test_marker_does_not_exempt_another_file(self):
         other = "hooks/other.py"
         repo = make_repo({other: 'old = "Lane kind: blind"  # glossary-ok: quoted to be refused\n'})
