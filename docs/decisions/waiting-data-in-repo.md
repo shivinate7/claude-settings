@@ -33,7 +33,7 @@ Cost: each run of the page writer makes one list call per page of each collectio
 
 Known limits:
 
-- The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes.
+- The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. So do a password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
 - A truncated fetch, such as a missed page of results, deletes the missed documents from the copy. Git history keeps them.
 
 Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.

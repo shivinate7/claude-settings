@@ -119,6 +119,18 @@ RED = [
     ("env-style password assignment", "DB_PASSWORD=" + "hunter2", "hunter2"),
     ("password with a colon", "password: " + "hunter2", "hunter2"),
     ("pwd with spaces around the sign", "pwd = " + "hunter2", "hunter2"),
+    # A placeholder or a plain word is no secret only as the whole value. A secret after a placeholder, or a second
+    # keyword after a shell path, is one.
+    ("password with an angle-bracket value", "password: " + "<hunter2>", "hunter2"),
+    ("password with a placeholder before a secret", "password: " + "<x>" + "hunter2", "hunter2"),
+    ("password with a brace placeholder", "password: " + "${hunter2}", "hunter2"),
+    ("password with a dollar name", "password: " + "$Tr0ub4dor", "Tr0ub4dor"),
+    ("password with a percent name", "password: " + "%Hunter2%", "Hunter2"),
+    ("PWD path with a second keyword after a semicolon", "PWD=/home/x;" + "password=" + "hunter2", "hunter2"),
+    ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
+    # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
+    ("password with a plain word and digits", "password: " + "none123", "none123"),
+    ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
     ("phone number with dots", "555" + "." + "010" + "." + "2345", "555.010.2345"),
@@ -162,6 +174,23 @@ RED = [
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
     ("street with the suffix Ter", "400 Pine Ter", "400 Pine Ter"),
+    # Over-widening guard: a placeholder or a tool value must not open these real-looking values.
+    ("password with a real-looking value", "password: " + "S3cr3t!x9", "S3cr3t!x9"),
+    ("pwd assignment with a real-looking value", "pwd=" + "hunter2x", "hunter2x"),
+    ("personal address with a dotted name", "jane.doe" + "@" + "example.com", "jane.doe@example.com"),
+    ("personal address on a personal host", "jane" + "@" + "myhost.example.com", "jane@myhost.example.com"),
+    ("personal ssh-form remote on a personal host", "jane" + "@" + "myhost.example.com:notes.git",
+     "jane@myhost.example.com:notes.git"),
+    # A mask is no secret only as the whole value. A no-reply name is no person only as the whole local part, and an
+    # ssh remote of a public git host is no person only when its local part is `git`.
+    ("password with asterisks before a secret", "password: " + "***" + "hunter2", "hunter2"),
+    ("personal name in the ssh form of a public git host", "jane" + "@" + "github.com:x", "jane@github.com:x"),
+    ("no-reply name before a personal name", "noreply-jane" + "@" + "x.com", "noreply-jane@x.com"),
+    ("no-reply name after a personal name", "jane.noreply" + "@" + "x.com", "jane.noreply@x.com"),
+    # A plain word is no secret only as the whole value. A secret after one, with or without a comma or quotes, is one.
+    ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
+    ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
+    ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -221,6 +250,29 @@ GREEN = [
     ("a number before the word Park in prose", "Phase 2 Park the lane"),
     ("a key inside a longer word", "turnkey solution"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
+    # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
+    ("password word with optional", "password: " + "optional"),
+    ("shell working-dir variable", "PWD" + "=" + "/Users/x"),
+    ("ssh remote of a public host", "git" + "@" + "github.com:" + "owner/repo.git"),
+    ("no-reply address", "noreply" + "@" + "anthropic.com"),
+    ("password placeholder none", "password: " + "none"),
+    ("password mask", "password: " + "*" * 8),
+    ("password template placeholder", "Password: " + "<your-password>"),
+    ("env var from a template", "POSTGRES_" + "PASSWORD=" + "${DB_PASSWORD}"),
+    # A placeholder or a plain word inside quotes, brackets or parentheses, and a quoted shell path, name no secret.
+    ("quoted optional after a password word", "password: " + '"optional"'),
+    ("plain word in parentheses after a password word", "(password: none)"),
+    ("bracketed optional after a password word", "password: " + "[optional]"),
+    ("quoted shell path after PWD", 'PWD="/home/x"'),
+    # A placeholder, a mask or a plain word after a password word is no secret when it is the whole value.
+    ("password word with a shell variable", "password: " + "$DB_PASSWORD"),
+    ("password word with a brace template", "password: " + "{{DB_PASSWORD}}"),
+    ("password word with a percent template", "password: " + "%DB_PASSWORD%"),
+    ("password word with xxx", "password: " + "xxx"),
+    ("password word with a bullet mask", "password: " + "•" * 3),
+    ("single-quoted optional after a password word", "password: " + "'optional'"),
+    ("parenthesized none after a password word", "password: " + "(none)"),
+    ("none with a period after a password word", "password: " + "none."),
 ]
 
 
@@ -439,8 +491,8 @@ class Scan(Base):
                 doc = {"id": "ok", "title": "Ok", "note": value}
                 out = self.out("waiting-%d" % index)
                 r = self.export(self.fetch(items={"ok": doc}), out)
-                self.assertEqual(r.returncode, 0, "%s: a non-secret was refused or failed. Output:\n%s" % (label, shown(r)))
-                self.assertFalse(says(r, "refused"), label)
+                self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
 

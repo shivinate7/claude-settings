@@ -101,8 +101,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
     A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
     command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
-    (guard rule `command-in-item`). Each shell in `command` opens with its own `gh auth switch -u shivinate7`, or
-    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
+    (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
@@ -186,6 +185,11 @@ into `meta/page`. The writer watches the page ("Read the answers").
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
+
+## Rotate the writer
+
+A rotation moves the writer role to a new session, and the page and its open asks must follow it.
+The steps are in project-ops `templates/operating-model.md`, "Rotation of standing sessions", steps 1 and 5.
 
 ## Chat first
 
@@ -285,6 +289,8 @@ The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set 
 passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
 (`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
+A password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and
+the ssh remote of a public git host pass.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
@@ -385,11 +391,8 @@ live page.
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
-3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
-   item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
-   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
-   session until the owner answers. Running work continues with no one to brake it. You may end the
-   turn: each agent's end wakes the session.
+3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
+   (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -513,8 +516,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
-holds its subject:
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that holds its subject. An
+ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the writer"):
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
@@ -631,9 +634,7 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
-The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
-never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
-publishes.
+Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 ## Update a repo's pages
 

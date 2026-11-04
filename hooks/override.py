@@ -23,6 +23,21 @@ rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
+  A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
+  prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
+  owner prompt that carries the whole word `opus` and takes the plain path; none for any other prompt. It fails
+  closed: an error or an odd answer grants nothing. The plain path's rules:
+    - Strip every MACHINE_TAGS or NOTICE_FRAMES block anywhere, and a pasted block, first. An unclosed block, and a
+      `[SYSTEM NOTIFICATION` line, run to the end.
+    - In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID set), a prompt with no earlier owner turn in the
+      transcript is a seed prompt: no judge call.
+    - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
+      length. Any other first `opus` is a plain ask.
+    - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
+    - Two or more distinct roles, or a role word with not, no, don't, never, except or without just before it:
+      no grant.
+    - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
+      min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -44,8 +59,15 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+
+try:  # stdlib only: the one home of the machine-text tags
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES
+    NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
+except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
+    NOTICE_TAGS = ()
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
@@ -58,6 +80,29 @@ PROMPT = re.compile(
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
+# The plain ask (grant_opus_ask): the whole word, the blocks that are not the owner's words, a word that may name a
+# role, and a length (bounded by non-word characters, so `12 mhz` is none).
+OPUS_WORD = re.compile(r"\bopus\b", re.I)
+PASTED = r"<pasted_content\b[^>]*>.*?</pasted_content>|<pasted_content\b.*"  # an unclosed block runs to the end
+# One block per tag name in NOTICE_TAGS, so the lists stay the one home; an unclosed block, or a bracket line, runs
+# to the end.
+MACHINE_BLOCKS = "|".join(
+    [r"<{0}[\s>].*?(?:</{0}>|$)".format(name)
+     for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
+    + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
+BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
+ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
+NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
+NEGATION_SPAN = 3  # a negation within this many words before a role word negates it
+SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
+ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
+# A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
+UNCLEAR_LENGTH = re.compile(r"[.,]\d+(?:[mh]|\s?(?:{0}))(?![\w-])|\d(?:{0}|[mh])\d".format(SPELLED_UNIT), re.I)
+FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired scheduled task's block
+COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
+SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
+KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
+DEFAULT_ASK_LENGTH = ("2", "h")
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
 # grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
@@ -146,11 +191,172 @@ def _grant_opus(session_id, rest, at):
     length = OPUS_LENGTH.fullmatch(words[-1])
     if not length or len(words) > 2 or (len(words) == 2 and role is None):
         return None  # ambiguous: grants nothing
-    number, unit = length.groups()
+    return _write_opus(session_id, path, at, length.groups(), role)
+
+
+def _write_opus(session_id, path, at, length, role, said=None):
+    """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
+    shape, for the keyword grant and the plain ask. `said` is the owner's words, for the log. Returns ("opus", until,
+    role)."""
+    number, unit = length
     until = at + (timedelta(hours=int(number)) if unit.lower() == "h" else timedelta(minutes=int(number)))
-    _write(path, {"kind": "opus", "until": until.astimezone(timezone.utc).isoformat(), "role": role})
-    _log(session_id, "opus-grant", "%s until %s" % (role or "every role", until.astimezone(timezone.utc).isoformat()))
+    stamp = until.astimezone(timezone.utc).isoformat()
+    _write(path, {"kind": "opus", "until": stamp, "role": role})
+    detail = "%s until %s" % (role or "every role", stamp)
+    if said:
+        detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
+    _log(session_id, "opus-grant", detail)
     return "opus", until, role
+
+
+def _strip_blocks(prompt):
+    """The prompt with each pasted or machine-tag block replaced by a marker: that text is not the owner's words."""
+    return BLOCKS.sub("[pasted text]", prompt)
+
+
+def _keyword_rest(rest):
+    """True when the text after a first word `opus` is a keyword form: `off`, a length, or a role then a length."""
+    words = rest.split()
+    if KEYWORD_REST.match(rest) or (words and OPUS_LENGTH.match(words[0])):
+        return True
+    return len(words) > 1 and opus_role(words[0]) is not None and OPUS_LENGTH.match(words[1]) is not None
+
+
+def _ask_scope(text):
+    """(length, role) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
+    length, two roles, or a negated role. The role is None for every role."""
+    lengths = ASK_LENGTH.findall(text)
+    if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
+        return None
+    words = ROLE_WORDS.findall(text)
+    roles = set()
+    for at, word in enumerate(words):
+        role = opus_role(word)
+        if role is None or role == "claude":
+            continue
+        if NEGATIONS & {w.lower() for w in words[max(0, at - NEGATION_SPAN):at]}:
+            return None
+        roles.add(role)
+    if len(roles) > 1:
+        return None
+    length = DEFAULT_ASK_LENGTH
+    if lengths:
+        number, short, spelled = lengths[0]
+        length = (number, (short or spelled)[0])
+    return length, roles.pop() if roles else None
+
+
+def _text_of(rec):
+    """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript.owner_text(rec, NOTICE_TAGS)
+
+
+def _tail_prompts(transcript):
+    """[(offset, record)] for each owner prompt record in the last SEED_READ_MAX bytes, in order. Attachment, assistant
+    and other non-prompt records are left out. Cost: one open, one read of that tail."""
+    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+        return []
+    try:
+        with open(transcript, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            at = max(0, handle.tell() - SEED_READ_MAX)
+            handle.seek(at)
+            lines = handle.read().splitlines(True)
+    except OSError:
+        return []
+    found = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            rec = None
+        if isinstance(rec, dict) and _text_of(rec) is not None:
+            found.append((at, rec))
+        at += len(line)
+    return found
+
+
+def _own_record(transcript, prompt):
+    """Offset of the prompt's own record: the last owner prompt record whose text equals the prompt, or None."""
+    own = [at for at, rec in _tail_prompts(transcript) if _text_of(rec).strip() == prompt.strip()]
+    return own[-1] if own else None
+
+
+def _owner_turn_in(transcript, prompt):
+    """True when the transcript at path `transcript` holds an owner turn, not an isMeta record, a `/effort`-style
+    command record, a record whose origin kind is not human, a promptSource "system" record, or the prompt's own
+    record (_own_record). Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX
+    bytes, plus the _own_record read."""
+    if not isinstance(transcript, str):
+        return False
+    own = _own_record(transcript, prompt)
+    try:
+        with open(transcript, "rb") as handle:
+            while handle.tell() < SEED_READ_MAX:
+                at = handle.tell()
+                line = handle.readline(SEED_READ_MAX)
+                if not line:
+                    return False
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system" or at == own:
+                    continue
+                origin = rec.get("origin")
+                if isinstance(origin, dict) and origin.get("kind", "human") != "human":
+                    continue
+                text = _text_of(rec)
+                if text is not None and not text.lstrip().startswith(COMMAND_RECORDS):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def _system_prompt_last(transcript, prompt):
+    """True when the last owner prompt record is the prompt itself with promptSource "system": a timed check-in or
+    other harness turn."""
+    found = _tail_prompts(transcript)
+    return bool(found) and found[-1][1].get("promptSource") == "system" and _text_of(found[-1][1]).strip() == prompt.strip()
+
+
+def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
+    """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
+    owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
+    caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
+    the rules of the words. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a file, a machine-tag
+    start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud session's seed prompt
+    (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in the transcript, has
+    promptSource "system". The guard.log line
+    `opus-grant` holds the words that were judged."""
+    if not isinstance(prompt, str):
+        return None
+    path = _path(session_id, "opus")
+    if path is None or not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS):
+        return None
+    first = OPUS_PROMPT.match(prompt)
+    if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
+        return None
+    text = _strip_blocks(prompt)
+    if FIRED_TASK.search(prompt):  # a stored task, not typed words
+        return None
+    if not OPUS_WORD.search(text) or _system_prompt_last(transcript, prompt):
+        return None
+    if os.environ.get(LANE_ENV) and not _owner_turn_in(transcript, prompt):
+        return None
+    if judge is None:
+        from call_judge import opus_ask as judge
+    if judge(text) is not True:
+        return None
+    scope = _ask_scope(text)
+    if scope is None:
+        return None
+    return _write_opus(session_id, path, at, scope[0], scope[1], " ".join(text.split()))
 
 
 def grant(session_id, prompt, at):
