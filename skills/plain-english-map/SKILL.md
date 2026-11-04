@@ -34,7 +34,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 ## Steps
 
-1. **Scout.** Read the diff. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
+1. **Scout.** Read the diff. For each changed file, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area>` to read its map line first. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
    repository root. Each failed line names the file, table or screen key that has no map entry. The
    command binds no model-call reader, so it skips the `modelSeam` call-site check and prints a note.
    A host that has its own check may run the same check bodies there.
@@ -44,6 +44,11 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
    `node ~/.claude/skills/plain-english-map/scripts/map-picture.mjs` from the repository root and read the page.
    It writes `map.html` in a new folder under the system temp folder and prints the path.
    Give a path to write there instead. The command refuses a path inside the repository.
+
+Before you answer how code in this repo works, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area>` from
+the repository root. It is the cheap read: it prints the map, and you open no file. A file path prints its area, its map line, its fact lines,
+its Homes lines and its trace steps. An area id prints its map lines. A folder, with a `/` at the end, prints every map line under it.
+With no match it prints `no map line for <arg>` and exits 1.
 
 ## Formats
 
@@ -64,6 +69,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 - `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 9 MAP checks. Run it from a repository root, and it runs the 9 checks there. It prints one line for each check, and exits non-zero on a FAIL.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
+- `scripts/map-show.mjs` is the show command. It prints the map for one file, area or folder, through the readers of `map-check.mjs`.
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
 - `scripts/lib/` also holds `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
