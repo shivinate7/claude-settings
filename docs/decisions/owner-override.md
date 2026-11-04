@@ -44,9 +44,9 @@ Orchestrator's call, not an owner grant:
 - An Opus spawn that both overrides cover uses the Opus override, so a one-act `override` stays unspent.
 - `guard.log` gets one line per grant (`opus-grant`, with the role and the end), per lift (`opus-override`), per end (`opus-off`), and per unreadable file (`opus-unread`).
 - The plain ask (owner, 2026-11-03 19:47 CST, chat, "a read plain asks"): a plain Opus ask in the owner's own typed prompt, such as `send opus judges`, lifts the Opus spawn refusal with no keyword. The step grant route stays.
-- `hooks/local_time.py` calls `override.grant_opus_ask` only when the keyword forms granted nothing. It reads only the owner's typed prompt. These grant nothing: a prompt that starts with a `shared_names.MACHINE_TAGS` notice; a prompt whose first word is `opus` or `override` (the whole-prompt rule holds); text inside `<pasted_content>` blocks.
+- `hooks/local_time.py` calls `override.grant_opus_ask` only when the keyword forms granted nothing. It reads only the owner's typed prompt. A prompt that starts with a `shared_names.MACHINE_TAGS` notice grants nothing. A `MACHINE_TAGS` block anywhere, a `<pasted_content>` block, and the text after an unclosed one are cut first. The plain path skips a prompt whose first word is `override`. It also skips a first word `opus` followed by `off`, a length, or a role then a length (the whole-prompt rule holds).
 - A model judge, `call_judge.opus_ask` (haiku), answers yes or no. A question, a hedge, a negation or quoted agent text grants nothing. Any judge error grants nothing (fails closed).
-- The role is the one `OPUS_ROLES` role the words name, else every role. The length is a length in the words, else 2h.
+- The role is the one `OPUS_ROLES` role the words name, else every role. `claude` is the addressee here, never a role. Two roles, a role with a negation before it, or two lengths grant nothing (review round 1, 2026-11-03). The length is a length in the words (`30m`, `1 hour`), else 2h.
 - A plain-ask grant writes the same Opus override file. Its `opus-grant` line in `guard.log` carries the owner's words.
 - Cost: at most one model call per owner prompt with the word `opus`, none otherwise.
 
