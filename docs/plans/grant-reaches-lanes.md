@@ -2,7 +2,7 @@
 
 Owner, 2026-11-01 22:37 CST, in the coordinator's chat: "a grant here should allow for a grant there."
 
-Status: plan only. Nothing is built. The owner signs off first.
+Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Build step 1, the probe, comes first.
 
 ## The problem
 
@@ -85,8 +85,8 @@ A hook cannot bind free prose to one act (rule outcomes-grant-covers-named-act, 
 act it names, never a variant). So the grant is a typed word with a fixed form, like `override 15m`
 and `opus builders 2h`:
 
-`grant <lane slug> merge <pr> <n>[m|h]`, `grant <lane slug> self-edit <n>[m|h]`, or
-`grant off <lane slug>`
+`grant batch-runner merge <pr> <n>[m|h]`, `grant <lane slug> self-edit <n>[m|h]`, or
+`grant off <lane slug>` (`grant off batch-runner` for the runner)
 
 - The whole prompt, in any case, after leading whitespace. Any other text grants nothing, as for
   `override`.
@@ -100,7 +100,9 @@ and `opus builders 2h`:
   building-allow-list-is-the-constant). The act's full scope sits in the owner's words or the
   constant, never in a record a model writes. First entries, one per incident:
   - `merge <pr>`: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
-    cloud rule still allows any PR (section 2, the gate). The PR is required. The lead session only, never its agents.
+    cloud rule still allows any PR (section 2, the gate). The PR is required. Only the session
+    tagged `cs-build:batch-runner` for the repo, never its agents: on main, every other session
+    hands its merge to the batch runner (session-start hook, merge role).
   - `self-edit`: an Edit or Write in the calling agent's own worktree (its cwd's checkout), to `hooks/`, `lint/`, `skills/` or
     `agents/`. It takes no PR. Never `settings.json`, `.claude/` or `state/`, and never a path
     outside that worktree. A written allow rule or hook would outlive the grant, because a file
@@ -115,7 +117,9 @@ and `opus builders 2h`:
 ### The gate
 
 The gate runs in the receiving session, before the classifier. It lifts the classifier only. It
-emits `allow` only after every guard check and sibling hook passed. It never lifts an act on the
+lives in the guard hook and emits `allow` only after every check of that hook passed. It cannot
+see sibling hooks: each hook decides alone (decision owner-override, known limit). Whether a
+sibling's `deny` still outranks the gate's `allow` is part of the step 1 probe. It never lifts an act on the
 "Outside every override" list of decision owner-override (role and model guards, frozen paths). It approves only a call that matches
 the act in the catalogue exactly. Anything else falls through to the classifier as today. Three
 gates exist:
@@ -156,7 +160,7 @@ that.
 
 Transport:
 
-1. The owner types `grant runner-8 merge 1049 2h` in the coordinator.
+1. The owner types `grant batch-runner merge 1049 2h` in the coordinator.
 2. The coordinator's prompt hook (`hooks/local_time.py`) checks the form and prints one context
    line: the grant parsed, and the relay to send. It writes nothing beyond the inbox line it
    already writes for each prompt. The hook gets no event uuid, so the pointer is the coordinator's
@@ -195,7 +199,7 @@ What stops it working:
 - The model must call `get_event`. If it skips that, the classifier runs as today. That is a lost
   grant, never a widened one.
 
-The gate approves `merge` only in the lead session. A missed `grant off` is the gap named in
+The gate approves `merge` only in the batch runner. A missed `grant off` is the gap named in
 section 2.
 
 ### Design B: a frozen grant file (owner's computer only)
@@ -218,8 +222,9 @@ sessions on one machine.
 Transport: the grant goes to a store both sides read. That is the roadmap branch (the step grant of
 decision owner-override does this today) or the waiting page's `answers/<id>`.
 
-What a mistaken relay can do: anything a model can write. Any session can push to the roadmap
-branch. `ArtifactData` writes "as the person", so the page cannot tell the owner's save from a
+What a mistaken relay can do: anything a model can write. Only a session tagged
+`cs-build:triage` can push to the record branch (guard rule roadmap-one-writer, `hooks/guard.py`),
+but that session is a model too, and an override lifts the rule. `ArtifactData` writes "as the person", so the page cannot tell the owner's save from a
 model's. No guard refuses a model's write to `answers/<id>` (`hooks/call_judge.py` judges item
 writes only). The answer record has no viewer field (`skills/waiting-page/page.html`). An HMAC key
 in the cloud environment's secrets is readable with `env`, so signing proves nothing either.
@@ -277,7 +282,7 @@ Design B: one file write per grant, one file read per tool call while the file e
 3. **The first catalogue.** Options: (a) `merge <pr>` and `self-edit`, one per incident; (b)
    `merge <pr>` only, the rest after a probe. Recommend (a).
 4. **Agents.** Options: (a) `self-edit` reaches the target's agents, as a timed override does, and
-   `merge` stays with the lead session; (b) the lead session only. Recommend (a): the
+   `merge` stays with the batch runner; (b) the lead session only. Recommend (a): the
    `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Options: (a) probe the hook gate first, the mod gate second; (b) the mod gate only,
    since its skip is documented. Recommend (a): the hook gate is known to load in cloud sessions.
