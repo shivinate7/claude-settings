@@ -26,7 +26,7 @@
 # after the shutdown and before the lock is freed, on every exit, INT and TERM too. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
 # reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
-# goes back) or refused. A boot that fails shuts nothing down.
+# goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
 # it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
@@ -95,12 +95,21 @@ stop_child() {
   wait "$child" 2>/dev/null
 }
 
+# record_boot: one sim-boots.jsonl line for the device this run booted, once. The call is silent and its failure ignored.
+# The cleanup calls it too: a TERM that lands during the boot runs the trap before the main path reaches its own call.
+recorded=
+record_boot() {
+  [ -n "$recorded" ] && return 0
+  recorded=1
+  python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
+}
+
 # Order: stop the child, shut down my simulator, then free the lock, so no run sees the lock free while a simulator of
 # mine is still booted. Later signals are ignored so the cleanup finishes.
 cleanup() {
   trap '' INT TERM HUP QUIT
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then stop_child; fi
-  [ -n "$booted_by_me" ] && xcrun simctl shutdown "$booted_by_me"
+  if [ -n "$booted_by_me" ]; then record_boot; xcrun simctl shutdown "$booted_by_me"; fi
   [ -n "$have_lease" ] && "$(dirname "$0")/sim-lease" give --pid $$
   if [ -n "$have_lock" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
 }
@@ -207,7 +216,7 @@ if [ -z "$udid" ]; then
     # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
-    python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$udid" >/dev/null 2>&1 || true
+    record_boot
   fi
 fi
 echo "sim-test: using $udid"
