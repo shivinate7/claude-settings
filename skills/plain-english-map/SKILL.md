@@ -11,8 +11,9 @@ command at the repository root. The skill finds no config when `map.config.json`
 do not use this skill in that repository.
 
 The repository values live in `map.config.json` at the repository root. The keys are `title`,
-`codeExtensions`, `formatVersion`, `mapPaths`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir` and `requireAllKeys`.
+`codeExtensions`, `formatVersion`, `mapPaths`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir`, `decisionsDir`, `decisionIdPattern` and `requireAllKeys`.
 `mapPaths` is a list of path prefixes: MAP1 asks for a map line only for the code files under them. With no `mapPaths`, MAP1 covers the whole repository.
+`decisionsDir` is a folder prefix, and `decisionIdPattern` a regex string for one decision id, such as `D\d+`. Set both or neither: one alone is an error.
 `scripts/lib/map-config.mjs` checks the whole shape.
 
 ## The format version
@@ -29,6 +30,7 @@ the version it reads in `MAP_FORMAT_VERSION`, in `scripts/lib/map-config.mjs`. A
 - **Newer map.** Every command refuses, and the message says to update the skill. No command writes a downgrade.
 
 To change the map format: raise `MAP_FORMAT_VERSION`, and add one step to the list in `scripts/map-upgrade.mjs`.
+Version 3 to 4 changes no file: version 4 adds the two decision keys, the decisions line and MAP10, and it makes an older copy of the skill refuse the map.
 Version 2 to 3 changes no file: version 3 adds the fact line, the `## Homes` section and MAP9, and it makes an older copy of the skill refuse the map.
 Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines carried. It strips a `:N` after a file name only when its extension is in `codeExtensions`: `example.com:3000` stays.
 
@@ -55,6 +57,8 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
   `  - ` + one plain sentence + ` — ` + one backtick cite. A cite is `[file: ]SYMBOL = LITERAL` (the file is the map line's file when left out,
   the literal is JSON, `{…}` is a set and `[…]` a list) or `uses FILE[:SYMBOL]` (the map line's file imports FILE, and uses SYMBOL).
   The sentence shows each number of the cite, and names each item of a set or a list. A number outside backticks anywhere else in the map fails MAP9.
+- **A decisions line.** Indented under a map line: `  - Decisions: ` + each id in backticks, joined by `, `. An id names a record, a `.md` file directly in `decisionsDir`,
+  when the file name without `.md` is the id or starts with the id and `-`. A run of digits compares by value: `D7` names `D007-x.md`.
 - **A home.** Under `## Homes`: `- ` + the capability in words + ` — ` + backtick `FILE:SYMBOL`. Read this section before you build, and extend the home.
 - **A trace step.** In `docs/map/traces/<screen-key>.md`, under a `## <path name>` heading, a numbered line:
   `1. ` + backtick path + ` — ` + what the step does. Each step must be reached from an earlier step,
@@ -62,11 +66,14 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 ## Files
 
-- `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 9 MAP checks. Run it from a repository root, and it runs the 9 checks there. It prints one line for each check, and exits non-zero on a FAIL.
+- `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 10 MAP checks. Run it from a repository root, and it runs the 10 checks there. It prints one line for each check, and exits non-zero on a FAIL.
+- MAP10 runs only when both decision keys are set, and otherwise it passes with a skip note. It fails when a mapped file's comments cite an id that names a record and the file's decisions line lacks it,
+  and when an id on a decisions line names no record. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
+- `scripts/map-fix.mjs` adds the ids that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
-- `scripts/lib/` also holds `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
+- `scripts/lib/` also holds `decisions.mjs` (which record an id names, and which ids a file cites), `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
 - `scripts/lib/fact-readers.mjs` reads the value of each fact line: JSON, TypeScript and JavaScript by their parsers, Python through `py-facts.py` (one `python3` start for a run), and any other language by a line regex. MAP9 fails when a reader cannot run: an unknown read is never a pass.
 - `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. Through the install link, the host installs nothing. A copy of the skill outside the clone finds no `typescript`: the error says to run the skill from its install link, or to install `typescript` in the host.
 - `assets/page.html` is the page template.
@@ -74,6 +81,6 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 ## What a host repository may add
 
-A host may register the 9 check bodies with its own check, and it may bind its own readers. The model-call
+A host may register the 10 check bodies with its own check, and it may bind its own readers. The model-call
 readers go in through `bindConfig` and `bindSeamReader`, and the page readers go in through `bindReaders`.
 With no model-call reader bound, the AI calls tab is empty. A host pins the install link, never a copy of this folder.

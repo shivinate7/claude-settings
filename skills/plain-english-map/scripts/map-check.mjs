@@ -1,6 +1,6 @@
 // Plain English is the master copy of what the code does, and a check keeps `docs/map/` in sync with it.
 //
-// Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 9 MAP checks there.
+// Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 10 MAP checks there.
 // The check bodies live here, in `mapChecks`. A host may register each one with its own check.
 //
 // `migrationTables` strips SQL `--` comments first (`stripSqlComments` below — `ctx.stripComments`
@@ -13,7 +13,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import ts from './lib/lazy-typescript.mjs';
-import { blankComments, blankCommentsAndStrings } from './lib/source-text.mjs';
+import { blankComments, blankCommentsAndStrings, commentsOf } from './lib/source-text.mjs';
+import { citedIds, idKey, namesRecord, recordKeys } from './lib/decisions.mjs';
 import { importTargets } from './lib/import-reader.mjs';
 import { readFacts } from './lib/fact-readers.mjs';
 import { boundSeamReader, loadMapConfig, repoMapConfig, validateMapConfig } from './lib/map-config.mjs';
@@ -246,6 +247,33 @@ const parseHomes = (text) => {
 
 /** The lines under a `## Homes` heading of one docs/map/ page, as { line, capability, file, symbol }. */
 export const homeLines = (text) => parseHomes(text).homes;
+
+// ---- Decision lines: the ids of the decision records that a map line's file follows ----
+
+// A decisions line is an indented list line under a map line: `  - Decisions: ` and each id in backticks, joined by `, `.
+const DECISIONS_LABEL_RE = /^[ \t]+[-*+]\s+Decisions:/;
+const DECISIONS_LINE_RE = /^[ \t]+[-*+] Decisions: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
+
+/**
+ * The code-file map lines of one docs/map/ page, each as { file, line, ids, at, bad }. `line` is the 1-based number of the map line,
+ * and `ids` the ids on its decisions lines. `at` is the 1-based number of its first decisions line, or null when it has none.
+ * `bad` holds each decisions line that is not in the form above: a bad line adds no id.
+ */
+export const decisionEntries = (text, re) => {
+  const out = [];
+  let entry = null;
+  for (const [line, l] of unfenced(text)) {
+    if (/^#{1,6}\s/.test(l)) { entry = null; continue; }
+    const mapLine = l.match(LIST_ITEM_TOKEN_RE);
+    if (mapLine) { entry = re.test(mapLine[1]) ? { file: mapLine[1], line, ids: [], at: null, bad: [] } : null; if (entry) out.push(entry); continue; }
+    if (!entry || !DECISIONS_LABEL_RE.test(l)) continue;
+    const m = l.match(DECISIONS_LINE_RE);
+    if (!m) { entry.bad.push({ line, text: l.trim() }); continue; }
+    entry.at ??= line;
+    entry.ids.push(...[...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]));
+  }
+  return out;
+};
 
 // ---- MAP9 helpers ----
 
@@ -748,12 +776,7 @@ const NOTE_RE = /^\s*(?:\/\*\*?|\/\/|\*)?\s*In plain words:/;
 const HASH_NOTE_RE = /^\s*#\s*In plain words:/;
 const SQL_NOTE_RE =/^\s*--\s*In plain words:/;
 
-const commentText = (text, file) => {
-  const blanked = blankComments(text, file);
-  let out = '';
-  for (let i = 0; i < text.length; i++) out += blanked[i] !== text[i] || text[i] === '\n' ? text[i] : ' ';
-  return out.split('\n');
-};
+const commentText = (text, file) => commentsOf(text, file).split('\n');
 
 /** Reads { path: text }. Returns the sorted path:line of each note that opens with the label. */
 export const plainWordsNotes = (files) =>
@@ -1057,7 +1080,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
   });
 };
 
-// ---- The 9 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
+// ---- The 10 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
 const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */
@@ -1069,12 +1092,45 @@ export const gitLsFiles = (root) =>
 
 // Top-level docs/map/*.md only. A trace page under docs/map/traces/ has its own checks, MAP5 and MAP6.
 // A bullet under a trace heading that says "tables" or "screens" would else add a fake MAP3 or MAP4 line.
-const mapFilePaths = (files) => files.filter((f) => /^docs\/map\/[^/]+\.md$/.test(f));
+export const mapFilePaths = (files) => files.filter((f) => /^docs\/map\/[^/]+\.md$/.test(f));
 
 const skip = (key, what) => ({ skipped: `map.config.json has no "${key}" setting, so there is no ${what} to check` });
+// A check that no config has to turn on: `requireAllKeys` never makes its skip a fail.
+const optionalSkip = (key, what) => ({ ...skip(key, what), optional: true });
 
 /**
- * The bodies of MAP1..MAP9, for one validated config `cfg`, one repository `root` and a `read(file)` of its text. Each body returns true,
+ * What MAP10 reads, for a config that sets both decision keys: `pages` is [[path, text]] of the docs/map/ pages, `all` the tracked files.
+ * `missing` lists each tracked mapped file whose comments cite ids that name a record and that its decisions lines lack:
+ * { file, page, line, at, ids }, where `line` is its map line and `at` its first decisions line or null. `map-fix.mjs` adds exactly these ids.
+ * `unknown` lists each id on a decisions line that names no record. `bad` lists each decisions line that is not in the form.
+ */
+export const decisionGaps = ({ cfg, root, read, all, pages }) => {
+  const keys = recordKeys(root, cfg.decisionsDir);
+  const tracked = new Set(all);
+  const re = extRe(cfg);
+  const byFile = new Map();
+  const unknown = [], bad = [];
+  for (const [page, text] of pages) {
+    for (const e of decisionEntries(text, re)) {
+      // A file with a map line on two pages is judged on the union of its ids, and fixed on its first line.
+      if (!byFile.has(e.file)) byFile.set(e.file, { file: e.file, page, line: e.line, at: e.at, ids: [] });
+      byFile.get(e.file).ids.push(...e.ids);
+      for (const b of e.bad) bad.push({ page, ...b });
+      for (const id of e.ids) if (!namesRecord(id, keys)) unknown.push({ page, line: e.at, file: e.file, id });
+    }
+  }
+  const missing = [];
+  for (const home of byFile.values()) {
+    if (!tracked.has(home.file)) continue;
+    const have = new Set(home.ids.map(idKey));
+    const ids = citedIds(read(home.file), home.file, cfg.decisionIdPattern).filter((id) => namesRecord(id, keys) && !have.has(idKey(id)));
+    if (ids.length) missing.push({ file: home.file, page: home.page, line: home.line, at: home.at, ids });
+  }
+  return { missing, unknown, bad };
+};
+
+/**
+ * The bodies of MAP1..MAP10, for one validated config `cfg`, one repository `root` and a `read(file)` of its text. Each body returns true,
  * returns `{ skipped: '<reason>' }`, or throws an error that says what is wrong. `files` is the list of tracked files, read at each call.
  */
 export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) => {
@@ -1245,6 +1301,20 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
       if (problems.length) throw new Error(problems.join('; '));
       return true;
     },
+
+    MAP10: () => {
+      if (!cfg.decisionsDir) return optionalSkip('decisionsDir', 'decisions folder');
+      const all = files();
+      const pages = mapFilePaths(all).map((f) => [f, read(f)]);
+      const { missing, unknown, bad } = decisionGaps({ cfg, root, read, all, pages });
+      const problems = [
+        ...bad.map((b) => `${b.page}:${b.line} decisions line is not "- Decisions: \`ID\`, \`ID\`": ${b.text}`),
+        ...missing.map((m) => `${m.page}:${m.line} ${m.file} cites ${m.ids.join(', ')} in a comment, and its decisions line has no such id`),
+        ...unknown.map((u) => `${u.page}:${u.line} ${u.file} lists ${u.id}, and no record in ${cfg.decisionsDir} names it`),
+      ];
+      if (problems.length) throw new Error(problems.join('; '));
+      return true;
+    },
   };
 };
 
@@ -1271,8 +1341,9 @@ export const runMapChecks = (root) => {
       if (bad) throw bad;
       const r = bodies[id]();
       if (typeof r?.skipped === 'string') {
-        verdict = cfg.requireAllKeys ? 'FAIL' : 'SKIP';
-        text = cfg.requireAllKeys ? `${r.skipped}, and "requireAllKeys" is true` : r.skipped;
+        const strict = cfg.requireAllKeys && !r.optional;
+        verdict = strict ? 'FAIL' : 'SKIP';
+        text = strict ? `${r.skipped}, and "requireAllKeys" is true` : r.skipped;
       }
     } catch (e) {
       verdict = 'FAIL';
