@@ -295,8 +295,6 @@
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
 - stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
-- stale-cites-cost-untested-py: no case proves a PR that changes a .py and removes nothing starts 4 git processes and reads no .md; a mutant without that early return passes (lint/test_stale_cites.py CostTests). Decision: stale-cites-at-merge
-- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
@@ -1175,3 +1173,5 @@
 - text-only-decision-wrapping-wide: `docs/decisions/design-agents.md` says the design reviewer catches "wrapping" unqualified, while `agents/design-reviewer.md`, the file the reviewer reads, narrows it to a label, button or heading that newly wraps. Decision: design-agents
 - text-only-overflow-css-fix: in a text-only lane, an overflow fix routes to the builder (skill design-review step 5), and only the "edits more than copy" bullet, read at fix time, sends a CSS fix to a designer. Decision: design-agents
 - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
+- stale-cites-value-grammar-drift: the Python copy of the value cite grammar (`lint/stale_cites.py`) reads any backtick span in any prose line, while MAP9 reads only the tail of a fact line (`map-check.mjs`, `VALUE_CITE_RE` at :200, applied to a fact line tail by `parseFacts` at :222). A span that MAP9 never reads, such as one in running prose, can fire STALE004. The parity rows hold the grammar of one span, not where a span sits. Decision: stale-cites-at-merge
+- stale-cites-value-quadratic: py-facts `answer` rebuilds assigned() for each name in `_literal_changed` and `tree_value`, so the cost grows with the square of the name count: 0.84 s for hooks/test_guard.py (782 names), 14.6 s for 5000 names (`lint/stale_cites.py`). Decision: stale-cites-at-merge
