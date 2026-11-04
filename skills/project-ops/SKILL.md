@@ -50,7 +50,8 @@ that triage or the batch runner writes for its successor.
 5. **Triage pushes the record branch.** The guard lets only the triage session push it (rule
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3
-   in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI.
+   in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI. A local
+   triage first asks the owner to type `tier triage` as a whole prompt, its proof of tier.
 6. **Protect the default branch.** Name the checks the repo's CI reports. Preview, then set, once the
    owner confirms the act (it changes the live repo):
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check <name> [--check <name> ...] [--branch main]`,
