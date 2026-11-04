@@ -7,8 +7,7 @@ Run this in the orchestrator. Workers never spawn, so the orchestrator spawns ev
 The ruling is decision design-agents, 2026-10-27. The owner wants a mix of control and new ideas
 between the mockups.
 
-In this skill, `<repo root>` and "the target repo" mean the repo whose screen the lanes draw. The target
-repo defaults to the spawning repo. Lanes always draw in a worktree of the spawning repo.
+In this skill, "the repo" is the session's repo, and `<repo root>` is its root.
 
 ## Lane kinds
 
@@ -40,9 +39,7 @@ designer.
 
 ## Procedure
 
-1. **Write the briefs.** When a screen belongs to another repo, its brief names that repo as the target.
-   Otherwise the target is the spawning repo. A blind brief that names one does so in the first sentence
-   of its Job section, by name and with no path. Use the lane kinds above. The first line of each brief is
+1. **Write the briefs.** Use the lane kinds above. The first line of each brief is
    `Lane kind: blind|informed|directed`. A directed brief adds its direction. The skill always names
    the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
@@ -74,11 +71,10 @@ designer.
 7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
    and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the
    kept path in the briefs of the builder and the design reviewer, and the builder builds to it
-   (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, into the target repo's design
-   folder (the `design` kind in `~/.claude/lint/layout.json`). If the target is another repo, the
-   orchestrator first copies the pair onto a branch of that repo. The PR goes through that repo's
-   normal PR path and merges there (owner ruling, 2026-11-02 14:58 CST: git is
-   every artifact's home, mockups included).
+   (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, into the repo's design folder (the `design`
+   kind in `~/.claude/lint/layout.json`). The PR goes through the repo's normal PR path and merges
+   there, per decision `waiting-data-in-repo` (fb-1458-1): a repo's artifacts live in its git. The
+   builder builds to the kept path on the design branch and does not wait for that PR.
 8. **Clean up.** Push each lane branch to `archive/<branch>`, then delete it locally
    (`shared-trees-archive-then-delete`).
 
@@ -89,5 +85,5 @@ designer.
   (decision blind-briefs-use-a-template). Re-brief the lane.
 - A set whose mockups all share today's structure is flagged at the top of the owner's list, with
   an offer of one more round of blind lanes (skill `design-review`, Mockup set check).
-- The designer lane writes only in the design folder of its spawning repo (guard rule `designer-scope`).
+- The designer lane writes only in the repo's design folder (guard rule `designer-scope`).
 - After the cull, the builder and the design reviewer run as usual (decision design-agents).

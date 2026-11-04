@@ -57,7 +57,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    design reviewer with agentType `design-reviewer` (`agents/design-reviewer.md`). Its brief names the
    changed pages, the screenshots, the step's mockup in the design folder, and the full list. It
    judges each screen against the mockup and the repo's design rules, and sets each finding
-   against them. Do not change the list. The design reviewer is not blind, so it never takes the
+   against them. Do not change the list. Until the kept pair's PR merges, the mockup sits on the step's design branch, which the brief names; the reviewer does not wait for that PR. The design reviewer is not blind, so it never takes the
    place of Reviewer A or B.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
