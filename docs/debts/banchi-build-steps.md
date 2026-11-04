@@ -1,12 +1,12 @@
 # The shared stamp does not claim Banchi build steps
 
-**What.** A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. Banchi numbers it by hand. Banchi's `.github/stamp.json` carries an `unclaimed` entry for the step marker, so the stamp refuses a pending step and never numbers it.
+**What.** A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. Banchi numbers it by hand. Banchi's `claim-ids.py` reads a pending step only from `docs/GATES.md`, now a pointer, so no working rule exists to copy. Until Banchi's config carries an `unclaimed` entry for a step marker, a pending step passes in silence.
 
 **Where.** `actions/stamp`, and Banchi's stamp config.
 
 **Decision.** `one-shared-record-stamp`, one shared parser, not four claim tools.
 
-**Retire.** Revisit when the owner moves a step into the stamp. Then copy its rules into the engine and prove parity as for decisions. Closed when the stamp claims a step.
+**Retire.** Revisit when `claim-ids.py` claims a step in `docs/gates/steps/`. Then copy its rules into the engine and prove parity as for decisions. Closed when the stamp claims a step.
 
 ## Ruling
 

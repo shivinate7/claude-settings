@@ -608,19 +608,23 @@ publishes the page file, so the repo has one page and one publisher. The skill r
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
    `created_at`). Exit 1 with `todo step with an open PR` lines still writes a valid block: splice and
    publish as usual, then set each named step to `doing`.
-2. Run "Keep the page on main's code" steps 1 to 3 (`stale_pages.py --page <live page> --write <out>`);
-   on `unknown`, publish nothing.
-3. Splice: `splice.py --page <out> --block <block file> --out <new page>`.
+2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
+   older copy: the live page holds the designs for the items still open.
+3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
    It replaces the roadmap block, from `<!-- roadmap:data -->` to `<!-- /roadmap:data -->`, and keeps
    every other byte, the `designData` block among them. It refuses a page with no roadmap block or an
-   unclosed one.
+   unclosed one. A page that predates the roadmap block has none: first carry it into the template
+   (`splice.py --page <skill folder>/page.html --carry <live page> --out <carried page>`), then splice
+   the block into `<carried page>`.
 4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
    at a time, never with `force`. Whether the database stays is unmeasured until the step 4 live
    check of "Update a repo's pages".
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
-Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
+The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
+never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
+publishes.
 
 ## Update a repo's pages
 
