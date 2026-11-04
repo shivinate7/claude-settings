@@ -195,6 +195,8 @@ class PythonCategoriesTest(FinderCase):
             *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS],
             ("t = datetime.now()", "calendar"), ("t = datetime.datetime.now()", "calendar"),
             ("t = datetime.utcnow()", "calendar"),
+            ("assert datetime.now() > t", "calendar"), ("assert datetime.datetime.now() > t", "calendar"),
+            ("assert datetime.utcnow() > t", "calendar"),
         ), "calendar not listed")
 
     def test_elapsed_assert_on_a_bare_imported_clock(self):
@@ -482,6 +484,53 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_block.py", text,
                        listed=["t_after = datetime.now()"], clean=["t_block = time.localtime()"])
 
+    def test_no_argument_time_readers_are_listed_and_given_time_is_not(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_readers(stamp):",
+            "    t_gm_now = time.gmtime()",
+            "    t_ct_now = time.ctime()",
+            "    t_as_now = time.asctime()",
+            "    t_gm_fixed = time.gmtime(EPOCH)",
+            "    t_ct_fixed = time.ctime(EPOCH)",
+            "    t_as_fixed = time.asctime(stamp)",
+        )
+        self.put("tests/test_readers.py", text)
+        calendar_judge(self, "tests/test_readers.py", text,
+                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()"],
+                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_ct_fixed = time.ctime(EPOCH)",
+                              "t_as_fixed = time.asctime(stamp)"])
+
+    def test_zone_attributes_are_listed(self):
+        text = src(
+            "import time",
+            "",
+            "def test_zone():",
+            "    t_tzname = time.tzname",
+            "    t_offset = time.timezone",
+        )
+        self.put("tests/test_zone_attrs.py", text)
+        calendar_judge(self, "tests/test_zone_attrs.py", text,
+                       listed=["t_tzname = time.tzname", "t_offset = time.timezone"])
+
+    def test_time_readers_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "import time",
+            "",
+            "# t_comment = time.gmtime()",
+            "NOTE = 't_note = time.ctime()'",
+            "",
+            "def test_text():",
+            "    '''Docstring: t_doc = time.asctime(), t_zone = time.timezone'''",
+            "    t_real = time.gmtime()",
+        )
+        self.put("tests/test_text_readers.py", text)
+        calendar_judge(self, "tests/test_text_readers.py", text,
+                       listed=["t_real = time.gmtime()"],
+                       clean=["# t_comment = time.gmtime()", "NOTE = 't_note = time.ctime()'", "Docstring:"])
+
 
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
 
@@ -716,6 +765,15 @@ class JsTrapsTest(FinderCase):
         calendar_judge(self, "tests/calendar_slashes.test.js", text,
                        listed=["const today = new Date();", "const later = new Date();"])
 
+    def test_bare_date_after_a_comment_opener_in_a_string(self):
+        text = src(
+            'const u = "http://a.test/"; const today = Date();',
+            "const later = Date();",
+        )
+        self.put("tests/bare_slashes.test.js", text)
+        calendar_judge(self, "tests/bare_slashes.test.js", text,
+                       listed=["const today = Date();", "const later = Date();"])
+
     def test_calendar_inside_a_multi_line_template_is_not_listed(self):
         text = src(
             "const doc = `",
@@ -762,6 +820,29 @@ class JsCalendarTest(FinderCase):
                        listed=["const real = new Date();"],
                        clean=["// const note = new Date();", "/* let block = new Date(); */",
                               "const q = new Date();"])
+
+    def test_bare_date_call_without_new_is_listed(self):
+        text = src(
+            "const b_0 = Date();",
+            "let b_1 = Date();",
+        )
+        self.put("tests/bare_date.test.js", text)
+        calendar_judge(self, "tests/bare_date.test.js", text,
+                       listed=["const b_0 = Date();", "let b_1 = Date();"])
+
+    def test_bare_date_in_a_comment_or_a_string_is_not_listed(self):
+        text = src(
+            "// const note = Date();",
+            "const quoted = 'const q = Date();';",
+            "const doc = `",
+            "const inside = Date();",
+            "`;",
+            "const real = Date();",
+        )
+        self.put("tests/bare_date_text.test.js", text)
+        calendar_judge(self, "tests/bare_date_text.test.js", text,
+                       listed=["const real = Date();"],
+                       clean=["// const note = Date();", "const q = Date();", "const inside = Date();"])
 
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
