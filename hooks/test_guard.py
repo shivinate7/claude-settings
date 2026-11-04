@@ -25695,12 +25695,12 @@ lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=LB_LANE))
 lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
        lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
-# A subagent of a lane is an agent's call, so it reads the load once, as an agent's write does, and the lane check never
+# An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
 # reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
-lb_add("a lane session's subagent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
+lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
                          transcript=LB_LANE))
-lb_add("a lane session's subagent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
+lb_add("a lane session's agent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
        "the reader runs once",
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_LANE,), tool_input=LB_LANE_BASH,
                          agent=LB_AGENT, own_env=LB_OWN, transcript=LB_LANE))
