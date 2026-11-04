@@ -106,7 +106,7 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
-    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd|api_?key|token|secret))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
     # "Bearer tokens" or "Basic idea" passes.
@@ -142,6 +142,8 @@ MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
     r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
+PASSWORD_NAME = re.compile(r"(?:password|passwd|pwd)$", re.I)  # the password words; the other names of the shape are credentials
+CREDENTIAL_MIN_LENGTH = 12  # a credential-named value (API_KEY=, TOKEN:) of fewer characters is no secret
 REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
 WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
 SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
@@ -193,10 +195,13 @@ def bare_value(value):
 
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
-    `PWD=<path>`, and nothing but blanks follows it on its line."""
+    `PWD=<path>`, and nothing but blanks follows it on its line. A key, token or secret name needs a value of
+    CREDENTIAL_MIN_LENGTH or more characters to be a secret: a shorter one is no credential."""
+    value = bare_value(found.group(2))
+    if not PASSWORD_NAME.search(found.group(1)) and len(value) < CREDENTIAL_MIN_LENGTH:
+        return True  # judged on the first word alone, so `TOKEN=${{ secrets.X }}` passes
     if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
         return False
-    value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
     return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
