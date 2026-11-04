@@ -4,17 +4,23 @@
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../../lint/_test_git.sh"  # test-run signing opt-out (lint/_test_git.sh)
-tmp="$(mktemp -d)"; cd "$tmp" || exit 1
+# One run folder per run, from the one home of the test-temp standard (lint/_test_temp.py).
+repo="$(cd "$here/../.." && pwd)"
+tmp="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$repo/lint")" || { echo "FAIL setup: no run folder"; exit 1; }
+trap 'rm -rf "$tmp"' EXIT
+errf="$tmp/stderr"
+cd "$tmp" || exit 1
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 git init -q --bare -b main origin.git
 git clone -q origin.git w 2>/dev/null; cd w || exit 1
 git commit -q --allow-empty -m one && git push -q origin main 2>/dev/null
 bash "$here/install.sh"
 bad=0
-t() { # want label cmd...
+t() { # want label cmd...: ok is exit 0, refused any non-zero, stale exit 1, unknown exit 2; stderr to $errf
   want="$1"; label="$2"; shift 2
-  "$@" >/dev/null 2>&1; got=$?
-  if { [ "$want" = ok ] && [ $got -eq 0 ]; } || { [ "$want" = refused ] && [ $got -ne 0 ]; }; then echo "ok   $label"
+  "$@" >/dev/null 2>"$errf"; got=$?
+  if { [ "$want" = ok ] && [ $got -eq 0 ]; } || { [ "$want" = refused ] && [ $got -ne 0 ]; } \
+    || { [ "$want" = stale ] && [ $got -eq 1 ]; } || { [ "$want" = unknown ] && [ $got -eq 2 ]; }; then echo "ok   $label"
   else echo "FAIL $label (exit $got, wanted $want)"; bad=1; fi
 }
 git switch -q -c feat && git commit -q --allow-empty -m two
@@ -92,4 +98,82 @@ mkdir "$tmp/norepo"; snap() { cksum /hooks/reference-transaction 2>/dev/null; };
 t refused "installer outside a repo"             env GIT_CEILING_DIRECTORIES="$tmp" sh -c 'cd "$1" && sh "$2"' _ "$tmp/norepo" "$here/install.sh"
 # shellcheck disable=SC2016
 t ok      "outside a repo writes nothing"        sh -c '[ -z "$(ls -A "$1")" ] && [ "$(cksum /hooks/reference-transaction 2>/dev/null)" = "$2" ]' _ "$tmp/norepo" "$before"
+# --check: the armed copy against main. Each case clones a scratch source repo that holds a copy of
+# this installer at githooks/main-ref/ on main, then runs that clone's copy with --check. Each case
+# gets a fresh clone: an installer without --check re-arms, so state must not carry between cases.
+says() { # label pattern: stderr of the last case contains pattern
+  if grep -qF -- "$2" "$errf"; then echo "ok   $1"; else echo "FAIL $1: stderr lacks '$2'"; bad=1; fi
+}
+lacks() { # label pattern: stderr of the last case does not contain pattern
+  if grep -qF -- "$2" "$errf"; then echo "FAIL $1: stderr contains '$2'"; bad=1; else echo "ok   $1"; fi
+}
+silent() { # label: stderr of the last case is empty
+  if [ -s "$errf" ]; then echo "FAIL $1: stderr is not empty"; bad=1; else echo "ok   $1"; fi
+}
+chk="$tmp/chk"; mkdir "$chk"
+src="$chk/src"; mkdir -p "$src/githooks/main-ref"
+cp "$here/install.sh" "$here/reference-transaction" "$src/githooks/main-ref/"
+git init -q -b main "$src" && git -C "$src" add -A && git -C "$src" commit -q -m "main: installer and hook"
+nomain="$chk/nomain-src"; mkdir -p "$nomain/githooks/main-ref"
+cp "$here/install.sh" "$here/reference-transaction" "$nomain/githooks/main-ref/"
+git init -q -b trunk "$nomain" && git -C "$nomain" add -A && git -C "$nomain" commit -q -m "trunk only, no main"
+neutral="$chk/neutral"; printf '#!/bin/sh\n# an older copy\nexit 0\n' >"$neutral"; chmod +x "$neutral"
+main_hook="$src/githooks/main-ref/reference-transaction"
+fresh_clone() { # source name: a clone of source in $chk/name; prints its path
+  git clone -q "$1" "$chk/$2" 2>/dev/null && echo "$chk/$2"
+}
+arm_copy() { # dir file: put file where git reads the armed copy (the common .git hooks dir)
+  mkdir -p "$1/.git/hooks" && cp "$2" "$1/.git/hooks/reference-transaction" && chmod +x "$1/.git/hooks/reference-transaction"
+}
+ckdir() { ( cd "$1" && sh githooks/main-ref/install.sh --check ); }
+
+# current: the armed copy equals main. The old installer passes this too, so it is the green control.
+c="$(fresh_clone "$src" chk-current)"; arm_copy "$c" "$main_hook"
+t ok "--check: armed copy equal to main exits 0" ckdir "$c"
+silent "--check: armed copy equal to main prints nothing on stderr"
+
+# stale: the armed copy differs from main, and the source file is main
+c="$(fresh_clone "$src" chk-stale)"; arm_copy "$c" "$neutral"
+t stale "--check: armed copy behind main exits 1" ckdir "$c"
+says "--check: stale copy names the re-arm command" "sh githooks/main-ref/install.sh"
+
+# missing: no armed copy at all is stale too
+c="$(fresh_clone "$src" chk-missing)"
+[ ! -e "$c/.git/hooks/reference-transaction" ] || { bad=1; echo "FAIL setup: an armed copy exists in chk-missing"; }
+t stale "--check: missing armed copy exits 1" ckdir "$c"
+says "--check: missing copy names the re-arm command" "sh githooks/main-ref/install.sh"
+
+# unknown: the source repo has no main ref, so nothing can be compared. Exit 2, never 0.
+c="$(fresh_clone "$nomain" chk-nomain)"; arm_copy "$c" "$neutral"
+t unknown "--check: no main ref exits 2" ckdir "$c"
+says "--check: no main ref says unknown" "unknown"
+
+# unknown: the armed path is a directory, so no copy can be read as a file
+c="$(fresh_clone "$src" chk-unreadable)"; mkdir -p "$c/.git/hooks/reference-transaction"
+t unknown "--check: armed copy that cannot be read as a file exits 2" ckdir "$c"
+says "--check: unreadable armed copy says unknown" "unknown"
+
+# branch editing the hook: the source differs from main, the armed copy differs too. Allowed, with a NOTE
+# that does not tell the reader to rerun the installer, because that would arm unmerged work everywhere.
+c="$(fresh_clone "$src" chk-editing)"; arm_copy "$c" "$neutral"
+git -C "$c" switch -q -c edit-hook && printf '# a branch edit\n' >>"$c/githooks/main-ref/reference-transaction" && git -C "$c" commit -q -am "edit the hook on a branch"
+t ok "--check: branch editing the hook exits 0" ckdir "$c"
+says "--check: branch editing the hook prints a NOTE" "NOTE"
+lacks "--check: branch editing the hook does not tell to rerun install.sh" "install.sh"
+
+# relative core.hooksPath with two worktrees: one copy current, the other behind main. Exit 1.
+c="$(fresh_clone "$src" chk-two-wt)"; git -C "$c" config core.hooksPath .hooks
+git -C "$c" worktree add -q -b wt2 "$chk/chk-two-wt-2" main
+mkdir -p "$c/.hooks" "$chk/chk-two-wt-2/.hooks"
+cp "$main_hook" "$c/.hooks/reference-transaction"; cp "$neutral" "$chk/chk-two-wt-2/.hooks/reference-transaction"
+t stale "--check: one of two worktrees behind main exits 1" ckdir "$c"
+says "--check: stale worktree copy names the re-arm command" "sh githooks/main-ref/install.sh"
+
+# --check writes nothing: the armed copy is byte-identical before and after a stale run
+c="$(fresh_clone "$src" chk-nowrite)"; arm_copy "$c" "$neutral"
+before="$(cksum <"$c/.git/hooks/reference-transaction")"
+ckdir "$c" >/dev/null 2>&1
+after="$(cksum <"$c/.git/hooks/reference-transaction")"
+if [ "$before" = "$after" ]; then echo "ok   --check leaves the armed copy unchanged"; else echo "FAIL --check changed the armed copy"; bad=1; fi
+
 rm -rf "$tmp"; exit $bad
