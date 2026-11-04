@@ -104,6 +104,12 @@ RED = [
     ("personal address on a personal host", "jane" + "@" + "myhost.example.com", "jane@myhost.example.com"),
     ("personal ssh-form remote on a personal host", "jane" + "@" + "myhost.example.com:notes.git",
      "jane@myhost.example.com:notes.git"),
+    # A mask is no secret only as the whole value. A no-reply name is no person only as the whole local part, and an
+    # ssh remote of a public git host is no person only when its local part is `git`.
+    ("password with asterisks before a secret", "password: " + "***" + "hunter2", "hunter2"),
+    ("personal name in the ssh form of a public git host", "jane" + "@" + "github.com:x", "jane@github.com:x"),
+    ("no-reply name before a personal name", "noreply-jane" + "@" + "x.com", "noreply-jane@x.com"),
+    ("no-reply name after a personal name", "jane.noreply" + "@" + "x.com", "jane.noreply@x.com"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -145,6 +151,15 @@ GREEN = [
     ("plain word in parentheses after a password word", "(password: none)"),
     ("bracketed optional after a password word", "password: " + "[optional]"),
     ("quoted shell path after PWD", 'PWD="/home/x"'),
+    # A placeholder, a mask or a plain word after a password word is no secret when it is the whole value.
+    ("password word with a shell variable", "password: " + "$DB_PASSWORD"),
+    ("password word with a brace template", "password: " + "{{DB_PASSWORD}}"),
+    ("password word with a percent template", "password: " + "%DB_PASSWORD%"),
+    ("password word with xxx", "password: " + "xxx"),
+    ("password word with a bullet mask", "password: " + "•" * 3),
+    ("single-quoted optional after a password word", "password: " + "'optional'"),
+    ("parenthesized none after a password word", "password: " + "(none)"),
+    ("none with a period after a password word", "password: " + "none."),
 ]
 
 
