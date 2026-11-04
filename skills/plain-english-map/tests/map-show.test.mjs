@@ -5,14 +5,19 @@
 //   an area id   prints each map line of that area as `path — sentence`, with no fact line.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
 //   nothing      prints `no map line for <arg>` on stderr and exits 1. No arg prints a usage line and exits 2.
+//   unreadable   a map page the command cannot read: one plain stderr line, exit 3, no stack trace.
+//
+// A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. The fixture names
+// only `ts`, so a `.py` or `.json` line is no map line there. A case that needs one sets `codeExtensions` in its own
+// scratch copy. A Tables row is never a map line.
 //
 // Every case calls `needFile` first, so on a checkout with no command each case fails for the missing file.
 // The fixture holds one area (`core`), one Homes page and one trace page, so `src/home.ts` reaches every kind of line.
 // `run` joins stdout and stderr in `out`, stdout first, so the stderr of a run is what follows its stdout.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SKILL, gitIn, junction, needFile, run, scratchRepo } from './helpers.mjs';
 
@@ -20,15 +25,19 @@ const CLI = join(SKILL, 'scripts', 'map-show.mjs');
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
 const REL = 'scripts/map-show.mjs';
 
-// The map lines of area `core` in the fixture, as [path, sentence]. Each sentence is cut before any backtick.
-const AREA_LINES = [
+// The map lines of area `core` for files that the fixture config names as code (`codeExtensions: ["ts"]`), as [path, sentence].
+const TS_LINES = [
   ['src/screens.ts', 'Lists the screen keys of the fixture app.'],
   ['src/home.ts', 'Builds the title of the home screen from the saved notes.'],
   ['src/notes.ts', 'Holds the saved notes'],
+];
+// The map lines of area `core` for files the fixture config does not name as code. Each one prints only once its extension is named.
+const OTHER_LINES = [
   ['src/retry.py', 'Holds the retry wait.'],
   ['src/caller.py', 'Calls the retry module, and reads its retry wait.'],
   ['config.json', 'Holds the retry settings as JSON.'],
 ];
+const ALL_LINES = [...TS_LINES, ...OTHER_LINES];
 // The fact lines of area `core` in the fixture.
 const AREA_FACTS = [
   'The title counts the saved notes.',
@@ -42,6 +51,7 @@ const HOME_STEP = 'Builds the title of the home screen.';
 const NOTES_STEP = 'Gives the saved notes that the title counts';
 const RETRY_FACT = 'A failed call waits 30 s before its next try.';
 const SCREENS_LINE = 'Lists the screen keys of the fixture app.';
+const PY_EXTS = ['ts', 'py', 'json'];
 
 /** The command with `args`, run in a fresh copy of the fixture, after the check that names the missing file. */
 const show = (args, dir = scratchRepo()) => {
@@ -56,6 +66,38 @@ const stderrOf = (r) => r.out.slice(r.stdout.length);
 const lineWith = (out, ...parts) => out.split('\n').find((l) => parts.every((p) => l.includes(p))) ?? null;
 
 const dump = (r) => r.out.slice(0, 1500);
+
+/** A failure that exits `status`, prints nothing on stdout, and prints one plain line on stderr with no stack frame. */
+const plainFailure = (r, status, what) => {
+  assert.equal(r.status, status, `${what} must exit ${status}\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', `${what} must print nothing on stdout\n${dump(r)}`);
+  const err = stderrOf(r).trim();
+  assert.notEqual(err, '', `${what} must print a message on stderr\n${dump(r)}`);
+  assert.equal(err.split('\n').length, 1, `${what} must print one plain stderr line, not a trace\n${dump(r)}`);
+  assert.doesNotMatch(err, /^\s*at\s/m, `${what} must print no stack frame\n${dump(r)}`);
+};
+
+/** Sets `codeExtensions` in the scratch copy's map.config.json. The fixture keeps `["ts"]`. */
+const withExtensions = (dir, exts) => {
+  const p = join(dir, 'map.config.json');
+  const cfg = JSON.parse(readFileSync(p, 'utf8'));
+  writeFileSync(p, `${JSON.stringify({ ...cfg, codeExtensions: exts }, null, 2)}\n`);
+  return dir;
+};
+
+/** A scratch copy with one more area, `store`: a code file `src/store.ts`, and a Tables row that names `public.notes`. */
+const tablesRepo = () => {
+  const dir = scratchRepo();
+  writeFileSync(join(dir, 'src', 'store.ts'), 'export const store: string[] = [];\n');
+  writeFileSync(join(dir, 'docs', 'map', 'store.md'), [
+    '# Store', '', '## Code files', '',
+    '- `src/store.ts` — Holds the store of the fixture.', '',
+    '## Tables', '',
+    '- `public.notes` — One row for each saved note.', '',
+  ].join('\n'));
+  gitIn(dir, 'add', '-N', '.');
+  return dir;
+};
 
 test('1. a file path prints its area id', () => {
   const r = show(['src/home.ts']);
@@ -76,9 +118,23 @@ test('3. a file path prints its fact line', () => {
   assert.ok(r.stdout.includes(HOME_FACT), `the output must print the fact line of src/home.ts\n${dump(r)}`);
 });
 
-test('3b. a file path prints a value fact line, with its prose', () => {
-  const r = show(['src/retry.py']);
-  assert.equal(r.status, 0, `a file with a map line must exit 0\n${dump(r)}`);
+test('3b. a .py file is no map line while codeExtensions is ts, so its value fact does not print', () => {
+  const dir = scratchRepo();
+  // The scope first: a ts file must print, so the command reads the map.
+  const ts = show(['src/home.ts'], dir);
+  assert.equal(ts.status, 0, `a ts file with a map line must exit 0\n${dump(ts)}`);
+  assert.ok(ts.stdout.includes(HOME_LINE), `the ts file must print its map line\n${dump(ts)}`);
+  const py = show(['src/retry.py'], dir);
+  assert.equal(py.status, 1, `src/retry.py is not a code file under ["ts"], so it is no map line and must exit 1\n${dump(py)}`);
+  assert.equal(stderrOf(py).trim(), 'no map line for src/retry.py', 'stderr must hold one line: no map line for src/retry.py');
+  assert.equal(py.stdout.trim(), '', 'nothing prints on stdout');
+});
+
+test('3c. with codeExtensions that name py, a .py file prints its map line and its value fact', () => {
+  const dir = withExtensions(scratchRepo(), PY_EXTS);
+  const r = show(['src/retry.py'], dir);
+  assert.equal(r.status, 0, `a .py file that the config names must exit 0\n${dump(r)}`);
+  assert.ok(r.stdout.includes('Holds the retry wait.'), `the output must print the map line of src/retry.py\n${dump(r)}`);
   assert.ok(r.stdout.includes(RETRY_FACT), `the output must print the value fact line of src/retry.py\n${dump(r)}`);
 });
 
@@ -160,23 +216,36 @@ test('10. run through the install link to the skill folder, a file path still re
   assert.ok(r.stdout.includes(HOME_LINE), `the command run through the install link must print the map line\n${dump(r)}`);
 });
 
-test('11. an area id prints each map line of that area as path — sentence', () => {
+test('11. an area id prints the map lines of its code files, and none for a file the config does not name', () => {
   const r = show(['core']);
+  // The scope first: each code file's map line must print, or the absence below holds for a command that printed nothing.
   assert.equal(r.status, 0, `an area id must exit 0\n${dump(r)}`);
-  for (const [path, sentence] of AREA_LINES) {
+  for (const [path, sentence] of TS_LINES) {
     assert.ok(lineWith(r.stdout, path, sentence), `the area core must print the map line of ${path}\n${dump(r)}`);
+  }
+  for (const [path] of OTHER_LINES) {
+    assert.ok(!r.stdout.includes(path), `${path} is not a code file under ["ts"], so the area must not print it\n${dump(r)}`);
   }
 });
 
-test('11b. an area id prints one output line for each map line', () => {
+test('11b. an area id prints one output line for each code map line', () => {
   const r = show(['core']);
-  // The scope first: every map line must print, or the count holds for a command that printed too little.
+  // The scope first: every code map line must print, or the count holds for a command that printed too little.
   assert.equal(r.status, 0, `an area id must exit 0\n${dump(r)}`);
-  for (const [path, sentence] of AREA_LINES) {
+  for (const [path, sentence] of TS_LINES) {
     assert.ok(lineWith(r.stdout, path, sentence), `the area core must print the map line of ${path}\n${dump(r)}`);
   }
-  const lines = r.stdout.split('\n').filter((l) => AREA_LINES.some(([path]) => l.includes(path)));
-  assert.equal(lines.length, AREA_LINES.length, `the area must print one line for each of its ${AREA_LINES.length} map lines\n${dump(r)}`);
+  const lines = r.stdout.split('\n').filter((l) => ALL_LINES.some(([path]) => l.includes(path)));
+  assert.equal(lines.length, TS_LINES.length, `the area must print one line for each of its ${TS_LINES.length} code map lines\n${dump(r)}`);
+});
+
+test('11c. with codeExtensions that name py and json, the area id prints all six map lines', () => {
+  const dir = withExtensions(scratchRepo(), PY_EXTS);
+  const r = show(['core'], dir);
+  assert.equal(r.status, 0, `an area id must exit 0\n${dump(r)}`);
+  for (const [path, sentence] of ALL_LINES) {
+    assert.ok(lineWith(r.stdout, path, sentence), `the area core must print the map line of ${path} once its extension is named\n${dump(r)}`);
+  }
 });
 
 test('12. an area id prints no fact line', () => {
@@ -189,17 +258,24 @@ test('12. an area id prints no fact line', () => {
   }
 });
 
-test('13. a folder prefix prints every map line whose path starts with it', () => {
+test('13. a folder prefix prints the code map lines under it, and none for a file the config does not name', () => {
   const r = show(['src/']);
+  // The scope first: the folder's code lines must print, or the absence below holds for a command that printed nothing.
   assert.equal(r.status, 0, `a folder prefix with map lines must exit 0\n${dump(r)}`);
-  for (const [path, sentence] of AREA_LINES.filter(([path]) => path.startsWith('src/'))) {
+  for (const [path, sentence] of TS_LINES.filter(([path]) => path.startsWith('src/'))) {
     assert.ok(lineWith(r.stdout, path, sentence), `the folder src/ must print the map line of ${path}\n${dump(r)}`);
+  }
+  for (const path of ['src/retry.py', 'src/caller.py']) {
+    assert.ok(!r.stdout.includes(path), `${path} is not a code file under ["ts"], so the folder must not print it\n${dump(r)}`);
   }
 });
 
 test('14. a folder prefix prints no map line outside it', () => {
-  const r = show(['src/']);
-  // The scope first: the folder's own lines must print, or "no line outside it" holds for a command that printed nothing.
+  const dir = withExtensions(scratchRepo(), PY_EXTS);
+  // The scope first: config.json must be a map line under this config, or its absence holds for a line never read.
+  const outside = show(['config.json'], dir);
+  assert.equal(outside.status, 0, `config.json must be a map line once json is named\n${dump(outside)}`);
+  const r = show(['src/'], dir);
   assert.equal(r.status, 0, `a folder prefix with map lines must exit 0\n${dump(r)}`);
   assert.ok(lineWith(r.stdout, 'src/home.ts', HOME_LINE), `the folder src/ must print the map line of src/home.ts\n${dump(r)}`);
   assert.ok(!r.stdout.includes('Holds the retry settings as JSON.'), `config.json is outside src/, so the output must not print its map line\n${dump(r)}`);
@@ -267,4 +343,68 @@ test('19. the command reads each map line that map-check reads, whatever its bul
   const plus = show(['src/plus.ts'], dir);
   assert.equal(plus.status, 0, `a + bullet line must resolve\n${dump(plus)}`);
   assert.ok(plus.stdout.includes('Plus bullet sentence.'), `the output must print the + bullet map line\n${dump(plus)}`);
+});
+
+test('20. a Tables row is no map line, so an area id never prints it', () => {
+  const dir = tablesRepo();
+  const r = show(['store'], dir);
+  // The scope first: the area's code file must print, or the absence of the Tables row holds for an empty area.
+  assert.equal(r.status, 0, `an area id must exit 0\n${dump(r)}`);
+  assert.ok(lineWith(r.stdout, 'src/store.ts', 'Holds the store of the fixture.'), `the area store must print the map line of src/store.ts\n${dump(r)}`);
+  assert.ok(!r.stdout.includes('public.notes'), `public.notes is a Tables row, not a map line, so the area must not print it\n${dump(r)}`);
+});
+
+test('20b. a Tables row name is no map line for a path arg', () => {
+  const dir = tablesRepo();
+  const scope = show(['src/store.ts'], dir);
+  // The scope first: the code file's map line must resolve, or "no map line" holds for a command that resolves nothing.
+  assert.equal(scope.status, 0, `a file with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the store of the fixture.'), `the output must print the map line of src/store.ts\n${dump(scope)}`);
+  const r = show(['public.notes'], dir);
+  assert.equal(r.status, 1, `public.notes names a Tables row, so it is no map line and must exit 1\n${dump(r)}`);
+  assert.equal(stderrOf(r).trim(), 'no map line for public.notes', 'stderr must hold one line: no map line for public.notes');
+});
+
+test('21. a map page the command cannot read exits 3, with one plain stderr line and no stack trace', () => {
+  const dir = scratchRepo();
+  // The scope first: with every page on disk, the file is found.
+  const ok = show(['src/home.ts'], dir);
+  assert.equal(ok.status, 0, `a file with a map line must exit 0 while every page is on disk\n${dump(ok)}`);
+  rmSync(join(dir, 'docs', 'map', 'core.md'));
+  plainFailure(show(['src/home.ts'], dir), 3, 'an area page that is tracked but missing from disk');
+});
+
+test('21b. a trace page the command cannot read exits 3, the same as an area page', () => {
+  const dir = scratchRepo();
+  // The scope first: with every page on disk, the trace step prints, so the trace page is read.
+  const ok = show(['src/home.ts'], dir);
+  assert.equal(ok.status, 0, `a file with a map line must exit 0 while every page is on disk\n${dump(ok)}`);
+  assert.ok(ok.stdout.includes(HOME_STEP), `the trace step must print while the trace page is on disk\n${dump(ok)}`);
+  rmSync(join(dir, 'docs', 'map', 'traces', 'home.md'));
+  plainFailure(show(['src/home.ts'], dir), 3, 'a trace page that is tracked but missing from disk');
+});
+
+test('22. an absolute path under the root prints the same output as the relative path', () => {
+  const dir = scratchRepo();
+  const plain = show(['src/home.ts'], dir);
+  // The scope first: the relative path must resolve, or equal output proves nothing.
+  assert.equal(plain.status, 0, `the relative path must exit 0\n${dump(plain)}`);
+  assert.ok(plain.stdout.includes(HOME_LINE), `the relative path must print the map line\n${dump(plain)}`);
+  // The root as the command sees it: its real path, which `process.cwd()` returns.
+  const abs = show([join(realpathSync.native(dir), 'src', 'home.ts')], dir);
+  assert.equal(abs.status, 0, `an absolute path under the root must exit 0\n${dump(abs)}`);
+  assert.equal(abs.stdout, plain.stdout, `an absolute path under the root must print the same output as src/home.ts\n${dump(abs)}`);
+});
+
+test('22b. an absolute path outside the root prints no map line and exits 1', () => {
+  const dir = scratchRepo();
+  // The scope first: the relative path must resolve, or "no map line" holds for a command that resolves nothing.
+  const inside = show(['src/home.ts'], dir);
+  assert.equal(inside.status, 0, `the relative path must exit 0\n${dump(inside)}`);
+  assert.ok(inside.stdout.includes(HOME_LINE), `the relative path must print the map line\n${dump(inside)}`);
+  const outside = join(dirname(realpathSync.native(dir)), 'outside', 'src', 'home.ts');
+  const r = show([outside], dir);
+  assert.equal(r.status, 1, `a path outside the root must exit 1\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', 'a path outside the root prints nothing on stdout');
+  assert.equal(stderrOf(r).trim(), `no map line for ${outside}`, `stderr must hold one line: no map line for ${outside}`);
 });
