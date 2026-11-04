@@ -300,6 +300,10 @@ class Env(unittest.TestCase):
     def lock_ref(self):
         return "refs/heads/merge-lock/main" in self.refs()
 
+    def lock_text(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
 
@@ -315,6 +319,14 @@ class Env(unittest.TestCase):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
         os.environ["MERGE_TEST_HOOK"] = p
+
+    PUSH_REFUSAL = "refused by the test"  # the text the refusing pre-receive hook prints on stderr
+
+    def refuse_pushes(self, text=PUSH_REFUSAL):
+        """Every ref update to the origin is refused from here on: a pre-receive hook that prints `text` and exits 1."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, f"#!/bin/sh\necho '{text}' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
 
 class Flow(Env):
     def test_preview_presses_nothing(self):
@@ -795,7 +807,13 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b, ref=None: None
+        real_read, stale = lock2.read, [True]
+        def stale_first_read(b, ref=None):  # the stale view answers the first read of the main ref only; the re-read after the push is real
+            if stale and ref is None:
+                stale.clear()
+                return None
+            return real_read(b, ref)
+        lock2.read = stale_first_read
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -826,10 +844,6 @@ class CloudProxy(Env):
                   "  case $ref in refs/heads/*) ;; *) echo 'proxy: 403 ref' >&2; exit 1;; esac\n"
                   "done\n")
         os.chmod(hook, 0o755)
-
-    def lock_text(self):
-        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
-        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
         rc, out = self.run_merge("7", "--confirm")
@@ -882,6 +896,93 @@ class CloudProxy(Env):
             self.assertIsInstance(merge.default_lock(self.co), merge.GitLock)
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):
             self.assertIsInstance(merge.default_lock(self.co), merge.GhLock)
+
+class LockRetake(Env):
+    """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
+    an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held."""
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    def released_lock(self):
+        """A released lock on origin, pushed by the product's own release, so its expiry reads 0. -> its sha."""
+        c, out = merge.GitLock(self.other, now=lambda: self.now).released("main", "--force-with-lease=refs/heads/merge-lock/main:")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        return self.head("merge-lock/main")
+
+    def rival_lock(self, lease):
+        """Another run's live lock, pushed by the other clone under `lease`. -> its sha."""
+        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(600, self.now))
+        sh(self.other, "git", "push", "-q", lease, "origin", f"{sha}:refs/heads/merge-lock/main")
+        return sha
+
+    def move_after_first_read(self, lock):
+        """`lock`'s first read of the main ref answers as the ref stands, then another run moves the ref before the push. Later reads are real.
+        -> the list that receives the rival's sha once it has moved."""
+        real, moved = lock.read, []
+        def read(b, ref=None):
+            if ref is not None or moved:
+                return real(b, ref)
+            got = real(b, ref)
+            moved.append(self.rival_lock(f"--force-with-lease={merge.lock_ref(b)}:{got[0] if got else ''}"))
+            return got
+        lock.read = read
+        return moved
+
+    def assert_refused_push_stops(self):
+        """acquire on a ref the origin refuses: a Stop that is not a Held, holding the push output and the lock cite."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.acquire("main", 600)
+        self.assertNotIsInstance(cm.exception, merge.Held, "a refused push on an unchanged lock reads as another run's take")
+        self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "the Stop drops the push output")
+        self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
+
+    def test_a_released_lock_the_remote_refuses_stops_and_names_the_push(self):
+        released = self.released_lock()
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertEqual(self.head("merge-lock/main"), released, "the refused push moved the released lock")
+
+    def test_no_lock_ref_the_remote_refuses_stops_and_names_the_push(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertFalse(self.lock_ref(), "the refused push created a lock ref")
+
+    def test_a_ref_absent_at_the_read_and_present_at_the_push_is_held(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_that_moves_before_the_push_is_held(self):
+        self.released_lock()  # scope: the released lock is on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_is_retaken_by_one_push_and_no_delete(self):
+        released = self.released_lock()
+        self.assertEqual(self.head("merge-lock/main"), released)  # scope: the released lock is on origin before the take
+        with unittest.mock.patch.object(merge, "git", side_effect=merge.git) as calls:
+            sha = self.lock.acquire("main", 600)
+        pushes = [c.args for c in calls.call_args_list if "push" in c.args]
+        self.assertEqual(len(pushes), 1, pushes)
+        self.assertFalse([a for args in pushes for a in args if a.startswith(":refs/heads/merge-lock/")], pushes)
+        self.assertEqual(self.head("merge-lock/main"), sha)
+        self.assertGreater(merge.expiry_of(self.lock_text()), self.now)
+
+    def test_a_live_lock_is_still_held(self):
+        held = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)  # scope: the live lock is on origin before the take
+        with self.assertRaises(merge.Held):
+            self.lock.acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
@@ -2794,10 +2895,7 @@ class Unlock(Env):
     def test_an_unlock_that_the_remote_refuses_stops_and_names_the_push(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "held, not ours")
         sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
-        hook = os.path.join(self.bare, "hooks", "pre-receive")  # every ref update to the origin is refused from here on
-        with open(hook, "w") as f:
-            f.write("#!/bin/sh\necho 'refused by the test' >&2\nexit 1\n")
-        os.chmod(hook, 0o755)
+        self.refuse_pushes()
         with self.assertRaises(merge.Stop) as caught:
             self.lock.unlock("main")
         assert_cites(self, "unlock-failed", str(caught.exception))
