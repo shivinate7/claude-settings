@@ -73,11 +73,11 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   flush with the box's right edge, so it does not move when Undo or Copy ask shows or goes. It does not use
   the `.sent` panel above the bar. That panel grows the fixed bar, and at 390 it would cover the box.
 - Send answers and Send ask never mix. The bar's count ("1 ready") never counts an ask. The bar does not change in `#s=sent`.
-- Send ask is off while the box is empty. The hint says so: "Send ask turns on once you type."
+- Send ask is off while the box and the list are both empty. Add to list is off while the box is empty. The hint says why.
   Ctrl+Enter sends on a fine pointer. The hint drops those words on a touch screen. With focus anywhere in the Ask
   section, Ctrl+Enter sends the ask and never the answers.
-- The typed text is kept in `localStorage` `waiting.askDraft`, as `waiting.draft` keeps a note (ux-keep-what-was-made).
-- An ask cannot be changed after the Undo time. A follow-up is a new ask.
+- The typed text is kept in `localStorage` `waiting.askDraft`, and the list in `waiting.askStack`, as `waiting.draft` keeps a note (ux-keep-what-was-made).
+- A stacked ask can be changed until Send. A sent ask cannot be changed after the Undo time. A follow-up is a new ask.
 - Departs from: page.html `openSent` and `renderSent` — the Undo for an ask shows at the box, with no stamp. The window, the clock read and the notices stay as today.
 - Gain: the answer to the press is at the press, and the box is never covered. Lose: two Undo places on one page.
 - Pick: Undo at the box.

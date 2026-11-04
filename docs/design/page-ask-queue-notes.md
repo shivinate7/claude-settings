@@ -78,6 +78,13 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
   The slot now holds only Copy ask when the store cannot be reached. Not blocking.
 - Departs from: `renderAskForm`, which drops the Undo button when the count ends. Not blocking.
 - Item 5 of `page-ask-box-notes.md` now cites this ruling.
+- A second Send while the Undo counts: Send stays off until the count ends, and the hint says so with the seconds left.
+  Add to list stays on, so the owner stacks the next asks meanwhile.
+  - Gain: no Undo is cut short. This was the cause of the Nov 2 report. Loss: the next Send can wait up to 8 s.
+  - Other option: the new batch ends the old Undo, and the line says so. Loss: an Undo the owner may need is gone.
+  - Other option: one Undo for both batches. Loss: the first batch's window would pass the 10 s a session waits.
+  - Pick: Send stays off. Not drawn.
+  - Departs from: `sendAsk`, which takes a second send and ends the first Undo (`clearInterval(askTimer)`). Not blocking.
 
 ## 8. Each ask's reach after send
 
