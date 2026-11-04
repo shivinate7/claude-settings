@@ -375,8 +375,8 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
 #undoBtn { font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
-/* With Copy answers shown, two buttons leave the status too narrow to read, so it takes its own row at every width. */
-.bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; }
+/* With Copy answers shown on a phone, two buttons leave the status too narrow to read, so it takes its own row. */
+@media (max-width: 520px) { .bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; } }
 
 /* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
 .dprev { display: grid; gap: 8px; }
@@ -2126,7 +2126,7 @@ function renderAskForm() {
   const s = askState, a = s.sent, typed = $("askText").value.trim(), hint = $("askHint"), slot = $("askSlot");
   let cls = "askhint", kids, live = "polite", slotKids = [];
   // Send waits for the count, and for an Undo whose delete is still awaited, though its window has passed.
-  const counting = !!a && undoLeft(a) > 0, holding = counting || (!!a && !!a.busy), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
+  const counting = !!a && undoLeft(a) > 0 && !a.busy, holding = counting || (!!a && !!a.busy), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
   const n = rows.length + (typed ? 1 : 0), over = typed.length > ASK_MAX;
   const words = (t) => [h("span", {}, t, h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
   if (s.note) kids = [s.note];
@@ -2178,7 +2178,11 @@ function syncUndo() {
   const left = a ? undoLeft(a) : 0;
   // While Undo's deletes run, the button is spent as after the count, so a second press cannot start.
   if (left > 0 && !a.busy) { b.textContent = "Undo send (" + left + ")"; b.classList.remove("spent"); b.removeAttribute("aria-hidden"); b.removeAttribute("tabindex"); }
-  else if (!b.classList.contains("spent")) { b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send"; if (document.activeElement === b) $("askText").focus({ preventScroll: true }); }
+  else if (!b.classList.contains("spent")) {
+    // Read focus before .spent hides the button: hiding it can drop focus to the body first.
+    if (document.activeElement === b) $("askText").focus({ preventScroll: true });
+    b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send";
+  }
 }
 const showTray = () => { $("askTray").hidden = !$("askLine").firstChild && !$("askStack").firstChild; };
 // One ask not sent yet: idle, in edit, removed, in flight, saved, or not saved.

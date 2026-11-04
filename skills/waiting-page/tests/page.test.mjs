@@ -3045,6 +3045,88 @@ for (const width of [360, 390]) {
   });
 }
 
+// ---------------------------------------------------------------- review of 8e2194e2: focus after Undo, the hint in the window, the bar status width
+
+// Undo's first delete waits at the hold, so focus and the hint are read while Undo runs, inside its window.
+test("after an Undo press by click or Enter, focus is on the ask box while its delete runs, never on the body", async (t) => {
+  const lost = [];
+  for (const how of ["click", "Enter"]) {
+    const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+    await sendTyped(page, "Focus after an Undo by " + how);
+    await mustHave(page, ASK.undo, "Undo control");
+    await page.focus(ASK.undo);
+    // Scope first: the Undo button has focus before it is pressed.
+    assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", `before the Undo ${how}, focus is not on Undo`);
+    if (how === "click") await page.click(ASK.undo); else await page.keyboard.press("Enter");
+    await page.waitForFunction(() => window.__held >= 1);
+    const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+    if (focused !== "askText") lost.push(`${how} leaves focus on ${focused}`);
+    await page.evaluate(() => window.__release());
+  }
+  assert.deepEqual(lost, [], "focus is not on the ask box after an Undo press: " + lost.join("; "));
+});
+
+test("when the Undo count ends while the Undo button has focus, focus moves to the ask box, not the body", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Focus when the count ends");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.focus(ASK.undo);
+  // Scope first: Undo has focus while its count is still running.
+  assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", "Undo does not have focus before the count ends");
+  await jump(page, 9000); // the count ends; the page's one-second tick spends the button
+  const spent = () => { const b = document.getElementById("askUndo"); return !!b && b.classList.contains("spent"); };
+  await page.waitForFunction(spent, null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await page.evaluate(spent), true, "the Undo count ended but Undo is not spent");
+  const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+  assert.equal(focused, "askText", `after the Undo count ends with Undo focused, focus is on ${focused}, not the ask box`);
+});
+
+test("after a failed Undo, focus is on the ask box, not the body", async (t) => {
+  const page = await open(t, { failDelete: true }); if (!page) return;
+  await sendTyped(page, "Focus after a failed Undo");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.focus(ASK.undo);
+  // Scope first: Undo has focus when it is pressed and its delete fails.
+  assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", "Undo does not have focus before it is pressed");
+  await page.click(ASK.undo);
+  assert.equal(await lineHas(page, "Undo failed"), true, "the failed Undo shows no Undo failed line");
+  const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+  assert.equal(focused, "askText", `after a failed Undo focus is on ${focused}, not the ask box`);
+});
+
+test("while an in-window Undo's delete runs, the hint says Send turns on when Undo is done, not when the count ends", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  await sendTyped(page, "Hint inside the window");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  // Scope first: the window has not passed, so the Undo count is still running while the delete waits.
+  assert.equal(await page.evaluate(() => undoLeft(askState.sent) > 0), true, "the Undo window has already passed, so this is not the in-window case");
+  const hint = await hintText(page);
+  assert.match(hint, /Send turns on when Undo is done\./, "the hint while an in-window Undo runs is " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, /Undo count ends/, "the hint says the Undo count ends while Undo is already running: " + JSON.stringify(hint));
+  await page.evaluate(() => window.__release());
+});
+
+test("with Copy answers shown at 800 and 1280 wide, the bar status stays inline with its buttons, not on its own row", async (t) => {
+  const ownRow = [];
+  for (const width of [800, 1280]) {
+    const page = await open(t, { noStore: true, viewport: { width, height: 800 } }); if (!page) return;
+    await stubClipboard(page, true);
+    await mustHave(page, "#copy", "Copy answers button");
+    await page.click("#copy");
+    await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+    assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, `at ${width} wide, Copy answers did not show the copy box`);
+    // Scope first: the status has words to lay out, so its row is measured.
+    const r = await page.evaluate(() => { const s = document.getElementById("barStatus").getBoundingClientRect(), c = document.getElementById("copy").getBoundingClientRect(); return { status: [s.top, s.bottom], copy: [c.top, c.bottom] }; });
+    assert.ok(r.status[1] > r.status[0], `at ${width} wide, the bar status has no text to lay out: ${JSON.stringify(r.status)}`);
+    // Inline: the status and Copy answers share a row, so their vertical extents overlap.
+    const shared = r.status[0] < r.copy[1] && r.copy[0] < r.status[1];
+    if (!shared) ownRow.push(`${width} px: status ${JSON.stringify(r.status.map(Math.round))}, Copy answers ${JSON.stringify(r.copy.map(Math.round))}`);
+  }
+  assert.deepEqual(ownRow, [], "the bar status takes its own row at 800 or 1280 wide, where it should stay inline: " + ownRow.join("; "));
+});
+
 test("an edit still open when the page reloads comes back open, with the words typed in it", async (t) => {
   const page = await open(t); if (!page) return;
   await addToList(page, "Edit survives the reload");
