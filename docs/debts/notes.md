@@ -1288,8 +1288,8 @@
 - rerun-in-flight-mixed-unknown: the unknown detail can hold a cancelled run and a re-run in flight. Then `red_base` says to wait for the re-run, but the cancelled run stays UNKNOWN after the re-run ends green. Wording only; the merge still refuses. Decision: no-merge-onto-red-main
 - opus-plain-ask: `<child-session-event>`, `<standing_owner_message>`, `<channel>`, `<message>` and `<event>` frames are not cut before the plain Opus ask judge (`hooks/shared_names.py` `NOTICE_FRAMES`). Their text is rarely an Opus ask.
 - opus-plain-ask: `ASK_LENGTH` in `hooks/override.py` reads `1:30h` as 30h, and "an hour" as the 2h default. These are the owner's own words, so no hole.
-- opus-plain-ask: `_owner_turn_in` in `hooks/override.py` reads the record-level `origin` only. A `queued_command` attachment carries `attachment.origin`. Every one seen starts with `<task-notification>`, so no live path.
-- opus-plain-ask: a compaction summary and "[Request interrupted by user]" count as owner turns in `_owner_turn_in`. They matter only for the seed check.
+- opus-plain-ask: `_seed_record` in `hooks/override.py` reads the record-level `origin` only. A `queued_command` attachment carries `attachment.origin`. Every one seen starts with `<task-notification>`, so no live path.
+- opus-plain-ask: a compaction summary and "[Request interrupted by user]" count as owner turns in `_seed_record`. They matter only for the seed check.
 - map-stale-drops-untracked-cite: map-stale (skills/plain-english-map/scripts/map-stale.mjs) skips a map line whose cited file is untracked or renamed away, and still prints "nothing stale". MAP1 or the not-tracked check fails the same line, so the map check catches it first. Decision: none yet.
 - map-stale-own-page-list: map-stale lists map pages with its own readdir, beside `mapFilePaths` in map-check.mjs. Same result today. Decision: none yet.
 - map-stale-cost-posix-only: the git call count test (ST9) skips on Windows, so the cost of 4 git calls is proven on Linux and macOS only. Decision: none yet.

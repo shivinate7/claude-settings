@@ -35,15 +35,19 @@ rule's settings-write ask, and it reaches agents.
     - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
       length. Any other first `opus` is a plain ask.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
-    - The roles the ask names are granted, two or more as a list. A role word with not, no, don't, never, except
-      or without within three words before or after it: no grant (`builders, no problem` grants nothing too).
+    - The roles the ask names are granted, two or more as a list, only when a plain list joins them (PLAIN_LIST:
+      commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
+      no, don't, never, except, without, or an exclusion word such as skip or instead) within three words before or
+      after it: no grant (`builders, no problem` grants nothing too).
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
-      scope from context, fall back to every role). _context_prompts reads them from
+      scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
+      less a cloud session's seed brief (_seed_record, the seed check's one home),
       and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
       and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
       ASK_ROLES: every role for the length, and it never asks. The every-role file is written before the scope read
-      and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role.
+      and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role, with no
+      `opus-grant` line.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
@@ -101,8 +105,10 @@ MACHINE_BLOCKS = "|".join(
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
-NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
+NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
+             "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
+PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
 ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
 # A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
@@ -239,13 +245,15 @@ def _keyword_rest(rest):
 
 def _ask_scope(text):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
-    length, or a role with a negation within NEGATION_SPAN words before or after it. `roles` is the sorted list of
-    the roles it names, empty when it names none."""
+    length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
+    anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
+    none."""
     lengths = ASK_LENGTH.findall(text)
     if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
         return None
-    words = ROLE_WORDS.findall(text)
-    roles = set()
+    matches = list(ROLE_WORDS.finditer(text))
+    words = [m.group() for m in matches]
+    roles, last_end = set(), None
     for at, word in enumerate(words):
         role = opus_role(word)
         if role not in ASK_ROLES:
@@ -253,7 +261,10 @@ def _ask_scope(text):
         near = words[max(0, at - NEGATION_SPAN):at] + words[at + 1:at + 1 + NEGATION_SPAN]
         if NEGATIONS & {w.lower() for w in near}:
             return None
+        if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
+            return None
         roles.add(role)
+        last_end = matches[at].end()
     length = DEFAULT_ASK_LENGTH
     if lengths:
         number, short, spelled = lengths[0]
@@ -323,12 +334,12 @@ def _own_record(found, prompt):
     return own[-1] if own else None
 
 
-def _owner_turn_in(transcript, found, prompt):
-    """True when the transcript at path `transcript` holds an owner turn (_owner_text) other than the prompt's own
-    record (_own_record in `found`, the _tail_prompts read). Cost: one open, lines read from the top until the first
-    owner turn, at most SEED_READ_MAX bytes."""
+def _seed_record(transcript, found, prompt):
+    """Offset of the first owner turn (_owner_text) in the transcript at path `transcript` other than the prompt's own
+    record (_own_record in `found`, the _tail_prompts read), else None. In a cloud session it is the seed brief. Cost:
+    one open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes."""
     if not isinstance(transcript, str):
-        return False
+        return None
     own = _own_record(found, prompt)
     try:
         with open(transcript, "rb") as handle:
@@ -336,16 +347,16 @@ def _owner_turn_in(transcript, found, prompt):
                 at = handle.tell()
                 line = handle.readline(SEED_READ_MAX)
                 if not line:
-                    return False
+                    return None
                 try:
                     rec = json.loads(line)
                 except ValueError:
                     continue
                 if at != own and _owner_text(rec) is not None:
-                    return True
+                    return at
     except OSError:
         pass
-    return False
+    return None
 
 
 def _system_prompt_last(found, prompt):
@@ -354,14 +365,15 @@ def _system_prompt_last(found, prompt):
     return bool(found) and found[-1][1].get("promptSource") == "system" and _text_of(found[-1][1]).strip() == prompt.strip()
 
 
-def _context_prompts(found, prompt):
+def _context_prompts(found, prompt, seed=None):
     """The owner's earlier typed prompts for the scope read, oldest first: the records of `found` before the prompt's own
-    record that pass _owner_text, each through _strip_blocks and cut to SCOPE_CONTEXT_CHARS, the newest
-    SCOPE_CONTEXT_PROMPTS of them. The ask's own words, agent text, notices and pasted content never reach it."""
+    record that pass _owner_text, less the record at offset `seed` (a cloud session's seed brief, _seed_record), each
+    through _strip_blocks and cut to SCOPE_CONTEXT_CHARS, the newest SCOPE_CONTEXT_PROMPTS of them. The ask's own
+    words, agent text, notices, pasted content and the seed brief never reach it."""
     own = _own_record(found, prompt)
     texts = []
     for at, rec in found:
-        text = _owner_text(rec) if own is None or at < own else None
+        text = _owner_text(rec) if (own is None or at < own) and at != seed else None
         text = _strip_blocks(text).strip() if text is not None else ""
         if text:
             texts.append(text[:SCOPE_CONTEXT_CHARS])
@@ -393,7 +405,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     session's seed prompt (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in
     the transcript, has promptSource "system". The scope read is called once, only after a yes, for an ask that names
     no role and has an earlier owner prompt in the tail. The every-role file is written before that call and a valid
-    answer rewrites it narrowed (same end), so a kill during the call (the prompt hook's timeout) leaves every role.
+    answer rewrites it narrowed (same end), so a kill during the call (the prompt hook's timeout) leaves every role
+    with no `opus-grant` line.
     The one `opus-grant` line logs the final scope; an interrupt or exit in the call logs the every-role line. The guard.log line `opus-grant` holds the words that were
     judged."""
     if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
@@ -412,7 +425,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     found = _tail_prompts(transcript)
     if _system_prompt_last(found, prompt):
         return None
-    if os.environ.get(LANE_ENV) and not _owner_turn_in(transcript, found, prompt):
+    seed = _seed_record(transcript, found, prompt) if os.environ.get(LANE_ENV) else None
+    if os.environ.get(LANE_ENV) and seed is None:
         return None
     if judge is None:
         from call_judge import opus_ask as judge
@@ -423,7 +437,7 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
         return None
     length, roles = scope
     said = " ".join(text.split())
-    context = [] if roles else _context_prompts(found, prompt)
+    context = [] if roles else _context_prompts(found, prompt, seed)
     if context:
         # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
         # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
