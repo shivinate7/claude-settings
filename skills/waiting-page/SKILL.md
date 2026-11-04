@@ -178,6 +178,22 @@ into `meta/page`. The writer watches the page ("Read the answers").
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
 
+## Rotate the writer
+
+When the writer's session rotates (project-ops `templates/operating-model.md`, "Rotation of standing
+sessions", steps 1 and 5), the page follows the new session:
+
+1. The old writer stops its watch: `ArtifactComments` action `watch` with `on: false` and the page URL.
+2. The new writer watches the page first: `ArtifactComments` action `watch` on the page URL from the
+   `Watch:` line of its hand-off. No other page act comes before it.
+3. The new writer sets `writer` in `meta/page` to its own session name, as the roster gives it
+   (`ArtifactData` `update` on `meta/page`, pinned with `if_version`).
+4. It rewrites `owner` to itself on each inherited open item, and on each ask with no `reply` whose
+   `owner` is the old writer (`update`, never `set`).
+
+Until step 2 runs, no session watches the page, so a comment sent then wakes nobody. The new writer
+reads `asks/` at its first turn start, so an ask sent in that gap is still read.
+
 ## Chat first
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
