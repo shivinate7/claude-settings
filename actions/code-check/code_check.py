@@ -9,7 +9,9 @@ Known limit: a move whose edits fall below git's 50% rename similarity reads as 
 Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
-a dev machine). Formatter layers are skipped until o2 (one layout) lands; their rows say so.
+a dev machine). The javascript typecheck layer runs tsc over the tracked .mjs files and keeps only broken imports of
+a relative specifier, extensionless relative imports, TypeScript-only syntax and syntax errors ("mjs-imports"); checkJs is on for
+import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
 It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
 which GitHub fetches whole at the pinned sha."""
@@ -244,10 +246,61 @@ def run_astro_check(ctx):
     return ("astro-check", cmds) if cmds else None
 
 
-RUNNERS = {"ruff": run_ruff, "mypy": run_mypy, "shellcheck": run_shellcheck, "tsc": run_tsc, "astro-check": run_astro_check}
+DIAGNOSTIC = re.compile(r"^(?:(?P<file>.+?)\(\d+,\d+\): )?error TS(?P<code>\d+): (?P<msg>.*)$")
+IMPORT_CODES = {"2307", "2305", "2614", "2724"}  # cannot find module; no exported member
+# Node 22 rejects an extensionless relative import: TS2834 (no quoted specifier in its text) and TS2835 (has one).
+EXTENSION_CODES = {"2834", "2835"}
+# "can only be used in TypeScript files": syntax Node cannot parse in a .mjs file (TS8021 and the other JSDoc codes are
+# comment syntax to Node, so they are not here).
+TS_ONLY_SYNTAX_CODES = {"80%02d" % n for n in range(2, 18)} | {"8037"}
+RELATIVE_SPECIFIER = re.compile(r"""['"]\.{1,2}/""")
 
 
-def execute(name, cmd, root):
+def mjs_import_problems(lines, stderr=""):
+    """The tsc stdout lines that are a problem. Kept in a .mjs file: a broken import of a relative specifier, an
+    extensionless relative import, TypeScript-only syntax, and a syntax error (TS1xxx). Dropped: type errors and bare
+    or node: modules. checkJs is on for import diagnostics only. A diagnostic with no file (an option or config
+    error), a line that is no diagnostic, and no output at all are problems, so a tsc that did not check never reads
+    as a pass; stderr text joins the no-output message."""
+    if not lines:
+        return ["tsc exited with an error and printed no diagnostics" + (": " + stderr.strip()[:500] if stderr.strip() else "")]
+    kept, keeping = [], False
+    for line in lines:
+        m = DIAGNOSTIC.match(line)
+        if m is None:
+            if not line.startswith(" "):
+                return [line]  # not a diagnostic: a crash or a warning we cannot read
+            if keeping:
+                kept.append(line)  # the continuation of a kept diagnostic
+            continue
+        if not m["file"]:
+            return [line]
+        code = m["code"]
+        keeping = m["file"].endswith(".mjs") and (
+            (len(code) == 4 and code[0] == "1")  # TS1xxx; TS18048 and the like are type errors
+            or code in EXTENSION_CODES or code in TS_ONLY_SYNTAX_CODES
+            or (code in IMPORT_CODES and RELATIVE_SPECIFIER.search(m["msg"])))
+        if keeping:
+            kept.append(line)
+    return kept
+
+
+def run_mjs_imports(ctx):
+    # No tsconfig is written. nodenext reads .mjs as an ES module, as node does; the files are the tracked .mjs only.
+    files = [n for n in ctx["files"] if n.endswith(".mjs")]
+    flags = ["--noEmit", "--allowJs", "--checkJs", "--module", "nodenext", "--moduleResolution", "nodenext",
+             "--resolveJsonModule", "--noUncheckedSideEffectImports", "--skipLibCheck", "--pretty", "false"]
+    return ("mjs-imports", tool(ctx["std"], "typescript") + flags + files, mjs_import_problems) if files else None
+
+
+RUNNERS = {"ruff": run_ruff, "mypy": run_mypy, "shellcheck": run_shellcheck, "tsc": run_tsc, "astro-check": run_astro_check,
+           "mjs-imports": run_mjs_imports}
+
+
+def execute(name, cmd, root, keep=None):
+    """Runs each command; a nonzero exit is a problem. keep (lines -> the lines that are problems) narrows the
+    stdout of a tool whose other findings are out of scope (it also gets stderr, for its no-output message); with
+    keep, an exit with no kept line passes."""
     cmds = cmd if cmd and isinstance(cmd[0], list) else [cmd]
     for c in cmds:
         try:
@@ -255,7 +308,12 @@ def execute(name, cmd, root):
         except FileNotFoundError as e:
             return ["%s could not start: %s" % (name, e)]
         if p.returncode:
-            lines = (p.stdout + p.stderr).strip().splitlines()
+            # keep reads stdout only: stderr holds tool chatter such as npm's update notice, not diagnostics
+            lines = (p.stdout if keep else p.stdout + p.stderr).strip().splitlines()
+            if keep:
+                lines = keep(lines, p.stderr)
+                if not lines:
+                    continue
             return ["%s found problems (exit %d):" % (name, p.returncode)] + lines[:40]
     return []
 
@@ -313,7 +371,7 @@ def main(argv):
             if plan is None:
                 print("code-check: %s %s: nothing to run for %s" % (lang, layer, cell["run"]))
                 continue
-            problems = execute(plan[0], plan[1], root)
+            problems = execute(plan[0], plan[1], root, *plan[2:])
             print("code-check: %s %s: %s %s" % (lang, layer, plan[0], "FAIL" if problems else "pass"))
             failures += problems
     failures += comment_check(root, args.base, cfg.get("exclude", []))
