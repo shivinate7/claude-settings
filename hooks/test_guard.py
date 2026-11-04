@@ -99,6 +99,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -493,6 +494,15 @@ ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on p
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
+# The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
+# pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
+ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
+ARCHDRAFT_IDENT = os.path.join(ROOT, "archdraft-identical")    # an open draft, head identical to main: its commits landed
+ARCHDRAFT_AHEAD = os.path.join(ROOT, "archdraft-ahead")        # an open draft, head ahead of main: not landed
+ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, head diverged from main: not landed
+ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
+ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
+ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -960,7 +970,8 @@ else:
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
-                       base={"ref": o.get("base", "main")}, state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
+                       base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
+                       state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
@@ -987,8 +998,11 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
-    elif re.fullmatch(r"compare/[^/]+", rel):  # the containment read of "<base sha>...<head sha>": a pair not listed is diverged
-        print(json.dumps({"status": state.get("compares", {}).get(rel[len("compare/"):], "diverged")}))
+    elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
+        status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
+        if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
+            api_error(500, "compare read broke")
+        print(json.dumps({"status": status}))
     else:
         api_error(404, "Not Found")
 '''
@@ -1283,6 +1297,20 @@ def build_fixtures():
     make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
     make_fake_gh(ARCHNEAR_C10X, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/c10-x1")])
     make_fake_gh(ARCHNEAR_CI, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="claude/fix-ci-retry-x1")])
+    # The containment read is keyed "main...<head sha>" (the base's name, then the head's sha, as the compare API takes them).
+    draft_pair = "main..." + slug_head["head"]
+    draft_rows = [dict(slug_head, draft=True)]
+    make_fake_gh(ARCHDRAFT_BEHIND, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "behind"})
+    make_fake_gh(ARCHDRAFT_IDENT, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "identical"})
+    make_fake_gh(ARCHDRAFT_AHEAD, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "ahead"})
+    make_fake_gh(ARCHDRAFT_DIVERGED, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "diverged"})
+    # A ready pull request, not a draft: its head behind main does not release it, so the refusal stands.
+    make_fake_gh(ARCHREADY_BEHIND, "main", need=["o/r"], others=[dict(slug_head)], compares={draft_pair: "behind"})
+    make_fake_gh(ARCHDRAFT_READFAIL, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "server"})
+    # A draft based on integration/b1, whose head is behind both main and integration/b1. The rule refuses it, because
+    # its base is not the repo's default branch. A guard that compares against the base's name would release it here.
+    make_fake_gh(ARCHDRAFT_INTEG, "main", need=["o/r"], others=[dict(slug_head, draft=True, base="integration/b1")],
+                 compares={draft_pair: "behind", "integration/b1..." + slug_head["head"]: "behind"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8935,15 +8963,36 @@ def role_tag_call(tool_id, session=ROLE_OWN):
             role_result(tool_id, "ok")]
 
 
-def role_target_call(tool_id, tags, target=ROLE_OTHER):
-    """One paired get_session call for another session, `target`, whose record carries `tags`."""
-    return [role_use(tool_id, GET_SESSION, {"session_id": target}),
-            role_result(tool_id, role_record(tags, target, "a lane session"))]
+def role_target_call(tool_id, tags, target=ROLE_OTHER, wrapped=False):
+    """One paired get_session call for another session, `target`, whose record carries `tags`. `wrapped` returns
+    the record the way a read of another session's text comes back: inside an untrusted, nonce-tagged wrapper."""
+    body = role_record(tags, target, "a lane session")
+    if wrapped:
+        body = '<other-session nonce="abc123" untrusted="true">\n' + body + '\n</other-session>'
+    return [role_use(tool_id, GET_SESSION, {"session_id": target}), role_result(tool_id, body)]
 
 
 def role_said(text):
     """A user message: words typed or pasted, never a tool's result."""
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
+
+
+CREATE_SESSION = "mcp__claude-code-remote__create_session"
+ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
+
+
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
+    """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
+    body = "Created session " + session + "." if plain else json.dumps({key: session})
+    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
+            role_result(tool_id, body)]
+
+
+# lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
+STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
+STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
+STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -9008,6 +9057,24 @@ ROLE_LINES = {
     "archive-own-lane": role_call("r0", LANE_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
+    # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
+    # lane has no cs-topic, so its cs-step tags alone judge a brief. The create shapes read the start of the lane.
+    "step-topic-lane": role_target_call("t1", STEP_TOPIC_TAGS),
+    "step-old-lane": role_target_call("t1", STEP_OLD_TAGS),
+    "step-triage": role_target_call("t1", TRIAGE_TAGS),
+    "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
+    "step-create-json": role_create_call("c1", STEP_TOPIC_TAGS),
+    "step-create-text": role_create_call("c1", STEP_TOPIC_TAGS, plain=True),
+    # A lane read, then the target's tags set after it: the record is stale until it is read again.
+    "step-topic-lane-retagged": role_target_call("t1", STEP_TOPIC_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
+    "step-old-lane-retagged": role_target_call("t1", STEP_OLD_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
+    # A create_session result that names the new id as {"session_id": ...}, not {"id": ...}.
+    "step-create-session-id": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id"),
+    # A lane on topic colors: the marker variants below are judged against it.
+    "step-colors-lane": role_target_call("t1", STEP_COLORS_TAGS),
+    # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
+    "step-topic-lane-wrapped": role_target_call("t1", STEP_TOPIC_TAGS, wrapped=True),
+    "archive-wrapped-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS, wrapped=True),
 }
 
 
@@ -9434,10 +9501,12 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=()):
-    """An archive_session of the target the guard refuses. The reason names its rule, never the tool."""
+def archive_refuse(name, transcript, env_path, carries=(), lacks=()):
+    """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
+    adds fragments the reason must not hold, so a case can tell one refusal reason from another."""
+    more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
-        lacks=ARCHIVE_NAMED, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
+        lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
         session_id=ROLE_OTHER)
 
 
@@ -9465,6 +9534,10 @@ archive_allow("a lane ci with an open head claude/fix-ci-retry-x1 is allowed: th
 # A target whose record names no lane is not judged, even with an open pull request on the slug.
 archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
               role_path("archive-triage"), fake_gh_path(ARCHOPEN))
+# The same target, its record wrapped as another session's untrusted text. The record still decides: a triage target
+# is allowed. A reader that json-parses the whole body finds no record, and refuses.
+archive_allow("a wrapped record of a non-lane target (cs-build:triage) is allowed: the record is read inside its wrapper",
+              role_path("archive-wrapped-triage"), fake_gh_path(ARCHOPEN))
 # No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
 # gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
 archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
@@ -9484,6 +9557,140 @@ archive_refuse("a target read untagged, then tagged lane, is refused: the newest
                role_path("archive-stale-then-lane"), fake_gh_path(ARCHOPEN))
 # No transcript at all: no record can be read, so the target's tags are unknown, and the call is refused.
 archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
+# The containment read. An open draft lane pull request whose head is already in main has landed through the integration
+# pull request, so it no longer blocks the archive. Only a draft is released; a read that fails refuses, and says so.
+# The two refusal reasons are told apart by a fragment each: the open-pull-request reason says "still open", and the
+# read-failure reason says "could not be read". A case pins its own reason and not the other's.
+ARCHIVE_OPEN_PIN = ("still open",)
+ARCHIVE_READ_PIN = ("could not be read",)
+archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
+archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_IDENT))
+archive_refuse("an open draft lane pull request whose head is ahead of main is refused: its commits have not landed",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_AHEAD), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open draft lane pull request whose head diverged from main is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_DIVERGED), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open ready lane pull request whose head is behind main is refused: only a draft is released",
+               role_path("archive-lane"), fake_gh_path(ARCHREADY_BEHIND), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_refuse("an open draft lane pull request whose containment read fails is refused, and the reason says the read failed",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_READFAIL), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_OPEN_PIN)
+# A draft whose base is not the repo's default branch is not released, though its head is behind main. The default
+# branch is read from the row (base.repo.default_branch, main); the draft based on main above is the release case.
+# This refusal also holds on main, which refuses every open lane pull request. It pins the base check for the release.
+archive_refuse("an open draft lane pull request based on integration/b1, not the default branch, is refused though its head is behind main",
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_INTEG), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+
+
+# =========================================================================== 5h. one lane, one topic
+FAMILY = "lane-one-topic"
+#
+# Rule lane-one-topic. A lane is one topic: its cs-topic tag, set at create_session beside its cs-step tags. A
+# send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest
+# record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
+# Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
+# Any other message passes, and so does a brief to a target that is no lane. A marker brief with no record of its
+# target is refused. Only a marker brief reads the transcript: a message without the marker passes unread.
+LANE_ONE_TOPIC = "lane-one-topic"
+SEND_MESSAGE = "mcp__claude-code-remote__send_message"
+TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
+
+
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
+    """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
+    the reason must not hold."""
+    add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
+
+
+def step_allow(name, transcript, message, target=ROLE_OTHER):
+    """A send_message the guard lets through silently."""
+    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message)
+
+
+# Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
+# alone cannot pass it.
+step_refuse("a brief for topic colors to a lane on topic icons is refused, though it names the lane's own step",
+            role_path("step-topic-lane"), "Lane brief: icon-a. Topic: colors.")
+# Refused: a lane with a topic gets a brief that names none. The steer names the topic, so the sender can fix it.
+step_refuse("a brief that names no topic, to a lane with a topic, is refused, and the steer names the topic",
+            role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_STEER)
+# Refused: the match is exact. Topic icons-v2 is not topic icons, though it holds it as a substring.
+step_refuse("a brief for topic icons-v2 to a lane on topic icons is refused: a substring is not the topic",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons-v2.")
+# Refused: the marker is the first non-blank line, so leading blank lines do not hide it from the judge.
+step_refuse("a brief after two blank lines is judged: the marker is the first non-blank line",
+            role_path("step-topic-lane"), "\n\nLane brief: icon-a. Topic: colors.")
+# Refused: an older lane with no cs-topic is judged by its cs-step tags, and icon-c is not one of them.
+step_refuse("a brief naming a step the older lane does not carry is refused",
+            role_path("step-old-lane"), "Lane brief: icon-c. Topic: icons.")
+# Refused: a lane that create_session started on topic icons, with its result as JSON, then as plain text. Each
+# result shape has its own fixture, so a reader that takes only one shape fails one case.
+step_refuse("a brief for topic colors to a lane that create_session started on topic icons (JSON result) is refused",
+            role_path("step-create-json"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
+step_refuse("a brief for topic colors to a lane that create_session started on topic icons (plain result) is refused",
+            role_path("step-create-text"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW)
+# Refused: the lane's record comes back wrapped as another session's untrusted text. The topic is still read from it.
+step_refuse("a brief for topic colors to a lane on topic icons, its record wrapped, is refused",
+            role_path("step-topic-lane-wrapped"), "Lane brief: icon-a. Topic: colors.")
+# Refused: no record of the target in the transcript, so the guard cannot tell the lane's topic.
+step_refuse("a marker brief to a target with no record in the transcript is refused",
+            role_path("no-record"), "Lane brief: icon-b. Topic: icons.")
+# Refused, and paired with the cost case below: the transcript cannot be read, so a marker brief is refused.
+step_refuse("a marker brief whose transcript cannot be read is refused",
+            role_path("unreadable"), "Lane brief: icon-b. Topic: icons.")
+# Passes, the cost pair of the refusal above: a message without the marker passes with the same unreadable
+# transcript, so it reads none. A guard that read the transcript for every message would refuse it here.
+step_allow("a message without the marker passes with an unreadable transcript, so it reads no transcript",
+           role_path("unreadable"), "Status: PR #12 merged for icon-a.")
+# Passes: a status message about the lane's step, with no marker.
+step_allow("a status message about the lane's step, with no marker, is allowed",
+           role_path("step-topic-lane"), "Status: PR #12 merged for icon-a.")
+# Passes: the marker is not the first line, so the brief is not judged, though its topic differs.
+step_allow("a marker on line two is not the first line, so the brief is not judged",
+           role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-a. Topic: colors.")
+# Passes: one lane, one topic, many steps. A new step on the lane's own topic is allowed.
+step_allow("a brief for a new step on the lane's own topic is allowed: one lane, one topic",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.")
+step_allow("a brief for the lane's own step on its own topic is allowed",
+           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.")
+# Passes: an older lane with two cs-step tags and no topic is judged by its steps: the second step is one of them.
+step_allow("an older lane with two cs-step tags: a brief naming its second step is allowed",
+           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.")
+# Passes: a lane that create_session started on topic icons, with a new step on that topic, in both result shapes.
+step_allow("a brief for a new step on topic icons to a lane that create_session started (JSON result) is allowed",
+           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
+           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+# Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
+step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
+           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
+# Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
+step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
+           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+# Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
+# with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
+step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
+            role_path("step-topic-lane-retagged"), "Lane brief: icon-b. Topic: icons.",
+            carries=("get_session",), lacks=("new lane",))
+step_refuse("a brief for topic icons, after set_session_tags on a lane with no topic, is refused: re-read with get_session",
+            role_path("step-old-lane-retagged"), "Lane brief: icon-b. Topic: icons.",
+            carries=("get_session",), lacks=("new lane",))
+# A create_session result shaped {"session_id": ...} is a record too: the brief is judged against the lane's topic.
+step_allow("a create_session result shaped session_id counts as the record: a brief for its own topic icons passes",
+           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+# The refusal must be the topic's, not the no-record one: a reader that misses the record refuses every brief here.
+step_refuse("a create_session result shaped session_id counts as the record: a brief for topic colors is refused",
+            role_path("step-create-session-id"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW,
+            lacks=("holds no get_session",))
+# Marker variants: bold, heading and lowercase all open a marker brief. Each names topic icons to a lane on colors.
+step_refuse("a bold marker, **Lane brief:** x. Topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "**Lane brief:** x. Topic: icons.")
+step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
+step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
+            role_path("step-colors-lane"), "lane brief: x. topic: icons.")
 
 
 # =========================================================================== 5d. cite by id
@@ -16329,6 +16536,9 @@ def decide(case):
     # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    # The home clone that other-checkout's stranded-cwd act reads from CLAUDE_PROJECT_DIR. The runner's own
+    # value would reach every case, so it is dropped here, and a case that names one sets it through `env`.
+    env.pop("CLAUDE_PROJECT_DIR", None)
     # A cloud session (CLAUDE_CODE_REMOTE "true") skips the load brake. Every run judges a
     # local machine, as lb_run does.
     env.pop("CLAUDE_CODE_REMOTE", None)
@@ -18750,16 +18960,19 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
-def _cross_checkout_fixture(name, lanes=("lane-a", "lane-b")):
+def _cross_checkout_fixture(name, lanes=("lane-a", "lane-b"), origin=None):
     """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
     shape the harness makes, and a scratch folder outside the clone. Returns the four paths. `lanes`
-    names the two worktrees; an agent case passes `agent-<id>` names, the shape its home takes."""
+    names the two worktrees; an agent case passes `agent-<id>` names, the shape its home takes. `origin`,
+    when given, is the primary's `origin` remote, which a separate-clone case needs to name the same repo."""
     primary = os.path.join(ROOT, name + "_primary")
     lane_a = os.path.join(primary, ".claude", "worktrees", lanes[0])
     lane_b = os.path.join(primary, ".claude", "worktrees", lanes[1])
     scratch = os.path.join(ROOT, name + "_scratch")
     if not os.path.isdir(lane_b):
         make_repo(primary, {"src/app.py": "print(1)\n"})
+        if origin:
+            run_vcs(primary, "remote", "add", "origin", origin)
         run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-" + lanes[0])
         run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-" + lanes[1])
         os.makedirs(scratch, exist_ok=True)
@@ -18998,8 +19211,9 @@ def worktree_home_scratchpad_case():
 def worktree_home_cross_checkout_cost_case():
     """other-checkout's stated cost: one `git worktree list` per write call and per `cd` into another
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
-    redirect included), a `cd` within its own checkout, or a write from a cwd with no `.git` at or
-    above it. A stand-in git on PATH logs each spawn."""
+    redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
+    a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
+    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
@@ -19007,7 +19221,7 @@ def worktree_home_cross_checkout_cost_case():
     if path is None:
         return False, "no git on PATH"
     problems = []
-    for label, tool, cwd, tool_input, want_all, want_list in (
+    for label, tool, cwd, tool_input, want_all, want_list, *pin in (
         ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
         ("Grep", "Grep", lane_a, {"pattern": "x", "path": lane_b}, 0, 0),
         ("shell ls", "Bash", lane_a, {"command": "ls " + slash(lane_b)}, None, 0),
@@ -19023,11 +19237,34 @@ def worktree_home_cross_checkout_cost_case():
          {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
         ("Write from a cwd in no repository", "Write", NOGIT,
          {"file_path": os.path.join(lane_b, "n.txt"), "content": "x"}, None, 0),
+        # A separate clone's origin is read from its config file: the act adds no spawn to the one list.
+        ("Write into a separate clone", "Write", lane_a,
+         {"file_path": os.path.join(XCL_SEP, "note.txt"), "content": "x"}, None, 1),
+        ("shell cd into a separate clone", "Bash", lane_a,
+         {"command": "cd " + slash(XCL_SEP)}, None, 1),
+        ("Read of a separate clone", "Read", lane_a,
+         {"file_path": os.path.join(XCL_SEP, "src", "app.py")}, 0, 0),
+        # A plain own checkout: its git verbs that change only its own files spawn no list. CLAUDE_PROJECT_DIR
+        # names the clone, as a session's does, so the row reads the same way in a real session.
+        # A commit also meets the other rules' own git reads (8 spawns on the old code), so its total is
+        # not counted: only the list is. checkout -b and stash list spend the list alone, so their total is 0.
+        ("shell git commit in its own checkout", "Bash", lane_a,
+         {"command": VCS + " commit -m x"}, None, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git checkout -b in its own checkout", "Bash", lane_a,
+         {"command": VCS + " checkout -b x"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git stash list in its own checkout", "Bash", lane_a,
+         {"command": VCS + " stash list"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git status in its own checkout", "Bash", lane_a,
+         {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell git -C a separate clone commit", "Bash", lane_a,
+         {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
     ):
         if os.path.exists(log):
             os.remove(log)
         decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": path,
-                "config": None, "agent_id": None, "tool_input": tool_input})
+                "config": None, "agent_id": None, "tool_input": tool_input,
+                "temp": os.path.join(ROOT, "tmp"),  # a separate clone must sit outside the temp folder
+                "env": pin[0] if pin else None})
         spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
         listed = sum(1 for line in spawns if "worktree list" in line)
         if (want_all is not None and len(spawns) != want_all) or listed != want_list:
@@ -19035,7 +19272,8 @@ def worktree_home_cross_checkout_cost_case():
                 label, len(spawns), listed, "any" if want_all is None else want_all, want_list))
     if problems:
         return False, "; ".join(problems)
-    return True, "Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write spawns one"
+    return True, ("Read, Grep, quiet shell, own-checkout git verbs and no-repo writes spawn no worktree list; "
+                  "a write, a cd or a git -C into a separate clone spawns one list, and a read of one spawns none")
 
 
 def worktree_home_cross_checkout_override_case():
@@ -19725,6 +19963,315 @@ def worktree_home_cwd_builder_scratch_case():
 FIXTURELESS_CHECKS.update((
     worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
     worktree_home_cwd_builder_scratch_case))
+
+
+# ------------------------------------------------------------------ other-checkout: a separate clone
+#
+# The separate-clone act. A path in another clone of this repo is another checkout too, though no
+# `git worktree add` made it. The clone is found by a stat walk up from the path, never by a guess at
+# its name, and its origin is read from its config file, so the act spawns no git. Two clones are the
+# same repo when their origins name the same owner and repo, in any URL form. A clone with no origin, or
+# an unreadable config, is unknown and passes. A folder in the temp folder, a different repo, a nested
+# repo inside the own checkout and a plain folder with no `.git` all pass. With CLAUDE_PROJECT_DIR naming
+# the home clone, a cwd stranded in a separate clone refuses its writes. Decision:
+# docs/decisions/an-agent-outside-its-home-tree-must-stop.md (other-checkout).
+#
+# Each row is its own case, so a failure names one cause. A refusal row is red on a guard that lets the
+# act through.
+FAMILY = "worktree-home"
+XCL_ORIGIN = "https://github.com/example-owner/claude-settings.git"  # the own clone's origin
+XCL_PRIMARY = os.path.join(ROOT, "xcl_primary")                     # the own clone, with that origin
+XCL_LANE = os.path.join(XCL_PRIMARY, ".claude", "worktrees", "lane-a")  # its own linked worktree
+XCL_NESTED = os.path.join(XCL_PRIMARY, "vendor", "nested")          # a repo inside the own checkout
+XCL_SEP = os.path.join(ROOT, "xcl_sep")                             # a separate clone, same origin
+XCL_SEP_SSH = os.path.join(ROOT, "xcl_sep_ssh")                     # the same repo, ssh origin
+XCL_SEP_PROXY = os.path.join(ROOT, "xcl_sep_proxy")                 # the same repo, proxy URL origin
+XCL_SEP_LOCAL = os.path.join(ROOT, "xcl_sep_local")                 # cloned from the own clone's path
+XCL_SEP_LINKED = os.path.join(ROOT, "xcl_sep_linked")               # a linked worktree of XCL_THIRD
+XCL_THIRD = os.path.join(ROOT, "xcl_third")                         # a third clone of the same repo
+XCL_SEP_NOORIGIN = os.path.join(ROOT, "xcl_sep_noorigin")           # a clone with no origin at all
+XCL_SEP_BADCONF = os.path.join(ROOT, "xcl_sep_badconf")             # a config file that is no config
+XCL_SEP_EMPTY = os.path.join(ROOT, "xcl_sep_empty")                 # the same origin, no commit yet
+XCL_DIFF = os.path.join(ROOT, "xcl_other")                          # a different repo
+XCL_NEAR = os.path.join(ROOT, "xcl_near")                           # a repo name that only starts the same
+XCL_PLAIN = os.path.join(ROOT, "xcl_sep_like")                      # no .git anywhere above it
+XCL_TEMP = os.path.join(ROOT, "tmp")                                # the guard's temp folder for this block
+XCL_TMP = os.path.join(XCL_TEMP, "xcl_tmp_clone")                   # the same repo, under the temp folder
+XCL_SCRATCH = os.path.join(XCL_TEMP, FAKE_SESSION, "scratchpad", "xcl_clone")  # the session's scratchpad
+XCL_KEYS = (XCL_PRIMARY, XCL_NESTED, XCL_SEP, XCL_SEP_SSH, XCL_SEP_PROXY, XCL_SEP_LOCAL, XCL_SEP_LINKED,
+            XCL_SEP_NOORIGIN, XCL_SEP_BADCONF, XCL_SEP_EMPTY, XCL_DIFF, XCL_NEAR, XCL_PLAIN, XCL_TMP,
+            XCL_SCRATCH)
+
+
+def _xcl_clone(where, origin=None, commit=True):
+    """A clone of its own, with one commit unless `commit` is False, and the origin the case names."""
+    if commit:
+        make_repo(where, {"src/app.py": "print(1)\n"})
+    else:
+        os.makedirs(where, exist_ok=True)
+        init = run_vcs(where, "init", "-q", "-b", "main", ".")
+        if init.returncode != 0:
+            sys.exit("fixture setup failed: the init in %r: %s" % (where, init.stderr.strip()))
+    if origin:
+        added = run_vcs(where, "remote", "add", "origin", origin)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed: the origin add in %r: %s" % (where, added.stderr.strip()))
+
+
+def _build_separate_clones():
+    """The own clone and the clones around it. Each one is named by a case; none is copied from another."""
+    primary = _cross_checkout_fixture("xcl", origin=XCL_ORIGIN)[0]
+    _xcl_clone(XCL_NESTED, XCL_ORIGIN)
+    _xcl_clone(XCL_SEP, XCL_ORIGIN)
+    _xcl_clone(XCL_SEP_SSH, "git@github.com:example-owner/claude-settings.git")
+    _xcl_clone(XCL_SEP_PROXY, "http://proxy@127.0.0.1:8080/git/example-owner/claude-settings")
+    _xcl_clone(XCL_SEP_NOORIGIN)
+    _xcl_clone(XCL_SEP_BADCONF, XCL_ORIGIN)
+    write(os.path.join(XCL_SEP_BADCONF, ".git", "config"), "this is not a git config\n")
+    _xcl_clone(XCL_SEP_EMPTY, XCL_ORIGIN, commit=False)
+    _xcl_clone(XCL_DIFF, "https://github.com/example-owner/other-repo.git")
+    _xcl_clone(XCL_NEAR, "https://github.com/example-owner/claude-settings-old.git")
+    _xcl_clone(XCL_TMP, XCL_ORIGIN)
+    _xcl_clone(XCL_SCRATCH, XCL_ORIGIN)
+    _xcl_clone(XCL_THIRD, XCL_ORIGIN)
+    made = run_vcs(XCL_THIRD, "worktree", "add", "-q", XCL_SEP_LINKED, "-b", "xcl-linked")
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the worktree add at %r: %s" % (XCL_SEP_LINKED, made.stderr.strip()))
+    cloned = run_vcs(ROOT, "clone", "-q", primary, XCL_SEP_LOCAL)  # its origin is the own clone's path
+    if cloned.returncode != 0:
+        sys.exit("fixture setup failed: the clone to %r: %s" % (XCL_SEP_LOCAL, cloned.stderr.strip()))
+    write(os.path.join(XCL_PLAIN, "src", "app.py"), "print(1)\n")
+    # A missing clone would also read as an allow, so a refusal row could go red for the wrong cause. Stop here.
+    for where in (XCL_LANE, XCL_SEP, XCL_SEP_SSH, XCL_SEP_PROXY, XCL_SEP_LOCAL, XCL_SEP_LINKED, XCL_SEP_EMPTY):
+        if not os.path.exists(os.path.join(where, ".git")):
+            sys.exit("fixture setup failed: no .git at %r" % where)
+
+
+lazy_fixture(XCL_KEYS, _build_separate_clones)
+
+# The guard reads XCL_TEMP as its temp folder for every row here, so a clone under ROOT is outside it.
+# Left at the system temp, the clones would sit inside it and read as throwaways.
+TEMP_DIR = XCL_TEMP
+
+# Refused: a separate clone of this repo, from the own lane, the own checkout, or a stranded cwd.
+sh("other-checkout: a bare cd into a separate clone of the same repo is refused",
+   "cd " + slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a cd into a separate clone, chained to a build, is refused",
+   "cd " + slash(XCL_SEP) + " && make", "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a cd into a separate clone by a relative climb is refused",
+   "cd ../" + os.path.basename(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a cd into a separate clone in a subshell is refused",
+   "(cd %s && touch x)" % slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a pushd into a separate clone is refused",
+   "pushd " + slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an absolute shell redirect into a separate clone, with no cd, is refused",
+   "echo x > " + slash(os.path.join(XCL_SEP, "note.txt")), "deny", "other-checkout", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a separate clone of the same repo is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_LANE,
+    file_path=os.path.join(XCL_SEP, "note.txt"), content="x")
+add("other-checkout: an Edit into a separate clone of the same repo is refused",
+    "deny", "other-checkout", tool="Edit", cwd=XCL_LANE,
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), old_string="print(1)", new_string="print(2)")
+add("other-checkout: a Write under folders that do not exist yet in a separate clone is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP, "new", "dir", "note.txt"), content="x")
+add("other-checkout: a Write into an empty same-repo clone, with no commit yet, is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_EMPTY, "note.txt"), content="x")
+add("other-checkout: a Write into a linked worktree of a third clone of the same repo is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_LINKED, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone with an ssh origin is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_SSH, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone with a proxy URL origin is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_PROXY, "note.txt"), content="x")
+add("other-checkout: a Write into a clone cloned from the own clone's path is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_PRIMARY,
+    file_path=os.path.join(XCL_SEP_LOCAL, "note.txt"), content="x")
+sh("other-checkout: a cwd stranded in a separate clone refuses a relative shell write when CLAUDE_PROJECT_DIR "
+   "names the home clone",
+   "echo x > note.txt", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+add("other-checkout: a cwd stranded in a separate clone refuses a relative Write when CLAUDE_PROJECT_DIR "
+    "names the home clone",
+    "deny", "other-checkout", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+    file_path="note.txt", content="x")
+add("other-checkout: a cwd stranded in a separate clone refuses an absolute Write into that clone when "
+    "CLAUDE_PROJECT_DIR names the home clone",
+    "deny", "other-checkout", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), content="x")
+
+# Allowed: the own checkout, a repo inside it, a different repo, the temp folder, a clone that cannot be
+# read, and a plain folder. Each one is a false alarm the act must not raise.
+add("other-checkout: a Write within its own linked worktree is allowed",
+    "allow", tool="Write", cwd=XCL_LANE, file_path=os.path.join(XCL_LANE, "src", "new.txt"), content="x")
+sh("other-checkout: a cd to a folder inside the own checkout is allowed",
+   "cd %s && ls" % slash(os.path.join(XCL_PRIMARY, "src")), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a nested repo inside the own checkout is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_NESTED, "note.txt"), content="x")
+sh("other-checkout: a cd into a nested repo inside the own checkout is allowed",
+   "cd %s && ls" % slash(XCL_NESTED), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a clone of a different repo is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_DIFF, "note.txt"), content="x")
+sh("other-checkout: a cd into a clone of a different repo is allowed",
+   "cd %s && make" % slash(XCL_DIFF), "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Write into a clone whose repo name only starts with this one's is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_NEAR, "note.txt"), content="x")
+add("other-checkout: a Write into a separate clone with no origin is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP_NOORIGIN, "note.txt"), content="x")
+add("other-checkout: a Write into a separate clone whose config is unreadable is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP_BADCONF, "note.txt"), content="x")
+add("other-checkout: a Write into a folder with no .git, named like a clone, is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_PLAIN, "src", "new.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone under the temp folder is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_TMP, "note.txt"), content="x")
+add("other-checkout: a Write into a same-repo clone in this session's scratchpad is allowed",
+    "allow", tool="Write", cwd=XCL_PRIMARY, session=FAKE_SESSION,
+    file_path=os.path.join(XCL_SCRATCH, "note.txt"), content="x")
+add("other-checkout: a Read of a separate clone is allowed",
+    "allow", tool="Read", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP, "src", "app.py"))
+sh("other-checkout: a shell read of a separate clone is allowed",
+   "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git read run with -C into a separate clone is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
+add("other-checkout: a Grep into a separate clone is allowed",
+    "allow", tool="Grep", cwd=XCL_PRIMARY, pattern="print", path=XCL_SEP)
+sh("other-checkout: a cd word in quotes names no move into a separate clone",
+   'echo "cd %s && make"' % slash(XCL_SEP), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a cd word in a comment names no move into a separate clone",
+   "# cd %s\nls" % slash(XCL_SEP), "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset writes its own files",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+add("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a relative Write",
+    "allow", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None}, file_path="note.txt", content="x")
+add("other-checkout: a cwd in a separate clone with CLAUDE_PROJECT_DIR unset takes an absolute Write into it",
+    "allow", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None},
+    file_path=os.path.join(XCL_SEP, "src", "app.py"), content="x")
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming that clone, is not stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_SEP})
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming a different repo, is not stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_DIFF})
+sh("other-checkout: a cwd in a separate clone, with CLAUDE_PROJECT_DIR naming a folder with no .git, is not "
+   "stranded",
+   "echo x > note.txt", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PLAIN})
+sh("other-checkout: a stranded cwd's cd back into the home clone is allowed",
+   "cd " + slash(XCL_PRIMARY), "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's cd into a checkout of the home clone, then a command, is allowed",
+   "cd %s && ls" % slash(XCL_LANE), "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's shell read of its own clone is allowed",
+   "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_SEP,
+   env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+
+# Git writes from a stranded cwd, and into a separate clone from the own checkout. The verbs are
+# SESSION_HOME_GIT_VERBS. The stranded refusal's reason must not read as the own checkout's.
+sh("other-checkout: a git commit from a cwd stranded in a separate clone is refused when CLAUDE_PROJECT_DIR "
+   "names the home clone",
+   VCS + " commit -m x", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git reset --hard from a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone",
+   VCS + " reset --hard", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git checkout main from a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone",
+   VCS + " checkout main", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded refusal's reason does not name the checkout this session stands in",
+   VCS + " commit -m x", "deny", "other-checkout", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
+   lacks="the checkout this session stands in")
+sh("other-checkout: a git -C commit into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " commit -m x", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C reset --hard into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " reset --hard", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd's git status is allowed",
+   VCS + " status", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's git log is allowed",
+   VCS + " log --oneline -1", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a stranded cwd's git fetch is allowed",
+   VCS + " fetch origin", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
+sh("other-checkout: a git -C log into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C commit into a clone of a different repo is allowed",
+   VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
+   VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+
+# Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
+# same-repo test must read the two clones as one repo by the bare path they share.
+XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
+XCL_BARE_A = os.path.join(ROOT, "xcl_bare_a")      # a clone whose origin is XCL_REMOTE
+XCL_BARE_B = os.path.join(ROOT, "xcl_bare_b")      # a second clone whose origin is XCL_REMOTE
+
+
+def _build_shared_bare_origin():
+    """A bare repository, and two clones each with it as origin."""
+    os.makedirs(XCL_REMOTE, exist_ok=True)
+    made = run_vcs(XCL_REMOTE, "init", "-q", "--bare", ".")
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the bare init at %r: %s" % (XCL_REMOTE, made.stderr.strip()))
+    _xcl_clone(XCL_BARE_A, XCL_REMOTE)
+    _xcl_clone(XCL_BARE_B, XCL_REMOTE)
+
+
+lazy_fixture((XCL_REMOTE, XCL_BARE_A, XCL_BARE_B), _build_shared_bare_origin)
+add("other-checkout: a Write into a clone that shares a local bare origin with this clone is refused",
+    "deny", "other-checkout", tool="Write", cwd=XCL_BARE_A,
+    file_path=os.path.join(XCL_BARE_B, "note.txt"), content="x")
+TEMP_DIR = None  # back to the system temp for the sections below
+
+
+def xcl_override_write_case():
+    """The separate-clone act is liftable: under a timed owner override a Write into a separate clone
+    passes, because the owner may mean the write. Refused before the override."""
+    config = ov_config("xcl-write")
+    session = "ov-xcl-write"
+    target = os.path.join(XCL_SEP, "note.txt")
+    call = lambda s: ov_call("Write", {"file_path": target, "content": "x"}, XCL_LANE, config, session, s,
+                             temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def xcl_override_cd_case():
+    """The separate-clone cd act is liftable: under a timed owner override a bare cd into a separate
+    clone passes. Refused before the override."""
+    config = ov_config("xcl-cd")
+    session = "ov-xcl-cd"
+    call = lambda s: ov_call("Bash", {"command": "cd " + slash(XCL_SEP)}, XCL_LANE, config, session, s,
+                             temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def xcl_override_stranded_case():
+    """The stranded-cwd act is liftable too: under a timed owner override a relative write from a cwd
+    stranded in a separate clone passes. Refused before the override."""
+    config = ov_config("xcl-stranded")
+    session = "ov-xcl-stranded"
+    call = lambda s: ov_call("Bash", {"command": "echo x > note.txt"}, XCL_SEP, config, session, s,
+                             env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY}, temp=XCL_TEMP)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a Write into a separate clone",
+                         xcl_override_write_case))
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a cd into a separate clone",
+                         xcl_override_cd_case))
+LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd's relative write",
+                         xcl_override_stranded_case))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a

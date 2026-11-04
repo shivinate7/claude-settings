@@ -507,7 +507,8 @@ def run(hook):
         return ""
 
     named = "; ".join("%s (%s)" % (name, label) for name, label in findings)
-    return "Ruling home: this turn's memory names no tracked home for %s. %s" % (named, REMEDY)
+    return ("Ruling home: this turn's memory names no tracked home for %s. %s "
+            "(decision memory-is-never-a-rulings-only-home)" % (named, REMEDY))
 
 
 def main():

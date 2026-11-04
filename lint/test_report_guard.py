@@ -1029,6 +1029,7 @@ class NoResendTests(unittest.TestCase):
                 self.assertIn("never send the report again", reason)
                 self.assertNotIn("send the report now", reason)
                 self.assertEqual(reason.count("post only the corrected lines"), 1)
+                self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
@@ -1085,6 +1086,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
         self.assertIn("post only the corrected lines", out["reason"].lower())
+        self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
         for reply in ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
@@ -1639,14 +1641,14 @@ class PickGuardTests(unittest.TestCase):
 
     def test_pk_red_pick_with_no_control_blocks(self):
         # Catches: the Oct 27 incident, a pick as report text only, on an unlanded and a landed turn.
+        # Catches: the refusal offering the question box in a repo with a waiting page. The writer is the route.
         for landed in (False, True):
             with self.subTest(landed=landed):
                 out = self.verdict(self.PICK, landed=landed)
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
-                self.assertIn("question box", out["reason"])
-                # Catches: the refusal dropping the box's nothing-running condition (spec v2 block text).
-                self.assertRegex(out["reason"], r"nothing running[^.]*question box")
+                self.assertIn("writer", out["reason"])
+                self.assertNotRegex(out["reason"], r"\bbox\b")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1689,10 +1691,16 @@ class PickGuardTests(unittest.TestCase):
             with self.subTest(calls=calls):
                 self.assertIsNotNone(self.verdict(reply, calls))
 
+    def no_page_repo(self):
+        """A repo with no waiting page. The question box counts there, and nowhere else."""
+        bare = os.path.join(self.tmp.name, "bare")
+        if not os.path.isdir(bare):
+            os.makedirs(os.path.join(bare, ".git"))
+        return bare
+
     def test_pk_green_unknown_page_box_and_write_pass(self):
         # With no waiting page, the box or the writer's items write still passes (spec v2, "No page").
-        bare = os.path.join(self.tmp.name, "bare")
-        os.makedirs(os.path.join(bare, ".git"))
+        bare = self.no_page_repo()
         self.assertIsNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
@@ -1708,7 +1716,8 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
-        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
+        # The box passes only in a repo with no waiting page; in a page repo the writer's write is the route.
+        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=self.no_page_repo()))
         self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
 
     def assert_pick_blocked(self, reply, repo=None):
@@ -1860,39 +1869,47 @@ class PickGuardTests(unittest.TestCase):
         hyphen = self.PICK_BARE.replace("> **Next** wait",
                                         "> Departs from: lint/report_guard.py pick check - it also needs a line\n"
                                         "> **Next** wait")
+        # The Departs from check is judged on its own; the box is the route only where no page exists.
+        bare = self.no_page_repo()
+        box = ("AskUserQuestion", {}, False)
         for landed in (False, True):
             with self.subTest(landed=landed):
-                self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], landed=landed))
+                self.assertIsNone(self.verdict(self.PICK, [box], landed=landed, repo=bare))
                 self.assertIsNone(self.verdict(self.PICK_LINKED, [self.page_set()], landed=landed))
-        self.assertIsNone(self.verdict(hyphen, [("AskUserQuestion", {}, False)]))
+        self.assertIsNone(self.verdict(hyphen, [box], repo=bare))
 
     def test_dp_green_no_pick_needs_no_line(self):
         # Catches: an Input Needed item with no pick refused for its missing line (out of scope).
+        bare = self.no_page_repo()
         rows = ("> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
                 "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait")
         for row in rows:
             for landed in (False, True):
                 with self.subTest(row=row, landed=landed):
-                    # The "?" row is a question under spec v2.1, so it carries the box to pass.
-                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed))
+                    # The "?" row is a question under spec v2.1. With no waiting page, the box passes it.
+                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed, repo=bare))
 
     def test_dp_one_predicate_for_the_report_and_the_chat_box(self):
         # Catches: a report copy of the rule that judges a line the chat box does not. Both read question_form.
+        # The line is judged in a repo with no waiting page, where the box is the route, so the Departs from
+        # check is what refuses it.
         import question_form  # the one home of the rule (hooks/ is on sys.path)
+        bare = self.no_page_repo()
         bad = ["> Departs from:", "> Departs from: agent-model-cap — Opus above the row stays the existing ask"]
         for line in bad:
             with self.subTest(line=line):
                 reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
-                out = self.verdict(reply, [("AskUserQuestion", {}, False)])
+                out = self.verdict(reply, [("AskUserQuestion", {}, False)], repo=bare)
                 box = {"questions": [{"question": "\n".join(self.FORM_LINES + [line[2:]]), "header": "Ship",
                                       "multiSelect": False,
                                       "options": [{"label": "Keep it", "description": "Gain: a. Lose: b."},
                                                   {"label": "Drop it", "description": "Gain: c. Lose: d."}]}]}
                 self.assertEqual(question_form.chat_hit(box)[0], "question-departs")
                 self.assertIsNotNone(out, "the report passed a line the chat box refuses")
+                self.assertRegex(out["reason"], r"(?i)departs from")
         good = "> " + self.DEPARTS_LINE
         self.assertIsNone(self.verdict(self.PICK_BARE.replace("> **Next** wait", good + "\n> **Next** wait"),
-                                       [("AskUserQuestion", {}, False)]))
+                                       [("AskUserQuestion", {}, False)], repo=bare))
 
     def test_dp_no_copy_the_report_imports_question_form(self):
         # A presence check only: the verdict cases above pin the behaviour. The report reads the form's
@@ -1918,11 +1935,12 @@ class PickGuardTests(unittest.TestCase):
         # Catches: a Departs from line written as a bullet or a bold label refused as missing. A bold label
         # reads as a new report label, which ends the Input Needed item at that line.
         text = "lint/report_guard.py pick check — it also needs a Departs from line"
+        bare = self.no_page_repo()  # the box is the route here: the question has no waiting page to reach
         for line in ("> - Departs from: " + text, "> **Departs from:** " + text, "> * Departs from: " + text):
             for landed in (False, True):
                 with self.subTest(line=line, landed=landed):
                     reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
-                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
+                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed, repo=bare))
 
 
 import itertools
@@ -2075,7 +2093,9 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         self.assertEqual(self.written_files(), [])
 
     def test_qm_green_box_in_the_turn_passes(self):
-        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))])
+        # Catches: a box in the turn refused in a repo with no waiting page, where the box is the route.
+        bare = self.make_repo("bare", page=False)
+        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))], repo=bare)
         self.assertIsNone(out)
 
     def test_qm_red_sidechain_box_does_not_count(self):
@@ -2204,9 +2224,11 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                      *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
 
     def test_qm_green_own_record_without_a_lane_tag_is_owner_facing(self):
-        # Catches: a session record with no lane tag and no parent read as a lane, which would refuse the box.
+        # Catches: a session record with no lane tag and no parent read as a lane. A lane refuses the box, so a
+        # pass in a repo with no waiting page shows the record reads as owner-facing.
+        bare = self.make_repo("bare", page=False)
         out = self.stop([human("decide"), *self.lane_record(tags=("coordinator",), parent=None), *self.box(),
-                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV)
+                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV, repo=bare)
         self.assertIsNone(out)
 
     def test_qm_red_peer_only_session_with_no_lane_record_gets_the_owner_rule(self):
@@ -2249,12 +2271,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         out = self.stop([human("decide"), assistant_text(self.reply(["Don't merge it? Pick 'main'."]))])
         self.assert_blocked(out, "Pick guard")
 
-    def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
-        # Catches: a session with no own record whose question goes to its parent, refused as if it had no route.
+    def test_qm_red_owner_session_with_no_record_sends_to_parent_blocks(self):
+        # Catches: an owner-facing session (no own record, so no lane evidence) whose question goes to @parent
+        # passing as if @parent were a route. An owner-facing session has no parent, so the question still blocks.
         for label, send in (("@parent", self.send(session_id="@parent")), ("to parent", self.send(to="parent"))):
             with self.subTest(form=label):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
-                self.assertIsNone(out)
+                self.assert_blocked(out, "Pick guard")
 
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
@@ -4537,6 +4560,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIsNotNone(out, "the Stop passed with a pending refusal")
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
+                self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
                 self.assertIn("Input Needed", out["reason"])
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
@@ -4576,6 +4600,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "a name in Done passed as the answer to the refusal")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
 
     def test_k_a_plain_word_in_input_needed_does_not_clear_a_built_in_tool(self):
@@ -4614,6 +4639,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "the short name cleared the full MCP name")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("`%s`" % self.ARCHIVE, out["reason"], "the block reason does not quote the full name")
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
         # The reason quotes the full name, so one rewrite that names it clears the entry.
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
@@ -4621,6 +4647,19 @@ class PendingRefusalTests(unittest.TestCase):
         run = self.stop(reply, active=True)
         self.assertEqual(run.stdout.strip(), "", "the rewrite that names the full name blocked: %s" % run.stdout)
         self.assertEqual(self.pending_tools(), [], "the rewrite left the entry in the file")
+
+    def test_k_pending_refusal_with_no_transcript_refuses_and_cites_the_owner_rule(self):
+        # The refusal alone blocks when the transcript is missing, and its reason cites the owner rule.
+        self.write_refusals([self.ARCHIVE])
+        hook = {"hook_event_name": "Stop", "stop_hook_active": False, "session_id": self.SID, "cwd": self.scratch}
+        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = self.blocked(run)
+        self.assertIsNotNone(out, "the Stop passed with a pending refusal and no transcript")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertEqual(out["reason"].count("decision refusals-reach-the-owner"), 1, out["reason"])
+        self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_f_stop_hook_active_does_not_block_on_a_refusal(self):
         rows = (("unlanded", False, self.PROSE), ("landed", True, self.LANDED_OTHER_ASK))

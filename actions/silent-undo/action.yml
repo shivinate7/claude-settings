@@ -1,0 +1,19 @@
+name: Silent undo check
+description: >
+  Fails a pull request whose merge or branch silently drops or reverts earlier work of the base
+  branch. Runs lint/check_silent_undo.py from this repo against the caller's checkout, reading
+  the pull request head against the pull request base. Fails closed: a read that cannot run
+  (a shallow clone, a base that cannot be read) is UNKNOWN and red, never green. A run with no
+  pull request base is skipped. The escape is a `Drops-lines: <path> -- <reason>` trailer in a
+  commit message of the branch. The caller needs actions/checkout with fetch-depth 0 so the
+  history reaches the base. The step uses the local origin/<base> when it exists and fetches
+  only when it is missing.
+runs:
+  using: composite
+  steps:
+    - name: Check the change drops no earlier work
+      shell: bash
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: bash "${{ github.action_path }}/check.sh"

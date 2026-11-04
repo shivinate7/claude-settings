@@ -11,6 +11,7 @@ Run with:
 """
 import ast
 import glob
+import json
 import os
 import re
 import shutil
@@ -612,7 +613,7 @@ class CitationTests(unittest.TestCase):
 
     def test_row_whose_test_never_touches_its_ref_fails(self):
         problems = run(rule_map=check_map({
-            "ref": "lint/report_guard.py",
+            "ref": "lint/check_red_run.py",
             "test": "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"}))
         self.assertTrue(any("unlinked" in p for p in problems), problems)
 
@@ -744,7 +745,10 @@ class EmittedRuleIdsTests(unittest.TestCase):
 # ------------------------------------------------------------ refusal cites
 # A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
 # a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
-# id with a site that prints no cite, or whose reason the scan cannot read, fails unless it is in
+# site is a refuse() or ask_command() call, a raw permissionDecision dict, a raise or return of a
+# Stop, or a refuse print (a decision "block" that reaches the output), whatever the hook event.
+# The scan reads hooks/*.py, merge/merge.py and each .py script settings.json wires. A refusal id
+# with a site that prints no cite, or whose reason the scan cannot read, fails unless it is in
 # REFUSAL_UNCITED_EXEMPT with its home. The exempt list only shrinks.
 
 CITE_RE = re.compile(r"\b(decision|rule) ([a-z0-9][a-z0-9-]*)\b")
@@ -1051,7 +1055,7 @@ class _Reasons:
             return self.alts(expr.left, mod, locs, d)
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
             # A run-time piece in a join adds no static text; the static pieces around it still count.
-            left, right = self.alts(expr.left, mod, locs, d), self.alts(expr.right, mod, locs, d)
+            left, right = self._piece(expr.left, mod, locs, d), self._piece(expr.right, mod, locs, d)
             if left == [] or right == []:
                 return []
             if left is None and right is None:
@@ -1092,6 +1096,16 @@ class _Reasons:
                     return self.alts(expr.args[0], mod, locs, d)
             return self._call(expr, mod, locs, d, None)
         return None
+
+    def _piece(self, expr, mod, locs, depth, branch=False):
+        """An operand of `+`. A falsy branch of an `if` operand is the join without that piece, so it reads as "" and
+        not as no text: `join + (TAIL if c else "")` reads the join alone when `c` is false. A falsy operand on its
+        own still reads no text, as a falsy whole reason does."""
+        if isinstance(expr, ast.IfExp):
+            return _union([self._piece(b, mod, locs, depth, True) for b in (expr.body, expr.orelse)])
+        if branch and isinstance(expr, ast.Constant) and expr.value == "":
+            return [""]
+        return self.alts(expr, mod, locs, depth)
 
     def _static_branches(self, name, mod, locs, depth):
         """The static text of a local name's branches, skipping the run-time ones. `x = x or "text"` adds
@@ -1315,6 +1329,101 @@ def _raw_refuse_reason(node):
     return None
 
 
+NO_REASON = object()  # a refuse print that names no reason: its site reads not resolved
+
+
+def _item(target):
+    """(name, key) of a `name["key"]` target with a string key, else None."""
+    if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
+            and isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+        return target.value.id, target.slice.value
+    return None
+
+
+def _key_value(scope, name, key):
+    """The value `scope` first stores at `name["key"]`, NO_REASON when it stores none."""
+    stored = [n for n in _own(scope) if isinstance(n, ast.Assign) and len(n.targets) == 1
+              and _item(n.targets[0]) == (name, key)]
+    return min(stored, key=lambda n: n.lineno).value if stored else NO_REASON
+
+
+def _update_target(call):
+    """The name `n` of an `n.update(...)` call, else None."""
+    func = call.func if isinstance(call, ast.Call) else None
+    if isinstance(func, ast.Attribute) and func.attr == "update" and isinstance(func.value, ast.Name):
+        return func.value.id
+    return None
+
+
+def _pairs(node):
+    """{key: value} of a dict literal's constant keys, or of a call's keyword arguments."""
+    if isinstance(node, ast.Dict):
+        return {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant)}
+    return {k.arg: k.value for k in node.keywords if k.arg}
+
+
+def _name_reaches(name, mod, scope, depth):
+    """True when a read of `name` in `scope` reaches the output (see _reaches_output)."""
+    return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+               and _reaches_output(n, mod, scope, depth + 1) for n in _own(scope))
+
+
+def _bound_reaches(target, mod, scope, depth):
+    """True when a value bound to `target` reaches the output: a name, or an item of a name."""
+    item = _item(target)
+    if item is not None:
+        return _name_reaches(item[0], mod, scope, depth)
+    return isinstance(target, ast.Name) and _name_reaches(target.id, mod, scope, depth)
+
+
+def _reaches_output(node, mod, scope, depth=0):
+    """True when the value of `node` reaches the output of `scope`: it is printed (`print(...)`, or a `json.dumps(...)`
+    or `dict(...)` that is printed), returned, passed to `name.update(...)`, or bound to a name that reaches the
+    output. An `name.update(...)` call reaches the output when its name does."""
+    if depth > MAX_DEPTH:
+        return False
+    target = _update_target(node)
+    if target is not None and _name_reaches(target, mod, scope, depth):
+        return True
+    parent = mod.parents.get(id(node))
+    if isinstance(parent, ast.Return):
+        return True
+    if isinstance(parent, ast.Call) and parent.func is not node:
+        func = parent.func
+        if isinstance(func, ast.Name) and func.id == "print":
+            return True
+        if (isinstance(func, ast.Attribute) and func.attr == "dumps") or (isinstance(func, ast.Name) and func.id == "dict"):
+            return _reaches_output(parent, mod, scope, depth + 1)
+        target = _update_target(parent)
+        return target is not None and _name_reaches(target, mod, scope, depth)
+    if isinstance(parent, ast.Assign) and parent.value is node:
+        return any(_bound_reaches(t, mod, scope, depth) for t in parent.targets)
+    return False
+
+
+def _refuse_print(node, scope, mod, locs, reasons):
+    """The reason expression of a refuse print in `scope`, NO_REASON when it prints one with no reason, else None.
+    A refuse print is a dict literal or a keyword call whose decision reads as "block" in some branch, or an
+    `name["decision"] = ...` assignment that does, and whose value reaches the output of `scope`. A decision that
+    cannot be read is no print, as in _raw_refuse_reason; so is a dict that nothing prints, such as one appended
+    to a log."""
+    item = _item(node.targets[0]) if isinstance(node, ast.Assign) and len(node.targets) == 1 else None
+    if isinstance(node, (ast.Dict, ast.Call)):
+        pairs = _pairs(node)
+        decision, reason = pairs.get("decision"), pairs.get("reason", NO_REASON)
+    elif item is not None and item[1] == "decision":
+        decision, reason = node.value, _key_value(scope, item[0], "reason")
+    else:
+        return None
+    if decision is None or "block" not in (reasons.alts(decision, mod, locs) or []):
+        return None
+    if isinstance(node, (ast.Dict, ast.Call)):
+        reached = _reaches_output(node, mod, scope)
+    else:
+        reached = _name_reaches(item[0], mod, scope, 0)
+    return reason if reached else None
+
+
 def _base_name(base):
     """The class name a base expression names: `Stop`, or `stops.Stop` as `Stop`. None for any other base."""
     if isinstance(base, ast.Name):
@@ -1496,9 +1605,14 @@ class _Helpers:
         return self.mod.defs.get(name)
 
     def messages(self, d):
-        """The message expressions of the Stop classes that `d` raises or returns in its own scope."""
+        """The message expressions that `d` prints in its own scope: the Stop messages it raises or returns, and the
+        reasons of its refuse prints."""
         kinds = _kind_params(d, self.mod.stops)
-        return [m for node in _own(d) for m in (_stop_reason(node, self.mod.stops, kinds),) if m is not None]
+        locs = self.reasons.locals_of(d, self.mod)
+        stops = [m for node in _own(d) for m in (_stop_reason(node, self.mod.stops, kinds),) if m is not None]
+        prints = [p for node in _own(d) for p in (_refuse_print(node, d, self.mod, locs, self.reasons),)
+                  if isinstance(p, ast.AST)]
+        return stops + prints
 
     def _reaches(self, d):
         params, locs = set(_param_names(d)), self.reasons.locals_of(d, self.mod)
@@ -1544,18 +1658,24 @@ class _Helpers:
             return []
         return [h for h in self.binds.get((id(fdef), call.func.id), {}).values() if id(h) in self.helpers]
 
-    def transparent(self, site, fdef, locs):
-        """A helper's own Stop message that reaches its parameters: each call of the helper is read instead."""
-        if fdef is None or id(fdef) not in self.helpers:
+    def transparent(self, msg, fdef, locs):
+        """A helper's own message that reaches its parameters: each call of the helper is read instead. `msg` is the
+        Stop message or the reason of a refuse print at the site, and None or NO_REASON when there is none."""
+        if fdef is None or id(fdef) not in self.helpers or not isinstance(msg, ast.AST):
             return False
-        msg = _stop_reason(site, self.mod.stops, _kind_params(fdef, self.mod.stops))
-        return msg is not None and bool(_params_reaching(msg, set(_param_names(fdef)), locs))
+        return bool(_params_reaching(msg, set(_param_names(fdef)), locs))
 
     def site(self, expr, locs, homes):
         """(status, spellings) for a message read at its own site."""
         if _is_carried(expr, self.mod):
             return "cited", []
         return _judge(self.reasons.alts(expr, self.mod, locs), homes, _unparse(expr))
+
+    def printed_site(self, printed, site, locs, homes):
+        """(status, spellings) for a refuse print's reason, read at its own site. A print with no reason is not resolved."""
+        if printed is NO_REASON:
+            return _judge([], homes, _unparse(site))
+        return self.site(printed, locs, homes)
 
     def instance_rows(self, h, call, locs, homes):
         """(status, spellings) for each message of helper `h` that reaches its parameters, read with this call's
@@ -1594,8 +1714,8 @@ def refusal_status(sources, homes, scope, guards=None):
     expression) that an exempt key's prefix must start. `sources` maps each module name to its text; `scope`
     names the modules whose refusals count, and `guards` the guard modules among them (all of `scope` when
     None). A guard module's refuse() and ask_command() calls name their id. Any module in scope also counts a
-    raw refusal dict, a `raise Stop(...)`, `return Stop(...)` or `raise kind(...)` (see _kind_params) of its own,
-    and each call of a helper; their id is
+    raw refusal dict, a refuse print (see _refuse_print), a `raise Stop(...)`, `return Stop(...)` or
+    `raise kind(...)` (see _kind_params) of its own, and each call of a helper; their id is
     `module:function`, the function that makes the refusal. A helper's own message is no site, and a hook that
     is no guard module (a judge hook) prints its refusal in its own refuse(), so only that print counts there.
     unattributed: the calls whose id the scan cannot read."""
@@ -1614,6 +1734,9 @@ def refusal_status(sources, homes, scope, guards=None):
             rid = "%s:%s" % (mod.name, func)
             for site in _own(node):
                 where = "%s.py:%d" % (mod.name, site.lineno) if hasattr(site, "lineno") else ""
+                printed = _refuse_print(site, node, mod, locs, reasons)
+                if printed is not None and not helpers.transparent(printed, fdef, locs):
+                    _add(statuses, rid, where, *helpers.printed_site(printed, site, locs, homes))
                 if isinstance(site, ast.Call):
                     if mod.name in guards:
                         for ref, expr in _refusals_of(site, locs, where, unattributed, mod, reasons):
@@ -1622,8 +1745,9 @@ def refusal_status(sources, homes, scope, guards=None):
                         for status, spellings in helpers.instance_rows(h, site, locs, homes):
                             _add(statuses, rid, where, status, spellings)
                     continue
-                expr = _raw_refuse_reason(site) or _stop_reason(site, mod.stops, _kind_params(fdef, mod.stops))
-                if expr is not None and not helpers.transparent(site, fdef, locs):
+                stop = _stop_reason(site, mod.stops, _kind_params(fdef, mod.stops))
+                expr = _raw_refuse_reason(site) or stop
+                if expr is not None and not helpers.transparent(stop, fdef, locs):
                     _add(statuses, rid, where, *helpers.site(expr, locs, homes))
     for rows in statuses.values():
         rows.sort(key=lambda row: (row[0].rsplit(":", 1)[0], int(row[0].rsplit(":", 1)[1])))
@@ -1701,10 +1825,43 @@ def refusal_problems(sources, homes, exempt, scope, emitted=None, guards=None):
     return problems
 
 
+CONFIG_DIR_SCRIPT_RE = re.compile(
+    r"(?:\$\{CLAUDE_CONFIG_DIR(?::-\$HOME/\.claude)?\}|\$CLAUDE_CONFIG_DIR|~/\.claude|\$\{?HOME\}?/\.claude)"
+    r"/([A-Za-z0-9_./-]+\.py)")  # a script under the config dir, which is this repo's root
+REPO_SCRIPT_RE = re.compile(r"(?<![\w./-])((?:hooks|lint|merge|janitor)/[A-Za-z0-9_./-]+\.py)")  # a repo-relative path
+
+
+def settings_scripts(root=rule_audit.ROOT):
+    """The repo-relative .py scripts that the hook commands in settings.json run. A command names its script under
+    the config dir (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/<path>`, `~/.claude/<path>` or `$HOME/.claude/<path>`), and
+    <path> is the same path in this repo; or it names it by that repo-relative path."""
+    with open(os.path.join(root, "settings.json"), encoding="utf-8") as f:
+        settings = json.load(f)
+    found = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "command" and isinstance(value, str):
+                    found.update(CONFIG_DIR_SCRIPT_RE.findall(value))
+                    found.update(REPO_SCRIPT_RE.findall(value))
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(settings)
+    return sorted(found)
+
+
 def _hooks_world():
-    """The text of every hooks module but the tests, and the merge tool. The scan reads all of them, so a
-    judge hook or a new module that prints a refusal is in scope with no list of its own."""
-    paths = glob.glob(os.path.join(rule_audit.ROOT, "hooks", "*.py")) + [os.path.join(rule_audit.ROOT, "merge", "merge.py")]
+    """The text of every hooks module but the tests, the merge tool, and each .py script that settings.json wires
+    (lint/report_guard.py, janitor/*.py). The scan reads all of them, so a judge hook or a new module that prints a
+    refusal is in scope with no list of its own."""
+    root = rule_audit.ROOT
+    paths = glob.glob(os.path.join(root, "hooks", "*.py")) + [os.path.join(root, "merge", "merge.py")]
+    paths += [os.path.join(root, rel) for rel in settings_scripts(root)]
     return {os.path.splitext(os.path.basename(p))[0]: rule_audit.read(p)
             for p in paths if not os.path.basename(p).startswith("test_")}
 
@@ -1727,6 +1884,24 @@ class RefusalCiteRepoTests(unittest.TestCase):
     def test_the_repo_scope_reads_the_judge_hooks_and_the_merge_tool(self):
         self.assertLessEqual({"blind_brief", "call_judge", "prose_judge", "sendmessage_state", "merge"},
                              set(_hooks_world()))
+
+    def test_settings_wires_the_scripts_outside_hooks(self):
+        wired = settings_scripts()
+        self.assertIn("lint/report_guard.py", wired)
+        self.assertIn("janitor/agent_end_reap.py", wired)
+        self.assertIn("janitor/session_end_sweep.py", wired)
+
+    def test_every_script_settings_wires_exists(self):
+        self.assertTrue(settings_scripts(), "settings.json wires no .py script, so the scope is unknown")
+        gone = [rel for rel in settings_scripts() if not os.path.isfile(os.path.join(rule_audit.ROOT, rel))]
+        self.assertEqual(gone, [], "wired but missing: " + ", ".join(gone))
+
+    def test_every_script_settings_wires_is_in_the_scanned_world(self):
+        wired = settings_scripts()
+        self.assertTrue(wired, "settings.json wires no .py script, so the scope is unknown")
+        world = _hooks_world()
+        missing = [rel for rel in wired if os.path.splitext(os.path.basename(rel))[0] not in world]
+        self.assertEqual(missing, [], "wired by settings.json but not scanned: " + ", ".join(missing))
 
     def test_cite_homes_reads_the_style_file_anchors(self):
         decisions, anchors = cite_homes()
@@ -2232,6 +2407,231 @@ class RefusalKindParameterTests(unittest.TestCase):
     def test_a_stop_subclass_with_an_attribute_base_is_a_stop(self):
         src = body_src('    raise Lift("no cite")\n', 'class Lift(stops.Stop):\n    """A refusal."""\n')
         self.assertEqual(status_of(src, "merge:go", module="merge"), ["no cite"])
+
+
+class RefusePrintTests(unittest.TestCase):
+    """A refuse print is a refusal site: a decision "block" that reaches the output, whatever its shape: a dict literal,
+    a keyword call (`out.update` or `dict`), an `out["decision"] = ...` assignment, or a reason built at run time. Any
+    module in scope counts, not only a Stop hook. A print with no reason, or a reason the scan cannot read, is `not
+    resolved`. A decision the scan cannot read, a dict nothing prints, and a decision that is not "block" are no site."""
+
+    def test_a_refuse_print_dict_with_a_cite_passes(self):
+        src = 'import json\ndef stop():\n    print(json.dumps({"decision": "block", "reason": "held, see decision alpha"}))\n'
+        self.assertEqual(status_of(src, "guard:stop"), ["cited"])
+
+    def test_a_refuse_print_dict_with_no_cite_is_no_cite(self):
+        src = 'import json\ndef stop():\n    print(json.dumps({"decision": "block", "reason": "held, see decision beta"}))\n'
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_keyword_update_with_a_cite_passes(self):
+        src = ('import json\ndef stop(out):\n    out.update(decision="block", reason="held, see decision alpha")\n'
+               '    print(json.dumps(out))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["cited"])
+
+    def test_a_refuse_print_keyword_update_with_no_cite_is_no_cite(self):
+        src = ('import json\ndef stop(out):\n    out.update(decision="block", reason="held, see decision beta")\n'
+               '    print(json.dumps(out))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_keyword_dict_call_is_a_site(self):
+        src = 'import json\ndef stop():\n    print(json.dumps(dict(decision="block", reason="held, see decision beta")))\n'
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_keyword_reason_passed_in_as_a_parameter_is_not_resolved(self):
+        src = 'import json\ndef stop(out, why):\n    out.update(decision="block", reason=why)\n    print(json.dumps(out))\n'
+        self.assertEqual(status_of(src, "guard:stop"), ["not resolved"])
+
+    def test_a_refuse_print_reason_from_a_def_that_cites_nothing_is_no_cite(self):
+        src = ('import json\n'
+               'def run(hook):\n'
+               '    return "Ruling home: this turn\'s memory names no tracked home."\n'
+               'def main(hook):\n'
+               '    reason = run(hook)\n'
+               '    if reason:\n'
+               '        print(json.dumps({"decision": "block", "reason": reason}))\n')
+        self.assertEqual(status_of(src, "guard:main"), ["no cite"])
+        cited = src.replace("tracked home.", "tracked home, see decision alpha.")
+        self.assertEqual(status_of(cited, "guard:main"), ["cited"])
+
+    def test_a_refuse_print_joined_at_run_time_judges_its_static_tail(self):
+        src = ('import json\n'
+               'CORRECTION_TAIL = " Post only the corrected lines."\n'
+               'def main(reasons):\n'
+               '    print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))\n')
+        self.assertEqual(status_of(src, "guard:main"), ["no cite"])
+        cited = src.replace("corrected lines.", "corrected lines, see decision alpha.")
+        self.assertEqual(status_of(cited, "guard:main"), ["cited"])
+
+    def test_a_refuse_print_built_from_a_table_and_a_def_is_judged_on_its_text(self):
+        defs = ('def diff_rule(role):\n    return {"a": "author-diff"}.get(role, "builder-diff")\n'
+                'def builder_text():\n    return "A builder changes no test. Report it."\n')
+        src = 'import json\n' + defs + ('def stop(role):\n'
+              '    print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_text()}))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+        cited = src.replace("Report it.", "Report it. (decision alpha)")
+        self.assertEqual(status_of(cited, "guard:stop"), ["cited"])
+
+    def test_a_refuse_print_reason_that_is_a_name_of_the_enclosing_def_is_not_resolved(self):
+        src = ('import json\n'
+               'def main(refusal):\n'
+               '    def stop_for_refusal():\n'
+               '        if refusal:\n'
+               '            print(json.dumps({"decision": "block", "reason": refusal}))\n'
+               '    stop_for_refusal()\n')
+        self.assertEqual(status_of(src, "guard:stop_for_refusal"), ["not resolved"])
+
+    def test_a_refuse_print_with_no_reason_key_is_not_resolved(self):
+        src = 'import json\ndef stop():\n    print(json.dumps({"decision": "block"}))\n'
+        self.assertEqual(status_of(src, "guard:stop"), ["not resolved"])
+
+    def test_a_refuse_print_reason_passed_in_as_a_parameter_is_not_resolved(self):
+        src = 'import json\ndef go(why):\n    print(json.dumps({"decision": "block", "reason": why}))\n'
+        self.assertEqual(status_of(src, "guard:go"), ["not resolved"])
+
+    def test_a_refuse_print_reason_from_a_format_string_is_read(self):
+        src = ('import json\ndef stop(handoff):\n'
+               '    print(json.dumps({"decision": "block", "reason": "Rewrite your handoff at %s now, see decision alpha." % handoff}))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["cited"])
+
+    def test_comment_openers_inside_a_refuse_print_reason_are_text(self):
+        cited = ('import json\ndef stop():\n'
+                 '    print(json.dumps({"decision": "block", "reason": "use the # sign, a /* and // here, see decision alpha"}))\n')
+        self.assertEqual(status_of(cited, "guard:stop"), ["cited"])
+        uncited = ('import json\ndef stop():\n'
+                   '    print(json.dumps({"decision": "block", "reason": "a # and /* and // in text, Don\'t stop"}))\n')
+        self.assertEqual(status_of(uncited, "guard:stop"), ["no cite"])
+
+    def test_a_trailing_comment_with_a_cite_is_not_the_reason(self):
+        src = ('import json\ndef stop():\n'
+               '    print(json.dumps({"decision": "block", "reason": "no cite here"}))  # see decision alpha\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_reason_over_several_lines_reads_every_line(self):
+        cited = ('import json\ndef stop():\n'
+                 '    print(json.dumps({"decision": "block", "reason": (\n'
+                 '        "Context is about 334k tokens, "\n'
+                 '        "messages about 249k. "\n'
+                 '        "Follow step 4 of the prompt, see decision alpha."\n'
+                 '    )}))\n')
+        self.assertEqual(status_of(cited, "guard:stop"), ["cited"])
+        self.assertEqual(status_of(cited.replace("see decision alpha", "see decision beta"), "guard:stop"), ["no cite"])
+        triple = ('import json\ndef stop():\n'
+                  '    print(json.dumps({"decision": "block", "reason": """first line\n'
+                  'second line, see decision alpha"""}))\n')
+        self.assertEqual(status_of(triple, "guard:stop"), ["cited"])
+
+    def test_a_refuse_print_in_a_judge_module_is_a_site(self):
+        src = 'import json\ndef stop():\n    print(json.dumps({"decision": "block", "reason": "no cite"}))\n'
+        statuses, _ = refusal_status({"judge": src}, HOMES, {"judge"}, guards=set())
+        self.assertEqual([s for _, s, _ in statuses.get("judge:stop", [])], ["no cite"])
+
+    def test_two_refuse_prints_in_one_function_each_read_their_own_site(self):
+        src = ('import json\ndef stop(out):\n'
+               '    print(json.dumps({"decision": "block", "reason": "held, see decision alpha"}))\n'
+               '    out.update(decision="block", reason="no cite here")\n'
+               '    print(json.dumps(out))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["cited", "no cite"])
+
+    def test_a_decision_that_is_not_block_is_no_site(self):
+        # A control: a decision other than "block" is no site, so it can never turn a refusal red.
+        src = ('import json\ndef stop():\n'
+               '    print(json.dumps({"decision": "approve", "reason": "no cite"}))\n'
+               '    print(json.dumps({"decision": {"behavior": "allow"}, "reason": "no cite"}))\n')
+        statuses, _ = refusal_status({"guard": src}, HOMES, SCOPE)
+        self.assertEqual(statuses, {})
+
+    def test_a_module_with_no_refuse_print_is_no_site(self):
+        # A control: an empty module has no site and no unattributed call.
+        statuses, unattributed = refusal_status({"guard": ""}, HOMES, SCOPE)
+        self.assertEqual((statuses, unattributed), ({}, []))
+
+    def test_a_refuse_print_subscript_decision_is_a_site(self):
+        src = ('import json\ndef stop():\n    out = {}\n    out["decision"] = "block"\n'
+               '    out["reason"] = "held, see decision beta"\n    print(json.dumps(out))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+        self.assertEqual(status_of(src.replace("decision beta", "decision alpha"), "guard:stop"), ["cited"])
+
+    def test_a_refuse_print_module_constant_decision_is_a_site(self):
+        src = ('import json\nBLOCK = "block"\ndef stop():\n'
+               '    print(json.dumps({"decision": BLOCK, "reason": "held, see decision beta"}))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_ternary_decision_is_a_site(self):
+        src = ('import json\ndef stop(hold):\n'
+               '    print(json.dumps({"decision": "block" if hold else "approve", "reason": "held, see decision beta"}))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_decision_of_approve_by_name_or_by_ternary_is_no_site(self):
+        src = ('import json\nAPPROVE = "approve"\ndef stop(hold):\n'
+               '    print(json.dumps({"decision": APPROVE, "reason": "no cite"}))\n'
+               '    print(json.dumps({"decision": "approve" if hold else "approve", "reason": "no cite"}))\n')
+        statuses, _ = refusal_status({"guard": src}, HOMES, SCOPE)
+        self.assertEqual(statuses, {})
+
+    def test_a_refuse_print_appended_to_a_log_is_no_site(self):
+        src = 'LOG = []\ndef stop():\n    LOG.append({"decision": "block", "reason": "no cite"})\n'
+        statuses, _ = refusal_status({"guard": src}, HOMES, SCOPE)
+        self.assertEqual(statuses, {})
+
+    def test_a_refuse_print_dict_printed_through_a_name_is_a_site(self):
+        src = ('import json\ndef stop():\n'
+               '    payload = {"decision": "block", "reason": "held, see decision beta"}\n'
+               '    print(json.dumps(payload))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_refuse_print_keyword_update_printed_through_a_name_is_a_site(self):
+        src = ('import json\ndef stop(out):\n    out.update(decision="block", reason="held, see decision beta")\n'
+               '    print(json.dumps(out))\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["no cite"])
+
+    def test_a_helper_reads_the_reason_at_each_call_and_its_own_print_is_no_site(self):
+        src = ('import json\ndef emit(reason):\n'
+               '    print(json.dumps({"decision": "block", "reason": reason}))\n'
+               'def stop():\n'
+               '    emit("held, see decision alpha")\n'
+               '    emit("held, no cite")\n')
+        self.assertEqual(status_of(src, "guard:stop"), ["cited", "no cite"])
+        self.assertEqual(status_of(src, "guard:emit"), [], "the helper's own print reads its call sites instead")
+
+    def test_a_joined_reason_whose_tail_alone_cites_is_no_cite(self):
+        src = ('import json\nCORRECTION_TAIL = " Post only the corrected lines, see decision alpha."\n'
+               'def main(reasons, short):\n'
+               '    print(json.dumps({"decision": "block", "reason": " ".join(reasons) + (CORRECTION_TAIL if not short else "")}))\n')
+        self.assertEqual(status_of(src, "guard:main"), ["no cite"])
+
+    def test_a_joined_reason_with_a_cite_before_its_falsy_tail_is_cited(self):
+        src = ('import json\nCORRECTION_TAIL = " Post only the corrected lines."\n'
+               'def main(reasons, short):\n'
+               '    print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (decision alpha)" + (CORRECTION_TAIL if not short else "")}))\n')
+        self.assertEqual(status_of(src, "guard:main"), ["cited"])
+
+    def test_a_whole_reason_that_is_a_cite_or_falsy_keeps_the_falsy_branch_out(self):
+        src = ('import json\nTAIL = "Stop here, see decision alpha."\n'
+               'def main(short):\n'
+               '    print(json.dumps({"decision": "block", "reason": (TAIL if not short else "")}))\n')
+        self.assertEqual(status_of(src, "guard:main"), ["cited"])
+
+
+class SettingsScriptFormTests(unittest.TestCase):
+    """The script a settings.json command runs, read from each form a command may name it by."""
+
+    def wired(self, command):
+        data = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}
+        with mock.patch("builtins.open", mock.mock_open(read_data=json.dumps(data))):
+            return settings_scripts("/repo")
+
+    def test_the_config_dir_default_form_names_its_script(self):
+        self.assertEqual(self.wired('python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/alpha_guard.py"'),
+                         ["hooks/alpha_guard.py"])
+
+    def test_a_tilde_form_names_its_script(self):
+        self.assertEqual(self.wired("python3 ~/.claude/hooks/beta_guard.py"), ["hooks/beta_guard.py"])
+
+    def test_a_home_variable_form_names_its_script(self):
+        self.assertEqual(self.wired('python3 "$HOME/.claude/hooks/gamma_guard.py"'), ["hooks/gamma_guard.py"])
+
+    def test_a_repo_relative_form_names_its_script(self):
+        self.assertEqual(self.wired("python3 lint/delta_check.py"), ["lint/delta_check.py"])
 
 
 class RefusalCiteRatchetTests(unittest.TestCase):
