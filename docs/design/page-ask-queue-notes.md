@@ -78,6 +78,9 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
   "Undone on the waiting page. Asks <ids> are withdrawn."
 - While Undo's deletes run, the line says "Taking back 3 asks…", and the Undo has the look it has after the count: hidden, with no count.
 - A delete that fails or comes after the window: the line names the code and the asks that stay sent, with the words `undoSend` uses for answers.
+- Focus: when the Undo button goes hidden (a press by click or Enter, the count's end, a failed Undo) while it has focus,
+  focus moves to the ask box first, so it never falls to the body.
+- Copy answers shown: at 520 px and under, the bar status takes its own row. At 800 and 1280 it stays inline with the buttons.
 - Departs from: `renderAskForm` and `askSlot`, which put the Undo in the hint row's slot, and `undoAsk`, which puts the words back in the box.
   The slot now holds only Copy ask when the store cannot be reached. Not blocking.
 - Departs from: `renderAskForm`, which drops the Undo button when the count ends. Not blocking.
@@ -85,6 +88,7 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
 - A second Send while the Undo counts: Send stays off until the count ends, and until an Undo whose delete is still awaited is done.
   The hint says so with no seconds, so the live region does not speak at each tick: "Send turns on when the Undo count ends."
   Once the window has passed while a delete still runs, it says "Send turns on when Undo is done."
+  An Undo that runs inside the window says the same: the count is no longer what Send waits for.
   With an ask not saved, it says "Send ask tries the one not saved again when the Undo count ends." Add to list stays on with words in the box,
   so the owner stacks the next asks meanwhile, and the hint says so only then. With the box empty, Add is off and the hint does not name it.
 - Undo puts each ask in the kept list before its delete, and reads the window before each delete. A window that ends between two deletes
