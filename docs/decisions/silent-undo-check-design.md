@@ -16,7 +16,7 @@
 - **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
   and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
   flags two shapes. One is a whole file put back to its text before E, whatever the file held just
-  before, when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
+  before. It counts when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
   non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
   The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
   the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
