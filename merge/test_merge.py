@@ -2109,12 +2109,12 @@ class CutLanes(Env):
             self.assertNotIn("owner", line, "the refusal does not name the owner as who types the flag")
             self.assertIn("reason flag", line)
 
-    def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
+    def test_a_reason_flag_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
         # c110: the cleanup's kept line is the fallback when a reason flag lifts a failed first read.
         lane_batch(self, "lane1", "lane2")
         self.revert_on_batch(self.merge_of("lane1"))
         with self.first_lane_log_fails():
-            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "owner read the batch")
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "batch read by hand")
         self.assertEqual(rc, 0, out)
         self.assertIn("dropped-lane check UNKNOWN", out)
         self.assert_merged()
@@ -5954,9 +5954,9 @@ class UnknownOverride(Env):
 
     def test_the_reason_flag_with_a_reason_goes_on_and_logs_it(self):
         with self.unreadable():
-            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus, owner read it")
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus merge; history read by hand")
         self.assertEqual(rc, 0, out)
-        self.assertIn("--undo-check-unknown-ok, reason: octopus, owner read it", out, "the lift is logged with its flag and reason")
+        self.assertIn("--undo-check-unknown-ok, reason: octopus merge; history read by hand", out, "the lift is logged with its flag and reason")
         self.assertNotIn("Owner override", out, "a reason flag Claude types is not an owner override")
 
     def test_the_silent_undo_refusal_names_a_reason_flag_not_the_owner(self):
@@ -10056,10 +10056,10 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out)
 
     def test_the_reason_flag_lifts_unknown_and_logs_it(self):
-        rc, out, _ = self.go([], {}, "--base-red-ok", "GitHub is down, owner read main", runs_fail="gh: HTTP 500")
+        rc, out, _ = self.go([], {}, "--base-red-ok", "GitHub is down; main read by hand", runs_fail="gh: HTTP 500")
         self.merged(rc, out)
         self.assertIn("UNKNOWN", out)
-        self.assertIn("--base-red-ok, reason: GitHub is down, owner read main", out)
+        self.assertIn("--base-red-ok, reason: GitHub is down; main read by hand", out)
 
     def test_the_preview_reports_a_red_main_and_presses_nothing(self):
         rc, out, before = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
