@@ -344,15 +344,29 @@ def branch_cherry_empty(where: str, base: str, branch: str):
     return not any(line.startswith("+") for line in answer.stdout.splitlines())
 
 
-def branch_on_remote(where: str, branch: str):
-    """True when some remote-tracking ref's history already contains `branch`'s tip, False when
-    none does, None when the read failed."""
+def branch_on_remote(where: str, branch: str, pattern: str = "refs/remotes"):
+    """True when some remote-tracking ref under `pattern` (all of them by default) holds `branch`'s
+    tip in its history, False when none does, None when the read failed."""
     answer = _git(
-        where, "for-each-ref", "--contains", branch, "--format=%(refname)", "refs/remotes"
+        where, "for-each-ref", "--contains", branch, "--format=%(refname)", pattern
     )
     if answer is None or answer.returncode != 0:
         return None
     return bool(answer.stdout.strip())
+
+
+def design_files(where: str, tip: str, folder: str, base=None):
+    """The files under `folder` that `tip` holds and `base` lacks (every one when `base` is None),
+    as a list; None when the read failed. One `diff` (or one `ls-tree` with no base) start. The
+    diff folds the folder's case; `ls-tree` takes the folder as the layout spells it."""
+    if base is None:
+        answer = _git(where, "ls-tree", "-r", "--name-only", tip, "--", folder + "/")
+    else:
+        answer = _git(where, "diff", "--name-only", "--no-renames", "--diff-filter=A", base, tip,
+                      "--", ":(icase)" + folder + "/")
+    if answer is None or answer.returncode != 0:
+        return None
+    return [line for line in answer.stdout.splitlines() if line.strip()]
 
 
 def branch_proof(where: str, base: str, branch: str, ancestor=None):

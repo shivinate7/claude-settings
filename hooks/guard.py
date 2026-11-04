@@ -305,8 +305,9 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
-            worktree_remove_forced,
+            BRANCH_DELETE_DENY_REASON, DESIGN_DELETE_ASK_REASON,
+            DESIGN_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            design_branch_delete_ask, design_push_delete_verdict, worktree_remove_forced,
         )
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
@@ -321,8 +322,8 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_REASON,
-            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
-            push_text, push_verdict, rm_delete_hit,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_delete_names,
+            push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -2923,6 +2924,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if subcommand in ("checkout", "restore") and segment_tokens(REDIRECTION.sub(" ", segment)) is None:
             state = False  # an unparsable segment: the paths read above are a guess, keep the ask
         if state is None:
+            if subcommand == "branch-delete" and design_branch_delete_ask(args, root, design_folder()):
+                ask_command("shared-trees-archive-then-delete", DESIGN_DELETE_ASK_REASON, matched, "branch delete")
+                continue
             # An unforced remove is refused by the VCS itself when the tree is dirty or locked,
             # so a note protects nothing (owner ruling, agent-worktree-discard-is-noted).
             if subcommand != "worktree-remove" or worktree_remove_forced(args):
@@ -3142,6 +3146,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
+            if subcommand == "push":
+                remote, names = push_delete_names(args, where, overrides)
+                design = design_push_delete_verdict(where, remote, names, design_folder()) if names else ""
+                if design == "ask":
+                    ask_command("shared-trees-archive-then-delete", DESIGN_DELETE_ASK_REASON, "git push " + " ".join(args), "remote branch delete")
+                elif design:
+                    refuse(tool, design, "shared-trees-archive-then-delete", DESIGN_DELETE_DENY_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
