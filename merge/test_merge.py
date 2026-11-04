@@ -10149,16 +10149,16 @@ class RedMainBrake(Env):
         self.assertIn("all-jobs-passed: fail", out)
 
     def test_a_job_whose_if_names_the_push_event_inside_an_or_still_blocks_the_clear(self):
-        # gate's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
+        # checks-extra's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
         sha = "e" * 40
-        gate = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+        checks_extra = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
                           "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
-                          "  gate:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
+                          "  checks-extra:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
                           "    steps:", "      - run: echo ok"]) + "\n"
         runs = [main_run(1231, "success", sha=sha), main_run(1230, "failure", event="schedule")]
-        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("gate", "skipped")],
-                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("gate", "skipped")]}
-        rc, out, before = self.go(runs, jobs, texts={sha: gate})
+        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("checks-extra", "skipped")],
+                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("checks-extra", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: checks_extra})
         self.refused(rc, out, before)
         self.assertIn("run 1230", out)
         self.assertIn("checks-windows-merge-3: fail", out)
