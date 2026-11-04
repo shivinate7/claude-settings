@@ -1113,7 +1113,7 @@ class Host:
                     continue
                 elif r["conclusion"] == "cancelled":
                     if not cleared(r, cancelled=True):
-                        unknown.append(f"{where} was cancelled with no red job")
+                        unknown.append(f"{where} was cancelled with no red job ({rerun_once(r['id'], failed=False)})")
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job ({rerun_once(r['id'], failed=False)})")
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
