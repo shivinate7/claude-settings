@@ -1,0 +1,82 @@
+{
+  "_about": "Parity rows for the value cite grammar `[file: ]SYMBOL = LITERAL` inside one backticked cite. map-check.mjs (factLines) and lint/stale_cites.py (STALE004) both read these rows. A row with match names the file, symbol and literal the grammar reads. A row with match null is outside the grammar. file, base and head are the file's text at base and at head, for the end-to-end run of the Python check. Rows hold no fence or line-context forms: a cite with no file reads its file from the map line above, so the two copies differ there by design.",
+  "rows": [
+    {
+      "cite": "hooks/limits.py: LIMIT = 4",
+      "file": "hooks/limits.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "match": { "file": "hooks/limits.py", "symbol": "LIMIT", "literal": "4" }
+    },
+    {
+      "cite": "package.json: dependencies.typescript = \"~5.8.2\"",
+      "file": "package.json",
+      "base": "{\"dependencies\": {\"typescript\": \"~5.8.2\"}}\n",
+      "head": "{\"dependencies\": {\"typescript\": \"~5.9.0\"}}\n",
+      "match": { "file": "package.json", "symbol": "dependencies.typescript", "literal": "\"~5.8.2\"" }
+    },
+    {
+      "cite": "hooks/marks.py: MARK = \"#\"",
+      "file": "hooks/marks.py",
+      "base": "MARK = \"#\"\n",
+      "head": "MARK = \"##\"\n",
+      "match": { "file": "hooks/marks.py", "symbol": "MARK", "literal": "\"#\"" }
+    },
+    {
+      "cite": "hooks/seps.py: SEP = \"//\"",
+      "file": "hooks/seps.py",
+      "base": "SEP = \"//\"\n",
+      "head": "SEP = \"/\"\n",
+      "match": { "file": "hooks/seps.py", "symbol": "SEP", "literal": "\"//\"" }
+    },
+    {
+      "cite": "hooks/opens.py: OPEN = \"/*\"",
+      "file": "hooks/opens.py",
+      "base": "OPEN = \"/*\"\n",
+      "head": "OPEN = \"/\"\n",
+      "match": { "file": "hooks/opens.py", "symbol": "OPEN", "literal": "\"/*\"" }
+    },
+    {
+      "cite": "hooks/notes.py: NOTE = \"a = b\"",
+      "file": "hooks/notes.py",
+      "base": "NOTE = \"a = b\"\n",
+      "head": "NOTE = \"a = c\"\n",
+      "match": { "file": "hooks/notes.py", "symbol": "NOTE", "literal": "\"a = b\"" }
+    },
+    {
+      "cite": "hooks/dirs.py: TEMPLATE_DIRS = {\"examples\", \"templates\"}",
+      "file": "hooks/dirs.py",
+      "base": "TEMPLATE_DIRS = {\"examples\", \"templates\"}\n",
+      "head": "TEMPLATE_DIRS = {\"examples\"}\n",
+      "match": { "file": "hooks/dirs.py", "symbol": "TEMPLATE_DIRS", "literal": "{\"examples\", \"templates\"}" }
+    },
+    {
+      "cite": "X=5",
+      "file": "hooks/bare.py",
+      "base": "X = 5\n",
+      "head": "X = 6\n",
+      "match": null
+    },
+    {
+      "cite": "f.py X = 5",
+      "file": "hooks/nocolon.py",
+      "base": "X = 5\n",
+      "head": "X = 6\n",
+      "match": null
+    },
+    {
+      "cite": "hooks/eq.py: LIMIT=4",
+      "file": "hooks/eq.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "match": null
+    },
+    {
+      "cite": "hooks/nosign.py: LIMIT 4",
+      "file": "hooks/nosign.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "match": null
+    }
+  ]
+}
