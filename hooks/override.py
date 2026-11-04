@@ -98,6 +98,8 @@ SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
 ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
 # A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
 UNCLEAR_LENGTH = re.compile(r"[.,]\d+(?:[mh]|\s?(?:{0}))(?![\w-])|\d(?:{0}|[mh])\d".format(SPELLED_UNIT), re.I)
+FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired scheduled task's block
+COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
 KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
 DEFAULT_ASK_LENGTH = ("2", "h")
@@ -245,8 +247,8 @@ def _ask_scope(text):
 
 
 def _owner_turn_in(transcript):
-    """True when the transcript at path `transcript` holds an owner turn (lint/_transcript.py owner_text). Cost: one
-    open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes; never a full load."""
+    """True when the transcript at path `transcript` holds an owner turn (lint/_transcript.py owner_text), not an isMeta
+    record, a `/effort`-style command record or a record whose origin kind is not human. Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes; never a full load."""
     if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
         return False
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
@@ -263,7 +265,13 @@ def _owner_turn_in(transcript):
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(rec, dict) and _transcript.owner_text(rec, NOTICE_TAGS) is not None:
+                if not isinstance(rec, dict) or rec.get("isMeta"):
+                    continue
+                origin = rec.get("origin")
+                if isinstance(origin, dict) and origin.get("kind", "human") != "human":
+                    continue
+                text = _transcript.owner_text(rec, NOTICE_TAGS)
+                if text is not None and not text.lstrip().startswith(COMMAND_RECORDS):
                     return True
     except OSError:
         pass
@@ -274,7 +282,7 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
     caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
-    the rules of the words. The judge is not called for a non-string, an id that cannot name a file, a machine-tag
+    the rules of the words. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a file, a machine-tag
     start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud session's seed prompt
     (no owner turn in the transcript at path `transcript`). The guard.log line
     `opus-grant` holds the words that were judged."""
@@ -287,6 +295,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
     if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
         return None
     text = _strip_blocks(prompt)
+    if FIRED_TASK.search(prompt):  # a stored task, not typed words
+        return None
     if not OPUS_WORD.search(text) or (os.environ.get(LANE_ENV) and not _owner_turn_in(transcript)):
         return None
     if judge is None:
