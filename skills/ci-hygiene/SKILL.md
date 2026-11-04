@@ -51,10 +51,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.0 added the
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
-   Pins of claude-settings' `ste-lint` action follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
+   Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
+   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
-   only the `ste-lint` pin. Other claude-settings pins can drift unseen.
+   only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
