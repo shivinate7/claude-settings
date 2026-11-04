@@ -6,4 +6,4 @@
 
 **Decision.** `owner-override` (the owner override and its Opus form).
 
-**Retire.** In one local session, set a timed check-in. Log the transcript tail from inside the UserPromptSubmit hook when it fires, and read the record's place and `promptSource`. Do the same for one `create_session` seed. If either record is absent or differs, refuse that prompt shape by another sign, with a test in `hooks/test_local_time.py`. Else close this debt.
+**Retire.** Read the UserPromptSubmit payload's `source` field, which the Claude Code 2.1.318 schema names: `user`, `sdk`, `system`, `loop_wakeup`, `schedule_wakeup` or `poll_event`. A payload may still omit it. Refuse a plain ask unless `source` is `user` or absent, with a test for each value in `hooks/test_local_time.py`. Keep the transcript read as the fallback when the field is absent. Then close this debt.

@@ -1179,3 +1179,6 @@
 - opus-plain-ask: `ASK_LENGTH` in `hooks/override.py` reads `1:30h` as 30h, and "an hour" as the 2h default. These are the owner's own words, so no hole.
 - opus-plain-ask: `_owner_turn_in` in `hooks/override.py` reads the record-level `origin` only. A `queued_command` attachment carries `attachment.origin`. Every one seen starts with `<task-notification>`, so no live path.
 - opus-plain-ask: a compaction summary and "[Request interrupted by user]" count as owner turns in `_owner_turn_in`. They matter only for the seed check.
+- opus-plain-ask: in a cloud session, an owner's first Opus ask that is refused as a seed is refused again when he repeats it, because `_own_record` skips the earlier copy. Any other owner turn first lets it through.
+- opus-plain-ask: a seed record with more than one text block has joined text that differs from the prompt, so `_own_record` misses it and the seed counts as an owner turn.
+- opus-plain-ask: the check-in fixtures in `hooks/test_local_time.py` put the record in the transcript, the unmeasured shape, and none sets `isMeta`.
