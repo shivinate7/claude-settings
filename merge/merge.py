@@ -133,10 +133,13 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None):
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
+    if live_stderr:  # the child's stderr goes straight to ours; only its stdout is read
+        r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -2271,6 +2274,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
     if target.isdigit():
         info = (host or Host()).pr(int(target))
@@ -2282,7 +2286,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
         try:
-            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS)
+            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
         except subprocess.TimeoutExpired:
             raise Stop(f"the lint of {head[:9]} did not finish in {LINT_SECONDS} s, so it is unknown, not a pass. {LANE_LINT_REMEDY}")
     finally:

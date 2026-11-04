@@ -10,7 +10,7 @@
 # this repo's own action (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
-# An install step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
+# An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run; its if: and env read as any step's. An install that fails
 # or is unknown prints unknown, never FAIL (the tree, not the change, is at fault), and each later lint step prints
@@ -49,9 +49,9 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --lint each install step adds its processes, and network and disk only when a job has one: joyous, measured once in
-# a cloud container, npm ci 8-10 s, astro sync 5 s, a 103 MB npm cache and 387 MB node_modules. Each `not run` line
-# and the summary are one print.
+# --lint each install CI step adds its processes, plus network and disk only when a job has one. Each `not run` line,
+# the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
+# are one print.
 import os, re, shutil, subprocess, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
@@ -160,7 +160,7 @@ def missing_in_log(log, start, script):
 
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed|pipx run [\w.-]+==[\w.]+)"
                       r"(?: [^|&;`<>]*)?")
-INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r \S+"
+INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
@@ -381,6 +381,11 @@ def main(argv):
         if dry:
             print("%-15s %s" % ("would run", name))
             continue
+        try:
+            sys.stderr.write("start: %s\n" % name)
+            sys.stderr.flush()
+        except OSError:
+            pass  # reader gone: the step's verdict still prints
         with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
                                          encoding="utf-8", newline="\n") as f:
             f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else detail)
@@ -428,7 +433,7 @@ def main(argv):
         blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
         print("%-15s %s: %s" % (state, name, first))
     if lint:
-        print("%s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
+        print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
     if not dry:
         print("log=%s" % log)
     return 1 if tally["FAIL"] else 2 if tally["unknown"] else 0
