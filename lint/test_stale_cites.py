@@ -4,8 +4,9 @@
     python3 lint/test_stale_cites.py
 
 The merge check refuses stale prose. A tracked Markdown line that names a repo path the range deleted
-or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when the name was a def or
-class in that file at base and is not one at head. Each finding is one line, `path:line: CODE message`.
+or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when the name was bound at module
+level in that file at base (a def, class, assignment or import) and is not bound there at head. Each finding
+is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
 nothing tracked, STALE004 for a line anchor past the file's end (TreeTests, CostTests).
@@ -155,6 +156,57 @@ def repo_modules_imported(path):
     return found
 
 
+def paths_loaded_by_path(path):
+    """Repo-relative .py files the module names as the parts of an os.path.join call, resolved from its folder:
+    a file it loads by path (importlib, not an import). Read with ast, never imported."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    folder = os.path.relpath(os.path.dirname(os.path.abspath(path)), ROOT)
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "join":
+            parts = [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+            if parts and parts[-1].endswith(".py"):
+                rel = os.path.normpath(os.path.join(folder, *parts)).replace(os.sep, "/")
+                if rel not in found:
+                    found.append(rel)
+    return found
+
+
+SCOPES = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)  # names inside are not module level
+
+
+def module_bindings(source):
+    """(kind, name) for each name a Python source binds at module level, under any statement that is no def or
+    class: "def" for a def or class, "import", or "assign" for each name stored. Read with ast, never imported."""
+    found = []
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.append(("def", child.name))
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                found.extend(("import", alias.asname or alias.name.split(".")[0]) for alias in child.names)
+            elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                found.append(("assign", child.id))
+            elif not isinstance(child, SCOPES):
+                visit(child)
+    visit(ast.parse(source))
+    return found
+
+
+def binding_kind(source, name):
+    """How a Python source binds `name` at module level: "def", "assign", "import", or None. The last binding
+    counts. A case asserts this on its fixtures before it probes the check on the name."""
+    kinds = [kind for kind, bound in module_bindings(source) if bound == name]
+    return kinds[-1] if kinds else None
+
+
+def unknown_lines(out):
+    """Each line the check printed as unknown."""
+    return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
+
+
 class StaleCase(unittest.TestCase):
     def make_range(self, base, change):
         """Commit `base` on main, then run `change(repo)` on topic. `change` makes its own commit, so a case
@@ -233,7 +285,7 @@ class StaleCase(unittest.TestCase):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
         the files after), so a file the run writes in the repo or beside the script shows as a change."""
         scripts = os.path.join(rng.case, "scripts")
-        tracked_tree.copy_tracked(scripts, "lint", "hooks")
+        tracked_tree.copy_tracked(scripts, "lint", "hooks", "skills")
         before = (paths_under(rng.repo), paths_under(scripts))
         env = dict(os.environ, TMPDIR=rng.case)
         env.pop("PYTHONDONTWRITEBYTECODE", None)  # a set variable would hide a .pyc the run writes
@@ -518,6 +570,109 @@ class SymbolTests(StaleCase):
         self.assert_flags(self.make_range(base_files("", extra={"hooks/a.py": base_a}), change),
                           [(NOTES, n, "STALE002") for n in lines])
 
+    def test_a_removed_module_level_constant_cited_in_backticks_is_flagged(self):
+        base_config = "LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        head_config = "def keep():\n    return 1\n"
+        notes = "# Notes\n\n- `hooks/config.py` `LIMIT`\n"
+        self.assertEqual(binding_kind(base_config, "LIMIT"), "assign")  # scope: base binds LIMIT as a constant
+        self.assertIsNone(binding_kind(head_config, "LIMIT"))  # scope: head no longer binds LIMIT
+
+        def change(repo):
+            write(repo, "hooks/config.py", head_config)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={"hooks/config.py": base_config}), change),
+                          [(NOTES, 3, "STALE002")])
+
+    def test_a_def_replaced_by_an_assignment_that_still_binds_the_name_is_not_flagged(self):
+        base_lib = "def f():\n    return 1\n"
+        head_lib = "def h():\n    return 2\n\n\nf = h\n"
+        notes = "# Notes\n\n- `lib.py` `f`\n"
+        self.assertEqual(binding_kind(base_lib, "f"), "def")  # scope: base defines f
+        self.assertEqual(binding_kind(head_lib, "f"), "assign")  # scope: head binds f by assignment, no def
+
+        def change(repo):
+            write(repo, "lib.py", head_lib)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"lib.py": base_lib}), change))
+
+    def test_a_name_moved_away_but_re_imported_into_the_file_is_not_flagged(self):
+        head_guard = "from hooks.git_reads import _process_start_ms\n\n\ndef keep():\n    return 1\n"
+        head_reads = "def _process_start_ms(path):\n    return 0\n"
+        notes = "# Notes\n\n- (hooks/guard.py _process_start_ms)\n"
+        self.assertEqual(binding_kind(GUARD, "_process_start_ms"), "def")  # scope: base defines it in guard.py
+        self.assertEqual(binding_kind(head_guard, "_process_start_ms"), "import")  # scope: head re-imports it
+
+        def change(repo):
+            write(repo, "hooks/guard.py", head_guard)
+            write(repo, "hooks/git_reads.py", head_reads)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes), change))
+
+    def test_a_constant_still_bound_under_a_module_level_if_is_not_flagged(self):
+        base_config = "LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        head_config = "if True:\n    LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        notes = "# Notes\n\n- `hooks/config.py` `LIMIT`\n"
+        self.assertEqual(binding_kind(base_config, "LIMIT"), "assign")  # scope: base binds LIMIT at module level
+        self.assertEqual(binding_kind(head_config, "LIMIT"), "assign")  # scope: head binds it under the if
+
+        def change(repo):
+            write(repo, "hooks/config.py", head_config)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"hooks/config.py": base_config}), change))
+
+    def test_an_import_still_bound_inside_a_module_level_try_is_not_flagged(self):
+        base_out = "from json import dumps\n\n\ndef keep():\n    return 1\n"
+        head_out = ("try:\n    from json import dumps\nexcept ImportError:\n    pass\n\n\n"
+                    "def keep():\n    return 1\n")
+        notes = "# Notes\n\n- `hooks/out.py` `dumps`\n"
+        self.assertEqual(binding_kind(base_out, "dumps"), "import")  # scope: base imports dumps at module level
+        self.assertEqual(binding_kind(head_out, "dumps"), "import")  # scope: head imports it inside the try
+
+        def change(repo):
+            write(repo, "hooks/out.py", head_out)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"hooks/out.py": base_out}), change))
+
+    def assert_bound_name_not_flagged(self, path, name, base_src, head_src):
+        """Base and head both bind `name` at module level, so a note that cites it in `path` passes."""
+        self.assertIsNotNone(binding_kind(base_src, name), "scope: base does not bind %s" % name)
+        self.assertIsNotNone(binding_kind(head_src, name), "scope: head does not bind %s" % name)
+        notes = "# Notes\n\n- `%s` `%s`\n" % (path, name)
+
+        def change(repo):
+            write(repo, path, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={path: base_src}), change))
+
+    def test_a_name_moved_under_any_module_level_compound_statement_is_not_flagged(self):
+        base_mod = "X = 1\n\n\ndef keep():\n    return 1\n"
+        blocks = {
+            "with": "with open(path) as fh:\n    X = 1\n",
+            "for": "for item in items:\n    X = 1\n",
+            "while": "while running:\n    X = 1\n",
+            "match": "match mode:\n    case 1:\n        X = 1\n",
+            "except": "try:\n    pass\nexcept ValueError:\n    X = 1\n",
+            "for else": "for item in items:\n    pass\nelse:\n    X = 1\n",
+            "finally": "try:\n    pass\nfinally:\n    X = 1\n",
+        }
+        for kind, block in blocks.items():
+            with self.subTest(kind=kind):
+                self.assert_bound_name_not_flagged("hooks/mod.py", "X", base_mod,
+                                                   block + "\n\ndef keep():\n    return 1\n")
+
+    def test_a_name_still_bound_by_a_tuple_for_with_or_walrus_target_is_not_flagged(self):
+        base_mod = "X = 1\n\n\ndef keep():\n    return 1\n"
+        forms = {
+            "tuple": "X, Y = 1, 2\n",
+            "for": "for X in range(2):\n    pass\n",
+            "with": "with open(path) as X:\n    pass\n",
+            "walrus": "(X := 3)\n",
+        }
+        for form, statement in forms.items():
+            with self.subTest(form=form):
+                self.assert_bound_name_not_flagged("hooks/mod.py", "X", base_mod,
+                                                   statement + "\n\ndef keep():\n    return 1\n")
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
@@ -610,8 +765,14 @@ class PinTests(unittest.TestCase):
 
     def test_lint_files_holds_every_repo_file_the_check_imports(self):
         listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
-        needed = repo_modules_imported(MODULE) + ["lint/stale_cites.py"]
+        needed = repo_modules_imported(MODULE) + paths_loaded_by_path(MODULE) + ["lint/stale_cites.py"]
         self.assertEqual([f for f in needed if f not in listed], [], "bin/ste-changed LINT_FILES lacks these")
+
+    def test_the_py_facts_file_stale_cites_loads_by_path_is_in_lint_files(self):
+        self.assertIn("skills/plain-english-map/scripts/lib/py-facts.py", paths_loaded_by_path(MODULE))  # scope
+        listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
+        self.assertIn("skills/plain-english-map/scripts/lib/py-facts.py", listed,
+                      "bin/ste-changed LINT_FILES lacks the py-facts file stale_cites loads by path")
 
 
 class CostTests(StaleCase):
@@ -632,6 +793,27 @@ class CostTests(StaleCase):
         self.assertLessEqual(len(subs), 3, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff"}, subs)
 
+    def test_a_touched_py_that_removes_nothing_starts_four_git_processes_and_lists_no_tree(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        # ls-tree lists the tracked Markdown, so a run without it reads no .md.
+        self.assertNotIn("ls-tree", subs, subs)
+
+    def test_a_lone_touched_mjs_starts_three_git_processes_and_prints_no_unknown_line(self):
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- `hooks/lib.mjs` `refusals`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"], subs)
+
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
@@ -645,6 +827,15 @@ class CostTests(StaleCase):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
+        self.assert_run_writes_no_file(change)
+
+    def test_a_touched_py_that_loads_py_facts_writes_no_file_next_to_it(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
+            commit(repo)
+        self.assert_run_writes_no_file(change)
+
+    def assert_run_writes_no_file(self, change):
         rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
         rc, out, before, after = self.run_copy_of_script(rng, ["--range", "%s...%s" % (rng.base, rng.head)])
         self.assertIn(rc, (0, 1), out)
@@ -667,6 +858,33 @@ class CostTests(StaleCase):
         rc, out, before, after = self.run_copy_of_script(rng, ["--tree"])
         self.assertIn("stale-cites: FAIL, 1 finding(s)", out)
         self.assertEqual(after, before, out)
+
+
+class ForeignFileTests(StaleCase):
+    """A cite of a JavaScript or shell name prints as unknown, not as a finding, and only when Markdown is already
+    read. A lone touched .mjs passes silently."""
+
+    def mjs_and_removal(self, notes):
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            os.remove(os.path.join(repo, "hooks", "guard_core.py"))  # a second removal, so Markdown is read
+            commit(repo)
+        return self.make_range(base_files(notes), change)
+
+    def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [
+            "stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
+            "JavaScript and shell names are not checked",
+        ], out)
+
+    def test_a_line_marked_ste_disable_line_stale002_prints_no_unknown_line(self):
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals` <!-- ste-disable-line STALE002 -->\n")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [], out)
 
 
 class UnknownFileTests(StaleCase):

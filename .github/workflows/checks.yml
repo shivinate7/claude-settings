@@ -75,6 +75,8 @@ jobs:
     needs: scope
     # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 35.4 min
     # is 68% of it (range 25.2-35.4, median 28.9, n 16 green runs of 20, 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
+    # Those figures are from before the merge and install suites moved to checks-merge-install: about 991 s fewer,
+    # projected from run 41730427997 and unmeasured.
     timeout-minutes: 52
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -87,7 +89,9 @@ jobs:
           python-version: "3.11"
 
       - name: Workflow supply-chain audit (zizmor)
-        run: pipx run zizmor==1.30.1 .github/ actions/
+        uses: $/actions/zizmor
+        with:
+          paths: .github/ actions/
 
       # The pinned tsc and astro-check on PATH for the fixture suites below that run them (code-check, comment scan).
       - name: Code-check tools
@@ -163,6 +167,9 @@ jobs:
 
       - name: Question form fixture suite
         run: python3 hooks/test_question_form.py
+
+      - name: Question form option-key gap suite
+        run: python3 hooks/test_question_form_option_gap.py
 
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
@@ -477,16 +484,6 @@ jobs:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
 
-      - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: |
-          python3 janitor/test_session_end_sweep.py
-          python3 janitor/test_install_launchd.py
-
-      - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_install_schtasks.py
-
       - name: STE lint action fixture suite
         run: python3 actions/ste-lint/test_action.py
 
@@ -512,11 +509,49 @@ jobs:
           bash actions/ci-alarm/test_action.sh
           python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
+          bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
+
+      # Last step, so a red test here skips none of the steps above, and a red step above does not hide
+      # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
+      # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
+      # comes from ci-scope.sh.
+      - name: Mod and map-skill tests
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        shell: bash
+        run: bash .github/scripts/mod-tests.sh
+
+  # The merge tool and install suites, split off `checks` for wall time: `checks` took 33.4 min in run 41730427997 and
+  # these CI steps took about 16 of them. Each keeps its own `if:`, its shell and its cap. This job has no scope condition of
+  # its own, like `checks`: its suites carry the `code` flag.
+  checks-merge-install:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps). Projected about 17 min, unmeasured.
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: |
+          python3 janitor/test_session_end_sweep.py
+          python3 janitor/test_install_launchd.py
+
+      - name: Janitor triggers fixture suite (schtasks installer)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_install_schtasks.py
 
       - name: Merge launcher fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -551,15 +586,6 @@ jobs:
       - name: cloud-setup.sh suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_cloud_setup.sh
-
-      # Last step, so a red test here skips none of the steps above, and a red step above does not hide
-      # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
-      # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
-      # comes from ci-scope.sh.
-      - name: Mod and map-skill tests
-        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
-        shell: bash
-        run: bash .github/scripts/mod-tests.sh
 
   # The guard fixture suite alone: 10.6 min slowest of 30 runs (9.8 median), so the checks job stayed under 80% of its cap
   # (decision ci-job-caps). Cap 22 min = 2x the slowest, plus setup.
@@ -732,7 +758,9 @@ jobs:
     needs: scope
     # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps (the 80% target was
     # already met): slowest 37.1 min is 67% of it (range 25.6-37.1, median 31.1, n 15 green runs of 20,
-    # 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
+    # 2026-11-01 23:17 to 2026-11-02 08:33 UTC). Those figures are from before the split into checks-macos and
+    # checks-macos-b: about 1180 s fewer, a projection from run 41730427997 and unmeasured. The pull request figure is
+    # unmeasured too: the moved steps carry the same `if:` on a push and a pull request, so no push/PR gap is assumed.
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -747,10 +775,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap: slowest 16.62 min is 76% of it, so a hang reads red at this step.
-      - name: Guard fixture suite
+      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Each shard runs about half of the cases:
+      # its time is unmeasured. hooks/test_guard.py holds the shard switch.
+      - name: Guard fixture suite (shard 1 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 22
+        env:
+          GUARD_SHARD: 1/2
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
@@ -828,6 +859,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_question_form.py
 
+      - name: Question form option-key gap suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_question_form_option_gap.py
+
       - name: Remove-prompt answer fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_rm_prompt_answer.py
@@ -843,23 +878,6 @@ jobs:
       - name: Local time line fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_local_time.py
-
-      - name: CI wake-up fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_ci_wake.py
-
-      - name: Feedback inbox fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_feedback_inbox.py
-
-      - name: Daily note fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_daily_note.py
-
-      # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
-      - name: Stall watch fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_stall_watch.py
 
       - name: Simulator boot-record fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -905,18 +923,6 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
-      - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_session_end_sweep.py
-
-      - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_install_launchd.py
-
-      - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_install_schtasks.py
-
       # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
       # prints the process tree and kills it. timeout-minutes is the backstop.
       - name: Record stamp engine fixture suite
@@ -932,6 +938,66 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
+
+  # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
+  # in 2 shards, one per job, and the slow CI steps are shared out so each job takes about 20 min. Same scope flag, same `if:`
+  # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
+  # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, now starts a
+  # second, idle macOS runner that it did not start before.
+  checks-macos-b:
+    runs-on: macos-latest
+    needs: scope
+    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps). Projected about 20 min, unmeasured.
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Each shard runs about half of the cases:
+      # its time is unmeasured. hooks/test_guard.py holds the shard switch.
+      - name: Guard fixture suite (shard 2 of 2)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        timeout-minutes: 22
+        env:
+          GUARD_SHARD: 2/2
+        run: python3 hooks/test_guard.py
+
+      - name: CI wake-up fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_ci_wake.py
+
+      - name: Feedback inbox fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_feedback_inbox.py
+
+      - name: Daily note fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_daily_note.py
+
+      # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
+      - name: Stall watch fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_stall_watch.py
+
+      - name: Janitor triggers fixture suite (SessionEnd hook)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_session_end_sweep.py
+
+      - name: Janitor triggers fixture suite (launchd installer)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_install_launchd.py
+
+      - name: Janitor triggers fixture suite (schtasks installer)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_install_schtasks.py
 
   # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs off pull_request. Six python suites in the checks job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
@@ -1352,6 +1418,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_question_form.py
 
+      - name: Question form option-key gap suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_question_form_option_gap.py
+
       - name: Remove-prompt answer fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_rm_prompt_answer.py
@@ -1456,11 +1526,13 @@ jobs:
     needs:
       - scope
       - checks
+      - checks-merge-install
       - checks-guard
       - checks-shoot
       - pointer-windows
       - shell-macos
       - checks-macos
+      - checks-macos-b
       - checks-windows
       - checks-mutate-guard
       - checks-windows-guard
@@ -1487,11 +1559,13 @@ jobs:
     needs:
       - scope
       - checks
+      - checks-merge-install
       - checks-guard
       - checks-shoot
       - pointer-windows
       - shell-macos
       - checks-macos
+      - checks-macos-b
       - checks-windows
       - checks-mutate-guard
       - checks-windows-guard

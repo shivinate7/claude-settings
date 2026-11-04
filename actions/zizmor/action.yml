@@ -1,0 +1,20 @@
+name: Workflow supply-chain audit (zizmor)
+description: >
+  Audits the GitHub workflows and actions of the calling repo with the pinned zizmor, which fails on any
+  finding. The pin lives in run.sh beside this file, its one home. The caller needs actions/checkout
+  and pipx on PATH (GitHub's Ubuntu runners have pipx).
+inputs:
+  paths:
+    description: >
+      Folders or files to audit, separated by spaces.
+    required: false
+    default: .github/
+runs:
+  using: composite
+  steps:
+    - name: Audit workflows
+      shell: bash
+      env:
+        ZIZMOR_PATHS: ${{ inputs.paths }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "$ACTION_PATH/run.sh"
