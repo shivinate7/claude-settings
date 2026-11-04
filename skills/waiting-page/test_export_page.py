@@ -39,6 +39,12 @@ with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
 assert len(DESIGN.findall(PAGE)) == 1, "page.html must hold one designData block: the fixture's shape"
 DESIGN_ELEMENT = DESIGN.search(PAGE).group(0)
 
+# Parts of the postal-address and credential-name rows. A credential value is joined from parts, as TAIL is.
+STREET = "123 Main Street"
+API_VALUE = "abcdefgh" + "12345678"
+SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
+CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
     ("GitHub token", "ghp_" + TAIL, "ghp_" + TAIL),
@@ -85,6 +91,15 @@ RED = [
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token after a lone quote", "Don't paste " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token in a multi-line string", "first line\nsecond line " + "ghp_" + TAIL + "\nthird line", "ghp_" + TAIL),
+    ("street address", STREET, STREET),
+    ("PO box", "PO BOX 1234", "PO BOX 1234"),
+    ("P.O. box", "P.O. Box 1234", "P.O. Box 1234"),
+    ("city, state and ZIP", "AUSTIN, TX 78701", "AUSTIN, TX 78701"),
+    ("city, state and ZIP+4", "Austin, TX 78701-1234", "Austin, TX 78701-1234"),
+    ("street address in a full line", "Send it to " + STREET + ", Austin, TX 78701", STREET),
+    ("API_SECRET assignment", "API_SECRET=" + API_VALUE, API_VALUE),
+    ("SESSION_TOKEN assignment", "SESSION_TOKEN=" + SESSION_VALUE, SESSION_VALUE),
+    ("CLIENT_SECRET assignment with a colon", "CLIENT_SECRET: " + CLIENT_VALUE, CLIENT_VALUE),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -112,6 +127,22 @@ GREEN = [
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
     ("a number with 14 digits, not a string", {"n": 20261102110400, "note": "budget"}),
+    # Near misses of the address and credential shapes: a street word, a state code before a five-digit number, a rule name.
+    ("step number of three digits", "step 123"),
+    ("a street name with no number", "Main Street"),
+    ("PR number before the word lane", "PR 1167 batch lane"),
+    ("a digit before the word road", "step 3 on the road map"),
+    ("a digit before the word way", "a 2 way merge"),
+    ("a digit before a hyphenated word", "lane 4 drive-by fix"),
+    ("PR with a five-digit number", "merged, PR 12345"),
+    ("OK with a five-digit number", "done, OK 12345"),
+    ("a bare rule name in caps with TOKEN", "TOKEN_BUDGET"),
+    ("a TOKENS setting with a number", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000"),
+    ("a MAX_TOKENS setting with a number", "MAX_TOKENS=200000"),
+    ("a model setting", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet"),
+    ("a CI secret reference", "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"),
+    ("an env-var reference in a secret name", "API_SECRET=$API_SECRET"),
+    ("a rule anchor name", "rule roles-review-cap-three"),
 ]
 
 
