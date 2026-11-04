@@ -80,7 +80,7 @@ small, M medium, L large).
 | Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4. | 4 | S |
 | Agent-end reap | Runs on SubagentStop, timeout 60 s (checked: `settings.json`). Its build pass deletes trash in a detached child. That child has no time bound (record `build-dirs-reaped-at-agent-end`; the bound is unchecked). | Bound the child by time. State the cost. Split the record by stage. | no | M |
 | Agent-end payload log | Written under a lock file, one row per run (record `agent-end-reap-stops-what-a-finished-agent-left`). No reader is named. | Q5. | 5 | S |
-| Repo reaper (npm `reap:worktrees`) | `run_repo_reaper` in `janitor/sweep.py` runs the repository's npm script in a full `--confirm` run without `--attended`. This departs from the rule that the sweep never runs repository code (`the-janitor-is-one-machine-wide-sweep`). | Q7. | 7 | S |
+| Repo reaper (npm `reap:worktrees`) | `run_repo_reaper` in `janitor/sweep.py` runs the repository's npm script in a full `--confirm` run without `--attended`. This departs from the rule that the sweep never runs repository code (`the-janitor-is-one-machine-wide-sweep`). | Remove the reaper (Q7, decided). Lane watchers-remove-repo-reaper. | no | S |
 | `install_schtasks.resolve_primary_checkout` | `janitor/install_schtasks.py` keeps a local copy. `install_launchd.py` calls `guard.primary_checkout`. | Both installers call `guard.primary_checkout`. This is code work for a builder. | no | S |
 | `sim-lease` (`bin/sim-lease`) | A 2 s poll inside `take` (from the map; unchecked). | Keep it. Add a cost test. Fix the docstring. | no | S |
 | `sim_boot_record` | Its cost is not stated (rows are in the table above). | Record the cost. | no | S |
@@ -140,7 +140,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 ## 6. Owner questions
 
 **Status: open.** Item 180 is on the Cockpit. So are the new items below: Q2 (model-call hooks), Q4
-(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is not on the Cockpit yet; the coordinator posts it.
+(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is decided by an earlier ruling and needs no Cockpit item.
 
 **Q1a. Stall watcher.** Options: (a) delete it, and keep the Stop check and `wait-pid`; (b) keep it with
 a cost cap and a test; (c) leave it as is. Q1b decides between them. Recommendation: (b), until Q1b
@@ -176,9 +176,9 @@ one record that says why. Recommendation: (b). `sim-lease` already states its ow
 
 **Q7. Repo reaper.** The rule says the sweep never runs code a repository supplies. The npm reaper
 (`reap:worktrees`, `run_repo_reaper` in `janitor/sweep.py`) runs repository code, in a full `--confirm`
-run without `--attended`. Options: (a) keep the reaper as a named exception to the rule. Add a test that it runs only in that mode.
-(b) remove the reaper, and keep the rule without exception. Recommendation:
-(a), until the owner names a replacement for the worktree removal it does.
+run without `--attended`. **Decided: remove the reaper**, and keep the rule without exception. Decision
+uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51 CDT)
+rules it out as a per-repo exception. Lane watchers-remove-repo-reaper removes it.
 
 ## 7. Stale prose left open
 
@@ -200,14 +200,14 @@ One line each, with the reason the text stays.
 - daily_note.py docstring: volume figure dropped in this change. The weekly id stays, because a slug never changes.
 - daily_note: precompact-handoff item 12. Not read.
 - agent-end reap: "The sweep takes the deepest checkout" names `sweep.py`. True. The Home is the reaper by design.
-- agent-end payload log docstring ("the fields get measured"). A `.py` file. Whether the reason is spent is Q5.
+- agent-end payload log docstring ("the fields get measured"). Whether the reason is spent is Q5.
 - janitor: "Banchi keeps its own tier 2". A child repo. Not checkable here.
 - janitor: "Each new rule gets a row in rule_mechanisms.json". Unmeasured.
 - GUIDE: "runs against every repository" omits roots detail. The GUIDE covers roots later.
 - idle simulators, ruling 3 (simulator-boot-cap). Lives in `hooks/guard.py`. Unverified here.
 - session-end record: "owner ask, undated" constant. An undated owner ask. Cannot be dated.
 - session-end record title: already says armed. The file name keeps "disarmed" by design. No change.
-- `session_end_sweep.py` comment on the Windows job. Checked true (`checks-windows-sweep` runs the sweep and mutation suites). A `.py` file.
+- `session_end_sweep.py` comment on the Windows job. Checked true (`checks-windows-sweep` runs the sweep and mutation suites).
 - `install_schtasks.py` docstring named a missing `install_launchd` function. Fixed in this change.
 - daily installers: "the job is loaded on any machine". Unmeasured.
 - machine-load-brake: "the memory level is a placeholder" (85 and 95 %). Unmeasured.

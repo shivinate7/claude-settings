@@ -29,7 +29,8 @@ that is idle, and that the owner did not boot (decision
 The sweep never runs code that your repository supplies. It reads one file
 from your repository, and it reads that file as data. The npm reaper
 (`reap:worktrees`, run by `run_repo_reaper` in `janitor/sweep.py`) departs
-from this. The owner decides (Cockpit item 180, plan section 6, Q7).
+from this. It is to be removed, by decision uniform-over-variants (a shared
+tool never grows a per-repo exception).
 
 The sweep deletes no branch that holds the only copy of its work.
 
