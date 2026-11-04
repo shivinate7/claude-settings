@@ -30,7 +30,7 @@ Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP h
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
 words such as "token budget" or "password manager" pass. So do a password word with a
 placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
-A personal fact in plain words passes too.
+A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
 
@@ -80,12 +80,20 @@ BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
 REFUSED, UNKNOWN, CRASH = 1, 2, 3
 
+STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
+                "Court", "Ct", "Place", "Pl", "Circle", "Cir", "Terrace", "Ter", "Parkway", "Pkwy", "Park", "Trail", "Trl",
+                "Highway", "Hwy")
+STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
+               "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
-    ("stripe-key", re.compile(r"(?<![A-Za-z0-9_-])[sr]k_live_[A-Za-z0-9]{16,}")),
+    ("stripe-key", re.compile(r"(?<![A-Za-z0-9_-])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}")),
+    ("docker-token", re.compile(r"(?<![A-Za-z0-9_-])dckr_pat_[A-Za-z0-9_-]{20,}")),
+    # `(?<!\d)`, not `\b`: a bot URL, `api.telegram.org/bot<token>`, has a letter before the id.
+    ("telegram-bot-token", re.compile(r"(?<!\d)\d{8,10}:[A-Za-z0-9_-]{35}(?![\w-])")),
     ("google-key", re.compile(r"(?<![A-Za-z0-9_-])AIzaSy[A-Za-z0-9_-]{33}")),
     ("gitlab-token", re.compile(r"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}")),
     ("aws-key-id", re.compile(r"(?<![A-Z0-9])A[KS]IA[A-Z0-9]{16}(?![A-Z0-9])")),
@@ -100,6 +108,31 @@ SECRET_SHAPES = (
     ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
     ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
+    # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
+    # "Bearer tokens" or "Basic idea" passes.
+    ("bearer", re.compile(r"(?<![A-Za-z0-9])(?:Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
+    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken,
+    # SECRET_KEY_BASE, "clientSecret") set to a literal that looks random: 8 or more characters with a letter and a
+    # digit. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass, and so does a label with a word between,
+    # as in "token budget: 200000".
+    ("credential-name", re.compile(
+        r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*[=:][ \t]*[\"']?"
+        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}", re.I)),
+    # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
+    ("cookie-value", re.compile(
+        r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
+        r"(?=[A-Za-z0-9+/_.~%-]*\d)[A-Za-z0-9+/_.~%-]{8,}", re.I)),
+    # A postal address. Street: a house number, one to three capitalised name words (or an ordinal such as 5th), then a
+    # capitalised or all-caps street word, so "step 3 on the road map" and "a 2 way merge" pass. A dot ends a name word
+    # only after an initial or Mt, St or Ft, and a number after a colon is a time, so "5 PM. Way forward" and
+    # "13:44 CDT. Lane 2" pass. PO box: needs the box number.
+    ("address", re.compile(
+        r"(?<![A-Za-z0-9_.:-])\d{1,5}[ \t]+(?:(?:(?:[A-Z]|Mt|St|Ft)\.|[A-Z][A-Za-z]*|\d+(?:st|nd|rd|th))[ \t]+){1,3}"
+        r"(?:" + "|".join(w + "|" + w.upper() for w in STREET_WORDS) + r")\b(?![\w-])")),
+    ("address", re.compile(r"(?<![A-Za-z])P\.?[ \t]?O\.?[ \t]*Box[ \t]+\d+", re.I)),
+    # City, a USPS state code and a ZIP or ZIP+4, after a comma: "Austin, TX 78701".
+    ("address", re.compile(
+        r"(?<![A-Za-z0-9])[A-Z][A-Za-z.]*(?:[ \t][A-Z][A-Za-z.]*)*,[ \t]*(?:" + STATE_CODES + r")[ \t]+\d{5}(?:-\d{4})?(?!\d)")),
 )
 # A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
 # must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
@@ -185,8 +218,9 @@ NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_perso
 
 def kinds_in(text):
     """The kinds of secret or personal data that `text` has the shape of, each once."""
-    found = [name for name, shape in SECRET_SHAPES
-             if any(not NO_SECRET_MATCH.get(name, lambda match: False)(m) for m in shape.finditer(text))]
+    found = list(dict.fromkeys(  # address has three shapes: report its kind once
+        name for name, shape in SECRET_SHAPES
+        if any(not NO_SECRET_MATCH.get(name, lambda match: False)(m) for m in shape.finditer(text))))
     if is_phone(text):
         found.append("phone")
     return found
