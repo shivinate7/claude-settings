@@ -280,10 +280,22 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
     def test_long_digit_run_is_fast(self):
+        # Same-process ratio: the 20000-digit run against a same-length filler with no digits, each
+        # timed back to back, best of three. A linear scan keeps the ratio near 1 (measured 1.0 to 1.1).
         import time
-        start = time.time()
-        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
-        self.assertLess(time.time() - start, 2)
+
+        def best(text):
+            times = []
+            for _ in range(3):
+                start = time.perf_counter()
+                self.m.brief_faults(text)
+                times.append(time.perf_counter() - start)
+            return min(times)
+
+        run = best(brief(job=JOB + "\n" + "1" * 20000))
+        filler = best(brief(job=JOB + "\n" + "." * 20000))
+        self.assertLess(run / filler, 3.0,
+                        "a 20000-digit run takes %.1fx as long as a same-length filler" % (run / filler))
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."

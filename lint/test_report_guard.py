@@ -3706,18 +3706,36 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
+        # Same-process ratio: the generic-heavy text against the same text with the generics removed,
+        # each timed back to back, best of three. A linear scan keeps the ratio near 1 (measured 1.2 to 1.3).
         import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
+
+        def text_with(generic):
+            lines = []
+            for i in range(600):
+                if generic:
+                    lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                else:
+                    lines.append("const f%d = (a: T): T => a;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def best(text):
+            times = []
+            for _ in range(3):
+                started = time.perf_counter()
+                codes = self.check("a.tsx", text)
+                times.append(time.perf_counter() - started)
+            return min(times), codes
+
+        text = text_with(True)
+        self.assertGreaterEqual(text.count("\n"), 4800)
+        generic, codes = best(text)
         self.assertEqual(codes, ["STE011"])
+        plain, _ = best(text_with(False))
+        self.assertLess(generic / plain, 3.0,
+                        "generic-heavy text takes %.1fx as long as the same text without generics" % (generic / plain))
 
 
 class TurnReaderTests(unittest.TestCase):
