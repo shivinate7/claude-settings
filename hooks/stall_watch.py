@@ -26,7 +26,7 @@ Hook: stall_watch.py --hook
   streams from those handles, so a job that ends at once, and removes its files, loses no output. The
   job's EXIT trap removes both files when the job ends, also after a stall (the job keeps running and
   writing until then) and for the original's `exit N`, whose code the wrapper keeps. The STALL report
-  says the log is removed when the job ends. Limit: an original that execs or sets its own EXIT trap
+  says the log is usually removed when the job ends. Limit: an original that execs or sets its own EXIT trap
   drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled.
 
   BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
@@ -55,8 +55,8 @@ Stop: stall_watch.py --stop
   (also a foreground call that its timeout moved to the background, which --hook never sees),
   and prints one {"systemMessage": ...} line that lists each open job whose output file, and each
   log its command names, has not changed for the quiet age, and whose stall crossed after the previous
-  Stop (the last transcript record before the current turn's opening prompt). A job with no output
-  file is listed once, at the first Stop after its call. With no earlier turn, all are listed. A job closes on a <task-notification> with status completed, failed,
+  Stop (the newest stop_hook_summary record, skipping the run after a blocked Stop). A job with no
+  output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> with status completed, failed,
   killed or stopped (a user message, or a queued_command attachment record), or on the result of
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
@@ -238,7 +238,7 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
     except (OSError, ValueError):
         tail = []
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
-    lines.append("Log: %s (removed when the job ends)" % log)
+    lines.append("Log: %s (usually removed when the job ends)" % log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
     try:  # the wrapper creates the beat file empty: a heartbeat is a non-empty one
         beat_used = os.fstat(beatf.fileno()).st_size > 0 if beatf is not None else bool(beat and os.path.exists(beat))
@@ -388,8 +388,6 @@ def text_of(content):
 
 
 ISO_Z = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d+))?Z$")
-TIMESTAMP_KEY = re.compile(rb'"timestamp"\s*:\s*"([^"]*)"')
-USER_KEY = re.compile(rb'"type"\s*:\s*"user"')
 
 
 def parse_time(text):
@@ -405,61 +403,40 @@ def parse_time(text):
     return whole + (float("0." + m.group(7)) if m.group(7) else 0.0)
 
 
-class Turns:
-    """Finds the previous Stop while scan_jobs reads the transcript: the time of the last record before
-    the current turn's opener. A user prompt or a queued notice opens a turn, unless it follows a tool
-    call or tool result: that one is queued in the middle of a turn."""
-
-    def __init__(self):
-        self.last = self.prev_stop = None
-        self.after_tool = False
-
-    def see(self, when, opens=False, tool=None):
-        if opens and not self.after_tool:
-            self.prev_stop = self.last
-        if tool is not None:
-            self.after_tool = tool
-        if when is not None:
-            self.last = when
-
-
 def scan_jobs(transcript):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None)},
     previous Stop time or None) for every job with no terminal task notice and no TaskStop result. The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
-    previous Stop is the time of the last record before the current turn's opening prompt (Turns); None
-    when no turn came before or the records carry no timestamp."""
+    previous Stop is the timestamp of the newest stop_hook_summary record the harness wrote after a
+    Stop run that this check ran in (see below); None when there is none or its timestamp is unreadable.
+    A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
+    nothing: the summary of that run lists nothing, so it is not a Stop."""
     jobs, done, stops, notes, job_call, logs, began = {}, set(), set(), {}, {}, {}, {}
-    turns = Turns()
+    prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
-            wanted = any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use") + NOTICE_KEY)
-            if not wanted and not (USER_KEY.search(line) and b"tool_result" not in line and b"isMeta" not in line):
-                # A skipped record is text, a hook note or a system note, never a tool call or result:
-                # the turn is not mid-tool after it, unless it is an attachment (a hook note, mid-turn).
-                m = TIMESTAMP_KEY.search(line)
-                turns.see(parse_time(m.group(1).decode("ascii", "replace")) if m else None,
-                          tool=None if b"attachment" in line else False)
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary") + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
                 kind = rec.get("type")
                 when = parse_time(rec.get("timestamp"))
+                if kind == "system":
+                    if rec.get("subtype") == "stop_hook_summary":
+                        if not blocked:  # the run after a blocked Stop had stop_hook_active: it listed nothing
+                            prev_stop = when
+                        blocked = bool(rec.get("hookErrors")) or rec.get("preventedContinuation") is True
+                    continue
                 if kind == "attachment":  # a completion notice that arrives as a queued command
                     att = rec.get("attachment")
                     notice = att.get("prompt") if isinstance(att, dict) else None
                     if isinstance(notice, str):
                         done.update(closed_by_notice(notice))
-                    turns.see(when, opens=isinstance(notice, str))
                     continue
                 content = rec["message"]["content"]
                 text = text_of(content)
             except Exception:  # a bad or half-written line is skipped
                 continue
-            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
-            is_result = any(b.get("type") == "tool_result" for b in blocks)
-            turns.see(when, opens=kind == "user" and not is_result and not rec.get("isMeta"),
-                      tool=is_result or (kind == "assistant" and any(b.get("type") == "tool_use" for b in blocks)))
             tur = rec.get("toolUseResult")
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 m = RESULT_PATH.search(text)
@@ -487,7 +464,7 @@ def scan_jobs(transcript):
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k))
-             for k, v in jobs.items() if k not in done}, turns.prev_stop)
+             for k, v in jobs.items() if k not in done}, prev_stop)
 
 
 def closed_by_notice(text):

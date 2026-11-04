@@ -73,8 +73,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   must stay the job's one process, so the job gets no subshell) or sets its own EXIT trap drops the trap,
   and a stalled job of that kind leaves its two files; a job killed before it can run its trap leaves
   them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's `Log:` line says
-  the file goes when the job
-  ends. Cost: two small files created per job and two held handles in the watcher, no new process. The
+  the file is usually removed when the job ends. Cost: two small files created per job and two held handles in the watcher, no new process. The
   watcher no longer polls for the beat file.
 
 ## The Stop-time check
@@ -86,14 +85,18 @@ output file is not found is listed as unknown. It prints one systemMessage that 
 the shell or tell the owner.
 
 A job is listed only at the first Stop after its stall crossed. The crossing is its output file's mtime
-(or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the last
-transcript record before the current turn's opening user prompt or wake record; a prompt or notice that
-follows a tool call or tool result is queued mid-turn and opens nothing. A job whose crossing is not later than the previous Stop was
-listed there, so it is silent now. A job that goes quiet again after new output crosses again, and is
-listed again. An unknown job (no output file) is listed once, at the first Stop after its call. With no
-prior turn, or no readable timestamp, every quiet job is listed. The state is the transcript: no file is
-written and no process is started. Cost: one more regex search per transcript line the scan skips,
-in the one pass that `scan_jobs` already makes, at each Stop.
+(or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the newest
+`stop_hook_summary` record in the transcript, which the harness writes after each Stop run, so the time
+does not depend on how turns open (a queued prompt, a subagent hand-back and a hook's feedback all leave
+turns that no prompt record marks). A summary whose run came right after a blocked Stop (hookErrors not
+empty, or preventedContinuation true) is skipped: that run had `stop_hook_active` true, where the check
+prints nothing, so it listed nothing. A job whose crossing is not later than the previous Stop was listed
+there, so it is silent now. A job that goes quiet again after new output crosses again, and is listed
+again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
+time must be later than the previous Stop. With no summary, or a summary with no readable timestamp,
+every quiet job is listed. The state is the transcript: no file is written and no process is started.
+Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
+already makes, at each Stop.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
