@@ -5085,3 +5085,31 @@ test("a parked line with no id says the writer has not prepared it, and names no
   assert.match(why, /has not prepared this line yet/, "the no-id line does not say the writer has not prepared it: " + JSON.stringify(why));
   assert.doesNotMatch(why, NO_THREAD, "the no-id line names a thread: " + JSON.stringify(why));
 });
+
+// ---------------------------------------------------------------- an option with no label: the ready line names its letter
+// The page never prints a raw key or "undefined". An option with no title is named by its letter, as its chip is.
+test("a pick of an option with no label names its letter on the ready line", async (t) => {
+  const it = mk("no-label-pick", 41, { options: [optWith("a", "Red"), optNoLabel("b")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-no-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a pick of an option with a blank label names its letter on the ready line", async (t) => {
+  const it = mk("blank-label-pick", 42, { options: [optWith("a", "Red"), optWith("b", "   ")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-blank-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a two-pick with an option that has no label names that option by its letter on the ready line", async (t) => {
+  const it = mk("no-label-two", 43, { multi: true, options: [optWith("a", "Red"), optNoLabel("b")], pick: ["a", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 2);
+  await page.locator('label[for="o-no-label-two-a"]').click();
+  await page.locator('label[for="o-no-label-two-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: Red and B, your choice.", "the two-pick ready line does not name the unlabelled option by its letter: " + JSON.stringify(ready));
+});
