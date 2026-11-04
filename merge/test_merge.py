@@ -2077,10 +2077,9 @@ class CutLanes(Env):
         self.assertIn("git merge-base failed", out)
         self.assertEqual(self.claims("feat"), 0)
 
-    def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
-        # c110: the cleanup's kept line is the fallback when the owner overrides a failed first read.
-        lane_batch(self, "lane1", "lane2")
-        self.revert_on_batch(self.merge_of("lane1"))
+    @contextlib.contextmanager
+    def first_lane_log_fails(self):
+        """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
         real, n = merge.sh, [0]
         def first_fails(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):
@@ -2089,6 +2088,32 @@ class CutLanes(Env):
                     return 128, "fatal: bad revision"
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", first_fails):
+            yield
+
+    def test_the_reason_flag_lifts_a_failed_dropped_lane_read_and_logs_it(self):
+        lane_batch(self, "lane1", "lane2")
+        with self.first_lane_log_fails():
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("dropped-lane check UNKNOWN", out)  # the scope: the check is the one unread
+        self.assertIn("--undo-check-unknown-ok, reason: octopus read it", out, "the lift is logged with its flag and reason")
+        self.assertNotIn("Owner override", out, "a reason flag Claude types is not an owner override")
+
+    def test_a_failed_dropped_lane_refusal_names_a_reason_flag_not_the_owner(self):
+        lane_batch(self, "lane1", "lane2")
+        rc, out = self.unreadable_lane_log()
+        self.assertEqual(rc, 1, out)
+        named = [l for l in out.splitlines() if "--undo-check-unknown-ok" in l]
+        self.assertTrue(named, "the refusal names the flag")
+        for line in named:
+            self.assertNotIn("owner", line, "the refusal does not name the owner as who types the flag")
+            self.assertIn("reason flag", line)
+
+    def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
+        # c110: the cleanup's kept line is the fallback when the owner overrides a failed first read.
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        with self.first_lane_log_fails():
             rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "owner read the batch")
         self.assertEqual(rc, 0, out)
         self.assertIn("dropped-lane check UNKNOWN", out)
@@ -3125,7 +3150,7 @@ try:
         finish(one(pr, jq), 0, include)
 
     elif method == "PUT" and m_put and int(m_put.group(1)) == num:
-        S["put_done"] = True; save()
+        S["put_done"] = True; S.setdefault("merge_fields", []).append(dict(params)); save()  # each merge call's fields, as sent: a case reads what the merge carried
         sha = params.get("sha")
         if S.get("rival_at_merge") and not S.get("rival_done"):  # a push lands between the last read and the merge call
             S["rival_done"] = True; save()
@@ -3392,6 +3417,48 @@ class GhHalf(Env):
         self.assertIn("checks: fail", out)
         self.assertIn("GET actions/runs branch=main per_page=50", self.calls())
         self.assertNotIn("PUT pulls/7/merge", self.calls())
+
+    def red_main_then_merge(self, *flags, unreadable=False):
+        """Main's latest run is red, the flags go on the --confirm, and the merge call is the fake gh's. -> (rc, out, fields of each merge call)."""
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        with contextlib.ExitStack() as stack:
+            if unreadable:
+                stack.enter_context(UnknownOverride.unreadable(self))
+            rc, out = self.run_merge("7", "--confirm", *flags, host=self.gh_host())
+        return rc, out, self.gh_state("merge_fields") or []
+
+    def test_a_base_red_lift_is_written_into_the_merge_commit_message(self):
+        # a reason flag that lifts a check is kept: the merge call carries its line in commit_message
+        rc, out, fields = self.red_main_then_merge("--base-red-ok", "this batch carries the checks fix")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertIn("commit_message", fields[0], "the lift is written into the merge commit message")
+        self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --base-red-ok: this batch carries the checks fix"})
+
+    def test_each_lift_writes_its_own_line_into_the_merge_commit_message(self):
+        # both flags lift a check in one run: one line for each lift
+        rc, out, fields = self.red_main_then_merge("--base-red-ok", "this batch carries the checks fix", "--undo-check-unknown-ok", "octopus read it", unreadable=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertIn("commit_message", fields[0], "both lifts are written into the merge commit message")
+        self.assertEqual(set(fields[0]["commit_message"].splitlines()),
+                         {"Reason flag: --base-red-ok: this batch carries the checks fix", "Reason flag: --undo-check-unknown-ok: octopus read it"})
+
+    def test_no_commit_message_when_the_flags_lift_no_check(self):
+        # the flags are given, but the base is green and the history readable: nothing is lifted, so GitHub's default message stays
+        rc, out = self.run_merge("7", "--confirm", "--base-red-ok", "not needed here", "--undo-check-unknown-ok", "not needed here", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertNotIn("commit_message", fields[0], "no check was lifted, so the merge carries no commit message")
+
+    def test_no_commit_message_without_a_flag(self):
+        rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertNotIn("commit_message", fields[0], "no flag was given, so the merge carries no commit message")
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
         # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
@@ -5844,7 +5911,7 @@ class MemoKeyRead(Env):
 
 
 class UnknownOverride(Env):
-    """Unknown has a way out that does not depend on the check: an owner flag with a reason, logged."""
+    """Unknown has a way out that does not depend on the check: a reason flag with a reason, logged. Claude may type it; the owner is not named as who types it."""
     def unreadable(self):
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
@@ -5873,11 +5940,23 @@ class UnknownOverride(Env):
         self.assertEqual(self.refs(), before)
         self.assertFalse(self.lock_ref())
 
-    def test_the_owner_flag_with_a_reason_goes_on_and_logs_it(self):
+    def test_the_reason_flag_with_a_reason_goes_on_and_logs_it(self):
         with self.unreadable():
             rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus, owner read it")
         self.assertEqual(rc, 0, out)
-        self.assertIn("Owner override, reason: octopus, owner read it", out)
+        self.assertIn("--undo-check-unknown-ok, reason: octopus, owner read it", out, "the lift is logged with its flag and reason")
+        self.assertNotIn("Owner override", out, "a reason flag Claude types is not an owner override")
+
+    def test_the_silent_undo_refusal_names_a_reason_flag_not_the_owner(self):
+        # the refusal line that names the flag must say it is a reason flag, and must not say the owner accepts the unknown
+        with self.unreadable():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        named = [l for l in out.splitlines() if "--undo-check-unknown-ok" in l]
+        self.assertTrue(named, "the refusal names the flag")
+        for line in named:
+            self.assertNotIn("owner", line, "the refusal does not name the owner as who types the flag")
+            self.assertIn("reason flag", line)
 
     def test_the_flag_with_no_reason_does_not_go_on(self):
         with self.unreadable():
@@ -10010,6 +10089,16 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
+
+    def test_the_red_main_refusal_names_a_reason_flag_not_the_owner(self):
+        # the refusal line that names the flag must say it is a reason flag, and must not say the owner accepts the unknown
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        named = [l for l in out.splitlines() if "--base-red-ok" in l]
+        self.assertTrue(named, "the refusal names the flag")
+        for line in named:
+            self.assertNotIn("owner", line, "the refusal does not name the owner as who types the flag")
+            self.assertIn("reason flag", line)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
