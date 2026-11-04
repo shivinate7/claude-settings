@@ -198,6 +198,9 @@ RED = [
     ("GITHUB_TOKEN assignment of 16 letters", "GITHUB_TOKEN=" + LETTERS_16, LETTERS_16),
     ("CLIENT_SECRET with a colon and 16 letters", "CLIENT_SECRET: " + CLIENT_LETTERS_16, CLIENT_LETTERS_16),
     ("lower-case api_key in quotes of 14 letters", 'api_key = "' + LETTERS_14 + '"', LETTERS_14),
+    # Raw JSON text: the closing quote of the name sits before the separator, so the name is not followed by = or :.
+    ("raw JSON api_key pair of 16 letters", '"api_key": "' + LETTERS_16 + '"', LETTERS_16),
+    ("raw JSON GITHUB_TOKEN pair of 16 letters", '"GITHUB_TOKEN": "' + LETTERS_16 + '"', LETTERS_16),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -315,9 +318,16 @@ GREEN = [
     # A credential name below 12 characters, a placeholder, a variable reference, a plain word and prose pass.
     ("API_KEY with 11 letters", "API_KEY=" + LETTERS_11),
     ("API_KEY set to a placeholder", "API_KEY=<your-api-key>"),
-    ("API_KEY set to a variable reference", "API_KEY=${API_KEY}"),
+    ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
     ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
+    ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
     ("prose with the word secret before a name", "the secret santa list"),
+    # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
+    # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
+    ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
+    ("camelCase accessToken key with a call", "accessToken: localStorage.getItem('accessToken')"),
+    ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
+    ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
 
 
