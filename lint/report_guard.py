@@ -990,11 +990,52 @@ def names_tool(section, tool):
     return ("`%s`" % tool) in section
 
 
+PHRASE_RE = re.compile(r"refusal (?:was|is) right", re.I)
+
+
+def says_refusal_right(text, tool):
+    """True when one line of the reply names `tool` (as names_tool counts a name) and says the refusal
+    was right, wherever in the reply that line is."""
+    return any(PHRASE_RE.search(line) and names_tool(line, tool) for line in text.splitlines())
+
+
+def _tool_use_ids(records):
+    return {u.get("id") for r in records for u in tool_uses(r)}
+
+
+def agent_tool_use_ids(transcript_path):
+    """The tool_use ids of agent calls, or None when the main transcript cannot be read.
+
+    An agent's calls are sidechain records. Claude Code writes them to
+    <session>/subagents/agent-<id>.jsonl beside the main transcript <session>.jsonl (measured on a real
+    session's transcripts), and a sidechain record in the main file counts too. An id also in a main
+    record is not an agent's. An agent file that cannot be read adds nothing."""
+    try:
+        main = read_transcript(transcript_path)
+    except Exception:
+        return None
+    side = _tool_use_ids(r for r in main if r.get("isSidechain"))
+    folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
+    except OSError:
+        names = []
+    for name in names:
+        try:
+            side |= _tool_use_ids(read_transcript(os.path.join(folder, name)))
+        except Exception:
+            continue
+    return side - _tool_use_ids(r for r in main if not r.get("isSidechain"))
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
-    A tool the reply names under Input Needed is dropped from the file (the file goes when none is
-    left); the rest stay. One stat per Stop when the session had no refusal. Fails open: [] on any error.
+    A row leaves the file when the reply names its tool under Input Needed, or on one line with
+    "refusal was right" / "refusal is right" anywhere; or when the refused call was an agent's (the
+    row has agent_id, or its tool_use_id is a tool_use only in a sidechain). A row with no tool_use_id, a
+    tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays. The file goes when
+    none is left. One stat per Stop when the session had no refusal. Fails open: [] on any error.
     Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
@@ -1010,10 +1051,19 @@ def pending_refusals(hook, text):
                 except Exception:
                     continue
                 if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
-                    rows.append((line.rstrip("\n"), row["tool_name"]))
+                    rows.append((line.rstrip("\n"), row))
         section = input_needed_section(text)
-        kept = [(line, tool) for line, tool in rows
-                if not names_tool(section, tool)]
+        side = None
+        transcript = hook.get("transcript_path")
+        if transcript and any(r.get("tool_use_id") and not r.get("agent_id") for _, r in rows):
+            side = agent_tool_use_ids(transcript)
+        kept = []
+        for line, row in rows:
+            tool = row["tool_name"]
+            if (row.get("agent_id") or (side and row.get("tool_use_id") in side)
+                    or names_tool(section, tool) or says_refusal_right(text, tool)):
+                continue
+            kept.append((line, tool))
         if len(kept) != len(rows):
             if kept:
                 with open(path, "w", encoding="utf-8") as f:
@@ -1033,7 +1083,8 @@ def refusal_reason(tools):
     return (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it." % names)
+        "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
+        "right, say \"`<tool_name>`: refusal was right\" on one line." % names)
 
 
 def _marker_path(hook):

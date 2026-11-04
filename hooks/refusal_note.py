@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """At PermissionDenied, notes each tool the auto-mode classifier refuses, so the Stop guard can make the reply ask the owner about it. Prints nothing.
 
-Appends one JSON line {ts, tool_name, reason} to <config dir>/state/refusals/<session_id>.jsonl.
-lint/report_guard.py reads that file at Stop and blocks until the reply raises each refused
-tool under Input Needed (decision refusals-reach-the-owner).
+Appends one JSON line {ts, tool_name, reason, tool_use_id} to <config dir>/state/refusals/<session_id>.jsonl,
+plus agent_id when the payload names an agent. lint/report_guard.py reads that file at Stop, drops
+an agent's row, and blocks until the reply raises each other refused tool (decision refusals-reach-the-owner).
 
 - A reason that starts with "Auto mode could not evaluate this action" or "Classifier unavailable"
   is a classifier outage with no verdict. It writes nothing.
-- A tool_name already pending in the file is not written again.
+- A tool_name already pending in the file is not written again. An agent's row (one with agent_id)
+  does not count as pending: the Stop side drops it, so it must not hide the main session's refusal of
+  the same tool.
 - Prints nothing and never the `retry` decision (the only output the event reads). Exits 0 on
   every path, so a failure here never changes the refusal.
 """
@@ -28,7 +30,7 @@ def pending_tools(path):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict):
+                if isinstance(row, dict) and not row.get("agent_id"):
                     tools.add(row.get("tool_name"))
     except FileNotFoundError:
         pass
@@ -53,6 +55,9 @@ def main():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         row = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
                "tool_name": tool, "reason": reason}
+        for key in ("tool_use_id", "agent_id"):
+            if isinstance(data.get(key), str) and data[key]:
+                row[key] = data[key]
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
     except Exception as err:  # fail open: the hook only notes, it never decides
