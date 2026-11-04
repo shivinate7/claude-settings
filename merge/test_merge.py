@@ -10579,8 +10579,8 @@ class MergeRoleCheck(CloudSession):
                 self.assert_refused(CLAUDE_CODE_REMOTE_SESSION_ID=session)
 
     def test_the_refusal_goes_to_stderr_and_hands_the_pr_to_the_batch_runner(self):
-        # Ruling 113a, 2026-11-01 04:26 CST: the review record lives on the PR, and the batch runner finds PRs itself. So the refusal
-        # names the review record and says the batch runner finds the PR. It no longer hands over the number and the head.
+        # The review record lives on the PR, and the batch runner finds PRs itself. So the refusal
+        # names the review record and says the batch runner finds the PR. It does not hand over the number and the head.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
         # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
@@ -11037,7 +11037,7 @@ class CloudAllow(unittest.TestCase):
                     self.assertNotIn(needle, rule)
                 self.assertFalse(rule.startswith("Bash(merge"), rule)
 
-# ------------------------------------------------------------------ the review record (ruling 113a, 2026-11-01 04:26 CST)
+# ------------------------------------------------------------------ the review record
 # The review record is a comment on the pull request. `merge <pr> --review-record` prints it, a lane posts it, and `merge --reviewed` reads
 # the records of the open pull requests. Every case builds its record with record_text(), the one literal copy of the form. A case reaches
 # the new names of merge.py through review_fn, so each case fails on its own while a name is missing.
@@ -11178,8 +11178,9 @@ class ReviewRecordForm(unittest.TestCase):
 
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
-    or round 3 is done and Guard or check is no, or round 3 is done with Guard or check yes and a Net value of zero or positive. Net value
-    negative is held. Round 3 with Guard or check yes and no Net value is open. Round 1 FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
+    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
+    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
+    The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
@@ -11191,7 +11192,7 @@ class ReviewRecordRules(unittest.TestCase):
                 self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
 
     def test_round_three_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # Round 3 is FAIL here. A PASS would also meet the last-round-PASS rule, which says done for any net value.
+        # The third round is FAIL here. A PASS would also meet the last-round-PASS rule, which says done for any net value.
         for net in ("zero", "positive"):
             with self.subTest(net=net):
                 self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net=net)), "done")
@@ -11200,7 +11201,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative")), "held")
 
     def test_round_three_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        # "not owed" does not close a net-value test that the guard change owes. Round 3 is FAIL, so no done rule applies.
+        # "not owed" does not close a net-value test that the guard change owes. The third round is FAIL, so no done rule applies.
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")), "open")
 
     def test_round_one_fail_on_a_normal_change_is_open(self):
@@ -11210,7 +11211,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
 
     def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
-        # Ruled 2026-11-01 23:14 (Q2 a, process only): rule roles-review-cap-three outranks the decision record. Round 3 ends the review when Guard or check is no.
+        # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
         self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
 
@@ -11224,7 +11225,7 @@ class ReviewRecordRules(unittest.TestCase):
                 self.assertEqual(record_state(self, rec), "done")
 
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
-        # A guard or check change owes rounds 2 and 3 when round 1 fails, even if it only deletes.
+        # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.
         for verdict in ("FAIL", "PARTIAL"):
             with self.subTest(verdict=verdict):
                 rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="yes")
