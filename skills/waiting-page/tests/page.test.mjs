@@ -51,9 +51,9 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
   window.__hold = hold; window.__held = 0;
-  let openGate; const gate = new Promise((r) => { openGate = r; }); window.__release = () => openGate();
+  let openLatch; const latch = new Promise((r) => { openLatch = r; }); window.__release = () => openLatch();
   const seen = { set: 0, delete: 0 };
-  const holdFor = async (op) => { const h = window.__hold; if (!h || h[op] === undefined || ++seen[op] <= h[op]) return; window.__held++; await gate; };
+  const holdFor = async (op) => { const h = window.__hold; if (!h || h[op] === undefined || ++seen[op] <= h[op]) return; window.__held++; await latch; };
   // The asks are kept in the page's localStorage, so a reload finds them as the store held them.
   try { const kept = JSON.parse(localStorage.getItem("__stub.asks")); if (kept) data.asks = kept; } catch (e) {}
   const keepAsks = () => { try { localStorage.setItem("__stub.asks", JSON.stringify(data.asks || {})); } catch (e) {} };
@@ -2712,7 +2712,7 @@ test("asks made in one batch get ids that sort in the order they were made, so t
   assert.equal(bad, -1, bad < 0 ? "" : `ask ${made[bad]} was made after ${made[bad - 1]} but does not sort after it`);
 });
 
-// ---------------------------------------------------------------- red cases from the round 1 and design reviews of b7cf4105
+// ---------------------------------------------------------------- stacked asks across a reload, Undo races, the Undo window and the hint words
 
 // A reload as a viewer sees it. The stub keeps the asks, and the page keeps its stack and draft. The hold is disarmed here, as the init script arms it on every load.
 async function reopen(page) {
