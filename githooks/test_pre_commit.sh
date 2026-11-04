@@ -209,4 +209,101 @@ else
   bad=1; echo "FAIL installer installs over no existing pre-commit: no installer at githooks/pre-commit/install.sh"
 fi
 
+# --check through the shared pre-commit: a repo that holds githooks/main-ref/install.sh is held to main.
+# Each fixture commits a copy of that installer and hook on main before any hook is armed, then commits
+# on feat. The armed reference-transaction is a neutral copy that exits 0, except in the current case.
+neutral="$run/neutral-hook"; printf '#!/bin/sh\n# an older copy\nexit 0\n' >"$neutral"; chmod +x "$neutral"
+fresh_mr() { # name branch [installer]: a repo on branch that holds githooks/main-ref, then a feature branch to commit on
+  cd "$run" && mkdir "$1" && cd "$1" && git init -q -b "$2" . || { bad=1; echo "FAIL setup: cannot make $1"; return 1; }
+  mkdir -p githooks/main-ref && cp "${3:-$repo/githooks/main-ref/install.sh}" githooks/main-ref/install.sh && cp "$repo/githooks/main-ref/reference-transaction" githooks/main-ref/
+  git add -A && git commit -q -m "main-ref fixture" && git switch -q -c feat
+}
+arm_hook() { # file: the armed reference-transaction for the repo in the working directory
+  mkdir -p .git/hooks && cp "$1" .git/hooks/reference-transaction && chmod +x .git/hooks/reference-transaction
+}
+commit_err() { # cmd...: runs cmd; landed is 1 when HEAD moved; stdout to last.out, stderr to last.err
+  before="$(git rev-parse -q --verify HEAD)"
+  "$@" >"$run/last.out" 2>"$run/last.err"; got=$?
+  if [ "$(git rev-parse -q --verify HEAD)" != "$before" ]; then landed=1; else landed=0; fi
+}
+refused_naming() { # pattern label cmd...: the commit does not land, the hook does not crash, stderr names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -eq 1 ]; then bad=1; echo "FAIL $label: the commit landed, wanted refused"; return 1; fi
+  if grep -q Traceback "$run/last.err"; then bad=1; echo "FAIL $label: the hook crashed, which is not a refusal"; return 1; fi
+  if ! grep -qF -- "$pat" "$run/last.err"; then bad=1; echo "FAIL $label: stderr lacks '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+lands_with() { # pattern label cmd...: the commit lands and stderr names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -ne 1 ]; then bad=1; echo "FAIL $label: the commit did not land (exit $got), wanted allowed"; return 1; fi
+  if ! grep -qF -- "$pat" "$run/last.err"; then bad=1; echo "FAIL $label: stderr lacks '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+lands_without() { # pattern label cmd...: the commit lands and no output names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -ne 1 ]; then bad=1; echo "FAIL $label: the commit did not land (exit $got), wanted allowed"; return 1; fi
+  if grep -qF -- "$pat" "$run/last.out" "$run/last.err"; then bad=1; echo "FAIL $label: output names '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+
+# stale: the armed copy is behind main, so the commit is refused and the refusal names the re-arm command
+fresh_mr mr-stale main; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: armed copy behind main names the re-arm command" git commit -q -m c
+
+# current: the armed copy equals main, so the commit lands
+fresh_mr mr-current main; arm_hook "$repo/githooks/main-ref/reference-transaction"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands "ok: armed copy equal to main, the commit lands" git commit -q -m c
+
+# no githooks/main-ref in the repo: the commit lands and no main-ref output appears
+fresh mr-none; git switch -q -c feat; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands_without "main-ref" "ok: no githooks/main-ref, the commit lands with no main-ref output" git commit -q -m c
+
+# unknown: the repo has no main ref. The commit is allowed, because unknown is never clear and never broken, and stderr says so
+fresh_mr mr-unknown trunk; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands_with "unknown" "ok: no main ref, the commit lands and stderr says unknown" git commit -q -m c
+
+# the escape hatch lets a stale copy through
+fresh_mr mr-hatch main; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands "ok: PRE_COMMIT_GUARD=off lets a stale copy through" env PRE_COMMIT_GUARD=off git commit -q -m c
+
+# Round 2. The check reads HEAD, not the working tree: an uncommitted edit to the hook excuses nothing.
+fresh_mr mr-uncommitted main; arm_hook "$neutral"; arm
+printf '# an uncommitted edit\n' >>githooks/main-ref/reference-transaction
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: uncommitted edit does not excuse a stale armed copy" git commit -q -m c
+
+# Round 2. A repo that vendors the installer from before --check: the pre-commit must not re-arm the copy
+# through it. The copy stays byte-identical, the verdict is unknown, and unknown lets the commit land.
+fresh_mr mr-old-install main "$repo/githooks/test_fixtures/main-ref-install-no-check.sh"; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt
+armed_before="$(cksum <.git/hooks/reference-transaction)"
+lands_with "unknown" "ok: vendored installer with no --check, the commit lands and stderr says unknown" git commit -q -m c
+armed_after="$(cksum <.git/hooks/reference-transaction)"
+if [ "$armed_before" = "$armed_after" ]; then echo "ok   pre-commit leaves the armed copy alone when the vendored installer has no --check"; else bad=1; echo "FAIL pre-commit re-armed the copy through a vendored installer that has no --check"; fi
+
+# Round 2. git rev-parse --show-toplevel fails inside the hook: the verdict is unknown and the commit is allowed.
+# git prepends its exec path (/usr/lib/git-core) to PATH, so a PATH shim alone never runs. GIT_EXEC_PATH at a
+# dir with no git binary puts the shim first. The shim logs each failing call: the case checks that the
+# failure happened before it judges the verdict.
+fresh_mr mr-toplevel main; arm_hook "$repo/githooks/main-ref/reference-transaction"; arm
+shim="$run/shim-toplevel"; noexec="$run/shim-noexec"; mkdir "$shim" "$noexec"; real="$(command -v git)"
+printf '#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then echo hit >>"%s"; echo "fatal: simulated failure" >&2; exit 128; fi\nexec "%s" "$@"\n' "$run/toplevel.hits" "$real" >"$shim/git"
+chmod +x "$shim/git"
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt
+commit_err env PATH="$shim:$PATH" GIT_EXEC_PATH="$noexec" "$shim/git" commit -q -m c
+if [ ! -s "$run/toplevel.hits" ]; then bad=1; echo "FAIL setup: the shim never failed rev-parse --show-toplevel, so the case proves nothing"
+elif [ "$landed" -ne 1 ]; then bad=1; echo "FAIL ok: rev-parse --show-toplevel fails: the commit did not land, wanted allowed"
+elif grep -qF "unknown" "$run/last.err"; then echo "ok   ok: rev-parse --show-toplevel fails, the commit lands and stderr says unknown"
+else bad=1; echo "FAIL ok: rev-parse --show-toplevel fails: stderr lacks 'unknown'"; fi
+
 exit "$bad"
