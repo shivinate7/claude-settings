@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Sets branch protection with the one required check on an adopting repo, so no repo starts with none.
 
-    python3 protect.py --repo <owner>/<name> --check <name> [--branch main] [--confirm]
+    python3 protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main] [--confirm]
 
+The one check is the all-jobs-passed rollup (decision same-check-kinds), the constant REQUIRED_CHECK; any other --check name is refused.
 Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
 sets the required check: a branch with no protection gets it (the check, strict off, admins included, no review rule, no restriction);
 a protected branch with a check rule gets only its required check set (its strict setting stays), and an equal check is left alone.
 A branch protected without a check rule is refused, naming its rules: a PUT would replace them. merge/merge.py reads the
 required checks from this protection (merge.requiredChecks "protection"), so this is their one home.
-Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument.
+Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument or a check other than REQUIRED_CHECK.
 """
 import argparse
 import json
@@ -18,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a child start with no console window (hooks/_nowindow.py)
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
@@ -33,7 +35,7 @@ def run_gh(args, body=None):
 def main(argv, gh=run_gh):
     ap = argparse.ArgumentParser(description="Set branch protection with the required checks.")
     ap.add_argument("--repo", required=True, help="owner/name")
-    ap.add_argument("--check", action="append", default=[], help="the one required check (a name may hold a comma); a second distinct name is refused")
+    ap.add_argument("--check", action="append", default=[], help=f"the one required check, only {REQUIRED_CHECK} is allowed; a second distinct name is refused")
     ap.add_argument("--branch", default="main")
     ap.add_argument("--confirm", action="store_true", help="set the protection; without it, only preview")
     a = ap.parse_args(argv)
@@ -46,7 +48,10 @@ def main(argv, gh=run_gh):
         return 2
     if len(checks) > 1:  # action="append" keeps a second name so it reaches this refusal, not a silent overwrite
         print(f"protect: only one --check is allowed, got {len(checks)} ({', '.join(checks)}). Branch protection requires exactly one check, "
-              "the all-jobs-passed rollup (decision same-check-kinds).", file=sys.stderr)
+              f"the {REQUIRED_CHECK} rollup (decision same-check-kinds).", file=sys.stderr)
+        return 2
+    if checks[0] != REQUIRED_CHECK:  # the allowed name is the constant merge.py emits, never a copy
+        print(f"protect: --check {checks[0]!r} is refused. Branch protection requires one check, {REQUIRED_CHECK} (decision same-check-kinds).", file=sys.stderr)
         return 2
     base = f"repos/{a.repo}/branches/{a.branch}/protection"
     code, out = gh(["-X", "GET", base + "/required_status_checks"])

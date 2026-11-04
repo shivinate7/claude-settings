@@ -53,8 +53,8 @@ that triage or the batch runner writes for its successor.
    in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI.
 6. **Protect the default branch.** Name the one check the repo's CI reports (the `all-jobs-passed` rollup). Preview, then set, once the
    owner confirms the act (it changes the live repo):
-   `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check <name> [--branch main]`,
-   then the same with `--confirm`. It refuses no `--check`, and more than one, so no repo starts with none (decision `same-check-kinds`). merge reads the
+   `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
+   then the same with `--confirm`. It refuses no `--check`, any name but `all-jobs-passed`, and more than one, so no repo starts with none (decision `same-check-kinds`). merge reads the
    required checks from this protection, so keep `merge.requiredChecks` at `"protection"`.
 7. **Report** the record branch, the files written, the protection set, and each placeholder the owner must still fill.
 
