@@ -295,15 +295,17 @@
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
 - stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
-- stale-cites-cost-untested-py: no case proves a PR that changes a .py and removes nothing starts 4 git processes and reads no .md; a mutant without that early return passes (lint/test_stale_cites.py CostTests). Decision: stale-cites-at-merge
-- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-l1-test-gaps: mutants survive at lint/stale_cites.py:400 (the all-unknown case, against the not-active case), :377 (path in state), :198 (the nested-def case cites a bare word, so it is vacuous) and :268 (class-method names and starred targets have no case); :377 also holds dead code (path not in claimed) (tests in lint/test_stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-name-call-form: PAIR_RES misses "`f.py` `name()`" (pre-existing on main) (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-nested-class: a class nested in a module-level class no longer counts as bound; main counted it by accident (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-unbound-targets: except-as, match-capture and `type X =` names are not counted as bound (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
@@ -1175,3 +1177,5 @@
 - text-only-decision-wrapping-wide: `docs/decisions/design-agents.md` says the design reviewer catches "wrapping" unqualified, while `agents/design-reviewer.md`, the file the reviewer reads, narrows it to a label, button or heading that newly wraps. Decision: design-agents
 - text-only-overflow-css-fix: in a text-only lane, an overflow fix routes to the builder (skill design-review step 5), and only the "edits more than copy" bullet, read at fix time, sends a CSS fix to a designer. Decision: design-agents
 - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
+- stale-cites-flag-mask-batch: a flag that another touched file declares masks its removal; a batch integration range is likelier to hit it (limit (a), `lint/stale_cites.py` `declared_elsewhere`). Measure: 49 of 133 per-script flags have a twin in another script (orchestrator count, 2026-11-03 21:17 CST, not re-run). Decision: stale-cites-at-merge
+- stale-cites-flag-test-gaps: the flag cost case accepts `rc in (0, 1)` (`lint/test_stale_cites.py:1083`). No case covers the same-kind filter (`lint/stale_cites.py:453`) for a `.sh` flag moved to a `.py` file. Decision: stale-cites-at-merge

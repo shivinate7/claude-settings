@@ -6,13 +6,26 @@
 Refuses a range that leaves a tracked Markdown line naming a name the range removed.
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
-  STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was a
-            def or class in that file at base (read with `ast`) and is not one at head. A name counts
-            when it is module-level (also under a module-level if or try) or a def directly in a
-            module-level class.
+  STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
+            in that file at base (read with `ast`) and is not bound at head. `names_in` walks each module-level
+            statement, also inside a module-level if, try, with, for, while or match, never inside a def or
+            class. A name counts when a def, class, import or assignment binds it there, also a tuple, for,
+            with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
+            but is still bound in the file is not removed.
+  STALE003  one backticked code span cites a script and a `--flag` of it, and the range removed that flag from the
+            script. A `~/.claude/<path>` cite is `<path>` at the repo root. A Python flag is an `add_argument`
+            string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
+            named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
+            `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
+            fires. A flag another touched .py declares (or another touched .sh holds) at head moved there.
+  Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
+            touched that file. JavaScript and shell names are not read, so the line prints
+            `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
+            removes a path, a Python name or a flag, since only then is Markdown read. A range that touches only such
+            files prints nothing and passes.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
@@ -21,13 +34,15 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
-A touched .py adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file
---batch`, so 5 at most. Each tracked .md is read once, only when something was removed. It writes no file
-(no .pyc either) and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py or .sh.
+A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share. A removed
+path, name or flag adds `ls-tree` and reads the Markdown through that `cat-file`, so 5 at most. Each tracked .md
+is read once, only when something was removed. A touched .py also loads the py-facts script once, in-process (no
+start, no .pyc). It writes no file and leaves no process running.
 """
 import argparse
 import ast
+import importlib.util
 import os
 import re
 import subprocess
@@ -41,10 +56,20 @@ RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
-PAIR_RES = (  # "`file.py` `name`" and "(file.py name)"
-    re.compile(NOT_BEFORE + r"`?(%s\.py)`?\s+`([A-Za-z_]\w*)`" % RUN),
-    re.compile(r"\(`?(%s\.py)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % RUN),
-)
+FOREIGN_EXT = r"(?:mjs|cjs|js|ts|sh)"  # code files whose names this check does not read: a cite of one is unknown
+
+
+def pair_res(ext):
+    """"`file.<ext>` `name`" and "(file.<ext> name)"."""
+    return (
+        re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)`" % (RUN, ext)),
+        re.compile(r"\(`?(%s\.%s)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % (RUN, ext)),
+    )
+
+
+PAIR_RES = pair_res("py")
+FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
+FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 
@@ -139,50 +164,147 @@ def parse_range(text):
 
 
 def changed_paths(diff_args):
-    """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
+    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, added paths."""
     tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
-    removed, renamed, modified = [], {}, []
+    removed, renamed, modified, added = [], {}, [], []
     i = 0
     while i < len(tokens) and tokens[i]:
         status = tokens[i][0]
         if status == "R" or status == "C":
             if status == "R":
                 renamed[tokens[i + 1]] = tokens[i + 2]
+            else:
+                added.append(tokens[i + 2])
             i += 3
             continue
         if status == "D":
             removed.append(tokens[i + 1])
         elif status == "M":
             modified.append(tokens[i + 1])
+        elif status == "A":
+            added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified
+    return removed, renamed, modified, added
 
 
-def defs_in(source):
-    """Names a prose line can cite: each module-level def and class (also under a module-level if or try),
-    and each def directly in a module-level class. A def nested in a function is no public name. Read with
-    `ast`; None when it does not parse."""
+PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
+                        "scripts", "lib", "py-facts.py")
+_py_facts = []
+
+
+def py_facts():
+    """The py-facts module, the one home of a Python file's module-level names. Its file name has a hyphen, so
+    importlib loads it by path; `sys.dont_write_bytecode` keeps the load from writing a .pyc."""
+    if not _py_facts:
+        spec = importlib.util.spec_from_file_location("py_facts", PY_FACTS)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _py_facts.append(module)
+    return _py_facts[0]
+
+
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def module_statements(body):
+    """Each statement that runs at module level: the body itself and, inside any statement that is no def or
+    class, its if, try, with, loop and match bodies. A def or class is kept whole; its inside is not module level."""
+    for node in body:
+        yield node
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            yield from module_statements(getattr(node, field, None) or [])
+        for part in (getattr(node, "handlers", None) or []) + (getattr(node, "cases", None) or []):
+            yield from module_statements(part.body)
+
+
+def target_names(target):
+    """Each name one binding target binds: a name, or each name inside a tuple, list or starred target."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from target_names(target.value)
+
+
+def statement_expressions(node):
+    """Each expression node of one module-level statement. Nested statements are left out, since
+    `module_statements` yields them on their own, and so is a lambda body, which is its own scope."""
+    stack = [child for child in ast.iter_child_nodes(node) if not isinstance(child, ast.stmt)]
+    while stack:
+        child = stack.pop()
+        yield child
+        if not isinstance(child, ast.Lambda):
+            stack.extend(c for c in ast.iter_child_nodes(child) if not isinstance(c, ast.stmt))
+
+
+def target_bindings(statements):
+    """Names the module-level statements bind that py-facts `defined_names` does not read: each name in a
+    tuple, list or starred assignment target, a for target, a with-as target, and a walrus target."""
+    names = set()
+    for node in statements:
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            targets = [item.optional_vars for item in node.items if item.optional_vars is not None]
+        else:
+            targets = []
+        for target in targets:
+            names.update(target_names(target))
+        names.update(e.target.id for e in statement_expressions(node) if isinstance(e, ast.NamedExpr))
+    return names
+
+
+def names_in(source):
+    """Names a prose line can cite, read from every module-level statement (`module_statements`): each name
+    py-facts `defined_names` finds (def, class, plain-name assignment, import), each name `target_bindings`
+    finds, and each def directly in a module-level class. A def nested in a function is no public name. Read
+    with `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
-    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    names = set()
-
-    def collect(body, into_classes):
-        for node in body:
-            if isinstance(node, kinds):
-                names.add(node.name)
-                if isinstance(node, ast.ClassDef) and into_classes:
-                    collect(node.body, False)
-            else:
-                for field in ("body", "orelse", "finalbody"):
-                    collect(getattr(node, field, None) or [], into_classes)
-                for handler in getattr(node, "handlers", None) or []:
-                    collect(handler.body, into_classes)
-
-    collect(tree.body, True)
+    flat = list(module_statements(tree.body))
+    names = py_facts().defined_names(ast.Module(body=flat, type_ignores=[]))  # defined_names reads `.body` only
+    names.update(target_bindings(flat))
+    for node in flat:
+        if isinstance(node, ast.ClassDef):
+            names.update(m.name for m in module_statements(node.body) if isinstance(m, FUNCTIONS))
     return names
+
+
+CLAUDE_HOME = "~/.claude/"
+CODE_SPAN = re.compile(r"`([^`\n]+)`")
+LONG_FLAG = re.compile(r"--[A-Za-z][\w-]*")
+SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
+SHELL_SCRIPT = re.compile(r"\.sh\Z")
+
+
+def argument_flags(source):
+    """The long flags a Python source declares: the string literals passed to `add_argument`, read with `ast`.
+    A flag only named in a docstring or comment is not declared. None when the source does not parse."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    flags = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
+            flags.update(arg.value for arg in node.args
+                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and LONG_FLAG.fullmatch(arg.value))
+    return flags
+
+
+def shell_flags(source):
+    """The whole-word `--token`s in a shell source; `--between-x` is no `--between`."""
+    return set(SHELL_FLAG.findall(source))
 
 
 def disabled(line):
@@ -206,38 +328,174 @@ def path_cites(line, gone, exotic):
     return hits
 
 
+class Range:
+    """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
+
+    def __init__(self, base, head, removed, renamed, modified, batch, added=()):
+        self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
+        self.unknowns = []
+        self.added = set(added)
+        self.py_files = {p: p for p in modified if p.endswith(".py")}
+        self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+        self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
+        self.shell_files = {p for p in self.foreign_files if SHELL_SCRIPT.search(p)}
+
+
+class PathReader:
+    """STALE001: a line that names a path the range deleted or renamed."""
+    code = "STALE001"
+
+    def prepare(self, rng):
+        """None when the range removes no path, else the state `line` reads."""
+        gone = {}  # path -> new home or None
+        for path in rng.removed + list(rng.renamed):
+            if rng.batch.get("%s:%s" % (rng.head, path)) is None:
+                gone[path] = rng.renamed.get(path)
+        if not gone:
+            return None
+        simple = {p for p in gone if SIMPLE_PATH.match(p)}
+        return gone, simple, [p for p in gone if p not in simple]
+
+    def line(self, state, text, claimed):
+        gone, simple, exotic = state
+        messages = []
+        for path in path_cites(text, simple, exotic):
+            claimed.add(path)
+            home = gone[path]
+            messages.append("%s was renamed to %s in this range; name the new home" % (path, home) if home
+                            else "%s was deleted in this range" % path)
+        return messages
+
+
+class NameReader:
+    """STALE002: a line that cites `file.py name` for a name the range unbound in that file."""
+    code = "STALE002"
+
+    def prepare(self, rng):
+        removed_names = {}  # file at base -> names the range removed
+        for path in sorted(rng.py_files):
+            old_src = rng.batch.get("%s:%s" % (rng.base, path))
+            new_src = rng.batch.get("%s:%s" % (rng.head, rng.py_files[path]))
+            before = names_in(old_src) if old_src is not None else None
+            after = names_in(new_src) if new_src is not None else None
+            bad = [side for side, names in (("base", before), ("head", after)) if names is None]
+            if bad:
+                rng.unknowns.append("%s does not parse at %s; the names it removed were not checked"
+                                    % (path, " and ".join(bad)))
+            elif before - after:
+                removed_names[path] = before - after
+        return removed_names or None
+
+    def line(self, state, text, claimed):
+        if ".py" not in text:
+            return []
+        messages = []
+        for pair in PAIR_RES:
+            for match in pair.finditer(text):
+                path, name = match.group(1), match.group(2)
+                if path not in claimed and name in state.get(path, ()):
+                    messages.append("%s no longer defines %s at head; find its new home" % (path, name))
+        return messages
+
+
+class ForeignReader:
+    """STALE002 unknown: a line that cites `file.mjs name` of a JavaScript or shell file the range touched. Those
+    names are not read, so the line is reported as unknown. Reports through `unknown`, and only when another
+    reader made the run read Markdown."""
+    code = "STALE002"
+    unknown = True
+
+    def prepare(self, rng):
+        return rng.foreign_files or None
+
+    def line(self, state, text, claimed):
+        messages = []
+        for pair in FOREIGN_PAIR_RES:
+            for match in pair.finditer(text):
+                path, name = match.group(1), match.group(2)
+                text_ = "%s %s: JavaScript and shell names are not checked" % (path, name)
+                if path in state and path not in claimed and text_ not in messages:
+                    messages.append(text_)
+        return messages
+
+
+class FlagReader:
+    """STALE003: a code span that cites `script --flag` for a flag the range removed from that script."""
+    code = "STALE003"
+
+    def prepare(self, rng):
+        removed_flags = {}  # script at head -> flags the range removed
+        files = dict(rng.py_files)  # base path -> head path
+        shell = rng.shell_files
+        files.update({old: new for old, new in rng.renamed.items() if new in shell})
+        files.update({p: p for p in shell if p not in rng.renamed.values()})
+        for path in sorted(files):
+            old_src = rng.batch.get("%s:%s" % (rng.base, path))
+            new_src = rng.batch.get("%s:%s" % (rng.head, files[path]))
+            if old_src is None or new_src is None:
+                continue
+            read = argument_flags if path.endswith(".py") else shell_flags
+            before, after = read(old_src.decode("utf-8", "replace")), read(new_src.decode("utf-8", "replace"))
+            if before is None or after is None:
+                continue  # a .py that does not parse is already reported as unknown by NameReader
+            if before - after:
+                removed_flags[files[path]] = before - after
+        for script in list(removed_flags):
+            # A flag another touched file of the same kind declares at head moved there; it is not removed.
+            removed_flags[script] -= self.declared_elsewhere(rng, script, files)
+            if not removed_flags[script]:
+                del removed_flags[script]
+        return removed_flags or None
+
+    def declared_elsewhere(self, rng, script, files):
+        """The flags the other touched .py (or .sh) files declare at head, read through the open blob reader."""
+        suffix = ".py" if script.endswith(".py") else ".sh"
+        others = {p for p in list(files.values()) + sorted(rng.added) if p.endswith(suffix) and p != script}
+        read = argument_flags if suffix == ".py" else shell_flags
+        declared = set()
+        for path in sorted(others):
+            src = rng.batch.get("%s:%s" % (rng.head, path))
+            flags = read(src.decode("utf-8", "replace")) if src is not None else None
+            declared |= flags or set()
+        return declared
+
+    def line(self, state, text, claimed):
+        if "--" not in text:
+            return []
+        messages = []
+        for span in CODE_SPAN.finditer(text):
+            tokens = span.group(1).split()
+            for token in tokens:
+                script = token[len(CLAUDE_HOME):] if token.startswith(CLAUDE_HOME) else token
+                for flag_token in tokens if script in state else ():
+                    flag = LONG_FLAG.match(flag_token)
+                    if flag and flag.group(0) in state[script]:
+                        message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
+                        if message not in messages:
+                            messages.append(message)
+        return messages
+
+
+# One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
+# check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
+# reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
+# A new check adds one entry.
+READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader())
+
+
 def scan(range_text):
     """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified = changed_paths(diff_args)
-    found, unknowns = {}, []
-    py_files = {p: p for p in modified if p.endswith(".py")}
-    py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
-    if not removed and not renamed and not py_files:
-        return found, unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
+    removed, renamed, modified, added = changed_paths(diff_args)
+    found = {}
     batch = BlobReader()
+    rng = Range(base, head, removed, renamed, modified, batch, added)
+    if not removed and not renamed and not rng.py_files and not rng.shell_files:
+        return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     try:
-        gone = {}  # path -> new home or None
-        for path in removed + list(renamed):
-            if batch.get("%s:%s" % (head, path)) is None:
-                gone[path] = renamed.get(path)
-        simple = {p for p in gone if SIMPLE_PATH.match(p)}
-        exotic = [p for p in gone if p not in simple]
-
-        removed_names = {}  # file at base -> names the range removed
-        for path in sorted(py_files):
-            old_src = batch.get("%s:%s" % (base, path))
-            new_src = batch.get("%s:%s" % (head, py_files[path]))
-            before = defs_in(old_src) if old_src is not None else None
-            after = defs_in(new_src) if new_src is not None else None
-            bad = [side for side, names in (("base", before), ("head", after)) if names is None]
-            if bad:
-                unknowns.append("%s does not parse at %s; the defs it removed were not checked"
-                                % (path, " and ".join(bad)))
-            elif before - after:
-                removed_names[path] = before - after
-        if not gone and not removed_names:
-            return found, unknowns
+        active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
+        if all(getattr(reader, "unknown", False) for reader, _ in active):
+            return found, rng.unknowns  # an unknown line never starts the Markdown read
 
         excludes = exclude_patterns(".")
         tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
@@ -253,22 +511,17 @@ def scan(range_text):
             text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
             for number, line in enumerate(text.split("\n"), 1):
                 off = disabled(line) if "ste-disable-line" in line else set()
-                cited = path_cites(line, simple, exotic) if gone and "STALE001" not in off else []
-                for path in cited:
-                    home = gone[path]
-                    text = ("%s was renamed to %s in this range; name the new home" % (path, home) if home
-                            else "%s was deleted in this range" % path)
-                    found.setdefault((md, number, "STALE001"), []).append(text)
-                if removed_names and ".py" in line and "STALE002" not in off:
-                    for pair in PAIR_RES:
-                        for match in pair.finditer(line):
-                            path, name = match.group(1), match.group(2)
-                            if path not in cited and name in removed_names.get(path, ()):
-                                found.setdefault((md, number, "STALE002"), []).append(
-                                    "%s no longer defines %s at head; find its new home" % (path, name))
+                claimed = set()
+                for reader, state in active:
+                    if reader.code not in off:
+                        for message in reader.line(state, line, claimed):
+                            if getattr(reader, "unknown", False):
+                                rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                            else:
+                                found.setdefault((md, number, reader.code), []).append(message)
     finally:
         batch.close()
-    return found, unknowns
+    return found, rng.unknowns
 
 
 def main(argv):
