@@ -2,11 +2,11 @@
 
 ## The ruling
 
-Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. Exception, `settings.json`: a repeat install that finds a plain file there, not the link, moves it to a new `settings.json.bak.<time>` and removes each older `settings.json.bak.*`. Only the newest backup stays.
+Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. Exception, `settings.json`: a repeat install that finds a plain file there, not the link, backs it up to a new `settings.json.bak.<time>.<pid>` and removes each older backup of that form. Only the newest stays.
 
 - The first local install keeps the person's own file as `settings.json.orig`. It is never removed.
 - A backup from an older installer, named `settings.json.bak.<time>` with no pid, stays.
-- If a move fails, the install stops before it removes or links anything.
+- If the backup fails, the install stops before it replaces settings.json or removes an older backup.
 
 Skill backups: a skill backup never lands in `skills/` or any folder Claude Code scans. It goes to `backups/skills/<name>.<time>` under the config dir. Older `skills/<name>.bak.*` folders are moved there, never deleted. A cloud run records a tree hash of each skill it copies, in `backups/skill-copies/`. It replaces a copy with no backup when the copy matches that record or the source. Any other copy is backed up. The hash covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup. The move takes only folders named `<name>.bak.<14 digits>`.
 
@@ -18,3 +18,4 @@ Known cost: a hand edit to any other installed copy under `~/.claude` is lost at
 
 Kind: process
 Home: install.sh
+Home: install.ps1
