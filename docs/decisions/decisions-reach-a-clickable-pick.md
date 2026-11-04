@@ -2,15 +2,13 @@
 
 ## The ruling
 
-Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if one of these holds for the same main-session turn.
+Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner`, "Same turn to the page"). When the last reply's Input Needed item offers a pick with options, the stop passes only if the same turn holds a qualifying act. The act no longer depends on a clock or on words in the reply. Decision `questions-go-to-owner` and the spec `questions-reach-page` hold the full rule, including the lane route and the other questions the guard reads ("?" sentences).
 
-- It called `AskUserQuestion`, the question box. The guard does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the guard does not repeat that.
-- The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
-- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page".
+- Owner-facing session: a send to the page writer, or an ArtifactData set, update or batch under collection `items` to this repo's page. The question box (`AskUserQuestion`, main session) passes only in a repo with no waiting page (owner, 2026-11-01 23:31 CST, pick a). A send to `@parent` reaches no one here. The guard does not re-check that nothing runs: `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs.
+- Lane: a send to its parent (`@parent` counts only here) or to the page writer. A box, a page link and a promise pass nothing.
+- A page link in the reply and a 5-minute promise pass nothing now. Owner ruling 2026-10-28 15:10 CDT (chat first, then the page) added both; the 2026-11-01 23:31 CST ruling retired them, because a promise passed while nothing was sent.
 
-The box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
-
-The refusal is one line: "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only with nothing running, open the question box."
+The refusal names the route. Owner-facing: "Pick guard: every question goes to the page writer in the same turn it is asked ... Send it now: send_message to the writer <id>, or read meta/page first." Lane: "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent (send_message session_id @parent) now."
 
 Incident, named: on 2026-10-27 a degen session put "Two ways: A (my pick) ... B ..." under Input Needed as report text only. No control offered a click, and the owner found it late. This guard is the answer to that named incident. It also guards a likely risk: any session ends a report this way.
 
@@ -29,7 +27,7 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 Known limit: a drive name such as "the A: drive and the B: drive" reads as two lettered markers.
 
-Cost: no new process, file or timer. One layout read per turn whose Input Needed offers a pick and that opened no box.
+Cost: no new process, file or timer. No file written. The extra reads come only on a turn that asks with no send to the page writer. In a session with a remote id, that turn adds the own-record import and one more transcript read. A lane reads no layout; an owner-facing turn with no counted send reads it once. A repo with no waiting page is not blocked: the guard prints a systemMessage, and a lane is never failed open.
 
 Kind: process
 Home: lint/report_guard.py
