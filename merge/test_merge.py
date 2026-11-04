@@ -11010,6 +11010,21 @@ class RepoDirFlag(RepoDirRuns, Env):
         self.assertEqual(seen["hosts"], [], "merge read a host before it checked the named path")
         self.assertEqual(seen["locks"], [], "merge took a lock before it checked the named path")
 
+    def test_a_missing_path_stops_with_a_merge_line_and_no_traceback(self):
+        """-C names a folder that does not exist. merge stops with a `merge:` line and exit 1; a traceback is a crash, not a stop."""
+        missing = os.path.join(self.t, "no-such-checkout")
+        self.assertFalse(os.path.exists(missing), "fixture: the named folder exists")
+        for argv in (["-C", missing, "7"], ["-C", missing, "7", "--lane-lint"]):
+            with self.subTest(argv=argv):
+                try:
+                    rc, out, seen = self.run_from(self.co, argv)
+                except Exception as err:
+                    self.fail("merge raised %s at a missing -C path instead of stopping: %s" % (type(err).__name__, err))
+                self.assertEqual(rc, 1, "merge did not exit 1 at a missing -C path (rc %r): %s" % (rc, out))
+                self.assertNotIn("Traceback", out, "merge printed a traceback at a missing -C path: " + out)
+                self.assertTrue(any(line.startswith("merge:") for line in out.splitlines()),
+                                "merge stopped at a missing -C path without a `merge:` line: " + out)
+
     def test_a_repeated_flag_takes_its_last_value(self):
         rc, out, seen = self.run_from(self.co, ["--repo-dir", self.co, "--repo-dir", self.b_co, "7"])
         self.assertTrue(seen["locks"], "merge stopped before any read: " + out)

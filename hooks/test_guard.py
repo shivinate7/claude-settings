@@ -17760,6 +17760,17 @@ repo_case("a runner that names claude-settings is allowed through the proxy's or
           TX_RUNNER)
 repo_case("a runner that names claude-settings by flag is allowed", "allow", f"{MERGE_SHIM} --repo-dir {LANE_REPO} 5 --confirm",
           REPO_A, TX_RUNNER)
+# The checkout a merge acts in is the one in force where the merge's own segment runs: a `cd` before it in the same clause, else the
+# working directory. A `cd` after the merge, a `git -C` on another segment and a later `cd` do not move that checkout.
+repo_case("a cd into another checkout before a merge, then a cd back after it, is denied", "deny",
+          f"cd {REPO_B} && {MERGE_SHIM} 5 --confirm; cd {REPO_A}", REPO_A, TX_A)
+repo_case("a cd into another checkout before a merge, then a cd back chained after it, is denied", "deny",
+          f"cd {REPO_B} && {MERGE_SHIM} 5 --confirm && cd {REPO_A}", REPO_A, TX_A)
+repo_case("a git -C of this checkout, then a cd into another checkout and a merge, is denied", "deny",
+          f"git -C {REPO_A} status && cd {REPO_B} && {MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+repo_case("a merge before a cd into another checkout is allowed", "allow", f"{MERGE_SHIM} 5 --confirm; cd {REPO_B}", REPO_A, TX_A)
+repo_case("a git -C of another checkout before a merge does not move the shell, so it is allowed", "allow",
+          f"git -C {REPO_B} fetch && {MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
