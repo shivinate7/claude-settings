@@ -203,12 +203,21 @@ def _agent_branch_push(plain, delete: bool, cwd: str, overrides=None) -> bool:
 
     `--delete`, `-d` and a `:name` spec delete, so they never count. A destination git cannot
     read is None, and unknown is not a hit. A named destination other than `HEAD` or `@` costs
-    no git read.
+    no git read. A destination that holds `$` or a backtick is shell text the guard cannot read.
+    With a source other than `HEAD` or `@`, it may be the agent's own branch, so it is a hit when
+    the checkout's current branch is an agent's. Only such a destination reads the branch.
     """
     if delete:
         return False
     for spec in plain or [""]:
         if spec.lstrip("+").startswith(":"):
+            continue
+        source, colon, written = spec.lstrip("+").partition(":")
+        written = written if colon else source
+        if ("$" in written or "`" in written) and source not in ("HEAD", "@"):
+            current = _push_current_branch(cwd)
+            if current is not None and current.startswith(AGENT_BRANCH_PREFIX):
+                return True
             continue
         target = _push_dest(spec, not plain, cwd, overrides)
         if target is not None and target.removeprefix("refs/heads/").startswith(AGENT_BRANCH_PREFIX):

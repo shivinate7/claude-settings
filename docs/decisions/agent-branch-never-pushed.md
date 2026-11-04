@@ -11,11 +11,11 @@ Owner, 2026-11-02: `worktree-agent-*` branches never reach origin. Guard rule `a
 - **The refusal** cites this record and gives the remedy. It never names the branch (`git-remedy-never-names-target`). The matched push goes to the log.
 - **One constant.** `AGENT_BRANCH_PREFIX` in `hooks/guard_push_delete.py` is the only copy of the prefix. No prefix constant existed before this rule; the harness names the branch.
 - **An owner override** lifts it (`owner-override`).
-- **Cost.** No file written, no process started beyond the push call's own reads. A push with a named, non-`HEAD` destination spends no git call. A bare push, or a `HEAD` or `@` spec, spends one to three git reads. The force-push rule already spent them on a forced push. An unforced push now spends them too.
+- **Cost.** No file written, no process started beyond the push call's own reads. A push with a named, non-`HEAD` destination spends no git call. A bare push, or a `HEAD` or `@` spec, spends one to three git reads. A `$` or backtick destination with another source spends one, to read the current branch. The force-push rule already spent them on a forced push. An unforced push now spends them too.
 - **Archive stays allowed.** `archive/worktree-agent-*` is no hit: its name does not start with the prefix. Rule `shared-trees-archive-then-delete` pushes an unmerged branch there before it is deleted (lane ruling, 2026-11-02).
 - **No brief branch.** An agent with no branch in its brief keeps its commits local and reports. It pushes nowhere.
-- **Limits.** `--all` and `--mirror` push every local branch. From an agent worktree the bare destination is its own branch, so the rule refuses them. From any other checkout `--all` and its alias `--branches` pass, and `--mirror` asks under the force-push rule. A destination named through a variable or a command (`$BR`, `$(...)`) cannot be read, in any checkout. Refusing every `$` would refuse a lane's own `HEAD:$BRANCH` push.
-- **Protected by** the `agent push:` cases in `hooks/test_guard.py` (nine refusals, fifteen passes) and its cost check, which shows a named destination spends no git read.
+- **Limits.** `--all` and `--mirror` push every local branch. From an agent worktree the bare destination is its own branch, so the rule refuses them. From any other checkout `--all` and its alias `--branches` pass, and `--mirror` asks under the force-push rule. A destination that holds `$` or a backtick (`$BR`, `$(...)`) is shell text the guard cannot read. From an agent worktree, with a source other than `HEAD` or `@`, the rule refuses it. From any other checkout, or with a `HEAD` or `@` source (`HEAD:$BRANCH`), it stays unread and passes.
+- **Protected by** the `agent push:` cases in `hooks/test_guard.py` (14 refusals, 19 passes) and its cost check, which shows a named destination spends no git read.
 
 Kind: process
 Home: hooks/guard_push_delete.py
