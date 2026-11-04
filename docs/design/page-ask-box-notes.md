@@ -59,15 +59,17 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 ## 5. Send and Undo
 
-- Send ask writes `asks/<id>`. Then it tells Claude with one comment, through `canTell` and
+- Ruling: owner, waiting-page item 218, pick b, "Stack, then send", 2026-11-03 22:20 CST. Asks stack in the box and go
+  together on one Send, with one Undo for the batch. The design is in `page-ask-queue-notes.md`, items 1, 2, 6 and 7.
+- Send ask writes one `asks/<id>` per ask in the batch, all with one `at`. Then it tells Claude with one comment, through `canTell` and
   `notifyClaude` (page.html), as `sendAll` does today.
-  - Send notice: "Asked on the waiting page. Writer: <writer>. Ask <id>: <text, cut at 500 characters>."
-  - Undo notice: "Undone on the waiting page. Ask <id> is withdrawn."
+  - Send notice: "Asked on the waiting page. Writer: <writer>. <n> asks: <id>: <text, cut at 500 characters>; …", cut at `MAX_BYTES`.
+  - Undo notice: "Undone on the waiting page. Asks <ids> are withdrawn."
   - When no comment can go: today's `NOT_TOLD` words.
-- Undo: 8 seconds (`UNDO_S`), read from the clock, as `undoLeft` does. Undo deletes `asks/<id>`
-  and puts the text back in the box. A session waits 10 seconds after `at` before it reads, as for an answer.
-  After an Undo the hint says "Undone. Your ask is back in the box." Copy ask does not show, because the store works.
-- The Undo shows at the box, in the hint row beside Send ask (ux-answer-at-press). Send ask keeps its own grid column,
+- Undo: 8 seconds (`UNDO_S`), read from the clock, as `undoLeft` does. One Undo deletes each `asks/<id>` of the batch
+  and puts the asks back in the stack, in their order. A session waits 10 seconds after `at` before it reads, as for an answer.
+  After an Undo the line says "Undone. Your <n> asks are back in the list, not sent." Copy ask does not show, because the store works.
+- One Undo shows at the box, on the line under Send ask that answers the send (ux-answer-at-press). Send ask keeps its own grid column,
   flush with the box's right edge, so it does not move when Undo or Copy ask shows or goes. It does not use
   the `.sent` panel above the bar. That panel grows the fixed bar, and at 390 it would cover the box.
 - Send answers and Send ask never mix. The bar's count ("1 ready") never counts an ask. The bar does not change in `#s=sent`.

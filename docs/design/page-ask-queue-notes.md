@@ -1,111 +1,139 @@
-# Waiting page Ask box, step ask-reaches-writer: design notes
+# Waiting page Ask box, several asks: Stack, then send (design notes)
 
-Mockup: `docs/design/page-ask-queue.html`. Screen: `skills/waiting-page/page.html` at 72034d9a. Its CSS (lines 8–773) is
+Mockup: `docs/design/page-ask-queue.html`. Screen: `skills/waiting-page/page.html` at 0dbab787. Its CSS (lines 8–774) is
 copied whole into the mockup. Only `#newcss` is new.
-Deep links: `#s=rows|saving|untold|stale|failed|boxrow|stack|bar`, `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`,
-`&hide=rows,boxrow,stack,stale,copy`.
-Sizes: 390, 800 and 1280, which are page.html's bands. `layout.py devices` prints `unknown` for this repo. Themes: light and dark.
-Owner report, Nov 2 12:55 CST: an ask sent 11:55 still read "Waiting for home-triage-4 to read it." an hour later. Also,
-"can add only one ask before Send".
+Deep links: `#s=empty|one|several|edit|removed|send|sent|untold|reach|stale|failed|undone`, `&w=all|390|800|1280`,
+`&t=light|dark`, `&lab=off`, `&hide=stale,copy`.
+Sizes: phone 390 and desktop 1280, as the brief names. `w=800` draws page.html's mid band too. `layout.py devices` prints
+`unknown` for this repo. Themes: light and dark.
+Ruling: owner, waiting-page item 218 ("How should several asks queue on the waiting page?"), pick b, "Stack, then send",
+2026-11-03 22:20 CST. "Asks stack in the box and go together on a final Send."
+Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askState.sent` is one slot, and a second
+`sendAsk` inside the 8 s window ended the first ask's Undo.
 
-## 1. What stops a second ask today (read, not measured)
+## 1. Add to list stacks an ask in the box
 
-- `askState.sent` is one slot. A second `sendAsk` inside the 8 s window sets a new `s.sent` and runs `clearInterval(askTimer)`.
-  That ends the first ask's Undo. The guard `s.sent === sent` then drops the first ask's told status.
-- `s.busy` turns Send ask off while `canTell` (up to `CAN_WAIT_MS`, 3 s) and the write run.
-- The box itself takes a second ask once the first one saves. So the limit is the single Undo and status, not the box.
+- States `one`, `several`. Add to list moves the typed words out of the box into "Not sent yet", under the buttons. It writes
+  nothing to the store. Each stacked ask has a number in typed order, its words, Edit and Remove.
+- The stack sits under the buttons, so a press moves neither the box nor its buttons. Only the list under the form moves down.
+- A dashed edge marks an ask that is not in the store. The page uses dashed edges for "not yet" (`.btn.askgo:disabled`, `.unfold`).
+- The rail and the Ask count pill count saved asks only (`askWaiting`). A stacked ask is not counted.
+- Add to list checks `ASK_MAX` (4000) as Send ask does today. Over the limit, it stacks nothing and the hint says the length.
+- Gain: the owner sees the whole batch before it goes. Loss: one more button beside Send.
+- Departs from: `sendAsk`, one ask per press. Not blocking.
 
-## 2. Question 1: how several asks queue. Owner grant: yes
+## 2. Send takes the list and the box
 
-- **Undo on each row (pick)**, state `rows`, focus `#askRows`. Each Send writes at once. The ask goes to the top of the list,
-  with its own status line and its own `Undo send (n)` at the right end of that line. The hint row says
-  "Sent 17:42. 2 asks can still be undone, each on its row below. Type the next one any time."
-  - Gain: any number of asks, each with its own Undo. The new row sits directly under the box, so the answer stays next to the press (ux-answer-at-press).
-  - Loss: Undo is no longer in the hint row.
-- **Latest Undo at the box**, state `boxrow`, focus `#askBoxRow`. The hint row keeps the latest send and its Undo, as today.
-  An earlier send that is still in its 8 s gets its Undo on its row.
-  - Gain: the latest Undo stays where it is today. Loss: Undo has two homes, and the latest ask's status shows at the box and not on its row.
-- **Stack, then send**, state `stack`, focus `#askStack`. "Add to list" stacks the typed ask under the box, with Remove.
-  "Send 3 asks" sends them all. Then each row works as in the pick.
-  - Gain: matches "add several before Send" word for word. Loss: a second button, and stacked asks that were never sent can be forgotten. A batch can also half fail.
-- Departs from: `page-ask-box-notes.md` item 5, "The Undo shows at the box, in the hint row" (`renderAskForm`, `askSlot`). This applies to
-  the pick and to Stack. Not blocking.
-- Each option has its own Hide control.
+- State `several`. Send sends every stacked ask, plus the typed box if it holds text. The label counts both: "Send ask" for one,
+  "Send 4 asks" for four. The hint says "Send takes the 3 in the list and the one in the box."
+- With nothing stacked, type then Send is today's one-press send.
+- The button keeps the box of "Send 99 asks" (a hidden sizer), so a new count never resizes it. Measured: 138 px at every state and size.
+- Other option: Send takes the list only, and typed words need Add first. Gain: no doubt what goes. Loss: a single ask takes two presses.
+- Pick: list and box.
+- Departs from: the label "Send ask" (page.html `#askSend`), which never counts. Not blocking.
 
-## 3. Send clears the box at the press (pick)
+## 3. Ctrl+Enter sends
 
-- Each press runs its own `canTell`, then its write, keyed by the ask id. The box clears at the press, and the row says "Saving…" (state `saving`).
-  Send ask turns on again as soon as the owner types.
-- Gain: the owner can type the next ask while the last one saves. Loss: a write that fails needs the failed row (item 8).
-- Departs from: `sendAsk`, which clears the box only after the write, and `s.busy`, which turns Send ask off meanwhile.
-- Kept: `canTell` runs before the write, so the comment still follows the owner's own press (comment in page.html above `canTell`).
+- Ctrl+Enter in the Ask section runs Send, as it does today (the keydown handler, "Ctrl or Cmd+Enter sends"). The hint keeps "Ctrl+Enter sends."
+- Other option: Ctrl+Enter adds to the list. Gain: fast stacking. Loss: the hint's words and the key change meaning.
+- Pick: keep it. An early send has Undo.
 
-## 4. Status words: each claims only what the page knows
+## 4. Edit and Remove a stacked ask
 
-One home for the words, as `TOLD` and `NOT_TOLD` are today. Each status rests on one fact:
+- Edit (state `edit`) opens the ask in place, in a textarea, with Done. It keeps its number and its place. Rows above do not move.
+  The box keeps what is typed in it.
+- Remove (state `removed`) keeps the row's place: "Removed: <words>" with Undo remove (ux-ask-or-undo). The row goes at the next
+  Add, Send or reload.
+- Other option for Edit: move the words back to the box. Loss: it clashes with words already in the box.
+- Pick: in place.
 
-| Status | Fact | Words |
-|---|---|---|
-| saving | write running | "Saving…" |
-| told | write done, and `notifyClaude` returned true | "Saved 17:42. A wake was sent. Not read by triage yet." |
-| untold | write done, and `canTell` or the send was false | "Saved 17:42. No session was told. It waits for triage's next wake or turn start." |
-| saved | record only: after a reload, or after the Undo count | "Saved 17:41. Not read by triage yet." |
-| read | the record has `owner` and `read` | today's words: "Read by <owner> <time>. Waiting for its answer." |
-| answered | the record has `reply` | today's thread, unchanged |
+## 5. The stack is kept
 
-- "A wake was sent" is the comment send. It does not say that any session woke. Only `read` confirms a read.
-- The told or untold fact is in memory only. After a reload the row falls back to "saved". That is true, and needs no new storage.
-- "triage reads it at its next wake or turn start" is true by `SKILL.md`: "The writer also reads `asks/` at each wake and turn start".
-- No row and no hint says "reply in the thread". `SKILL.md`, "Read the answers", forbids a session to reply in a comment thread.
-- Departs from: `TOLD` ("Claude was told.") and `NOT_TOLD` (page.html, beside `MAX_BYTES`). This is a fix for ux-statements-are-true. No grant is needed.
-- Gain: the Nov 2 ask would have said "Not read by home-triage-4 yet", plus its age. Loss: longer lines.
+- The stack is kept in `localStorage` `waiting.askStack`, beside `waiting.askDraft` (ux-keep-what-was-made). A reload shows it again under "Not sent yet".
+- This cuts the ruling's loss "nothing reaches the writer until the final Send": a stack the owner left is still on view.
+- Departs from: `saveAskDraft`, which keeps the box only. Not blocking.
 
-## 5. Undo per row
+## 6. Final Send
 
-- Each row's count is read from the clock with `undoLeft(a)`, so `UNDO_S` (8 s) and the 10 s that a session waits stay as today. One interval ticks every open count.
-- Undo deletes that ask only. It puts the words back in the box, ahead of what is typed, as `undoAsk` does today. It sends today's "Undone on the waiting page" notice.
-- When a count ends in this view, its button keeps its box, hidden, until the next load. So no row below moves (ux-press-moves-nothing). See row 3 in `rows`.
+- State `send`. `canTell` runs once, then one write per ask. Each row shows "Saving…" or "Saved". Send is off while the batch
+  saves, as `s.busy` does today. The box and Add to list stay on, so the owner can type the next ask.
+- Every record of the batch gets the same `at`, as `sendAll` gives one `at` to each answer. So one clock serves the Undo
+  (`undoLeft`), and a session's 10 s wait holds for each record.
+- One comment per Send, after the writes: "Asked on the waiting page. Writer: <writer>. 3 asks: <id>: <text>; …".
+  Each text is cut at `ASK_NOTICE` (500). The whole comment is cut at `MAX_BYTES` (4096), as `noticeText` does.
+- Departs from: `sendAsk`, one `canTell`, one write and one comment per ask. Not blocking.
 
-## 6. The not-read line (hide: "the not-read line"). Owner grant: yes
+## 7. One Undo for the batch, at the box
 
-- State `stale`. An ask with no `read` after 15 minutes says "Saved 17:02. Not read by triage after 40 minutes. If it is not running,
-  copy the ask into a session's chat." The row's head keeps "waited 40 minutes" (`waited`).
+- State `sent`. The line under the buttons says "Sent 17:42. 3 asks." with today's `TOLD` or `NOT_TOLD` words, and
+  "Undo send (7)" at its right end. One Undo takes back every ask of the batch. Its window is `UNDO_S` (8 s), read from the clock.
+- The line sits where the stack was. The press and its answer stay in one place (ux-answer-at-press).
+- When the count ends, the Undo keeps its box, hidden, until the line goes (ux-press-moves-nothing). The line goes when the owner types, as `s.sent` does today.
+- Undo (state `undone`) deletes each record of the batch and puts the asks back in the list, in their order, ahead of any ask stacked
+  since. The box keeps what was typed. The line says "Undone. Your 3 asks are back in the list, not sent." One comment:
+  "Undone on the waiting page. Asks <ids> are withdrawn."
+- A delete that fails or comes after the window: the line names the code and the asks that stay sent, with the words `undoSend` uses for answers.
+- Departs from: `renderAskForm` and `askSlot`, which put the Undo in the hint row's slot, and `undoAsk`, which puts the words back in the box.
+  The slot now holds only Copy ask when the store cannot be reached. Not blocking.
+- Departs from: `renderAskForm`, which drops the Undo button when the count ends. Not blocking.
+- Item 5 of `page-ask-box-notes.md` now cites this ruling.
+
+## 8. Each ask's reach after send
+
+- States `sent`, `untold`, `reach`. Each sent ask is its own row in the list, newest first, with today's words from `askItem`:
+  "Waiting for <writer> to read it.", "Read by <owner> <time>. Waiting for its answer.", or the answer thread.
+- A routed ask shows its new owner ("Read by lane hooks-batch"). An answered one opens with "New answer", as today.
+- The told or untold fact is one fact for the batch, so it shows once, on the line at the box, and not on each row (ux-label-once).
+- Open for the builder: in one batch the rows share `at`, so the id breaks the tie (`askAll`). The ids must sort so the last-typed ask is on top.
+
+## 9. One ask not saved
+
+- State `failed`. Each write is tried. A write that fails leaves its ask in the list, with a `--due` edge, its words, and
+  "Not saved (permission-denied). Your words are kept here." (`role="alert"`). It gets Copy ask, Edit and Remove.
+- The saved asks go to the list. The line says "2 of 3 sent 17:42." with the told words. Undo covers the two that saved.
+- Send ask, now counting 1, tries it again. No second Try again control, so the act keeps one name.
+- When every write fails, the line says "Not saved (<code>). Your 3 asks are kept in the list: copy them and paste them in chat.",
+  and Copy ask shows in the slot. Not drawn.
+- Other option: stop at the first failure, as `sendAll` does, and leave the rest unsent. Gain: same rule as answers. Loss: one
+  bad write holds back asks that would save. Asks do not depend on each other.
+- Pick: try each.
+- Kept: the code in brackets, as `renderAskForm` shows it today.
+- Departs from: `renderAskForm`'s failed hint, which keeps the words in the box. Not blocking.
+
+## 10. Empty box
+
+- State `empty`. Add to list and Send ask are off, with today's dashed look. The hint says why, in the words of today's hint for Send ask (`renderAskForm`), with Add to list added.
+- At 390 the hint row keeps three lines (66 px), so a change of hint never moves the buttons under it. Measured: every drawn hint fits.
+- Departs from: the hint "Send ask turns on once you type." Not blocking.
+
+## 11. The not-read line (hide: "the not-read line"). Owner grant: yes
+
+- State `stale`. Kept from the explore notes; item 218 did not answer it. An ask with no `read` after 15 minutes says
+  "Not read by triage after 40 minutes. If triage is not running, copy the ask into a session's chat."
 - The 15 minutes are unmeasured. They are a pick for the owner to change.
-- Gain: a stuck ask says it is stuck, and how to go on. Loss: one more line of words to keep true.
+- Gain: a stuck ask says it is stuck, and how to go on. Loss: one more line to keep true, on each row of a stuck batch.
 
-## 7. Copy ask on a row (hide: "Copy ask on a row"). Owner grant: yes
+## 12. Copy ask on a stuck row (hide: "Copy ask on a stuck row"). Owner grant: yes
 
-- An `untold` or `stale` row gets Copy ask. It uses `copyText`, as `copyAsk` does. It copies that row's words, not the box.
-- Gain: the row has a control that leads on (ux-no-dead-end), and the control never says "reply in the thread". Loss: one more button per stuck row.
+- Kept from the explore notes; item 218 did not answer it. A row with the not-read line gets Copy ask. It copies that row's words (`copyText`).
+- Gain: the row leads on (ux-no-dead-end). Loss: one more button per stuck row.
 
-## 8. A row that is not saved
+## 13. What the page cannot know
 
-- State `failed`. The row keeps the owner's words and says "Not saved (permission-denied). Your words are kept here." It has Try again and Copy ask, and `role="alert"`.
-  Its head says "Not sent, typed 17:42" with the due triangle, never "You asked" and the waiting disc, because nothing is in the store. The box keeps the next ask.
-- Kept: the code in brackets, as `renderAskForm` shows it today. ux-machine-text-hidden would put it behind a disclosure. That is a wider change to every "Not saved" line, so it is not made here.
-- Departs from: `renderAskForm`'s failed hint, which keeps the words in the box. With a queue, the box may already hold the next ask.
+- `askWriter()` reads `meta/page.writer`. After a triage rotation that name can be stale.
+- No state claims "delivered" or "woke". Only `read` confirms a read.
 
-## 9. The answer bar shares the words
+## 14. Measured verdicts
 
-- `sendAll` reads the same `TOLD` and `NOT_TOLD` (`setSentStatus`). State `bar` draws them: "No session was told. Each owner reads its answer at its next wake or turn start."
-- `sendAll`'s write failure `barNote` ends "Copy the answers and reply in the thread." New: "Copy the answers and paste them in chat." It is not drawn, and the builder changes it.
-
-## 10. What the page cannot know
-
-- `askWriter()` reads `meta/page.writer`. After a triage rotation that name can be stale, and the page cannot tell. The cause fix is in the
-  skill (the new writer watches the page at start, step note), not on this screen.
-- No state claims "delivered" or "woke". Only `read` confirms.
-
-## 11. Measured verdicts
-
-Headless Chrome, every state at 390, 800 and 1280, in light and dark. Checks: no sideways scroll, no element past the page edge,
-and every Ask button at least 44 px high. Both checks went red on a broken copy, with 30 px row buttons 900 px wide.
+Headless Chrome, every state at 390, 800 and 1280, in light and dark. Checks: no sideways scroll, no element past the
+page edge, every Ask button at least 44 px high, the 390 hint at 66 px or less, and one Send box size at every state.
 
 | State | 390 | 800 | 1280 |
 |---|---|---|---|
-| rows, saving, untold, stale, failed, boxrow, stack, bar (light and dark) | pass | pass | pass |
+| all 12 states, light and dark | pass | pass | pass |
 
-## 12. Work outside this folder (for the builder)
+## 15. Work outside this folder (for the builder)
 
-- page.html: the ask state is keyed by id (`sent` becomes a map), with per-row status and Undo in `askItem`. Also the new words, and `barNote`.
-- SKILL.md: no change for the words. The writer-watch fix is in the step note.
+- page.html: `askState.stack` (kept in `waiting.askStack`), Add to list, a batch send with one `at`, one comment and one Undo,
+  the line under the buttons, the failed row, and the Send label count.
+- SKILL.md: the writer reads several asks with one `at`. No change to the record fields.

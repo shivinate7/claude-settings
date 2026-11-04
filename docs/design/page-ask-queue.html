@@ -36,46 +36,51 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 <body>
 <div class="sample" id="sampleBanner">Sample. No ask, answer, session name, number or time on this page is real.</div>
 <header class="tool">
-  <h1>Waiting page: several asks in a row, and words that say what is known (step ask-reaches-writer)</h1>
+  <h1>Waiting page: asks stack in the box and go together on one Send</h1>
   <div class="row" id="rowS"><span>State</span>
-    <button data-s="rows">Undo on each row (pick)</button>
-    <button data-s="saving">Row: saving</button>
-    <button data-s="untold">Row: no session told</button>
-    <button data-s="stale">Row: not read after 40 min</button>
-    <button data-s="failed">Row: not saved</button>
-    <button data-s="boxrow">Latest Undo at the box</button>
-    <button data-s="stack">Stack, then send</button>
-    <button data-s="bar">Answer bar: no session told</button>
+    <button data-s="empty">Empty box</button>
+    <button data-s="one">One ask stacked</button>
+    <button data-s="several">Several stacked</button>
+    <button data-s="edit">Edit a stacked ask</button>
+    <button data-s="removed">Remove, with Undo</button>
+    <button data-s="send">Final Send</button>
+    <button data-s="sent">Sent, Undo for the batch</button>
+    <button data-s="untold">Sent, no session told</button>
+    <button data-s="reach">Reach after send</button>
+    <button data-s="stale">Not read after 40 min</button>
+    <button data-s="failed">One ask not saved</button>
+    <button data-s="undone">Batch undone</button>
   </div>
   <div class="row" id="rowH"><span>Hide</span>
-    <button class="hide" data-hide="rows">Hide "Undo on each row"</button>
-    <button class="hide" data-hide="boxrow">Hide "Latest Undo at the box"</button>
-    <button class="hide" data-hide="stack">Hide "Stack, then send"</button>
-    <button class="hide" data-hide="stale">Hide the not-read line (item 6)</button>
-    <button class="hide" data-hide="copy">Hide Copy ask on a row (item 7)</button>
+    <button class="hide" data-hide="stale">Hide the not-read line (item 11)</button>
+    <button class="hide" data-hide="copy">Hide Copy ask on a stuck row (item 12)</button>
   </div>
   <div class="row" id="rowW"><span>Size</span>
-    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
+    <button data-w="all">Phone and desktop</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Desktop 1280</button>
   </div>
   <div class="row" id="rowT"><span>Theme</span>
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button data-lab="1" id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=rows|saving|untold|stale|failed|boxrow|stack|bar</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=rows,boxrow,stack,stale,copy</code>. Notes: <code>page-ask-queue-notes.md</code>. Screen: <code>skills/waiting-page/page.html</code> at 72034d9a, CSS copied whole. The question cards are drawn short: this step does not change them.</p>
+  <p>Deep links: <code>#s=empty|one|several|edit|removed|send|sent|untold|reach|stale|failed|undone</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=stale,copy</code>. Notes: <code>page-ask-queue-notes.md</code>. Screen: <code>skills/waiting-page/page.html</code> at 0dbab787, CSS copied whole. The question cards are drawn short: this step does not change them.</p>
 </header>
 <main id="stage">
-  <section class="st" data-state="rows" id="askRows"><h2>Undo on each row (pick)</h2><p>Three asks sent in 20 seconds. Each row has its own status line and its own Undo count. The box is empty and ready for the next ask.</p><div class="frames"></div></section>
-  <section class="st" data-state="saving" id="askSaving"><h2>Undo on each row: one ask still saving</h2><p>Send clears the box at the press. The row says "Saving…" while the owner already types the next ask.</p><div class="frames"></div></section>
-  <section class="st" data-state="untold" id="askUntold"><h2>Undo on each row: no session was told</h2><p>The ask is saved, but no wake went out. The row says so, says when the page writer reads it, and offers Copy ask.</p><div class="frames"></div></section>
-  <section class="st" data-state="stale" id="askStale"><h2>Undo on each row: not read after 40 minutes</h2><p>The Nov 2 case. The row stops saying only "Waiting" and says how long it has gone unread, with Copy ask.</p><div class="frames"></div></section>
-  <section class="st" data-state="failed" id="askFailed"><h2>Undo on each row: one ask not saved</h2><p>The failed ask keeps its words on its row, with Try again and Copy ask. The box keeps the next ask.</p><div class="frames"></div></section>
-  <section class="st" data-state="boxrow" id="askBoxRow"><h2>Latest Undo at the box</h2><p>The hint row keeps the latest send and its Undo, as today. An earlier send still in its 8 seconds gets its Undo on its row.</p><div class="frames"></div></section>
-  <section class="st" data-state="stack" id="askStack"><h2>Stack, then send</h2><p>"Add to list" stacks the typed ask under the box. One Send sends them all, then each row works as in the pick.</p><div class="frames"></div></section>
-  <section class="st" data-state="bar" id="barUntold"><h2>Answer bar: no session was told</h2><p>The same words reach the answer bar, because the bar and the box share them. No "reply in the thread".</p><div class="frames"></div></section>
+  <section class="st" data-state="empty" id="askEmpty"><h2>Empty box</h2><p>Nothing typed and nothing stacked. Add to list and Send ask are off, and the hint says why.</p><div class="frames"></div></section>
+  <section class="st" data-state="one" id="askOne"><h2>One ask stacked</h2><p>One press on Add to list moved the words out of the box into "Not sent yet". Nothing went to the store. Send ask sends that one.</p><div class="frames"></div></section>
+  <section class="st" data-state="several" id="askSeveral"><h2>Several asks stacked</h2><p>Three asks wait in the list, each with Edit and Remove. The box holds a fourth, so Send counts four.</p><div class="frames"></div></section>
+  <section class="st" data-state="edit" id="askEdit"><h2>Edit a stacked ask</h2><p>Edit opens the ask in place. It keeps its number and its place. Rows above it do not move.</p><div class="frames"></div></section>
+  <section class="st" data-state="removed" id="askRemoved"><h2>Remove, with Undo</h2><p>Remove keeps the row's place and offers Undo remove. The row goes at the next Add, Send or reload.</p><div class="frames"></div></section>
+  <section class="st" data-state="send" id="askSend"><h2>Final Send</h2><p>The press is in flight. Send is off while the batch saves. Each row shows its own write. The box stays open for the next ask.</p><div class="frames"></div></section>
+  <section class="st" data-state="sent" id="askSent"><h2>Sent, with one Undo for the batch</h2><p>All three are saved under one time. One Undo at the box takes back the whole batch for 8 seconds.</p><div class="frames"></div></section>
+  <section class="st" data-state="untold" id="askUntold"><h2>Sent, no session told</h2><p>The asks are saved, but no wake went out. The line says when the writer reads them.</p><div class="frames"></div></section>
+  <section class="st" data-state="reach" id="askReach"><h2>Each ask's reach after send</h2><p>Four minutes on. Each row has its own reach: one answered, one routed and read, one read and waiting.</p><div class="frames"></div></section>
+  <section class="st" data-state="stale" id="askStale"><h2>Not read after 40 minutes</h2><p>A batch that no session has read. Each row says how long, and offers Copy ask.</p><div class="frames"></div></section>
+  <section class="st" data-state="failed" id="askFailed"><h2>One ask not saved</h2><p>Two of three saved. The third stays in the list with its words and its code. Send ask tries it again. Undo covers the two that saved.</p><div class="frames"></div></section>
+  <section class="st" data-state="undone" id="askUndone"><h2>Batch undone</h2><p>Undo deleted the three records and put the asks back in the list, in their order. The box keeps what was typed since.</p><div class="frames"></div></section>
 </main>
 
 <script type="text/plain" id="pagecss">
-/* page.html lines 8-773 at 72034d9a, unchanged. */
+/* page.html lines 8-774 at 0dbab787, unchanged. */
 /* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
    repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
 :root {
@@ -357,7 +362,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt .line .changebtn { grid-column: 3; grid-row: 1; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
 .receipt .line b { overflow-wrap: anywhere; color: var(--good); }
-.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
 /* A multi answer lists each pick with its letter and title, in order. */
 .receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
 .receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
@@ -734,10 +739,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
 /* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
 .g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
-/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading. */
-.tier.ruled { gap: 10px; }
-.tier.ruled > header { display: grid; gap: 2px; }
-.tier.ruled > header h2 { font: 700 17px/1.25 var(--body); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading.
+   The Answered section (.sunk) has the same shape, and its cards take a ruling card's size. */
+.tier.ruled, .tier.sunk { gap: 10px; }
+.tier.ruled > header, .tier.sunk > header { display: grid; gap: 2px; }
+.tier.ruled > header h2, .tier.sunk > header h2 { font: 700 17px/1.25 var(--body); }
 .rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
 .rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
 .rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
@@ -747,9 +753,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* Not .rbody: the Status tab already uses that class. */
 .rlist { display: grid; gap: 10px; }
 /* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
-.card.rcard { padding: 14px 16px; gap: 8px; }
+.card.rcard, .tier.sunk .card { padding: 14px 16px; gap: 8px; }
 .card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
-.rcard .title { font-size: 17px; max-width: 60ch; }
+.rcard .title, .tier.sunk .card .title { font-size: 17px; max-width: 60ch; }
 .rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
 .ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
 .ruledline .key { flex: none; max-width: none; }
@@ -845,28 +851,63 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 </script>
 
 <script type="text/plain" id="newcss">
-/* ---- New for ask-reaches-writer. Today's rules above are page.html's own, unchanged. ---- */
+/* ---- New for Stack, then send. Today's rules above are page.html's own, unchanged. ---- */
 html.coarse .askhint .kbd { display: none; } /* Mockup stand-in for @media (pointer: coarse). */
-/* A row's status line: the shape of .astate, plus a slot at its right end for the row's Undo, Copy ask or Try again.
-   The slot keeps the box of its widest button, so the line does not move when the Undo count ends. */
-.arow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 44px; }
-.arow .astate { min-width: 0; }
-.arow .acts { display: flex; gap: 8px; justify-content: flex-end; }
-.arow .acts .btn { min-height: 44px; white-space: nowrap; }
-.arow .acts .spent { visibility: hidden; }
-.astate.bad { color: var(--due); }
-.astate.quiet { font-weight: 400; color: var(--muted); }
-.astate .t { font-variant-numeric: tabular-nums; }
+/* The row under the box: hint, the Copy ask slot, Add to list, Send. Send stays flush with the box's right edge. */
+.askrow { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.askrow .slot { grid-column: 2; }
+.askrow .btn.askadd { grid-column: 3; }
+.askrow .btn.askgo { grid-column: 4; }
+.btn.askadd { min-height: 48px; white-space: nowrap; }
+.btn.askadd:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+/* A label that changes keeps the box of its widest form: the shown label and a hidden sizer share one grid cell. */
+.btn.fixw { display: inline-grid; justify-items: center; }
+.btn.fixw > span { grid-area: 1 / 1; }
+.btn.fixw > .sz { visibility: hidden; }
 @media (max-width: 520px) {
-  .arow { grid-template-columns: minmax(0, 1fr); }
-  .arow .acts { justify-content: flex-start; }
+  .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Three lines reserved, so typing or a new count never moves the buttons under the hint. */
+  .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
+  .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
 }
-/* Stack, then send: each stacked ask is a quiet card under the box with Edit and Remove. */
+/* The tray under the row: the line that answers Send or Undo, then the asks not sent yet. */
+.tray { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tray:empty { display: none; }
+.sline { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; min-height: 44px; font-size: 14.5px; }
+.sline .g { align-self: center; }
+.sline b { color: var(--good); }
+.sline .bad { color: var(--due); font-weight: 600; }
+.sline .btn { font-variant-numeric: tabular-nums; }
+.sline .btn.spent { visibility: hidden; }
+@media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }
+.stackh { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
 .stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.stack li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 8px 12px; border: 1.5px dashed var(--line); border-radius: var(--r); background: var(--ground); }
-.stack .sn { font: 600 13px var(--mono); color: var(--muted); }
-.stack .stext { min-width: 0; overflow-wrap: anywhere; }
-.stack .btn { min-height: 44px; }
+/* A stacked ask is not in the store yet: a dashed edge, the look the page gives a thing not yet sent. */
+.stack > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
+.stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
+.stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
+.stack .stext.sedit { padding-block: 0; }
+.stack .sacts { display: flex; gap: 4px; justify-content: flex-end; }
+.stack .sacts .btn { min-height: 44px; }
+.stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.stack .sstate.ok { color: var(--good); font-weight: 600; }
+.stack textarea { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
+.stack .serr { grid-column: 2 / -1; margin: 0; font-size: 14.5px; font-weight: 600; color: var(--due); }
+.stack > li.failed { border-color: var(--due); }
+.stack > li.gone { background: transparent; }
+.stack > li.gone .stext { color: var(--muted); }
+@media (max-width: 520px) {
+  .stack > li { grid-template-columns: 24px minmax(0, 1fr); }
+  .stack .sacts { grid-column: 2; justify-content: flex-start; }
+  .stack .serr { grid-column: 2; }
+}
+/* An ask row's stuck line: today's .astate, plus Copy ask at its right end. */
+.arow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 44px; }
+.arow .btn { min-height: 44px; white-space: nowrap; }
+.astate.bad { color: var(--due); }
+@media (max-width: 520px) { .arow { grid-template-columns: minmax(0, 1fr); } .arow .btn { justify-self: start; } }
 
 /* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
 [data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
@@ -881,118 +922,146 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 <script>
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const WRITER = "triage";
-// The status words. One home: the row, the hint and the answer bar read them from here.
-// Each claims only what the page knows: the store write, the comment send, or a session's `read`.
-const W = {
-  saving: "Saving…",
-  told: (t) => `Saved ${t}. A wake was sent. Not read by ${WRITER} yet.`,
-  untold: (t) => `Saved ${t}. No session was told. It waits for ${WRITER}'s next wake or turn start.`,
-  saved: (t) => `Saved ${t}. Not read by ${WRITER} yet.`,
-  stale: (t, m) => `Saved ${t}. Not read by ${WRITER} after ${m}. If it is not running, copy the ask into a session's chat.`,
-  failed: (c) => `Not saved (${c}). Your words are kept here.`,
-  read: (o, t) => `Read by ${o} <span class="t">${t}</span>. Waiting for its answer.`,
-};
+// Today's words, from page.html: TOLD and NOT_TOLD beside MAX_BYTES, the row words in askItem.
+const TOLD = "A wake was sent.";
+const NOT_TOLD = `No session was told. It waits for ${WRITER}'s next wake or turn start.`;
 // Older asks, as the list draws them today (askItem).
 const OLDER = [
-  { id: "ask-r1", at: "Nov 3, 17:02 CST", waited: "40 minutes", text: "Is the iOS build still red, or did the pin bump fix it?", state: "read", owner: "lane ios-pin", read: "17:04" },
-  { id: "ask-r2", at: "Nov 3, 16:10 CST", text: "The rail chips feel small on my phone.\nI miss them with my thumb.", state: "answered", fresh: true, owner: "triage", answered: "Nov 3, 16:31 CST",
-    reply: "Thanks. Each chip is 32 px high: under the 44 px touch floor. I filed it for the next page-review lane.", home: "step page-review", filed: "Nov 3, 16:32 CST" },
+  { id: "ask-r2", at: "Nov 3, 16:10 CST", text: "The rail chips feel small on my phone.\nI miss them with my thumb.", state: "answered", owner: "triage", answered: "Nov 3, 16:31 CST", reply: "Thanks. I filed it for the next page-review lane." },
   { id: "ask-r3", at: "Nov 2, 11:04 CST", text: "What does “Pick stands” mean on the page?", state: "answered", owner: "triage", answered: "Nov 2, 11:09 CST", reply: "It is the last section." },
 ];
-// Three asks typed back to back, newest first.
-const NEW = [
-  { id: "ask-n3", at: "Nov 3, 17:42 CST", t: "17:42", text: "And move the Status tab's log under a fold." },
-  { id: "ask-n2", at: "Nov 3, 17:42 CST", t: "17:42", text: "Please batch the two hook lanes into one PR." },
-  { id: "ask-n1", at: "Nov 3, 17:41 CST", t: "17:41", text: "Why did lane tier-fold need three review rounds?" },
+// Three asks typed in this order. The stack shows them 1 to 3; the list shows them newest first.
+const ASKS = [
+  { id: "ask-n1", text: "Why did lane tier-fold need three review rounds?" },
+  { id: "ask-n2", text: "Please batch the two hook lanes into one PR." },
+  { id: "ask-n3", text: "And move the Status tab's log under a fold." },
 ];
+const BOX4 = "Also: can the rail chips grow to 44 px?";
 
-const btn = (id, label, cls = "alt") => `<button class="btn ${cls}" type="button" id="${id}">${label}</button>`;
-// One row. `st` is the row's status: saving, told, untold, saved, stale, failed, read, answered. `undo` is seconds left, or 0.
-function askItem(a, o) {
-  const { st, undo = 0, lab, labText, hide = [] } = o;
+const btn = (id, label, cls = "alt", extra = "") => `<button class="btn ${cls}" type="button" id="${id}"${extra}>${label}</button>`;
+const lbl = (lab, txt, kind = "new") => (lab && txt ? ` data-${kind}="${esc(txt)}"` : "");
+
+// One sent ask in the list, as askItem draws it today. `st`: wait, read, answered, stale.
+function askItem(a, o = {}) {
+  const { st, lab, labText, hide = [] } = o;
   if (st === "answered" && !a.fresh) {
     return `<li class="askc folded"><button class="frow" type="button" aria-expanded="false"><span class="g done" aria-hidden="true"></span><span class="ftext">${esc(a.text)}</span><span class="fwhen">Answered ${esc(a.answered)}</span><span class="fgo">Show answer</span></button></li>`;
   }
   const answered = st === "answered";
-  // A row that never saved has no `at` in the store, so it never says "You asked" and never shows the waiting disc.
-  const failed = st === "failed";
-  const head = `<div class="ahead"><span class="g ${answered ? "done" : failed ? "due" : "wait"}" aria-hidden="true"></span><span class="aby">${failed ? "Not sent, typed " + esc(a.t) : "You asked, " + esc(a.at)}</span>${a.waited && !answered ? `<span>waited ${esc(a.waited)}</span>` : ""}${answered && a.fresh ? '<span class="newmark">New answer</span><button class="morebtn" type="button" aria-expanded="true">Fold</button>' : ""}</div>`;
+  const head = `<div class="ahead"><span class="g ${answered ? "done" : "wait"}" aria-hidden="true"></span><span class="aby">You asked, ${esc(a.at)}</span>${!answered && a.waited ? `<span>waited ${esc(a.waited)}</span>` : ""}${answered && a.fresh ? '<span class="newmark">New answer</span><button class="morebtn" type="button" aria-expanded="true">Fold</button>' : ""}</div>`;
   const text = `<p class="atext">${esc(a.text)}</p>`;
-  if (answered) return `<li class="askc">${head}${text}<div class="thread"><p class="lhead">Answer from ${esc(a.owner)}, ${esc(a.answered)}</p><p class="reply">${esc(a.reply)}</p>${a.home ? `<p class="filed">Filed in ${esc(a.home)}, ${esc(a.filed)}</p>` : ""}</div></li>`;
-  const words = { saving: W.saving, told: W.told(a.t), untold: W.untold(a.t), saved: W.saved(a.t), stale: W.stale(a.t, a.waited), failed: W.failed("permission-denied"), read: W.read(a.owner, a.read) }[st];
-  const cls = st === "failed" ? " bad" : st === "saving" ? " quiet" : "";
-  const acts = [];
-  if (undo > 0 && st !== "failed" && st !== "saving") acts.push(btn(a.id + "-undo", `Undo send (${undo})`));
-  // The count ended in this view: the button keeps its box, hidden, until the next load, so no row below moves.
-  if (o.spent) acts.push(`<button class="btn alt spent" type="button" tabindex="-1" aria-hidden="true">Undo send (8)</button>`);
-  if (st === "failed") acts.push(btn(a.id + "-retry", "Try again", "send"));
-  if ((st === "failed" || ((st === "untold" || st === "stale") && !hide.includes("copy")))) acts.push(btn(a.id + "-copy", "Copy ask"));
-  const live = st === "failed" ? ' role="alert"' : ' aria-live="polite"';
-  return `<li class="askc"${lab ? ` data-new="${esc(labText || "own status line and Undo")}"` : ""}>${head}${text}<div class="arow"><p class="astate${cls}"${live}>${words}</p>${acts.length ? `<span class="acts">${acts.join("")}</span>` : ""}</div></li>`;
+  const L = lbl(lab, labText);
+  if (answered) return `<li class="askc"${L}>${head}${text}<div class="thread"><p class="lhead">Answer from ${esc(a.owner)}, ${esc(a.answered)}</p><p class="reply">${esc(a.reply)}</p></div></li>`;
+  if (st === "read") return `<li class="askc"${L}>${head}${text}<p class="astate">Read by ${esc(a.owner)} <span class="t">${esc(a.read)}</span>. Waiting for its answer.</p></li>`;
+  if (st === "stale" && !hide.includes("stale")) {
+    const copy = hide.includes("copy") ? "" : btn(a.id + "-copy", "Copy ask");
+    return `<li class="askc"${L}>${head}${text}<div class="arow"><p class="astate bad">Not read by ${WRITER} after ${esc(a.waited)}. If ${WRITER} is not running, copy the ask into a session's chat.</p>${copy}</div></li>`;
+  }
+  return `<li class="askc"${L}>${head}${text}<p class="astate">Waiting for ${WRITER} to read it.</p></li>`;
 }
 
-// The box. `hint` is the hint row's inner HTML; `slot` the button beside Send ask; `val` the typed text.
-function askForm({ hint, slot = "", val = "", lab, labText, extra = "", go = "Send ask", addBtn = "" }) {
-  return `<form class="askform" onsubmit="return false"${lab ? ` data-${labText ? "new" : "today"}="${esc(labText || "ask box")}"` : ""}>
+// One ask not sent yet. `mode`: idle, edit, gone, saving, saved, failed.
+function stackRow(a, n, mode, lab, labText) {
+  const L = lbl(lab, labText);
+  const num = `<span class="sn" aria-hidden="true">${n}</span>`;
+  const ed = btn(a.id + "-edit", "Edit", "quiet", ` aria-label="Edit ask ${n}"`), rm = btn(a.id + "-rm", "Remove", "quiet", ` aria-label="Remove ask ${n}"`);
+  if (mode === "edit") return `<li${L}>${num}<div class="stext sedit"><textarea rows="2" aria-label="Ask ${n}">${esc(a.text)}</textarea></div><span class="sacts">${btn(a.id + "-done", "Done", "alt")}${rm}</span></li>`;
+  if (mode === "gone") return `<li class="gone"${L}>${num}<p class="stext">Removed: “${esc(a.text)}”</p><span class="sacts">${btn(a.id + "-back", "Undo remove", "alt")}</span></li>`;
+  if (mode === "saving") return `<li${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts"><span class="sstate">Saving…</span></span></li>`;
+  if (mode === "saved") return `<li${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts"><span class="sstate ok"><span class="g done" aria-hidden="true"></span>Saved</span></span></li>`;
+  if (mode === "failed") return `<li class="failed"${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts">${btn(a.id + "-copy", "Copy ask")}${ed}${rm}</span><p class="serr" role="alert">Not saved (permission-denied). Your words are kept here.</p></li>`;
+  return `<li${L}>${num}<p class="stext">${esc(a.text)}</p><span class="sacts">${ed}${rm}</span></li>`;
+}
+const stackList = (rows, lab, labText) => `<p class="stackh" id="stackH">Not sent yet</p><ol class="stack" aria-labelledby="stackH"${lbl(lab, labText)}>${rows.join("")}</ol>`;
+
+// The line that answers Send and Undo: at the box, under the buttons.
+function sline(kind, o = {}) {
+  const { undo = 0, lab, labText, n = 3, of = 0 } = o;
+  const L = lbl(lab, labText);
+  const u = undo > 0 ? btn("askUndo", `Undo send (${undo})`) : `<button class="btn alt spent" type="button" tabindex="-1" aria-hidden="true">Undo send (8)</button>`;
+  const what = of ? `${n} of ${of} sent 17:42.` : `Sent 17:42. ${n} asks.`;
+  if (kind === "saving") return `<p class="sline" aria-live="polite"${L}><span class="g wait" aria-hidden="true"></span><span>Saving ${n} asks… Keep typing: the box does not wait for the send.</span></p>`;
+  if (kind === "undone") return `<p class="sline" aria-live="polite"${L}><span class="g wait" aria-hidden="true"></span><span>Undone. Your ${n} asks are back in the list, not sent.</span></p>`;
+  const told = kind === "untold" ? NOT_TOLD : TOLD;
+  return `<p class="sline" aria-live="polite"${L}><span class="g done" aria-hidden="true"></span><span><b>${what}</b> ${told}</span>${u}</p>`;
+}
+
+// The box. `stackN` counts the asks in the list; the typed box adds one more to Send.
+function askForm({ hint, val = "", stackN = 0, busy = false, tray = "", lab, labText }) {
+  const n = stackN + (val.trim() ? 1 : 0);
+  const go = n > 1 ? `Send ${n} asks` : "Send ask";
+  const addOff = !val.trim() ? " disabled" : "", goOff = !n || busy ? " disabled" : "";
+  return `<form class="askform" onsubmit="return false"${lbl(lab, labText, labText ? "new" : "today")}>
     <label for="askText">Your ask</label>
     <textarea id="askText" rows="3" aria-describedby="askHint">${esc(val)}</textarea>
-    <div class="askrow"><p class="askhint" id="askHint" aria-live="polite">${hint}</p><span class="slot">${slot}${addBtn}</span><button class="btn askgo" type="button" id="askSend"${val || go !== "Send ask" ? "" : " disabled"}>${go}</button></div>
-    ${extra}
+    <div class="askrow"><p class="askhint" id="askHint" aria-live="polite">${hint}</p><span class="slot"></span>
+      <button class="btn alt askadd" type="button" id="askAdd"${addOff}>Add to list</button>
+      <button class="btn askgo fixw" type="button" id="askSendBtn"${goOff}><span>${go}</span><span class="sz" aria-hidden="true">Send 99 asks</span></button></div>
+    <div class="tray">${tray}</div>
   </form>`;
 }
-const IDLE = `<span>It goes to ${WRITER}, which answers here or passes it on.<span class="kbd"> Ctrl+Enter sends.</span></span>`;
-const SENT_HINT = (n) => `<span class="g done" aria-hidden="true"></span><span><b>Sent 17:42.</b> ${n > 1 ? n + " asks can still be undone, each on its row below." : "Undo is on its row below."} Type the next one any time.</span>`;
+const KBD = '<span class="kbd"> Ctrl+Enter sends.</span>';
+const H = {
+  empty: `<span>Add to list and Send ask turn on once you type. Asks go to ${WRITER}, which answers here or passes them on.${KBD}</span>`,
+  typed: `<span>Asks go to ${WRITER}, which answers here or passes them on.${KBD}</span>`,
+  waiting: (n) => `<span>${n === 1 ? "1 ask is" : n + " asks are"} not sent yet. Add more, or send.${KBD}</span>`,
+  withBox: (n) => `<span>Send takes the ${n} in the list and the one in the box.${KBD}</span>`,
+  retry: `<span>1 ask is not sent yet. Send ask tries it again.${KBD}</span>`,
+};
 
-// The body of the Ask section for each state.
+// Three sent asks, newest first, as the list draws them after the batch. One `at` for the batch.
+const sentRows = (sts, extra = {}) => ASKS.slice().reverse().map((a, i) => ({ ...a, at: "Nov 3, 17:42 CST", ...(extra[a.id] || {}) }))
+  .map((a, i) => askItem(a, { st: sts[i], ...(extra.o || {}) }));
+const older = () => OLDER.map((a) => askItem(a, { st: a.state }));
+const ol = (rows) => `<ol class="asklist" aria-label="Your asks, newest first">${rows.join("")}</ol><button class="unfold older" type="button" aria-expanded="false"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">Show 4 older asks</span></span></button>`;
+
 function asksBody(s, lab, hide) {
-  const older = (from = 0) => OLDER.slice(from).map((a, i) => askItem(a, { st: a.state, lab: false }));
-  const ol = (rows) => `<ol class="asklist" aria-label="Your asks, newest first">${rows.join("")}</ol><button class="unfold older" type="button" aria-expanded="false"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">Show 4 older asks</span></span></button>`;
-  if (s === "rows") return askForm({ hint: SENT_HINT(2), lab, labText: "the box clears at Send; the hint points at the rows" }) + ol([
-    askItem(NEW[0], { st: "told", undo: 7, lab, labText: "own status line and Undo" }),
-    askItem(NEW[1], { st: "told", undo: 2, lab, labText: "its own Undo, still counting" }),
-    askItem(NEW[2], { st: "saved", spent: true, lab, labText: "Undo over: its box stays, empty, so nothing moves" }),
-    ...older()]);
-  if (s === "saving") return askForm({ hint: `<span class="g done" aria-hidden="true"></span><span><b>Sending…</b> Keep typing; it saves on its own.</span>`, val: "Also: can the rail", lab, labText: "the next ask, typed while the last one saves" }) + ol([
-    askItem(NEW[0], { st: "saving", lab, labText: "saving, no Undo yet" }),
-    askItem(NEW[1], { st: "told", undo: 4, lab: false }),
-    ...older()]);
-  if (s === "untold") return askForm({ hint: SENT_HINT(1) }) + ol([
-    askItem(NEW[0], { st: "untold", undo: 6, lab, labText: "no session told: when it is read, and Copy ask", hide }),
-    ...older()]);
+  if (s === "empty") return askForm({ hint: H.empty, lab, labText: "" }) + ol(older());
+  if (s === "one") return askForm({ hint: H.waiting(1), stackN: 1, tray: stackList([stackRow(ASKS[0], 1, "idle", lab, "the ask waits here, not in the store")]), lab, labText: "Add to list beside Send" }) + ol(older());
+  if (s === "several") return askForm({ hint: H.withBox(3), val: BOX4, stackN: 3, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, "idle", lab && i === 0, "Edit and Remove on each"))), lab, labText: "Send counts the list and the box" }) + ol(older());
+  if (s === "edit") return askForm({ hint: H.waiting(3), stackN: 3, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, i === 1 ? "edit" : "idle", lab && i === 1, "edits in place, keeps its number"))) }) + ol(older());
+  if (s === "removed") return askForm({ hint: H.waiting(2), stackN: 2, tray: stackList(ASKS.map((a, i) => stackRow(a, i + 1, i === 2 ? "gone" : "idle", lab && i === 2, "Remove keeps the place, with Undo remove"))) }) + ol(older());
+  if (s === "send") return askForm({ hint: H.typed, val: "Also: can the", busy: true, stackN: 3, tray: sline("saving", { lab, labText: "the answer to Send, at the box" }) + stackList([stackRow(ASKS[0], 1, "saved"), stackRow(ASKS[1], 2, "saved"), stackRow(ASKS[2], 3, "saving", lab, "each write shows on its row")]), lab: false }) + ol(older());
+  if (s === "sent") return askForm({ hint: H.empty, tray: sline("told", { undo: 7, lab, labText: "one Undo for the whole batch" }) }) + ol([...sentRows(["wait", "wait", "wait"], { o: {} }), ...older()]);
+  if (s === "untold") return askForm({ hint: H.empty, tray: sline("untold", { undo: 5, lab, labText: "today's NOT_TOLD words, for the batch" }) }) + ol([...sentRows(["wait", "wait", "wait"]), ...older()]);
+  if (s === "reach") {
+    const ex = {
+      "ask-n3": { owner: "triage", answered: "Nov 3, 17:45 CST", reply: "Done in lane status-fold. It lands with the next batch.", fresh: true },
+      "ask-n2": { owner: "lane hooks-batch", read: "17:46" },
+      "ask-n1": { owner: "triage", read: "17:44" },
+      o: { lab, labText: "" },
+    };
+    const rows = ASKS.slice().reverse().map((a) => ({ ...a, at: "Nov 3, 17:42 CST", ...ex[a.id] }));
+    return askForm({ hint: H.empty, tray: sline("told", { undo: 0 }) }) + ol([
+      askItem(rows[0], { st: "answered", lab, labText: "answered: today's thread" }),
+      askItem(rows[1], { st: "read", lab, labText: "routed, read by its owner" }),
+      askItem(rows[2], { st: "read", lab, labText: "read by the writer" }),
+      ...older()]);
+  }
   if (s === "stale") {
-    const a = { ...NEW[2], at: "Nov 3, 17:02 CST", t: "17:02", waited: "40 minutes" };
-    return askForm({ hint: IDLE }) + ol([askItem(a, { st: hide.includes("stale") ? "saved" : "stale", lab, labText: hide.includes("stale") ? "the line without item 6" : "not read after 40 minutes", hide }), ...older(1)]);
+    const rows = ASKS.slice(0, 2).reverse().map((a) => ({ ...a, at: "Nov 3, 17:02 CST", waited: "40 minutes" }));
+    return askForm({ hint: H.empty }) + ol([...rows.map((a, i) => askItem(a, { st: "stale", hide, lab: lab && i === 0, labText: hide.includes("stale") ? "today's line, without item 11" : "not read after 40 minutes" })), ...older()]);
   }
-  if (s === "failed") return askForm({ hint: `<span>It goes to ${WRITER}, which answers here or passes it on.</span>`, val: "And move the Status tab's log under a fold.", lab: false }) + ol([
-    askItem(NEW[1], { st: "failed", lab, labText: "not saved: words kept on the row" }),
-    askItem(NEW[2], { st: "told", undo: 3, lab: false }),
-    ...older()]);
-  if (s === "boxrow") return askForm({ hint: `<span class="g done" aria-hidden="true"></span><span><b>Sent 17:42.</b> A wake was sent. Not read by ${WRITER} yet.</span>`, slot: btn("askUndo", "Undo send (7)"), lab, labText: "latest send and its Undo stay at the box" }) + ol([
-    askItem({ ...NEW[0] }, { st: "told", undo: 0, lab: false }),
-    askItem(NEW[1], { st: "told", undo: 2, lab, labText: "an earlier send in its 8 s: Undo on its row" }),
-    askItem(NEW[2], { st: "saved", lab: false }),
-    ...older()]);
-  if (s === "stack") {
-    const stack = `<ol class="stack" aria-label="Asks to send"${lab ? ' data-new="asks stacked before Send"' : ""}>${NEW.slice().reverse().map((a, i) => `<li><span class="sn">${i + 1}</span><span class="stext">${esc(a.text)}</span><button class="btn quiet" type="button">Remove</button></li>`).join("")}</ol>`;
-    return askForm({ hint: `<span>3 asks wait to send. Each goes to ${WRITER} on its own.</span>`, addBtn: btn("askAdd", "Add to list"), go: "Send 3 asks", extra: stack, lab, labText: "Add to list, then one Send" }) + ol(older());
-  }
+  if (s === "failed") return askForm({ hint: H.retry, stackN: 1, tray: sline("told", { undo: 6, n: 2, of: 3, lab, labText: "Undo covers the two that saved" }) + stackList([stackRow(ASKS[1], 1, "failed", lab, "not saved: words, code and Copy ask on the row")]) }) + ol([
+    askItem({ ...ASKS[2], at: "Nov 3, 17:42 CST" }, { st: "wait" }), askItem({ ...ASKS[0], at: "Nov 3, 17:42 CST" }, { st: "wait" }), ...older()]);
+  if (s === "undone") return askForm({ hint: H.withBox(3), val: "Also: can the", stackN: 3, tray: sline("undone", { lab, labText: "the answer to Undo, where Undo was" }) + stackList(ASKS.map((a, i) => stackRow(a, i + 1, "idle", lab && i === 0, "back in their order"))) }) + ol(older());
   return "";
 }
-const waitingOf = (s) => ({ rows: 4, saving: 3, untold: 2, stale: 2, failed: 2, boxrow: 4, stack: 1, bar: 1 }[s]);
+const waitingOf = (s) => ({ empty: 0, one: 0, several: 0, edit: 0, removed: 0, send: 0, sent: 3, untold: 3, reach: 2, stale: 2, failed: 2, undone: 0 }[s]);
 
 function asksSection(s, lab, hide) {
   const n = waitingOf(s);
   return `<section class="in asks" id="asks" aria-labelledby="asksH">
     <div class="asks-head"><h2 id="asksH"><span class="g wait" aria-hidden="true"></span>Ask${n ? `<span class="ct" aria-label="${n} waiting for an answer">${n}</span>` : ""}</h2>
       <p>A question, feedback, anything. A session answers under your ask, so you need not watch the chat.</p></div>
-    <div class="asks-body">${s === "bar" ? askForm({ hint: IDLE }) + `<ol class="asklist">${askItem(OLDER[0], { st: "read" })}</ol>` : asksBody(s, lab, hide)}</div></section>`;
+    <div class="asks-body">${asksBody(s, lab, hide)}</div></section>`;
 }
 function rail(s) {
   const n = waitingOf(s);
-  return `<nav class="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>${s === "bar" ? 1 : 0}</b>of 2 sent</div><div class="sub none"></div><div class="track"></div></div>
+  return `<nav class="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>0</b>of 2 sent</div><div class="sub none"></div><div class="track"></div></div>
     <div class="ov-tier"><a class="ov-head" href="#tier-holds"><span class="g holds" aria-hidden="true"></span>Blocking<span class="ct">1</span></a><div class="chips-n"><button class="nchip" type="button"><span class="no">4</span><span class="nt">Test runner</span></button></div></div>
     <div class="ov-tier"><a class="ov-head" href="#tier-calm"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">1</span></a><div class="chips-n"><button class="nchip" type="button"><span class="no">7</span><span class="nt">Archive stale lanes</span></button></div></div>
-    <div class="ov-tier"><a class="ov-head" href="#asks"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct">${n}</span></a></div></nav>`;
+    <div class="ov-tier${n ? "" : " zero"}"><a class="ov-head" href="#asks"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct">${n}</span></a></div></nav>`;
 }
 function list() {
   return `<div class="list" id="list">
@@ -1000,33 +1069,29 @@ function list() {
       <article class="card holds"><div class="top"><span class="num">No. 4</span><span>waited 2 hours</span></div><h3 class="title">Which test runner should the janitor sweep use?</h3><p class="stake holds"><span class="g holds" aria-hidden="true"></span>Lane janitor-sweep waits for this answer.</p></article></section>
     <section class="tier" id="tier-calm"><header><h2><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">1</span></h2></header>
       <article class="card"><div class="top"><span class="num">No. 7</span><span>waited 1 day</span></div><h3 class="title">Archive the three stale lanes?</h3></article></section>
-    <p class="checked">Checked against main at 72034d9a</p></div>`;
+    <p class="checked">Checked against main at 0dbab787</p></div>`;
 }
 const tabs = () => `<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">2</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>`;
-// The answer bar. In `bar`, its sent panel shows the shared words for "no session was told" (renderSent, setSentStatus).
-function bar(s, lab) {
-  const sent = s === "bar" ? `<div class="sent"><div class="in"><div class="sent-head"><span class="stamp">Sent<small>17:42</small></span><div class="sent-what"><p class="sent-line"><b>1 answer sent. </b><span id="sentStatus"${lab ? ' data-new="shared words: no session told"' : ""}>No session was told. Each owner reads its answer at its next wake or turn start.</span></p><ul class="sent-list"><li><span class="no">No. 4</span></li></ul></div></div><div class="row"><button class="btn alt" type="button">Undo send (6)</button><button class="btn quiet" type="button">Close</button></div></div></div>` : "";
-  return `<div class="bar">${sent}<div class="in"><span class="st"><b>${s === "bar" ? 0 : 1}</b> ready. <b>1</b> stays open.</span><button class="btn send" type="button"${s === "bar" ? " disabled" : ""}>Send ${s === "bar" ? "answers" : "1 answer"}</button></div></div>`;
-}
+// The answer bar does not change in this step: Send answers never counts an ask.
+const bar = () => `<div class="bar"><div class="in"><span class="st"><b>1</b> ready. <b>1</b> stays open.</span><button class="btn send" type="button">Send 1 answer</button></div></div>`;
 function screen(s, theme, lab, w, hide) {
-  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}${w <= 520 ? " coarse" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body${s === "bar" ? ' style="padding-bottom:200px"' : ""}>
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}${w <= 520 ? " coarse" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
 <header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>
 ${tabs()}
 <div class="in main">${rail(s)}${list()}</div>${asksSection(s, lab, hide)}
-${bar(s, lab)}</body></html>`;
+${bar()}</body></html>`;
 }
 
 /* ---------- Harness ---------- */
-const STATES = ["rows", "saving", "untold", "stale", "failed", "boxrow", "stack", "bar"];
-const P = { s: "rows", w: "all", t: "", lab: "on", hide: [] };
-const gone = (s) => P.hide.includes(s);
-function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "rows"; }
+const STATES = ["empty", "one", "several", "edit", "removed", "send", "sent", "untold", "reach", "stale", "failed", "undone"];
+const P = { s: "several", w: "all", t: "", lab: "on", hide: [] };
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "several"; }
 function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
 const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 const fits = [];
 function frame(host, w) {
   const box = document.createElement("div"); box.className = "fr";
-  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Wide") + " " + w + ", " + theme();
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Desktop") + " " + w + ", " + theme();
   const wrap = document.createElement("div"); wrap.className = "fw";
   const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide, state " + P.s; f.style.width = w + "px";
   wrap.append(f); box.append(cap, wrap); host.append(box);
@@ -1044,18 +1109,17 @@ function frame(host, w) {
 }
 addEventListener("resize", () => fits.forEach((f) => f()));
 function render() {
-  if (gone(P.s)) P.s = STATES.find((s) => !gone(s)) || "rows";
   writeHash();
   fits.length = 0;
   document.documentElement.dataset.theme = theme();
-  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = gone(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
   document.querySelectorAll("[data-hide]").forEach((b) => { const on = P.hide.includes(b.dataset.hide); b.textContent = b.textContent.replace(/^(Hide|Show)/, on ? "Show" : "Hide"); b.setAttribute("aria-pressed", String(on)); });
   document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
   document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
   const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
   document.querySelectorAll(".st[data-state]").forEach((sec) => { const on = sec.dataset.state === P.s; sec.classList.toggle("on", on); sec.querySelector(".frames").replaceChildren(); });
   const host = document.querySelector(`.st[data-state="${P.s}"] .frames`);
-  (P.w === "all" ? [390, 800, 1280] : [[800, 1280].includes(Number(P.w)) ? Number(P.w) : 390]).forEach((w) => frame(host, w));
+  (P.w === "all" ? [390, 1280] : [[800, 1280].includes(Number(P.w)) ? Number(P.w) : 390]).forEach((w) => frame(host, w));
 }
 document.querySelector(".tool").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
