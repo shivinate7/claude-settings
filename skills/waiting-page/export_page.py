@@ -25,8 +25,8 @@ Verdict, one line, then exit:
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
-shapes, except that a version pin such as `react@18.3.1` is not an email; a file that is not UTF-8 is binary and not
-scanned. Only the shape counts: words such as "token budget" or "password manager" pass.
+shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails. A file
+that is not UTF-8 is read as latin-1; only a file with a NUL byte or an image or font extension is binary and not scanned. Only the shape counts: words such as "token budget" or "password manager" pass.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -103,6 +103,9 @@ PHONE_OTHER = (
     re.compile(r"(?<!\d)\d{3}([-. ])\d{3}\1\d{4}(?!\d)"),
 )
 VERSION_PIN = re.compile(r"@\d+(?:\.\d+)*(?![\w.-]*[A-Za-z])")  # `@18.3.1` in a CDN address
+# `logo@2x.png`: a retina image name, not an email. Only an image extension after the suffix makes it one.
+RETINA_NAME = re.compile(r"@\d+x(?=\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico)\b)", re.I)
+BINARY_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".eot")
 DATE_START = re.compile(r"\d{4}-\d{2}-\d{2}")
 PHONE_DIGITS = (10, 11)  # a JSON number of this many digits is a phone; 13 digits is an epoch in milliseconds
 
@@ -217,11 +220,26 @@ def supporting_files(folder):
     return found
 
 
+def page_kinds(text):
+    """`kinds_in` for page text, a supporting file or its name: a version pin such as `react@18.3.1` and a retina
+    image name are not emails."""
+    return kinds_in(RETINA_NAME.sub("@", VERSION_PIN.sub("@", text)))
+
+
 def scan_text(label, text, finds):
-    """Append (label, "$", kind) to `finds` for each kind of find in `text`, a page or a supporting text file. A
-    package version pin such as `react@18.3.1` is not an email: its domain has no letter."""
-    text = VERSION_PIN.sub("@", text)
-    finds.extend((label, "$", kind) for kind in kinds_in(text))
+    """Append (label, "$", kind) to `finds` for each kind of find in `text`, a page or a supporting text file."""
+    finds.extend((label, "$", kind) for kind in page_kinds(text))
+
+
+def file_text(rel, raw):
+    """The text of a supporting file to scan: UTF-8, else latin-1 (so a cp1252 note is read). None for a binary
+    file: one with a NUL byte or an image or font extension."""
+    if b"\0" in raw or rel.lower().endswith(BINARY_EXT):
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def refuse(finds, prefix=""):
@@ -281,13 +299,10 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         scan_text(label, text, finds)
         want[label] = raw
     for rel, raw in (files or {}).items():
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            text = None  # a binary file has no text to scan
-        hit = bool(kinds_in(rel))
-        label = "%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, "<redacted>" if hit else rel)
-        finds.extend((label, "$name", kind) for kind in kinds_in(rel))
+        text = file_text(rel, raw)
+        name_kinds = page_kinds(rel)
+        label = "%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, "<redacted>" if name_kinds else rel)
+        finds.extend((label, "$name", kind) for kind in name_kinds)
         if text is not None:
             scan_text(label, text, finds)
         want["%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, rel)] = raw
