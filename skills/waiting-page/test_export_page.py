@@ -20,9 +20,12 @@ Contract the page cases assume (the builder builds to it):
     artifact to artifacts/<id>/. Each file written counts one in `changed N`. A find in an artifact's page, or in a
     supporting file's name or text, refuses only that artifact: exit 1, its copy unchanged, and the other artifacts
     still export. A supporting file that is not UTF-8 is scanned as cp1252 text, so a cp1252 note holding an email
-    refuses; a binary file with no shape in it exports.
+    refuses. A file is binary only with a NUL byte, whatever its name: a binary file with no shape in it exports, and a
+    text file under an image or font name is scanned.
   Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
   Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
+  URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
+    host with no credentials passes.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
 """
@@ -55,6 +58,11 @@ DEEP = "[" * 5000 + "]" * 5000  # nests past the interpreter's recursion limit: 
 RUN_FOLDER = None  # made in setUpModule
 TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
 MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
+PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
+IP_CREDENTIAL_URLS = (
+    ("with a port", "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"),
+    ("with a path and no port", "https://svc:" + PASSWORD + "@10.0.0.5/build"),
+)
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
@@ -663,6 +671,36 @@ class PageScan(Base):
         self.assertNotIn(address, r.stdout + r.stderr, "the address was printed")
         self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
 
+    def test_url_credentials_on_an_ip_host_in_the_page_text_refuse_the_export(self):
+        for index, (label, url) in enumerate(IP_CREDENTIAL_URLS):
+            with self.subTest(label=label):
+                page = write_text(os.path.join(self.tmp.name, "ip-url-%d.html" % index), page_with("<p>Database: %s</p>\n" % url))
+                out = self.out("ip-url-%d" % index)
+                r = self.export(self.fetch(meta={"page": META}), out, page=page)
+                self.assertVerdict(r, "refused", [PASSWORD])
+                self.assertEqual(r.returncode, 1, "%s: URL credentials on an IP host were not refused. Output:\n%s"
+                                 % (label, shown(r, [PASSWORD])))
+                self.assertNotIn(PASSWORD, r.stdout + r.stderr, "%s: the password was printed" % label)
+                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % label)
+
+    def test_url_credentials_on_a_host_name_refuse_the_export(self):
+        """The control for the case above: the same credentials on a host name refuse today, as an email."""
+        url = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"
+        page = write_text(os.path.join(self.tmp.name, "host-url.html"), page_with("<p>Database: %s</p>\n" % url))
+        r = self.export(self.fetch(meta={"page": META}), self.out("host-url"), page=page)
+        self.assertVerdict(r, "refused", [PASSWORD])
+        self.assertEqual(r.returncode, 1, "URL credentials on a host name were not refused. Output:\n" + shown(r, [PASSWORD]))
+        self.assertNotIn(PASSWORD, r.stdout + r.stderr, "the password was printed")
+
+    def test_an_ip_host_without_credentials_is_not_refused(self):
+        """The control for the case above: an IP host in a link with no user and password is an address, not a secret."""
+        page = write_text(os.path.join(self.tmp.name, "ip-host.html"), page_with('<a href="https://10.0.0.5:5432/db">db</a>\n'))
+        out = self.out("ip-host")
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertFalse(says(r, "refused"), "an IP host with no credentials was refused. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "an IP host with no credentials failed. Output:\n" + shown(r))
+        self.assertVerdict(r, "changed")
+
 
 class Rebuild(Base):
     def batch_entries(self, batches):
@@ -975,8 +1013,36 @@ class All(Base):
     def test_a_cp1252_supporting_text_file_with_an_email_refuses_that_artifact(self):
         self.assert_supporting_file_refused("cp1252-email", "notes/cafe.txt", b"caf\xe9 " + MAIL.encode("ascii"), [MAIL])
 
+    def test_url_credentials_on_an_ip_host_in_a_supporting_text_file_refuse_that_artifact(self):
+        url = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"
+        self.assert_supporting_file_refused("ip-url", "notes/db.txt", ("Database: %s\n" % url).encode("ascii"), [PASSWORD])
+
+    def test_a_text_file_under_an_image_or_font_name_is_scanned(self):
+        cases = (("font-password", "fonts/x.woff", ("password = " + PASSWORD).encode("ascii"), [PASSWORD]),
+                 ("image-email", "img/logo.png", ("Contact " + MAIL + "\n").encode("ascii"), [MAIL]))
+        for label, rel, data, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, rel, data, secrets)
+
+    def test_a_real_binary_under_an_image_or_font_name_exports_unscanned(self):
+        """The control for the case above: a file with a NUL byte is binary, whatever its name. Its bytes are not scanned,
+        so email- and password-shaped bytes in it still export."""
+        cases = (("png", "img/photo.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR " + MAIL.encode("ascii")),
+                 ("woff", "fonts/real.woff", b"wOFF\x00\x01\x00\x00password = " + PASSWORD.encode("ascii")))
+        for label, rel, data in cases:
+            with self.subTest(label=label):
+                worktree = self.out("worktree-" + label)
+                files = {self.QUEUE: {rel: data}}
+                r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+                self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+                self.assertEqual(r.returncode, 0, "%s: a real binary was refused. Output:\n%s" % (label, shown(r)))
+                landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files", *rel.split("/"))
+                self.assertTrue(os.path.isfile(landed), "%s was not exported under page/files/. Output:\n%s" % (rel, shown(r)))
+                self.assertEqual(read_bytes(landed), data, "%s is not byte-identical" % rel)
+                self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
+
     def test_a_retina_file_name_is_not_an_email(self):
-        png = b"\x89PNG\r\n\x1a\n"  # not UTF-8, so the file is binary and its name is the only text to scan
+        png = b"\x89PNG\r\n\x1a\n"  # not UTF-8, so it is read as latin-1 and scanned; no shape is in these bytes, only in the name
         worktree = self.out("worktree")
         files = {self.QUEUE: {"img/logo@2x.png": png}}
         r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
