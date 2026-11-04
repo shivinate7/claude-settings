@@ -6,11 +6,13 @@ Owner, 2026-11-04 07:56 CST, waiting-page item 168 (what a lane is), pick a: a l
 
 - **A lane is the unit of work.** It has its own branch, worktree and lane PR. A lane session runs it, local and cloud alike. The GLOSSARY lane row defines it.
 - **The coordinator starts each lane session.** Inside a standing build the owner started, it needs no further owner grant (record `session-tiers`, A coordinator starts lane sessions).
-- **An agent is not a lane.** A solo, one-lane or lane session fans its own work out to agents, each in its own worktree (`parallelism-each-own-checkout`, each agent in its own checkout). That work is part of the session's lane, or of its solo task.
-- **A Mac start, until the probe answers.** On the Mac, one session that starts another shows the owner a card to press, and the card drops the lane's branch (incident below). Until a probe answers, each Mac lane start is one press, and the lane brief makes the lane set its own branch first thing.
-- **The probe.** A session on the owner's Mac measures two facts on that day's Claude version: whether the card still shows, and whether it still drops the branch. A cloud session cannot see the Mac card. The coordinator starts the probe as a lane of its own. Its result rewrites the bullet above.
+- **An agent is not a lane.** A solo, one-lane or lane session fans its own work out to agents, each in its own worktree (`parallelism-each-own-checkout`, each agent in its own checkout). That work is part of the session's lane, or of its solo task. An agent ends with the session that started it.
+- **A keep-going follow-up.** A follow-up that `parallelism-keep-going` (keep going) lets a session start with no question is an agent when it is part of the session's own topic. A follow-up on a new topic is a new lane, so it goes to the coordinator.
+- **A session starts another only on the owner's words.** Outside a coordinator, a session calls `start_session` only when the owner's own message, on the current turn, asked for a separate session in words. Then the kind is `user_asked`. It never uses `user_asked` for work the owner did not ask for. The app refuses a start on a turn that another session's message started.
+- **A Mac start, until the probe answers.** On the Mac, one session that starts another has shown the owner a card to press, and the card has dropped the lane's branch (incidents below). Until a probe answers, each Mac lane start is one press, and the lane brief makes the lane set its own branch first thing.
+- **The probe.** A session on the owner's Mac measures two facts on that day's Claude version: whether the card still shows, and whether it still drops the branch. A cloud session cannot see the Mac card. The coordinator starts the probe as a lane of its own, because only the coordinator starts sessions (record `session-tiers`, Who starts which session). Its result rewrites the bullet above.
 
-Why: one name, one meaning. Two meanings of "lane" made the records disagree (debt `page-answer-second-click`, a page answer needs a second approval). In the cloud a coordinator starts lane sessions with no card (more than 30 since 2026-11-01). The card is the one measured difference, and it costs one press per Mac lane.
+Why: one name, one meaning. Two meanings of "lane" made the records disagree (debt `page-answer-second-click`, a page answer needs a second approval). In the cloud a coordinator starts lane sessions with no card. The card is the one measured difference, and it costs one press per Mac lane.
 
 Incidents:
 
