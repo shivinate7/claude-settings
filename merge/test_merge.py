@@ -9562,10 +9562,10 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None):
-    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id."""
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1):
+    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
+            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
 
 
 def main_job(name, conclusion, minutes=1):
@@ -10010,6 +10010,60 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
+
+    # A re-run keeps its run id and its place in the list. While it goes it is not completed and its attempt is above 1: the group's
+    # older green run must not stand in for it, so the verdict is UNKNOWN until the re-run finishes.
+    def re_run_over_green(self, status, confirm=True):
+        """Main's push run 1301 is a re-run in flight of `status`, above the older green push run 1300 of the same file and group."""
+        return self.go([main_run(1301, None, status=status, run_attempt=2), main_run(1300, "success")], {}, confirm=confirm)
+
+    def assert_unknown_for_re_run(self, rc, out, before, status):
+        self.assertEqual(rc, 1, f"a re-run {status} at attempt 2 is passed for the green run beneath it\n" + out)
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "the refusal does not say UNKNOWN")
+        self.assertIn("run 1301", out, "the refusal does not name the re-run")
+        self.assertIn("finish", out.lower(), "the refusal does not say to wait for the re-run to finish")
+        self.assertNotIn("read failed", out, "the runs were read, so the refusal does not say the read failed")
+
+    def test_a_re_run_in_flight_above_an_older_green_run_is_unknown_and_refuses(self):
+        rc, out, before = self.re_run_over_green("in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress")
+
+    def test_a_queued_re_run_above_an_older_green_run_is_unknown_and_refuses(self):
+        rc, out, before = self.re_run_over_green("queued")
+        self.assert_unknown_for_re_run(rc, out, before, "queued")
+
+    def test_a_re_run_in_flight_with_no_completed_run_in_its_group_is_unknown_and_refuses(self):
+        rc, out, before = self.go([main_run(1311, None, status="in_progress", run_attempt=2)], {})
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress")
+
+    def test_the_preview_shows_a_re_run_in_flight_as_unknown_and_presses_nothing(self):
+        rc, out, before = self.re_run_over_green("in_progress", confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unknown", line[0].lower(), "the preview does not show the re-run in flight as UNKNOWN")
+        self.assertIn("run 1301", line[0], "the preview line does not name the re-run")
+        self.assertIn("--confirm refuses it", line[0])
+
+    # Guards, which pass on the current code: the green control beside each red case, and the rules the re-run must leave alone.
+    def test_an_attempt_one_run_still_going_waits_its_turn_under_an_older_green_run(self):
+        # the same shape as the red cases at attempt 1: a newer run still going waits its turn, so the green run beneath it is the verdict
+        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {})
+        self.merged(rc, out)
+        self.assertNotIn("actions/runs/1301/jobs", self.host.reads, "a run in progress is not judged, so it is not read")
+
+    def test_a_run_with_no_run_attempt_field_is_attempt_one(self):
+        running = main_run(1301, None, status="in_progress")
+        del running["run_attempt"]
+        rc, out, _ = self.go([running, main_run(1300, "success")], {})
+        self.merged(rc, out)
+
+    def test_a_re_run_in_flight_older_than_a_completed_green_run_leaves_the_verdict_to_that_run(self):
+        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {})
+        self.merged(rc, out)
+        self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
