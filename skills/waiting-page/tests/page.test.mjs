@@ -3744,6 +3744,135 @@ test("merged_page.py refuses --current with --no-roadmap, since a repo with no r
   assert.equal(r.stdout, "", "the refusal printed a page");
 });
 
+// ---------------------------------------------------------------- one page: the phase list draws every step (Status tab)
+// The rail holds one button per phase that has a step: the five known phases in their order, and any other
+// phase id a step carries, ordered by its smallest order and then by id, with Later last. A step with no
+// phase, or an empty one, is in "No phase". Every fixture goes through merged_page.py --data, so the roadmap
+// build bakes it as it bakes a real repo, and the case checks the baked steps before it asks the page anything.
+
+// The steps of a fixture, keyed by file stem (the step id). A row is [id, phase, order, status]; an undefined
+// phase leaves the key out, so the step has no phase at all.
+const stepsOf = (rows) => Object.fromEntries(rows.map(([id, phase, order, status = "todo"]) => [id, {
+  title: "Step " + id, status, order, note: "n", updatedAt: "2026-10-26T00:00:00Z", ...(phase === undefined ? {} : { phase }),
+}]));
+// The page built from a fixture. make_repo adds a cleanup step c1 unless the fixture names one, so a fixture names its own c1.
+function phasePage(steps, phases = {}) {
+  assert.ok(steps.c1, "the fixture names no c1: make_repo would add its own cleanup step c1");
+  return mergedPage("--data", JSON.stringify({ steps, meta: { phases } }));
+}
+// Each step's phase, id to phase, null where the step has none. Fixture and baked data are compared in this form.
+const phaseOf = (steps) => Object.fromEntries(Object.entries(steps).map(([id, s]) => [id, s.phase ?? null]));
+// Before any phase is asked about: the build bakes every fixture step under the fixture's phase, so a red below is the page's.
+async function assertBaked(page, steps) {
+  const baked = await page.evaluate(() => Object.fromEntries(Object.entries(window.ROADMAP_DATA.steps).map(([id, s]) => [id, s.phase ?? null])));
+  assert.deepEqual(baked, phaseOf(steps), "the roadmap build did not bake the fixture's steps under their phases, so the page is not the one the case set up");
+}
+// The names on the rail, in order, one per phase button.
+const railNames = (page) => page.locator(".prail > button .nm > span:first-child").allTextContents();
+// The step ids the phase list draws now: the rows of the phase shown, open and done.
+const listedIds = (page) => page.locator("#svPhases [data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row")));
+// Presses each rail button in turn, and returns the step ids the phase list drew under each button's name.
+async function listedByPhase(page) {
+  const out = {};
+  const count = await page.locator(".prail > button").count();
+  for (let i = 0; i < count; i++) {
+    const button = page.locator(".prail > button").nth(i);
+    const name = await button.locator(".nm > span:first-child").textContent();
+    await button.click();
+    out[name] = await listedIds(page);
+  }
+  return out;
+}
+
+// (a) The degen shape: every step in one foreign phase. The tab is not blank, and each step's title is drawn.
+test("the phase list draws a repo whose steps all sit in one foreign phase: the phase shows, and every step title is drawn", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2], ["a3", "v2", 3, "done"]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["v2"], "the rail does not name the one phase the steps hold, v2: it shows the five known phases only");
+  const titles = await page.locator("#svPhases .ttl").allTextContents();
+  for (const [id, s] of Object.entries(steps)) assert.ok(titles.includes(s.title), `step ${id} (${s.title}) is not drawn in the phase list, though its phase v2 is shown`);
+});
+
+// (b) The home shape: known phases that hold steps, foreign phases by their smallest order, Later last.
+test("the phase list draws a home-shaped repo: known phases that hold steps, then foreign phases by their first order, Later last, every step drawn", async (t) => {
+  const steps = stepsOf([["c1", "now", 1], ["n2", "now", 2, "done"], ["d3", "duo", 4], ["d4", "duo", 5], ["o5", "owner", 7], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["now", "duo", "owner", "Later"], "the rail does not hold the phases that have steps, foreign ones by their smallest order, Later last, and no empty known phase");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// (b, tie) Foreign phases whose smallest order is the same sit in id order. File order would put zeta first.
+test("the phase list orders foreign phases with the same smallest order by id", async (t) => {
+  const steps = stepsOf([["a1", "zeta", 5], ["c1", "zeta", 3], ["z2", "alpha", 3]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["alpha", "zeta"], "the rail does not put alpha before zeta: a tie on the smallest order goes by phase id");
+});
+
+// (b, current) Where the plan stands is the first shown phase with an open step. Now is shown but all done, so Duo is current.
+test("the phase list: Where the plan stands names the first shown phase with an open step, Duo here, not Later", async (t) => {
+  const steps = stepsOf([["c1", "now", 1, "done"], ["d3", "duo", 4], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+  assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), "duo", "the current phase on the rail is not duo, the first shown phase with an open step");
+  assert.equal(await page.locator("#svNow .ph").textContent(), "duo", "the Where the plan stands block does not name duo as the current phase");
+});
+
+// (c) A foreign phase takes its name from meta.phases.<id>.name when that is a non-empty string, else its id.
+test("the phase list names a foreign phase from meta.phases when that name is a non-empty string, else by its id", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1], ["d3", "duo", 2], ["o5", "owner", 3]]);
+  const phases = { v2: { name: "Version two" }, duo: { name: "" }, owner: { name: 7 } };
+  const page = await open(t, { pageHtml: phasePage(steps, phases) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Version two", "duo", "owner"], "the rail does not name each foreign phase from meta.phases.<id>.name when it is a non-empty string, else by its id");
+});
+
+// (d) A step with no phase key, and one with an empty phase, are both drawn under one phase named No phase.
+test("the phase list draws a step with no phase, or an empty one, under No phase", async (t) => {
+  const steps = stepsOf([["c1", undefined, 1, "active"], ["e2", "", 2]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["No phase"], "the rail does not hold one No phase button for the steps with no phase");
+  await page.locator(".prail > button", { hasText: "No phase" }).click();
+  const ids = await listedIds(page);
+  assert.ok(ids.includes("c1"), "step c1, with no phase key, is not drawn under No phase");
+  assert.ok(ids.includes("e2"), "step e2, with an empty phase, is not drawn under No phase");
+});
+
+// (b, full size) The shape of claude-settings: the five known phases and seven more, two steps each, twenty-four in all.
+// The orders run later, then the seven others, then the four known phases before Later. So a sort by order alone
+// puts Later first, and a foreign phase with a small order must still sit between Roll out and Later.
+test("the phase list at full size puts the seven others between Roll out and Later, by their smallest order, and draws every step", async (t) => {
+  const others = ["now", "next", "page", "checks", "ci", "merge", "records"];
+  const rows = [];
+  let order = 1;
+  for (const phase of ["later", ...others, "cleanup", "organize", "design", "rollout"]) for (const k of [1, 2]) rows.push([phase === "cleanup" && k === 1 ? "c1" : `${phase}-${k}`, phase, order++]);
+  const steps = stepsOf(rows);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", ...others, "Later"], "the rail is not the known phases in their order, then the others by their smallest order, then Later last");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// Green control: the five known phases all hold steps, so the rail keeps the five names in today's order.
+test("the phase list keeps the five known names in today's order when all five phases hold steps", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage("--current", "organize") }); if (!page) return;
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", "Later"], "the five known names or their order changed");
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
