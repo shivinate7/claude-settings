@@ -65,6 +65,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+import layout  # noqa: E402  the design folder is the layout's `design` kind, never a literal
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -1572,11 +1573,6 @@ def _build_branch():
     write(os.path.join(BRANCHREPO, "r.txt"), "same patch\n")  # identical content, own commit
     run_vcs(BRANCHREPO, "add", "r.txt")
     run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "add r.txt directly on main")
-    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
-    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
-    run_vcs(BRANCHREPO, "add", "u.txt")
-    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
-    run_vcs(BRANCHREPO, "checkout", "-q", "main")
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "pushed-work")
     write(os.path.join(BRANCHREPO, "p.txt"), "pushed to the remote\n")
     run_vcs(BRANCHREPO, "add", "p.txt")
@@ -1604,6 +1600,116 @@ def _build_branch():
         if archive.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: the branch-delete refusal's handed "
                      "push failed. stderr: %s" % archive.stderr.strip())
+    # DESIGN BRANCHES. The design folder is the layout's `design` kind, read through lint/layout.py,
+    # so these cases follow the folder the guard reads. Each design branch is pushed under its own
+    # name, so origin holds its tip: a branch whose remote copy is deleted loses its design file. A
+    # design branch that was never pushed is already refused as the only copy.
+    design = layout.layout()["kinds"]["design"]["path"].strip("/")
+
+    def design_branch(name, rel, text):
+        run_vcs(BRANCHREPO, "checkout", "-q", "-b", name)
+        write(os.path.join(BRANCHREPO, *rel.split("/")), text)
+        run_vcs(BRANCHREPO, "add", rel)
+        run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", name + "'s design file")
+        pushed = run_vcs(BRANCHREPO, "push", "-q", "origin", name)
+        if pushed.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: pushing %s failed. stderr: %s"
+                     % (name, pushed.stderr.strip()))
+        run_vcs(BRANCHREPO, "checkout", "-q", "main")
+
+    picked = design + "/picked.html"
+    landed = design + "/landed.html"
+    design_branch("design-only", picked, "picked, found nowhere on main\n")
+    design_branch("design-archived", design + "/archived.html", "archived by its own push\n")
+    archived = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                       "design-archived:refs/heads/archive/design-archived")
+    if archived.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-archived failed. "
+                 "stderr: %s" % archived.stderr.strip())
+    design_branch("design-landed", landed, "landed on main as a squash\n")
+    # design-local is never pushed: no ref on origin holds its tip, so it is the only copy.
+    local = design + "/local.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-local")
+    write(os.path.join(BRANCHREPO, *local.split("/")), "local only, never pushed\n")
+    run_vcs(BRANCHREPO, "add", local)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-local's design file")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-stale: its archive takes the first draft, then the branch moves on to a second draft,
+    # so the archive does not hold the tip.
+    stale = design + "/stale.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-stale")
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "first draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's first draft")
+    stale_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                            "design-stale:refs/heads/archive/design-stale")
+    if stale_archive.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-stale's first draft "
+                 "failed. stderr: %s" % stale_archive.stderr.strip())
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "second draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's second draft")
+    stale_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-stale")
+    if stale_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-stale failed. stderr: %s"
+                 % stale_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-taken: its first archive name is taken on origin. archive/design-taken holds the first
+    # draft, so the tip is archived under the next name the rule's remedy allows, archive/design-taken-2.
+    taken = design + "/taken.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-taken")
+    write(os.path.join(BRANCHREPO, *taken.split("/")), "first draft\n")
+    run_vcs(BRANCHREPO, "add", taken)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-taken's first draft")
+    taken_first = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                          "design-taken:refs/heads/archive/design-taken")
+    if taken_first.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-taken's first draft "
+                 "failed. stderr: %s" % taken_first.stderr.strip())
+    write(os.path.join(BRANCHREPO, *taken.split("/")), "second draft\n")
+    run_vcs(BRANCHREPO, "add", taken)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-taken's second draft")
+    taken_tip = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                        "design-taken:refs/heads/archive/design-taken-2")
+    if taken_tip.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-taken's tip under "
+                 "archive/design-taken-2 failed. stderr: %s" % taken_tip.stderr.strip())
+    taken_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-taken")
+    if taken_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-taken failed. stderr: %s"
+                 % taken_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-merged: its tip reaches main as a merge below, and main then renames its file, so the
+    # default branch holds every commit of the tip and lacks the file's old path.
+    merged = design + "/merged.html"
+    design_branch("design-merged", merged, "merged on main, renamed there after\n")
+    # design-landed's file reaches main as its own commit with the same bytes, as a squash merge
+    # leaves it. Made after every design branch above, so none of them inherits it.
+    write(os.path.join(BRANCHREPO, *landed.split("/")), "landed on main as a squash\n")
+    run_vcs(BRANCHREPO, "add", landed)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "landed.html lands on main")
+
+    # design-merged reaches main as a merge, then main renames its file. origin's default branch
+    # holds every commit of the tip and lacks the file's old path.
+    merging = run_vcs(BRANCHREPO, *IDENT, "merge", "-q", "--no-ff", "-m", "merge design-merged",
+                      "design-merged")
+    if merging.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: merging design-merged into main failed. "
+                 "stderr: %s" % merging.stderr.strip())
+    renamed = design + "/merged-renamed.html"
+    moving = run_vcs(BRANCHREPO, "mv", merged, renamed)
+    if moving.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: renaming design-merged's file on main "
+                 "failed. stderr: %s" % moving.stderr.strip())
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "merged.html is renamed on main")
+    # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
+    # swapped ancestor test reads it as merged and allows the only copy; the rule must still refuse.
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
+    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
+    run_vcs(BRANCHREPO, "add", "u.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
@@ -1626,6 +1732,102 @@ def _build_branch():
             "origin/main, so it does not prove the patch-id test. git cherry says: %r"
             % cherry_check.stdout
         )
+
+    # The design cases' scope, read with git before any case relies on it: origin's default branch
+    # holds the squash-landed file and lacks the picked one, and each design branch's origin copy is
+    # its tip, while the stale archive does not contain the tip.
+    def rev(name):
+        return run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", name).stdout.strip()
+
+    def listed(ref, rel):
+        return run_vcs(BRANCHREPO, "ls-tree", "--name-only", ref, "--", rel).stdout.strip()
+
+    if listed("origin/main", picked):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds the picked design file, "
+                 "so design-only would not be a design branch")
+    if not listed("origin/main", landed):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks the squash-landed design "
+                 "file, so design-landed would not be a design branch on the default branch")
+    for name in ("design-only", "design-archived", "design-landed", "design-stale"):
+        if not rev(name) or rev(name) != rev("origin/" + name):
+            sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s"
+                     % (name, name))
+    if rev("origin/archive/design-archived") != rev("design-archived"):
+        sys.exit("fixture setup failed in build_fixtures: the design-archived archive is not its tip")
+    stale_contains = run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-stale",
+                             "origin/archive/design-stale")
+    if stale_contains.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the design-stale archive holds the tip, so "
+                 "it would not be stale")
+
+    if rev("origin/design-local"):
+        sys.exit("fixture setup failed in build_fixtures: origin holds design-local, so it would not "
+                 "be the only copy")
+
+    # The new design cases' scope, read with git before any case relies on it. archive/design-taken-2
+    # holds design-taken's tip, and archive/design-taken holds only the first draft.
+    if rev("origin/archive/design-taken-2") != rev("design-taken"):
+        sys.exit("fixture setup failed in build_fixtures: archive/design-taken-2 is not the tip of "
+                 "design-taken")
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-taken",
+               "origin/archive/design-taken").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: archive/design-taken holds the tip, so the "
+                 "name would not be taken")
+    # design-merged's tip is an ancestor of origin/main, and origin/main lacks the file's old path.
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-merged", "origin/main").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: design-merged is not an ancestor of origin/main")
+    if listed("origin/main", merged) or not listed("origin/main", renamed):
+        sys.exit("fixture setup failed in build_fixtures: origin/main still holds design-merged's old "
+                 "path, or lacks its renamed file, so the file would not be renamed on main")
+    # origin/main must be an ancestor of unmerged-work, or the swapped ancestor mutant survives again.
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "origin/main", "unmerged-work").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: origin/main is not an ancestor of "
+                 "unmerged-work, so a swapped ancestor test would not flip the only-copy case")
+
+    # design-unseen is pushed, then this clone drops its tracking ref and local branch, as a clone
+    # that fetched before the push has none. No ref here names it, so no read can list its tip.
+    unseen = design + "/unseen.html"
+    design_branch("design-unseen", unseen, "pushed after this clone's last fetch\n")
+    run_vcs(BRANCHREPO, "update-ref", "-d", "refs/remotes/origin/design-unseen")
+    run_vcs(BRANCHREPO, "branch", "-q", "-D", "design-unseen")
+    if rev("refs/heads/design-unseen") or rev("refs/remotes/origin/design-unseen"):
+        sys.exit("fixture setup failed in build_fixtures: a ref here still names design-unseen, so it "
+                 "would not be unseen")
+    if not run_vcs(BRANCHREPO, "ls-remote", "--heads", "origin", "design-unseen").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin lacks design-unseen")
+
+    # design-torn: its tip is a commit whose tree object is missing from this clone, so the design
+    # read cannot list its files. origin does not hold it; the tracking ref names it, as a damaged
+    # clone's would.
+    missing_tree = "%040d" % 7
+    torn_text = ("tree %s\nparent %s\nauthor cases <cases@example.invalid> 1700000000 +0000\n"
+                 "committer cases <cases@example.invalid> 1700000000 +0000\n\n"
+                 "design-torn: its tree is missing\n") % (missing_tree, rev("main"))
+    made = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], cwd=BRANCHREPO,
+                          input=torn_text, capture_output=True, text=True)
+    torn = made.stdout.strip()
+    if made.returncode != 0 or not torn:
+        sys.exit("fixture setup failed in build_fixtures: writing design-torn's commit failed. "
+                 "stderr: %s" % made.stderr.strip())
+    if run_vcs(BRANCHREPO, "update-ref", "refs/remotes/origin/design-torn", torn).returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: naming design-torn's commit failed")
+    if rev(torn + "^{commit}") != torn:
+        sys.exit("fixture setup failed in build_fixtures: design-torn's tip is not a commit")
+    if (run_vcs(BRANCHREPO, "ls-tree", "-r", "--name-only", torn).returncode == 0
+            or run_vcs(BRANCHREPO, "diff", "--name-only", "origin/main", torn).returncode == 0):
+        sys.exit("fixture setup failed in build_fixtures: design-torn's tree reads, so the design "
+                 "read would not fail")
+
+    # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
+    # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
+    run_vcs(BRANCHREPO, "tag", "v1.0", "main")
+    if run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", "refs/tags/v1.0").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: tagging v1.0 failed")
+    if rev("refs/heads/v1.0") or rev("refs/remotes/origin/v1.0"):
+        sys.exit("fixture setup failed in build_fixtures: a branch named v1.0 exists, so v1.0 would "
+                 "not be a tag-only name")
+    if run_vcs(BRANCHREPO, "ls-remote", "--heads", "origin", "v1.0").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin holds a branch named v1.0")
 
     # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
     # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
@@ -1667,6 +1869,14 @@ def _build_branch():
     write(os.path.join(BRANCHNOBASE, "o.txt"), "irrelevant to the unreadable case\n")
     run_vcs(BRANCHNOBASE, "add", "o.txt")
     run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-work's commit")
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
+    # A design file on a tip with no readable base: the design read cannot tell whether origin's
+    # default branch lacks it, so the rule asks. orphan-work above holds no design file and stays allowed.
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "-b", "orphan-design")
+    orphan = design + "/orphan.html"
+    write(os.path.join(BRANCHNOBASE, *orphan.split("/")), "design file, no readable base\n")
+    run_vcs(BRANCHNOBASE, "add", orphan)
+    run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-design's design file")
     run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
     base_check2 = run_vcs(BRANCHNOBASE, "rev-parse", "--verify", "-q", "refs/heads/main")
     if base_check2.returncode == 0:
@@ -3112,6 +3322,72 @@ sh("branch: local master's fallback still denies an only-copy branch",
 # denied and never silently passed over an unproven subject.
 sh("branch: no origin/HEAD, no local main, no local master: unreadable, allowed",
    VCS + " branch -D orphan-work", "allow", cwd=BRANCHNOBASE)
+
+# THE DESIGN FILE RULE. A design file on a branch's tip is the only copy of that file when no ref on
+# origin holds the tip. Two acts split the rule:
+#   a local delete (`branch -d/-D`) loses nothing when origin/<branch>, or any archive ref on origin,
+#   holds the tip: the copy stays on origin.
+#   a remote delete (`push --delete`, `push :<branch>`) removes the origin copy, so only
+#   archive/<branch> holding the tip keeps the file.
+# ARCHIVE_RULE is the rule id the guard prints for the remote-delete refusal and for the ask on an
+# unreadable default branch, named once so a rename is one edit (the CHAIN_ASK pattern). A local-only
+# design branch is refused by the old only-copy refusal, rule "shared-tree", which stays right.
+ARCHIVE_RULE = "shared-trees-archive-then-delete"
+sh("branch: a design file origin holds at its tip allows -D",
+   VCS + " branch -D design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -d",
+   VCS + " branch -d design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -D even when its archive is older",
+   VCS + " branch -D design-stale", "allow", cwd=BRANCHREPO)
+sh("branch: a design file no origin ref holds is the only copy, and -D denies",
+   VCS + " branch -D design-local", "deny", "shared-tree", cwd=BRANCHREPO,
+   lacks=("design-local",))
+sh("branch: a design file whose archive holds its tip allows -D",
+   VCS + " branch -D design-archived", "allow", cwd=BRANCHREPO)
+sh("branch: a design file that origin's default branch also holds allows -D",
+   VCS + " branch -D design-landed", "allow", cwd=BRANCHREPO)
+sh("branch: a design file with no readable default branch asks on -D",
+   VCS + " branch -D orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a design file with no archive holding its tip denies",
+   VCS + " push origin --delete design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("push: a delete refspec of a design file with no archive holding its tip denies",
+   VCS + " push origin :design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("push: a --delete of a design file whose archive is an older commit denies",
+   VCS + " push origin --delete design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-stale",))
+sh("push: a --delete of a design file whose archive holds its tip allows",
+   VCS + " push origin --delete design-archived", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a pushed branch with no design file allows",
+   VCS + " push origin --delete pushed-work", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file with no readable default branch asks",
+   VCS + " push origin --delete orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a branch with no design file and no readable default branch allows",
+   VCS + " push origin --delete orphan-work", "allow", cwd=BRANCHNOBASE)
+# THE REMOTE DELETE'S READS. A remote delete removes origin's copy, so the guard must judge the tip
+# it reads. Each case below is one read that cannot settle the tip, or one archive name the rule
+# allows, that the check must not refuse.
+sh("push: a --delete of a design branch this clone never fetched asks",
+   VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-unseen",))
+sh("push: a --delete through a variable name asks, since no read can name its branch",
+   VCS + " push origin --delete $B", "ask", ARCHIVE_RULE, cwd=BRANCHREPO)
+sh("push: a --delete of a design file whose tip cannot be listed asks",
+   VCS + " push origin --delete design-torn", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-torn",))
+sh("push: a --delete of a design branch already on the default branch, its file renamed, allows",
+   VCS + " push origin --delete design-merged", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file whose tip an archive under a new name holds allows",
+   VCS + " push origin --delete design-taken", "allow", cwd=BRANCHREPO)
+# A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
+# it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
+# which allows. Its control is the same no-tip read with no tag of that name: that still asks.
+sh("push: a --delete of a name that is only a local tag allows",
+   VCS + " push origin --delete v1.0", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a name with no ref and no tag still asks, beside the tag allow",
+   VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-unseen",))
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
