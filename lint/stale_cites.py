@@ -7,10 +7,13 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
   STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
-            in that file at base (read with `ast`) and is not bound at head. A name counts when it is a
-            module-level def, class, assignment or import (a def or class also under a module-level if or
-            try), or a def directly in a module-level class. A name that moved but is still bound in the
-            file, as an assignment or an import, is not removed.
+            in that file at base (read with `ast`) and is not bound at head. A name counts when a module-level
+            def, class, assignment or import binds it, also under a module-level if or try, or when it is a
+            def directly in a module-level class. A name that moved but is still bound in the file is not
+            removed.
+  Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
+            touched that file. JavaScript and shell names are not read, so the line prints
+            `stale-cites: unknown, <path>:<line> ...` and never fails the run.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
@@ -22,10 +25,11 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
-A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
---batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
-loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py,
+.mjs, .js, .cjs, .ts or .sh. A touched .py adds one `git cat-file --batch`. A removed path or name, or a touched
+.mjs, .js, .cjs, .ts or .sh, adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read
+once, only when one of those holds. A touched .py also loads the py-facts script once, in-process (no start,
+no .pyc). It writes no file and leaves no process running.
 """
 import argparse
 import ast
@@ -43,10 +47,20 @@ RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
-PAIR_RES = (  # "`file.py` `name`" and "(file.py name)"
-    re.compile(NOT_BEFORE + r"`?(%s\.py)`?\s+`([A-Za-z_]\w*)`" % RUN),
-    re.compile(r"\(`?(%s\.py)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % RUN),
-)
+FOREIGN_EXT = r"(?:mjs|cjs|js|ts|sh)"  # code files whose names this check does not read: a cite of one is unknown
+
+
+def pair_res(ext):
+    """"`file.<ext>` `name`" and "(file.<ext> name)"."""
+    return (
+        re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)`" % (RUN, ext)),
+        re.compile(r"\(`?(%s\.%s)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % (RUN, ext)),
+    )
+
+
+PAIR_RES = pair_res("py")
+FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
+FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 
@@ -176,36 +190,36 @@ def py_facts():
     return _py_facts[0]
 
 
-def class_and_def_names(tree):
-    """Each module-level def and class (also under a module-level if or try), and each def directly in a
-    module-level class. A def nested in a function is no public name."""
-    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    names = set()
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
-    def collect(body, into_classes):
-        for node in body:
-            if isinstance(node, kinds):
-                names.add(node.name)
-                if isinstance(node, ast.ClassDef) and into_classes:
-                    collect(node.body, False)
-            else:
-                for field in ("body", "orelse", "finalbody"):
-                    collect(getattr(node, field, None) or [], into_classes)
-                for handler in getattr(node, "handlers", None) or []:
-                    collect(handler.body, into_classes)
 
-    collect(tree.body, True)
-    return names
+def module_statements(body):
+    """Each statement that runs at module level: the body itself and, inside any statement that is no def or
+    class, its if, try, with, loop and match bodies. A def or class is kept whole; its inside is not module level."""
+    for node in body:
+        yield node
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            yield from module_statements(getattr(node, field, None) or [])
+        for part in (getattr(node, "handlers", None) or []) + (getattr(node, "cases", None) or []):
+            yield from module_statements(part.body)
 
 
 def names_in(source):
-    """Names a prose line can cite: class_and_def_names plus py-facts `defined_names` (module-level def, class,
-    assignment, import). Read with `ast`; None when it does not parse."""
+    """Names a prose line can cite: each name py-facts `defined_names` finds in the module-level statements
+    (def, class, assignment, import; also under a module-level if or try), plus each def directly in a
+    module-level class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
-    return class_and_def_names(tree) | py_facts().defined_names(tree)
+    flat = list(module_statements(tree.body))
+    names = py_facts().defined_names(ast.Module(body=flat, type_ignores=[]))  # defined_names reads `.body` only
+    for node in flat:
+        if isinstance(node, ast.ClassDef):
+            names.update(m.name for m in module_statements(node.body) if isinstance(m, FUNCTIONS))
+    return names
 
 
 def disabled(line):
@@ -237,6 +251,7 @@ class Range:
         self.unknowns = []
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+        self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
 
 
 class PathReader:
@@ -296,10 +311,31 @@ class NameReader:
         return messages
 
 
+class ForeignReader:
+    """STALE002 unknown: a line that cites `file.mjs name` of a JavaScript or shell file the range touched. Those
+    names are not read, so the line is reported as unknown, never as a pass. Reports through `unknown`."""
+    code = "STALE002"
+    unknown = True
+
+    def prepare(self, rng):
+        return rng.foreign_files or None
+
+    def line(self, state, text, claimed):
+        messages = []
+        for pair in FOREIGN_PAIR_RES:
+            for match in pair.finditer(text):
+                path, name = match.group(1), match.group(2)
+                text_ = "%s %s: JavaScript and shell names are not checked" % (path, name)
+                if path in state and path not in claimed and text_ not in messages:
+                    messages.append(text_)
+        return messages
+
+
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
-# reader already cited there). A new check adds one entry.
-READERS = (PathReader(), NameReader())
+# reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
+# A new check adds one entry.
+READERS = (PathReader(), NameReader(), ForeignReader())
 
 
 def scan(range_text):
@@ -309,7 +345,7 @@ def scan(range_text):
     found = {}
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch)
-    if not removed and not renamed and not rng.py_files:
+    if not removed and not renamed and not rng.py_files and not rng.foreign_files:
         return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     try:
         active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
@@ -334,7 +370,10 @@ def scan(range_text):
                 for reader, state in active:
                     if reader.code not in off:
                         for message in reader.line(state, line, claimed):
-                            found.setdefault((md, number, reader.code), []).append(message)
+                            if getattr(reader, "unknown", False):
+                                rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                            else:
+                                found.setdefault((md, number, reader.code), []).append(message)
     finally:
         batch.close()
     return found, rng.unknowns
