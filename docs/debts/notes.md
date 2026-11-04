@@ -305,6 +305,8 @@
 - stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-report-extras-untested: no test covers a malformed .claude/layout-extras.json in the report. A mutant that drops layout.LayoutError from the except in `scan` of lint/stale_cites.py passes all tests and exits 1 with a traceback. Decision: stale-cites-at-merge
+- stale-cites-report-dirs-untested: no case lists a changed file under bin/, actions/ or .github/. A mutant that narrows RULE_DIRS (`RULE_DIRS` in lint/stale_cites.py) to hooks/ and lint/ passes. A ci row's logic lives under .github/. Decision: stale-cites-at-merge
 - stale-cites-unbound-targets: except-as, match-capture and `type X =` names are not counted as bound (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-tree-exclude-worktree: tree mode reads .ste-lint-exclude from the working tree, not REV, as range mode does (lint/stale_cites.py). Decision: stale-cites-whole-tree
 - stale-cites-tree-local-parity: bin/ste-changed does not read a workflow's tree-cites; an opted-in repo must export TREE_CITES=true to match CI locally (bin/ste-changed). Decision: stale-cites-whole-tree
