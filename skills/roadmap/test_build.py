@@ -1593,9 +1593,11 @@ class MockupFiles(UpkeepFixture):
     mockup id (item<N>-<letter>, a whole token) needs a `mockups` entry, {"<id>": "<path>"}. The one mockup home is the
     repo's design folder, and the file must be on origin: any remote-tracking ref under refs/remotes/origin/, as a
     fetch leaves it. An absent path is a miss, and so is a folder or a link at it on origin. A miss prints
-    `mockup with no file: <step> <id>` for each id, writes the page, and the build exits 1. A path that origin cannot
+    `mockup with no file: <step> <id>` for each id, writes the page, and the build exits 1. The miss line names
+    `git fetch`, since a stale or unfetched origin ref reads as a miss. A path that origin cannot
     show reads unknown: `mockup file unread: <step> <id> (<why>)`, exit 0. Unknown covers no origin ref, a shallow
     checkout, an unreadable layout and a failed git read; empty git output means absent, a failed read means unknown.
+    The check starts at most four git processes, however many entries and origin refs there are.
     The machine-home form is refused. A step with no mockup passes. HOME is this case's own folder, so no case reads
     or writes the real home. The repo is "fixture" (UpkeepFixture's origin)."""
 
@@ -1632,10 +1634,10 @@ class MockupFiles(UpkeepFixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "design " + rel)
 
-    def fetch_origin(self, branch):
-        """Make origin readable: the remote-tracking ref of `branch` at its tip, as a fetch leaves it. With no such ref
-        the origin cannot be read, and a design entry reads unknown."""
-        git(self.repo, "update-ref", "refs/remotes/origin/" + branch, branch)
+    def fetch_origin(self, branch, name=None):
+        """Make origin readable: the remote-tracking ref `name` (default `branch`) at `branch`'s tip, as a fetch leaves it.
+        With no such ref the origin cannot be read, and a design entry reads unknown."""
+        git(self.repo, "update-ref", "refs/remotes/origin/" + (name or branch), branch)
 
     def make_shallow(self):
         """Mark the checkout shallow at origin/main's tip, the way a shallow clone is marked: its history stops there."""
@@ -1655,16 +1657,34 @@ class MockupFiles(UpkeepFixture):
         commit = git(self.repo, "commit-tree", tree, "-p", "main", "-m", "link " + rel).strip()
         git(self.repo, "update-ref", "refs/remotes/origin/main", commit)
 
-    def failing_origin_git(self):
-        """A patch of the build's git read. A cat-file or ls-tree of an origin ref returns None, as a failed read does;
-        every other read goes to git. Empty output means the path is absent, and None means the read failed."""
+    def failing_origin_git(self, verbs=("cat-file", "ls-tree")):
+        """A patch of the build's git read. A read of an origin ref by one of `verbs` (None: any verb) returns None, as a
+        failed read does; every other read goes to git. Empty output means the path is absent, and None means the read failed."""
         real = build.git
 
         def read(repo, *args, stdin=None):
-            if args and args[0] in ("cat-file", "ls-tree") and any("refs/remotes/origin/" in arg for arg in args):
+            if args and (verbs is None or args[0] in verbs) and any("refs/remotes/origin/" in arg for arg in args):
                 return None
             return real(repo, *args, stdin=stdin)
         return mock.patch.object(build, "git", read)
+
+    def check_starts(self):
+        """One build, with its mockup check wrapped to count the git processes the check starts. Each process is counted
+        at subprocess.Popen, the one start every helper of the build reaches, so a git call made any way is counted.
+        The rest of the build is outside the count. Returns (build output, the check's (misses, unread), the git argv
+        the check started). The check's result is None when the check did not run."""
+        real = build.mockup_misses
+        seen = {}
+
+        def check(repo, steps):
+            with mock.patch.object(subprocess, "Popen", wraps=subprocess.Popen) as popen:
+                seen["result"] = real(repo, steps)
+            seen["argv"] = [c.args[0] for c in popen.call_args_list if c.args and c.args[0][:1] == ["git"]]
+            return seen["result"]
+
+        with mock.patch.object(build, "mockup_misses", check):
+            _, out = self.build_from_main(expect=(1,))
+        return out, seen.get("result"), seen.get("argv", [])
 
     def write_extras(self, text):
         """The checkout's extras file, as given. Write it after the commits: their `git add -A` would stage it."""
@@ -1672,8 +1692,13 @@ class MockupFiles(UpkeepFixture):
         path.parent.mkdir(exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def misses(self, out):
+    def miss_lines(self, out):
+        """The text after the prefix of each miss line, in printed order: the step and id, then any remedy."""
         return re.findall(r"^%s: (.*)$" % re.escape(self.MISS), out, re.M)
+
+    def misses(self, out):
+        """The "<step> <mockup id>" of each miss line, in printed order. Words after the id, a remedy, do not change it."""
+        return [" ".join(line.split()[:2]) for line in self.miss_lines(out)]
 
     def unread_ids(self, out):
         """The "<step> <mockup id>" of each line the build could not read, in printed order."""
@@ -1734,6 +1759,15 @@ class MockupFiles(UpkeepFixture):
         _, out = self.build_from_main(expect=(1,))
         self.steps_line(out, 1)
         self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_miss_line_names_git_fetch_as_the_remedy(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.fetch_origin("main")  # origin is readable and lacks the file: a stale or unfetched origin ref reads as a miss
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"], "the miss is not reported")
+        for line in self.miss_lines(out):
+            self.assertIn("git fetch", line, "the miss line names no `git fetch`, so a stale origin ref reads as a broken file")
 
     def test_a_design_entry_whose_file_is_on_origin_passes(self):
         self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
@@ -1884,6 +1918,37 @@ class MockupFiles(UpkeepFixture):
         self.assertEqual(self.unread_ids(out), ["c1 item48-a"], "a failed origin read does not read unknown")
         self.assertEqual(self.code, 0, "an unknown entry exits 0")
         self.assertIn("Design held", page, "the build did not read the step")
+
+    def test_a_failed_origin_ref_listing_reads_every_design_entry_unknown_and_is_no_miss(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_step("c2", order=2, title="Design held too", note="Shape the item49-b picker.",
+                         mockups={"item49-b": "docs/design/item49/b.html"})
+        self.commit_design(self.DESIGN_ITEM)  # origin/main holds item48-a and lacks item49-b
+        self.fetch_origin("main")
+        with self.failing_origin_git(verbs=None):  # every read of an origin ref fails, the listing among them
+            _, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 2)
+        self.assertEqual(self.misses(out), [], "a failed origin ref listing reads an entry as a miss")
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a", "c2 item49-b"],
+                         "a failed origin ref listing does not read every entry unknown")
+
+    def test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes(self):
+        for k in range(1, 6):
+            item = "item%d-a" % (40 + k)
+            self.commit_step("c%d" % k, order=k, title="Picker %d" % k, note="Shape the %s picker." % item,
+                             mockups={item: "docs/design/item%d/a.html" % (40 + k)})
+        self.fetch_origin("main")
+        for n in range(1, 50):
+            self.fetch_origin("main", name="lane-%02d" % n)  # 50 origin refs in all, as open PR branches leave them
+        out, result, argv = self.check_starts()
+        self.steps_line(out, 5)
+        self.assertIsNotNone(result, "the mockup check did not run")
+        misses, unread = result
+        self.assertEqual(misses, [("c%d" % k, "item%d-a" % (40 + k)) for k in range(1, 6)],
+                         "the check did not judge all five entries as misses")
+        self.assertEqual(unread, [], "the check read an entry as unknown")
+        self.assertLessEqual(len(argv), 4, "the mockup check started %d git processes for 5 entries over 50 origin refs, "
+                                           "want at most 4" % len(argv))
 
     def test_a_malformed_extras_file_reads_the_design_entry_unknown_and_the_build_writes_the_page(self):
         self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
