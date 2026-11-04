@@ -3706,17 +3706,15 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        # Same-process ratio: the generic-heavy text against the same text with the generics removed,
-        # each timed back to back, best of three. A linear scan keeps the ratio near 1 (measured 1.2 to 1.3).
+        # Growth, in one process: the generic-heavy text at 600 blocks and at 1200 blocks, best of
+        # three each. Linear lint doubles with its input (ratio near 2, measured 2.0); a quadratic
+        # scan quadruples (near 4). The bound 3.0 sits between them.
         import time
 
-        def text_with(generic):
+        def text_with(blocks):
             lines = []
-            for i in range(600):
-                if generic:
-                    lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-                else:
-                    lines.append("const f%d = (a: T): T => a;" % i)
+            for i in range(blocks):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
                 lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
             lines.append("const y = <p>In order to go.</p>;")
             return "\n".join(lines) + "\n"
@@ -3729,13 +3727,15 @@ class UICopyRoundTwoTests(unittest.TestCase):
                 times.append(time.perf_counter() - started)
             return min(times), codes
 
-        text = text_with(True)
+        text = text_with(600)
         self.assertGreaterEqual(text.count("\n"), 4800)
-        generic, codes = best(text)
+        once, codes = best(text)
         self.assertEqual(codes, ["STE011"])
-        plain, _ = best(text_with(False))
-        self.assertLess(generic / plain, 3.0,
-                        "generic-heavy text takes %.1fx as long as the same text without generics" % (generic / plain))
+        longer = text_with(1200)
+        doubled, _ = best(longer)
+        self.assertLess(doubled / once, 3.0,
+                        "generic-heavy text of %d lines takes %.1fx as long as %d lines"
+                        % (longer.count("\n"), doubled / once, text.count("\n")))
 
 
 class TurnReaderTests(unittest.TestCase):

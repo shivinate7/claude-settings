@@ -280,8 +280,10 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
     def test_long_digit_run_is_fast(self):
-        # Same-process ratio: the 20000-digit run against a same-length filler with no digits, each
-        # timed back to back, best of three. A linear scan keeps the ratio near 1 (measured 1.0 to 1.1).
+        # Growth, in one process: a 20000-digit run and a 40000-digit run, best of three each. Linear
+        # work doubles (ratio near 2, measured 1.9); quadratic work quadruples (near 4). The bound 3.0
+        # sits between them. The same-length dot filler keeps the claim that digits are no slower
+        # than other text (measured 1.0 to 1.1).
         import time
 
         def best(text):
@@ -293,6 +295,9 @@ class BriefFaults(unittest.TestCase):
             return min(times)
 
         run = best(brief(job=JOB + "\n" + "1" * 20000))
+        doubled = best(brief(job=JOB + "\n" + "1" * 40000))
+        self.assertLess(doubled / run, 3.0,
+                        "a 40000-digit run takes %.1fx as long as a 20000-digit run" % (doubled / run))
         filler = best(brief(job=JOB + "\n" + "." * 20000))
         self.assertLess(run / filler, 3.0,
                         "a 20000-digit run takes %.1fx as long as a same-length filler" % (run / filler))
