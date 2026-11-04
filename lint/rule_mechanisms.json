@@ -463,7 +463,7 @@
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Partly checked: lint/stale_cites.py (in the ste-lint CI step) refuses a Markdown line that names a file or Python def the same PR removed. A claim wrong in meaning is judged only by hooks/prose_judge.py, inside a decisions folder."
+        "reason": "Partly checked: lint/stale_cites.py (in the ste-lint CI step) refuses a Markdown line that names a file or a Python module-level name the same PR removed. A claim wrong in meaning is judged only by hooks/prose_judge.py, inside a decisions folder."
       }
     },
     "output-write-in-ste": {

@@ -3,6 +3,8 @@
 # issue. A green run of another group clears it only when that run is newer, is the newest of its group,
 # succeeded, and passed every job of the red run. Runs of an event not in events.json, and of a deleted
 # or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
+# The dropped-start cases (dropped.sh, the alarm for a pull request whose all-jobs-passed run never started)
+# come last. They use their own fake routes and fixtures, so the cases above read nothing new.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -15,9 +17,59 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for and
 # the runs of the --status it is asked for, as gh does; unparsable runs are echoed raw. `api` routes
 # the jobs of a run to $JOBS/<run id> and records each such read in $READS; a run with no jobs fixture
-# fails the read, so an unexpected read is unknown.
+# fails the read, so an unexpected read is unknown. The dropped-start routes (pulls, check runs, issue
+# comments, and a POST of a comment) serve DROP_PULLS/<page>, one JSON document per page (--paginate serves
+# every page, without it only page 1), DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each api call to
+# DROP_READS and each POST to DROP_LOG, and fail a read with no fixture.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
+# classify: what one api call is, for the reads log: pulls, checks <route>, comments <pr>, post <pr>, other.
+classify() {
+  local route method=GET n
+  route="$(printf '%s\n' "$@" | sed -n '/^repos\//{p;q;}')"
+  [ "$2" = --method ] && method="$3"
+  case "$route" in
+    */pulls|*/pulls\?*) echo pulls ;;
+    */check-runs*) echo "checks $route" ;;
+    */issues/*/comments*)
+      n="${route#*issues/}"; n="${n%%/*}"
+      if [ "$method" = POST ]; then echo "post $n"; else echo "comments $n"; fi ;;
+    *) echo other ;;
+  esac
+}
+# serve_pages <dir> <jq filter or ""> <paged or ""> : one list read. Each page is one JSON document in <dir>/<n>;
+# page 1 alone unless --paginate. A missing page 1 fails the read.
+serve_pages() {
+  local dir="$1" jqf="$2" paged="$3" k=1
+  [ -f "$dir/1" ] || { echo "gh: no fixture in $dir (fake)" >&2; exit 1; }
+  while [ -f "$dir/$k" ]; do
+    if [ -n "$jqf" ]; then jq -r "$jqf" "$dir/$k" || exit 1; else cat "$dir/$k"; fi
+    [ -n "$paged" ] || break
+    k=$((k + 1))
+  done
+  exit 0
+}
+# dropped_api: serves a dropped-start read from its fixture, or logs a POST with its body.
+dropped_api() {
+  local route body="" jqf="" prev="" paged="" a file="" sha n
+  route="$(printf '%s\n' "$@" | sed -n '/^repos\//{p;q;}')"
+  for a in "$@"; do
+    case "$a" in body=*) body="${a#body=}" ;; esac
+    if [ "$prev" = --jq ] || [ "$prev" = -q ]; then jqf="$a"; fi
+    if [ "$a" = --paginate ]; then paged=1; fi
+    prev="$a"
+  done
+  if [ "$2" = --method ]; then printf 'POST %s\n%s\n' "$route" "$body" >> "$DROP_LOG"; echo '{"id": 1}'; exit 0; fi
+  case "$route" in
+    */pulls|*/pulls\?*) serve_pages "$DROP_PULLS" "$jqf" "$paged" ;;
+    */check-runs*) sha="${route#*commits/}"; file="$DROP_CHECKS/${sha%%/*}" ;;
+    */issues/*/comments*) n="${route#*issues/}"; serve_pages "$DROP_COMMENTS/${n%%/*}" "$jqf" "$paged" ;;
+  esac
+  [ -f "$file" ] || { echo "gh: no fixture for $route (fake)" >&2; exit 1; }
+  if [ -n "$jqf" ]; then jq -r "$jqf" "$file"; exit $?; fi
+  cat "$file"
+}
+if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
 case "$1 $2" in
@@ -31,6 +83,7 @@ case "$1 $2" in
         id="${2#*actions/runs/}"; id="${id%%/*}"
         echo "$2" >> "${READS:-/dev/null}"
         if [ -f "${JOBS:-/nonexistent}/$id" ]; then cat "$JOBS/$id"; else echo "gh: no jobs fixture for run $id (fake)" >&2; exit 1; fi ;;
+      --method|*/pulls|*/pulls\?*|*/check-runs*|*/issues/*/comments*) dropped_api "$@" ;;
       *) cat "$WORKFLOWS" ;;
     esac ;;
   "issue list") echo "${OPEN:-}" ;;
@@ -213,4 +266,181 @@ t unknown issue-create-fails-is-unknown-exit-0 "issue create"
 OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
 if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
 else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
+# --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
+# A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
+dropped="$here/dropped.sh"
+DNOW=1800000000                       # 2027-01-15T08:00:00Z, given so no case reads the real clock
+OLD=2027-01-15T07:50:00Z              # 600 s before DNOW: old enough to flag
+AT300=2027-01-15T07:55:00Z            # 300 s before: on the line, not flagged
+AT301=2027-01-15T07:54:59Z            # 301 s before: just past the line, flagged
+SHA_A=0123456789abcdef0123456789abcdef01234567
+SHA_B=fedcba9876543210fedcba9876543210fedcba98
+dd="$tmp/dropped"
+# dnew: an empty fixture folder for one case.
+dnew() { rm -rf "$dd"; mkdir -p "$dd/checks" "$dd/comments"; : > "$dd/pulls.lines"; }
+# dpr <number> <head sha> <updated_at> [draft]: one open pull request, as the pulls list gives it.
+dpr() {
+  jq -cn --argjson n "$1" --arg sha "$2" --arg u "$3" --argjson d "${4:-false}" \
+    '{number: $n, draft: $d, updated_at: $u, head: {sha: $sha, ref: ("branch-" + ($n | tostring))}}' >> "$dd/pulls.lines"
+}
+# dpage: the pull requests after this line are on the next page of the pulls list.
+dpage() { echo PAGE >> "$dd/pulls.lines"; }
+# dchecks <sha> <json array>: the check runs of one head commit, as the check-runs read gives them.
+dchecks() { jq -n --argjson r "$2" '{total_count: ($r | length), check_runs: $r}' > "$dd/checks/$1"; }
+# dcomments <pr> [body]: page 1 of the comments of one PR; a PR given no body has none.
+dcomments() {
+  mkdir -p "$dd/comments/$1"
+  if [ $# -lt 2 ]; then echo '[]'; else jq -cn --arg b "$2" '[{id: 1, body: $b}]'; fi > "$dd/comments/$1/1"
+}
+# dcommentpage <pr> <page> <body>: a later page of the comments of one PR, holding one comment.
+dcommentpage() { jq -cn --arg b "$3" '[{id: 2, body: $b}]' > "$dd/comments/$1/$2"; }
+# drun <FAIL glob or "">: one run of dropped.sh on $dd. Sets out, code, and the reads and log files.
+drun() {
+  rm -rf "$dd/pulls"; mkdir -p "$dd/pulls"
+  n=1; : > "$dd/page.lines"
+  while IFS= read -r ln; do
+    if [ "$ln" = PAGE ]; then jq -s . "$dd/page.lines" > "$dd/pulls/$n"; n=$((n + 1)); : > "$dd/page.lines"
+    else printf '%s\n' "$ln" >> "$dd/page.lines"; fi
+  done < "$dd/pulls.lines"
+  jq -s . "$dd/page.lines" > "$dd/pulls/$n"
+  : > "$dd/reads"; : > "$dd/log"
+  out="$(env -u CHECK PATH="$tmp/bin:$PATH" DROP_PULLS="$dd/pulls" DROP_CHECKS="$dd/checks" DROP_COMMENTS="$dd/comments" \
+    DROP_READS="$dd/reads" DROP_LOG="$dd/log" FAIL="$1" GH_TOKEN=x GITHUB_REPOSITORY=o/r NOW="$DNOW" \
+    bash "$dropped" 2>"$dd/err")"
+  code=$?
+}
+# countok <expected> <got>: the expected count, or `*` for any count.
+countok() { [ "$1" = '*' ] || [ "$1" = "$2" ]; }
+# td <verdict> <label> <FAIL glob or ""> <pulls> <check reads> <comment reads> <POST attempts> [text]...
+# Runs drun and names the first cause that fails: exit code, verdict, the ::warning:: line of unknown, the api
+# reads per route (`*` is any count), a read outside the routes, then each text, which must be in the log of
+# POST lines and bodies. A text with a leading `!` must not be there; `re:` makes the rest an extended regex.
+td() {
+  local want="$1" label="$2" fail="$3" ep="$4" ek="$5" ec="$6" ew="$7" got gp gk gc gw why="" m shown
+  shift 7
+  drun "$fail"
+  shown="$(grep -v '^::warning::' <<<"$out")"
+  got="$(grep -c '^pulls' "$dd/reads") $(grep -c '^checks' "$dd/reads") $(grep -c '^comments' "$dd/reads") $(grep -c '^post' "$dd/reads")"
+  read -r gp gk gc gw <<<"$got"
+  if [ "$code" != 0 ]; then why="exit $code, want 0"
+  elif [ "$shown" != "$want" ]; then why="verdict '$shown', want '$want'"
+  elif [ "$want" = unknown ] && ! grep -q '::warning::' <<<"$out"$'\n'"$(cat "$dd/err")"; then why="no ::warning:: line"
+  elif ! countok "$ep" "$gp" || ! countok "$ek" "$gk" || ! countok "$ec" "$gc" || ! countok "$ew" "$gw"; then
+    why="api reads pulls/checks/comments/posts $got, want $ep/$ek/$ec/$ew"
+  elif grep -q '^other' "$dd/reads"; then why="an api read outside the routes"
+  else
+    for m in "$@"; do
+      case "$m" in
+        !*) if grep -qF -- "${m#!}" "$dd/log"; then why="log holds '${m#!}'"; break; fi ;;
+        re:*) if ! grep -qE -- "${m#re:}" "$dd/log"; then why="log lacks /${m#re:}/"; break; fi ;;
+        *) if ! grep -qF -- "$m" "$dd/log"; then why="log lacks '$m'"; break; fi ;;
+      esac
+    done
+  fi
+  if [ -z "$why" ]; then echo "ok   $label"; else echo "FAIL $label: $why"; bad=1; fi
+}
+
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td red dropped-old-pr-without-check-run-is-red "" '*' '*' '*' '*' "POST repos/o/r/issues/1/comments" "<!-- dropped-start-alarm:$SHA_A -->"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td red dropped-one-flagged-pr-reads-each-route-once "" 1 1 1 1 "POST repos/o/r/issues/1/comments"
+dnew; dpr 1 "$SHA_A" "$OLD" true
+td green dropped-draft-pr-is-green-with-no-check-read "" 1 0 0 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$AT300"
+td green dropped-update-300s-old-is-green "" 1 0 0 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$AT301"; dchecks "$SHA_A" '[]'; dcomments 1
+td red dropped-update-301s-old-is-red "" 1 1 1 1 "POST repos/o/r/issues/1/comments"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"skipped"}]'; dcomments 1
+td red dropped-skipped-only-run-counts-as-absent "" 1 1 1 1 "POST repos/o/r/issues/1/comments"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'
+td green dropped-success-run-is-green-with-no-comment "" 1 1 0 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'
+dcomments 1 "<!-- dropped-start-alarm:$SHA_A -->
+already flagged"
+td green dropped-marker-for-this-head-is-green-with-no-new-comment "" 1 1 1 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'
+dcomments 1 "<!-- dropped-start-alarm:$SHA_B -->
+an older head"
+td red dropped-marker-for-another-head-does-not-suppress "" 1 1 1 1 "POST repos/o/r/issues/1/comments" "<!-- dropped-start-alarm:$SHA_A -->"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td unknown dropped-check-run-read-fails-is-unknown-with-no-comment "api *check-runs*" 1 1 0 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$OLD"; dpr 2 "$SHA_B" "$OLD"; dchecks "$SHA_A" '[]'; dchecks "$SHA_B" '[]'; dcomments 1; dcomments 2
+td unknown dropped-comment-write-fails-is-unknown-and-stops "api --method*" 1 '*' '*' 1 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'
+drun ""
+# The default is compared with the constant itself (hooks/required_check.py, the one home), never a string match.
+want_check="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from required_check import REQUIRED_CHECK; print(REQUIRED_CHECK)' "$root/hooks")" || want_check=""
+got_check="$(sed -n 's/^checks .*check_name=\([^&]*\).*/\1/p' "$dd/reads")"
+if [ -n "$want_check" ] && [ "$got_check" = "$want_check" ]; then echo "ok   dropped-check-default-is-draft-skip-check"
+else echo "FAIL dropped-check-default-is-draft-skip-check: default '$got_check', want REQUIRED_CHECK '$want_check'"; bad=1; fi
+# merge.DRAFT_SKIP_CHECK is the same constant. Importing merge only reads lint/layout.json; its bytecode cache is git-ignored.
+merge_check="$(python3 -I -c 'import sys; sys.path[:0] = [sys.argv[1], sys.argv[2]]; import merge; print(merge.DRAFT_SKIP_CHECK)' "$root/merge" "$root/hooks")" || merge_check=""
+if [ -n "$merge_check" ] && [ "$merge_check" = "$want_check" ]; then echo "ok   dropped-check-merge-draft-skip-check-is-required"
+else echo "FAIL dropped-check-merge-draft-skip-check-is-required: merge.DRAFT_SKIP_CHECK '$merge_check', want REQUIRED_CHECK '$want_check'"; bad=1; fi
+cause="$(python3 -I - "$here/action.yml" <<'PY'
+import re, sys
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+
+def under(lines, head, indent):
+    # The lines under `head`, up to the next non-blank line at `indent` or less.
+    out, on = [], False
+    for ln in lines:
+        if not on:
+            on = ln.startswith(head)
+            continue
+        if ln.strip() and len(ln) - len(ln.lstrip()) <= indent:
+            break
+        out.append(ln)
+    return out
+
+ds = under(under(lines, "inputs:", 0), "  dropped-start:", 2)
+steps = []
+for ln in under(under(lines, "runs:", 0), "  steps:", 2):
+    if ln.startswith("    - "):
+        steps.append([ln])
+    elif steps and ln.strip():
+        steps[-1].append(ln)
+alarm = [s for s in steps if s[0].strip() == "- name: Alarm on a red branch"]
+dropped_steps = [s for s in steps if any("dropped.sh" in ln for ln in s)]
+defaults = [m.group(1).strip("'\"") for m in (re.match(r"^    default:\s*(.*?)\s*$", ln) for ln in ds) if m]
+ifs = [ln for ln in dropped_steps[0] if re.match(r"^      if:", ln)] if dropped_steps else []
+if not ds: cause = "no dropped-start input under inputs"
+elif defaults != ["false"]: cause = "dropped-start default is %r, want 'false'" % (defaults,)
+elif not alarm: cause = "no alarm step"
+elif any(re.match(r"^      if:", ln) for ln in alarm[0]): cause = "the alarm step has an if; it must run alone"
+elif not dropped_steps: cause = "no step runs dropped.sh"
+elif not ifs: cause = "the dropped step has no if"
+elif not re.search(r"inputs\.dropped-start\s*==\s*'true'", ifs[0]): cause = "the dropped step's if does not test dropped-start == 'true'"
+else: cause = "ok"
+print(cause)
+PY
+)" || cause="python could not read action.yml"
+if [ "$cause" = ok ]; then echo "ok   action-yml-dropped-start-defaults-false-and-gates-only-its-step"
+else echo "FAIL action-yml-dropped-start-defaults-false-and-gates-only-its-step: $cause"; bad=1; fi
+dnew
+td green dropped-no-open-pull-requests-is-green "" 1 0 0 0
+dnew
+for i in $(seq 1 100); do
+  printf -v sha '%040x' "$i"
+  dpr "$i" "$sha" "$OLD"
+  if [ "$i" -lt 100 ]; then dchecks "$sha" '[{"name":"all-jobs-passed","conclusion":"success"}]'
+  else dchecks "$sha" '[]'; dcomments "$i"; fi
+done
+td red dropped-full-page-of-100-flags-only-the-last "" 1 100 1 1 "POST repos/o/r/issues/100/comments"
+dnew; dpr 1 "$SHA_A" "$OLD"
+td unknown dropped-pulls-read-fails-is-unknown "api *pulls*" 1 0 0 0 "!POST repos/"
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td unknown dropped-comments-read-fails-is-unknown-with-no-post "api *issues/*/comments*" 1 1 1 0 "!POST repos/"
+
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
+td red dropped-comment-remedy-is-ready-and-undo-not-a-workflow-run "" 1 1 1 1 "POST repos/o/r/issues/1/comments" "gh pr ready 1 --undo" 're:gh pr ready 1([^0-9 ]|$)' "!gh workflow run"
+dnew; dpr 1 "$SHA_A" "$OLD"; dpage; dpr 2 "$SHA_B" "$OLD"
+dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'; dchecks "$SHA_B" '[]'; dcomments 2
+td red dropped-flagged-pr-on-page-two-is-found-from-one-pulls-read "" 1 2 1 1 "POST repos/o/r/issues/2/comments"
+
+dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1 "an unrelated comment"
+dcommentpage 1 2 "<!-- dropped-start-alarm:$SHA_A -->
+already flagged"
+td green dropped-marker-on-page-two-of-comments-is-green-with-no-post "" 1 1 1 0 "!POST repos/"
+
 exit $bad
