@@ -55,6 +55,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     works it out again. A seen card folds every answer part behind one control (options, or steps, command and
     links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
     An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
+  - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
+    "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
+    when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
+    open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
+    it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
+    to its top row, title and answer line; one control holds the owner's note, last answer and reply. A Change keeps
+    the card in the section, open, until reload. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -133,9 +140,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
-  them on the answered card. With no record, the card says "Answered, filing pending" and the save
-  time. With `filed`, it says "Answered, filed in <home>" (the item's `home`) and the filed time. With only `read`, it
-  also says "Read by <owner>" and the time.
+  them on the answered card. In a tier (an item answered on the open page), with no record the card says
+  "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
+  filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
+  `read`, the card also says "Read by <owner>" and the time.
 - `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
   (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
@@ -159,9 +167,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
     the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
-The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered, in place, when
-`answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
-in <home>", never "waited". It stays on the page until the owning session closes the item.
+The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered when
+`answers/<id>` exists: a green edge and the badge "Filing pending, sent" or "Filed
+in <home>" in the Answered section (see `rank` above), never "waited". An item answered on the open page keeps its tier
+until reload, with the badge "Answered, filing pending" or "Answered, filed in <home>". It stays on the page until the owning session closes the item.
 
 ## The writer
 
@@ -170,8 +179,8 @@ project with a triage thread, it is triage. The page's name for it is `writer` i
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers").
 
-- Every other session sends its question to the writer, which writes the item. A lane's question
-  reaches the writer through its report to its orchestrator ("Add an item", step 0).
+- Every other session sends its question to the writer, which writes the item. A lane sends its question
+  to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -182,12 +191,12 @@ into `meta/page`. The writer watches the page ("Read the answers").
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
 (decision questions-go-to-owner, "Same turn to the page", owner 2026-11-01 23:31 CST). The chat ask is
-the reply, or, with nothing running, the terminal question box, which also counts as the send. The
+the reply. A repo with no waiting page asks in the reply or, with nothing running, the terminal question box. The
 writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 - The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
-  asks a yes/no. It passes only when the same turn sent the question to the writer, wrote a page item,
-  or opened the box. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
+  asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.
+  The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
@@ -257,7 +266,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
-   `<file>` is the page that "Keep the page on main's code" step 1 already read.
+   `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
+   `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
    collection is `unknown`.
 4. Read the verdict line.
@@ -302,10 +312,12 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
    `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
    stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
-   `<folder>/<id>/page.html`.
+   `.complete` in its folder. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
+   and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
-   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export.
+   It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
+   text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
    the reply, and fix the cause first.
@@ -489,7 +501,7 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 A parked answer (`answers/park.<id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads `answers/park.<id>` again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
 This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
-A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`) or a reply in the thread.
+A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
 - `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
 - `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.
@@ -597,6 +609,7 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 
 The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
+The Status tab draws each phase id that its steps use, and a step with no phase goes under "No phase".
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
@@ -628,9 +641,17 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
-   raw HTML, or that does not name this account a writer, is unreadable too.
+   raw HTML, or that does not name this account a writer, is unreadable too. Write an empty
+   `<artifact id>.notfound` instead only when the read says "not found" AND `Artifact` action `list`
+   with scope `all` holds no such id. Page the list to its end (`page_token` until none is returned)
+   before an id counts as absent. Any other failed read stays `.unreadable`.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
-   `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
+   `behind`, `unknown` or `not-found` with its owner, and exits non-zero. An unread page is never
+   current. A `not-found` page is reported with the claude-settings waiting page as the place to re-file that
+   repo's items: the URL recorded in the extras file of the claude-settings checkout that holds the script, not
+   fetched. The target reads `the claude-settings waiting page is unknown` when that checkout has no page, its
+   extras file cannot be read, or its page has a `.notfound` or `.unreadable` marker in the folder. The check
+   never repoints a page: the owner decides.
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`, as "Keep the page on main's code" step 2 says:
    `stale_pages.py --page <fetched page> --write <new page>`.
@@ -646,5 +667,5 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
 4. Update one page first, then read its items: they must all still be there. That the database and
    its saved answers survive a republish is unmeasured until this live check is run.
-5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
-   its owner.
+5. Run the command again. The batch report lists its verdict line, with each `unknown` or `not-found` page
+   and its owner.

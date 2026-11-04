@@ -392,6 +392,8 @@ def case_bash_whole_component_not_substring():
     reason = rh.run(hook)
     prefix = "Ruling home: this turn's memory names no tracked home for "
     check("whole_component: reason has the expected shape", reason.startswith(prefix), reason)
+    check("whole_component: the reason cites decision memory-is-never-a-rulings-only-home",
+          "decision memory-is-never-a-rulings-only-home" in reason, reason)
     named_part = reason[len(prefix):].split(". Each written section")[0]
     entries = named_part.split("; ")
     check("whole_component: exactly data.md named, not a.md", entries == ["data.md (Note)"], entries)

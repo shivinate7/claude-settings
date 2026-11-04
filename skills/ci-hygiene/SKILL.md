@@ -117,7 +117,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the CI step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a public repo.
     Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    `lint/test_windows_split.py` checks that each suite runs in exactly one job.
+    `lint/test_windows_split.py` checks that each suite runs in exactly one job, for the Windows, Linux and macOS splits.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's CI step `if:`,
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
@@ -210,6 +210,8 @@ The other composite actions in `actions/`, in the same home:
 
 - `code-check`: one type check and one lint for defects per language. The caller needs checkout at
   `fetch-depth: 0` and setup-python.
+- `zizmor`: audits the caller's workflows and actions with one pinned zizmor (input `paths`, default
+  `.github/`). The caller needs checkout and pipx on PATH. `run.sh` holds the pin.
 - `playwright-setup`: installs the Playwright that a lockfile pins, and its browsers. No apt step by
   default.
 - `ste-lint`: runs `lint/ste_lint.py` on changed Markdown, or on every file with `scope: all`.
@@ -253,5 +255,6 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. No
-    version is a no.
+    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. A step
+    that runs the shared action (`actions/zizmor@<sha>` or `$/actions/zizmor`) is also a yes: its
+    `run.sh` holds the pin. No version and no shared action is a no.

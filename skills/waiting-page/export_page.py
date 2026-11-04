@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy the waiting page's database into the repo, and build it back (skill waiting-page, decision waiting-data-in-repo).
+"""Copy an artifact's page, its files and its database into the repo, and build the database back (skill waiting-page, decision waiting-data-in-repo).
 
 Export, the writer's step at each wake and before each republish:
 
@@ -12,7 +12,8 @@ The session touches `.complete` in each collection folder after the last list pa
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
-the page's designData block lands in `page/designData.json`. The script never runs git: the session commits.
+the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
+only when its bytes differ. The script never runs git: the session commits.
 
 Verdict, one line, then exit:
   changed N  N files written or deleted in WAITING_DIR; exit 0
@@ -23,7 +24,11 @@ Verdict, one line, then exit:
              page has no or two designData blocks; nothing is written; exit 2
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
-10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass.
+10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
+shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
+Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
+read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
+words such as "token budget" or "password manager" pass.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -43,10 +48,13 @@ Every artifact, the step "Before you switch Claude accounts":
         [--allow-empty COLLECTION]
 
 REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
-artifact id, each laid out as in a single export; a waiting-page entry with `<id>/page.html` also exports its
-designData block. Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting
-page: the waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export.
-Each artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+artifact id, each laid out as in a single export, plus `page.html` and `files/<path>` (the page's supporting files).
+Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting page: the
+waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export. Any role's
+`<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
+also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
+An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
+counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
 
@@ -65,7 +73,7 @@ import splice  # noqa: E402  the one home of the designData block's span
 # The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
-PAGE_FOLDER, DESIGN_FILE = "page", "designData.json"
+PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
@@ -87,6 +95,8 @@ SECRET_SHAPES = (
     ("cookie-header", re.compile(r"\bCookie:\s*[^\s=;]+=\S+", re.I)),
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
+    # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
+    ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
     ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
@@ -97,6 +107,9 @@ PHONE_OTHER = (
     re.compile(r"(?<!\d)\(\d{3}\)\s*\d{3}[\s.\-]\d{4}(?!\d)"),
     re.compile(r"(?<!\d)\d{3}([-. ])\d{3}\1\d{4}(?!\d)"),
 )
+VERSION_PIN = re.compile(r"@\d+(?:\.\d+)*(?![\w.-]*[A-Za-z])")  # `@18.3.1` in a CDN address
+# `logo@2x.png`: a retina image name, not an email. Only an image extension after the suffix makes it one.
+RETINA_NAME = re.compile(r"@\d+x(?=\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico)\b)", re.I)
 DATE_START = re.compile(r"\d{4}-\d{2}-\d{2}")
 PHONE_DIGITS = (10, 11)  # a JSON number of this many digits is a phone; 13 digits is an epoch in milliseconds
 
@@ -177,13 +190,18 @@ def docs_in(folder, label):
     return found
 
 
-def design_data(page_path):
-    """The parsed JSON of the one designData block of the page at `page_path`."""
+def read_page(page_path):
+    """(bytes, text) of the page at `page_path`. The bytes are what lands in the copy; the text is what is scanned."""
     try:
-        with open(page_path, encoding="utf-8", newline="") as handle:
-            text = handle.read()
+        with open(page_path, "rb") as handle:
+            raw = handle.read()
+        return raw, raw.decode("utf-8")
     except (OSError, UnicodeDecodeError) as err:
         raise Stop("unknown - the page cannot be read (%s)" % type(err).__name__, UNKNOWN)
+
+
+def design_data(text):
+    """The parsed JSON of the one designData block in the page `text`."""
     try:
         start, end = splice.design_span(text, "the page")
     except SystemExit as err:
@@ -194,6 +212,38 @@ def design_data(page_path):
         return json.loads(body)
     except ValueError:
         raise Stop("unknown - the page's designData block is not JSON", UNKNOWN)
+
+
+def supporting_files(folder):
+    """{relative path: bytes} of each file under `folder`, a page's supporting files; {} when there is none."""
+    found = {}
+    for here, _dirs, names in os.walk(folder):
+        for name in names:
+            with open(os.path.join(here, name), "rb") as handle:
+                found[os.path.relpath(os.path.join(here, name), folder).replace(os.sep, "/")] = handle.read()
+    return found
+
+
+def page_kinds(text):
+    """`kinds_in` for page text, a supporting file or its name: a version pin such as `react@18.3.1` and a retina
+    image name are not emails."""
+    return kinds_in(RETINA_NAME.sub("@", VERSION_PIN.sub("@", text)))
+
+
+def scan_text(label, text, finds):
+    """Append (label, "$", kind) to `finds` for each kind of find in `text`, a page or a supporting text file."""
+    finds.extend((label, "$", kind) for kind in page_kinds(text))
+
+
+def file_text(raw):
+    """The text of a supporting file to scan: UTF-8, else latin-1 (so a cp1252 note is read). None for a binary
+    file: one with a NUL byte, whatever its name, so a text file under an image or font name is scanned."""
+    if b"\0" in raw:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def refuse(finds, prefix=""):
@@ -215,7 +265,7 @@ def existing(out, collections=COLLECTIONS):
     return found
 
 
-def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix=""):
+def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
     docs = {}
     for name in collections:
         folder = os.path.join(fetched, name)
@@ -240,28 +290,43 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix=""):
             label = "%s/%s.json" % (name, "<redacted>" if hits else doc_id)
             scan(data, "$", hits)
             finds.extend((label, path, kind) for path, kind in hits)
-            want["%s/%s.json" % (name, doc_id)] = canonical(data)
+            want["%s/%s.json" % (name, doc_id)] = canonical(data).encode("utf-8")
     if page:
-        data = design_data(page)
-        found = []
-        scan(data, "$", found)
-        finds.extend(("%s/%s" % (PAGE_FOLDER, DESIGN_FILE), path, kind) for path, kind in found)
-        want["%s/%s" % (PAGE_FOLDER, DESIGN_FILE)] = canonical(data)
+        raw, text = read_page(page)
+        label = "%s/%s" % (PAGE_FOLDER, PAGE_FILE)
+        if design:
+            data = design_data(text)
+            found = []
+            scan(data, "$", found)
+            finds.extend(("%s/%s" % (PAGE_FOLDER, DESIGN_FILE), path, kind) for path, kind in found)
+            want["%s/%s" % (PAGE_FOLDER, DESIGN_FILE)] = canonical(data).encode("utf-8")
+        scan_text(label, text, finds)
+        want[label] = raw
+    for rel, raw in (files or {}).items():
+        text = file_text(raw)
+        name_kinds = page_kinds(rel)
+        label = "%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, "<redacted>" if name_kinds else rel)
+        finds.extend((label, "$name", kind) for kind in name_kinds)
+        if text is not None:
+            scan_text(label, text, finds)
+        want["%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, rel)] = raw
     if finds:
         refuse(finds, prefix)  # before any write, so a refused run leaves the copy as it was
 
-    if page:
-        path = os.path.join(out, PAGE_FOLDER, DESIGN_FILE)
-        if os.path.isfile(path):
-            with open(path, "rb") as handle:
-                have["%s/%s" % (PAGE_FOLDER, DESIGN_FILE)] = handle.read()
     changed = 0
-    for label, text in want.items():
-        if have.get(label) != text.encode("utf-8"):
-            target = os.path.join(out, *label.split("/"))
+    for label, raw in want.items():
+        target = os.path.join(out, *label.split("/"))
+        if label in have:
+            old = have[label]
+        elif os.path.isfile(target):  # the page and its files are not in a collection folder
+            with open(target, "rb") as handle:
+                old = handle.read()
+        else:
+            old = None
+        if old != raw:
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(target, "w", encoding="utf-8", newline="") as handle:
-                handle.write(text)
+            with open(target, "wb") as handle:
+                handle.write(raw)
             changed += 1
     for label in have:
         if label not in want:
@@ -284,14 +349,18 @@ def export_all(root, fetched, worktree, allow_empty):
     worst = 0
     for entry in entries:
         name = entry["id"]
+        if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
+            print("%s: skipped - no export" % name)
+            continue
         folder = os.path.join(fetched, name)
-        page = os.path.join(folder, "page.html")
+        page = os.path.join(folder, PAGE_FILE)
+        files = os.path.join(folder, FILES_FOLDER)
         try:
             if not os.path.isdir(folder):
                 raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
             verdict = export(folder, os.path.join(worktree, *entry["export"].split("/")),
-                             page if entry["role"] == layout.WAITING_ROLE and os.path.isfile(page) else None,
-                             allow_empty, tuple(entry["collections"]), "%s: " % name)
+                             page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
+                             entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
             code = 0
         except Stop as stop:
             verdict, code = str(stop), stop.code
