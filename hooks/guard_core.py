@@ -832,17 +832,21 @@ def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers, runner=_RUNNER) -> bool:
-    """True when a file a heredoc writes is run later: its pipeline holds a `runner` word (by default a shell,
-    an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself
-    (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
+    """The word that runs a file a heredoc writes, else '': the first `runner` word of its pipeline (by default a
+    shell, an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or the file itself when it is
+    the command (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
+    matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words)
-        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
-            return True
-    return False
+        runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words
+                     if runner(word.rsplit("/", 1)[-1])), "")
+        for words in stages:
+            for at, word in enumerate(words):
+                if word in written and (runs or at == 0):
+                    return runs or word
+    return ""
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
@@ -907,7 +911,8 @@ def script_language(header: str) -> str:
 
 def interpreter_bodies(cmd: str):
     """[(language, body, quote)] for each heredoc body that python, node, perl or ruby reads as a script: the body
-    of a header that names one, and the body written to a file that a later segment runs with one (language '').
+    of a header that names one, and the body written to a file that a later segment runs with one, in the
+    language of the word that runs it (language '' for a file run as the command itself, `./f`).
     `quote` is "'" for a quoted delimiter. A rule that judges shell lines reads these only at their shell spots
     (guard_env.script_spots), and an unquoted body also at the substitutions bash runs in it."""
     if "<<" not in cmd:
@@ -917,8 +922,9 @@ def interpreter_bodies(cmd: str):
     out = []
     for quote, body, header in bodies:
         header = _without_message_values(header)
-        lang = script_language(header)
-        if lang or _runs_written_file(text, [header], _SCRIPT_RUNNER):
+        runs = _runs_written_file(text, [header], _SCRIPT_RUNNER)
+        lang = script_language(header) or script_language(runs)
+        if lang or runs:
             out.append((lang, body, quote))
     return out
 

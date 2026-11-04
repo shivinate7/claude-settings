@@ -298,6 +298,15 @@ _SPOT_BARE = r"|[ \t]+(?=['\"])"
 _KEYWORD_ARG = re.compile(r"\s*(?:\*\*)?[A-Za-z_]\w*\s*(?:=(?!=)|:(?!:))")
 _BRACKETS = {"(": ")", "{": "}", "[": "]", "<": ">"}
 _COMMAND_OPEN = re.compile(r"(?:\bqx|%x)[ \t]*([^\w\s])")
+# An argument whose shell text can be told: one string, or a bracket list of strings, with no interpolation.
+_STRING = r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`"""
+_STRINGS = re.compile(r"\[\s*(?:(?:" + _STRING + r")\s*(?:,\s*(?:" + _STRING + r")\s*)*,?\s*)?\]|" + _STRING)
+_INTERPOLATION = {"js": r"\$\{", "perl": r"[$@]", "ruby": r"#\{"}
+# Node reaches a shell through child_process. A name bound to it is read only as `name.call(`.
+_JS_CALLS = r"(?:execSync|execFileSync|spawnSync|execFile|spawn|exec)"
+_JS_MODULE = r"""require\s*\(\s*(?P<quote>['"`])(?:node:)?child_process(?P=quote)\s*\)"""
+_JS_BIND = re.compile(r"(?<![\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*" + _JS_MODULE + r"\s*(?=[;\n]|$)")
+_JS_DIRECT = re.compile(_JS_MODULE + r"\." + _JS_CALLS + r"\s*\(")
 
 
 def _call_args(script: str, at: int, parens: bool):
@@ -349,13 +358,46 @@ def _command_spans(script: str):
     return out
 
 
+def _literal_arg(arg: str, lang: str) -> bool:
+    """True when the argument is one string or a bracket list of strings whose text the language does not fill
+    in: a js template with `${`, a perl string in double quotes or backticks with `$` or `@`, or a ruby one
+    with `#{`. A variable, a concatenation or a call is no literal."""
+    if not _STRINGS.fullmatch(arg):
+        return False
+    return not any(each[0] != "'" and (lang != "js" or each[0] == "`") and re.search(_INTERPOLATION[lang], each)
+                   for each in re.findall(_STRING, arg))
+
+
+def _js_module_names(script: str):
+    """The names a node script binds to child_process (`const cp = require('child_process')`), or None when it
+    names the module any other way: a destructured or imported name, a call held in a variable or handed on,
+    or a name used other than as `name.call(`. Those calls cannot be told."""
+    names, told = [], [found.span() for found in _JS_DIRECT.finditer(script)]
+    for bind in _JS_BIND.finditer(script):
+        names.append(bind.group(1))
+        told.append(bind.span())
+    for name in names:
+        for use in re.finditer(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", script):
+            if any(start <= use.start() < end for start, end in told):
+                continue
+            call = re.compile(re.escape(name) + r"\." + _JS_CALLS + r"\s*\(").match(script, use.start())
+            if not call:
+                return None
+            told.append(call.span())
+    for mention in re.finditer("child_process", script):
+        if not any(start <= mention.start() < end for start, end in told):
+            return None
+    return names
+
+
 def script_spots(script: str, lang: str = ""):
     """The shell text of each spot of a script where it hands a string to a shell: the call text of each shell
     call, and the command of each perl or ruby backtick span, `qx` and `%x`. `lang` is "py", "js", "perl" or
     "ruby", or '' for a script of unknown language (every language is tried). Python is read with `ast`
     (`guard_frozen.py_spots`): an alias resolves, a comment and a plain string are text, and a script it cannot
     tell reads whole. In the other languages, a call whose arguments hold no quote, a variable handed to a
-    shell, reads the whole script: the string it holds cannot be told."""
+    shell, reads the whole script: the string it holds cannot be told. So does a node script that names
+    child_process other than as `name.call(` (`_js_module_names`)."""
     langs = [lang] if lang else list(_SPOT_CALLS)
     out = []
     if lang in ("", "py"):
@@ -365,18 +407,24 @@ def script_spots(script: str, lang: str = ""):
         except (SyntaxError, ValueError):
             pass   # python runs no line of it, so the pattern reader below only tries a literal name
         else:
-            if found is None and lang:
+            if found is None:
                 return [script]
-            if found is not None:
-                out += found
-                langs = [each for each in langs if each != "py"]
+            out += found
+            langs = [each for each in langs if each != "py"]
     for each in langs:
+        calls = _SPOT_CALLS[each]
+        if each == "js":
+            names = _js_module_names(script)
+            if names is None:
+                return [script]
+            calls += "".join(r"|(?<=(?<![\w$.])" + re.escape(name) + r"\.)exec" for name in names)
         tail = _SPOT_PAREN + (_SPOT_BARE if each in ("perl", "ruby") else "")
-        for call in re.finditer("(?:" + _SPOT_CALLS[each] + ")(?:" + tail + ")", script):
+        for call in re.finditer("(?:" + calls + ")(?:" + tail + ")", script):
             parens = call.group(0).rstrip().endswith("(")
             args = [arg.strip() for arg in _call_args(script, call.end(), parens)
                     if arg.strip() and not _KEYWORD_ARG.match(arg) and not arg.lstrip().startswith("{")]
-            if not any(mark in arg for arg in args for mark in "'\"`"):
+            if not any(mark in arg for arg in args for mark in "'\"`") or (
+                    each != "py" and not all(_literal_arg(arg, each) for arg in args)):
                 return [script]
             out.append(re.sub(r"\s*\($", "", call.group(0).rstrip()) + "(" + ", ".join(args) + ")")
     if lang in ("", "perl", "ruby"):

@@ -848,19 +848,35 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
-# A python script reaches a shell only at a call of os or subprocess. `py_spots` reads that with `ast`, so an
-# import alias (`import subprocess as sp`, `from os import system`) is the call it names, and a comment or a
-# plain string is text.
+# A python script acts on files and processes only through the modules in `_PY_ACTING`. `py_spots` reads it with
+# `ast`: each name an import binds to one of them must be the callee of a shell call of os or subprocess with
+# literal arguments (an alias resolves: `import subprocess as sp`, `from os import system`), or a name that acts
+# on nothing (`_py_inert`). Any other use (shutil.copy, os.chmod, a call held in a variable) cannot be told, so
+# the script reads whole, as a shell reads it. A comment or a plain string is text.
+_PY_ACTING = ("os", "subprocess", "shutil", "pty", "asyncio", "posix", "nt", "sys", "importlib", "ctypes",
+              "multiprocessing", "pathlib", "builtins", "runpy", "_posixsubprocess")
 _OS_SPOT = re.compile(r"system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*")
 _SUBPROCESS_SPOTS = ("run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput")
-_PY_DYNAMIC = ("eval", "exec", "compile", "__import__", "import_module", "globals", "vars")
+_PY_INERT = ("subprocess.PIPE", "subprocess.DEVNULL", "subprocess.STDOUT")
+_PY_DYNAMIC = ("eval", "exec", "compile", "__import__", "__builtins__", "import_module", "globals", "locals",
+               "vars")
+# The keyword arguments of a shell call that set what runs: a variable there cannot be told.
+_PY_SPOT_KEYWORDS = ("args", "executable")
 
 
-def _py_spot_name(module: str, name: str) -> str:
-    """`module.name` when that call hands its text to a shell, else ''."""
-    if module == "os":
-        return "os." + name if _OS_SPOT.fullmatch(name) else ""
-    return "subprocess." + name if module == "subprocess" and name in _SUBPROCESS_SPOTS else ""
+def _py_spot_name(name: str) -> str:
+    """The dotted `name` when that call hands its text to a shell (`os.system`, `subprocess.run`), else ''."""
+    module, _, call = name.rpartition(".")
+    if module == "os" and _OS_SPOT.fullmatch(call) or module == "subprocess" and call in _SUBPROCESS_SPOTS:
+        return name
+    return ""
+
+
+def _py_inert(name: str) -> bool:
+    """True for a dotted name of an acting module that names or reads things and acts on nothing: os.path, a
+    subprocess constant, and every name of sys but sys.modules, which can swap a module for another."""
+    return (name in _PY_INERT or name == "os.path" or name.startswith("os.path.")
+            or name.startswith("sys.") and name.split(".")[1] != "modules")
 
 
 def _py_literal(node) -> bool:
@@ -870,39 +886,40 @@ def _py_literal(node) -> bool:
     return isinstance(node, (ast.List, ast.Tuple)) and all(_py_literal(each) for each in node.elts)
 
 
-def _py_aliases(tree):
-    """(modules, functions) as {name: canonical}: the names an `import` binds to `os` or `subprocess`, and the
-    names a `from` import binds to a call of theirs that reaches a shell. None for a `from` import of every
-    name, which binds names that cannot be told."""
+def _py_bindings(tree):
+    """{name: dotted name} for each name an import binds to an acting module or a name of one: `import os.path`
+    binds `os` to os, `import os.path as p` binds `p` to os.path, `from shutil import copy as c` binds `c` to
+    shutil.copy. None for a `from` import of every name, which binds names that cannot be told."""
     import ast
-    modules, functions = {}, {}
+    bound = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for each in node.names:
-                if each.name in ("os", "subprocess"):
-                    modules[each.asname or each.name] = each.name
-        elif isinstance(node, ast.ImportFrom) and node.module in ("os", "subprocess") and not node.level:
+                top = each.name.split(".")[0]
+                if top in _PY_ACTING:
+                    bound[each.asname or top] = each.name if each.asname else top
+        elif (isinstance(node, ast.ImportFrom) and node.module and not node.level
+              and node.module.split(".")[0] in _PY_ACTING):
             for each in node.names:
                 if each.name == "*":
                     return None
-                if _py_spot_name(node.module, each.name):
-                    functions[each.asname or each.name] = node.module + "." + each.name
-    return modules, functions
+                bound[each.asname or each.name] = node.module + "." + each.name
+    return bound
 
 
 def py_spots(script: str):
     """The shell text of each call of a python script that hands a string to a shell, as `os.system('...')`,
-    or None when the script cannot be told: it reaches such a call by another route (the name passed on,
-    `getattr`, `eval`), or a call takes an argument that is no literal. The caller then reads the whole script
-    as shell. A script that does not parse raises SyntaxError or ValueError: python runs none of it."""
+    or None when the script cannot be told: it uses an acting module another way (`_PY_ACTING`), reaches code by
+    another route (`eval`, `__import__`), or a shell call takes an argument that is no literal. The caller then
+    reads the whole script as shell. A script that does not parse raises SyntaxError or ValueError: python
+    runs none of it."""
     import ast
     import textwrap
     source = textwrap.dedent(script)
     tree = ast.parse(source)
-    aliases = _py_aliases(tree)
-    if aliases is None:
+    bound = _py_bindings(tree)
+    if bound is None:
         return None
-    modules, functions = aliases
     calls, callee_names, parents = [], set(), {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
@@ -912,32 +929,25 @@ def py_spots(script: str):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
-            spot = _py_spot_name(modules[func.value.id], func.attr)
-            base = func.value
-        elif isinstance(func, ast.Name) and func.id in functions:
-            spot, base = functions[func.id], func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in bound:
+            spot, base = _py_spot_name(bound[func.value.id] + "." + func.attr), func.value
+        elif isinstance(func, ast.Name) and func.id in bound:
+            spot, base = _py_spot_name(bound[func.id]), func
         else:
             continue
         if spot:
             calls.append((node, spot))
             callee_names.add(id(base))
     for node in ast.walk(tree):
-        # A name bound to os, subprocess or a shell call of theirs is read only as the callee of a spot call,
-        # or as the base of an attribute that is no such call (`os.path`, `subprocess.PIPE`). Any other use
-        # hands the call on (`map(os.system, ...)`, `getattr(os, name)`), where this reading cannot follow it.
-        if not isinstance(node, ast.Name) or id(node) in callee_names:
+        if not isinstance(node, ast.Name) or node.id not in bound or id(node) in callee_names:
             continue
-        if node.id in functions:
+        name, parent = bound[node.id], parents.get(id(node))
+        if not (_py_inert(name) or isinstance(parent, ast.Attribute) and parent.value is node
+                and _py_inert(name + "." + parent.attr)):
             return None
-        if node.id in modules:
-            parent = parents.get(id(node))
-            if not (isinstance(parent, ast.Attribute) and parent.value is node
-                    and not _py_spot_name(modules[node.id], parent.attr)):
-                return None
     out = []
     for node, spot in calls:
-        args = list(node.args) + [kw.value for kw in node.keywords if kw.arg == "args"]
+        args = list(node.args) + [kw.value for kw in node.keywords if kw.arg in _PY_SPOT_KEYWORDS]
         if (not args or not all(_py_literal(arg) for arg in args) or any(kw.arg is None for kw in node.keywords)
                 or any(isinstance(arg, ast.Starred) for arg in node.args)):
             return None
