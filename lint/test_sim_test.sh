@@ -36,6 +36,13 @@
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
 #    folder) stops xcodebuild and exits non-zero. The stop line says "shut down" if it booted the simulator, else "left".
+#  - A `simctl list` that fails (non-zero): exit 1, no boot, no xcodebuild. The booted list is never read as empty.
+#  - A duo run that queued behind a pro holder re-reads the booted list after its grant: an 18 Pro booted by then is
+#    refused (exit 1, no boot), as the one-phone-kind rule says.
+#  - `--hold --for S -- CMD` with CMD still running at S: exit 124, then cleanup. A crash loop stops a hold, with or
+#    without CMD.
+#  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
+#    lock freed. TERM during a simctl boot: the device still comes up, so it is shut down and recorded.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -123,6 +130,8 @@ SH
 # xcrun: simctl only. $RUN/booted holds the "Booted" lines of `simctl list devices booted`, and $RUN/devices.json answers
 # `simctl list devices --json` (the record mode's read). Each simctl call logs its
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
+# STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
+# then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
 [ "$1" = simctl ] || exit 99
@@ -133,11 +142,13 @@ lease="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json"
 held=no; [ -d "$lock" ] && held=yes
 echo "$1 $held" >> "$RUN/lock_simctl"
 case "$1" in
-  list) case "$*" in
+  list) [ -n "${STUB_LIST_RC:-}" ] && exit "$STUB_LIST_RC"; case "$*" in
     *--json*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
-  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
+    if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
+    case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -200,7 +211,7 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -847,6 +858,122 @@ need "the child saw the lock folder" test -e "$work/cmd_lock_seen"
 need "the lock's pid is this tool's pid while the child runs" test "$(cat "$work/cmd_lock_pid" 2>/dev/null)" = "$tool_pid"
 need "lock freed after the hold" lock_gone
 end_case "68 lock held through a --hold run: the child sees the lock with this tool's pid, and it is freed after"
+
+# ---- Cases 69 to 77: the queued duo run, simctl list failing, a hold past its time, a crash loop in a hold, and TERM
+# during the lease wait and during a boot.
+# poll_for TRIES CMD...: runs CMD now and then every 0.5 s, up to TRIES runs, and returns at the first success. It waits for
+# a step the tool or the test has made, never for a fixed time: TRIES is a ceiling only.
+poll_for() { local n=$1; shift; while [ "$n" -gt 0 ]; do "$@" && return 0; n=$((n - 1)); "$REAL_SLEEP" 0.5; done; "$@"; }
+# in_lease_file: this tool's pid is in leases.json, as a lease or as a place in the queue.
+in_lease_file() { lease_holds "$lease_file" "$tool_pid"; }
+# tool_ended: the tool has exited. A zombie counts as exited: finish_tool reaps it.
+tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st || $st == Z* ]]; }
+# lease_freed_after_reap: a `sim-lease status` call drops the dead holders and places, as a later take does. Then the tool
+# holds neither a lease nor a place.
+lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
+
+# pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
+# BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it.
+pro_dies_during_duo_wait() {
+  fresh
+  sleep 600 > /dev/null 2>&1 &
+  local holder=$!
+  need "the pro holder is granted the pro lease" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
+    "$sim_lease" take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
+  ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
+  need "the duo run is queued behind the pro lease" poll_for 20 in_lease_file
+  if [[ $1 = yes ]]; then
+    booted "iPhone 18 Pro" $PRO
+    need "the 18 Pro is booted when the holder dies" grep -Fq "iPhone 18 Pro" "$booted_file"
+  fi
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  finish_tool
+  ARGS=(-scheme X)
+}
+pro_dies_during_duo_wait yes
+need "exit 1" rc_is 1
+need "boots nothing" no_boot
+need "runs nothing" no_xcodebuild
+need "stderr names the booted 18 Pro" grep -Fq "iPhone 18 Pro" "$work/run.err"
+need "lease given back" lease_released
+end_case "69 a pro holder dies with the 18 Pro still booted, during a queued duo run's wait: refused, no boot, exit 1"
+
+pro_dies_during_duo_wait no
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "destination is the Duo's UDID" dest_is "$DUO1"
+end_case "70 control: a pro holder dies with nothing booted, and the queued duo run boots its Duo"
+
+fresh; run STUB_LIST_RC=1
+need "exit 1" rc_is 1
+need "boots nothing" no_boot
+need "runs nothing" no_xcodebuild
+end_case "71 simctl list fails: exit 1, boots and runs nothing"
+
+fresh; ARGS=(--hold --for 1 -- sleep 15); run; ARGS=(-scheme X)
+need "exit 124 when CMD runs past --for" rc_is 124
+need "steps are boot shutdown" steps_are "boot shutdown "
+need "shutdown of the Duo it booted" has_call "simctl shutdown $DUO1"
+need "lease given" lease_released
+need "lock freed" lock_gone
+end_case "72 --hold --for 1 -- CMD still running at 1 s: exit 124, shuts the Duo down, gives the lease, frees the lock"
+
+# The CMD of case 73 writes three SpringBoard reports that name its Duo, then sleeps on until the hold stops it.
+crash_cmd=$work/crash_cmd.sh
+cat > "$crash_cmd" <<'SH'
+#!/bin/sh
+sleep 1
+for i in 0 1 2; do mkreport "$SIM_TEST_CRASH_DIR/SpringBoard-hold-$i.ips" "$STUB_CRASH_UDID"; done
+sleep 30
+SH
+chmod +x "$crash_cmd"
+fresh; ARGS=(--hold -- "$crash_cmd"); run; ARGS=(-scheme X)
+need "exit 1 on the crash loop" rc_is 1
+need "stderr names the crash loop and the count 3" crash_msg_count3
+need "the stop line says it shut down the Duo it booted" crash_line_has "shut down"
+need "shutdown of the Duo it booted" has_call "simctl shutdown $DUO1"
+end_case "73 crash loop during a hold with CMD: stops CMD, shuts the Duo down, exits 1"
+
+fresh; ARGS=(--hold --for 60); start_tool; ARGS=(-scheme X)
+need "the hold is up" poll_for 20 grep -Fq "sim-test: holding" "$work/run.std"
+for i in 0 1 2; do mkreport "$crashdir/SpringBoard-hold-$i.ips" "$DUO1"; done
+finish_tool
+need "exit 1 on the crash loop" rc_is 1
+need "stderr names the crash loop and the count 3" crash_msg_count3
+need "the stop line says it shut down the Duo it booted" crash_line_has "shut down"
+need "shutdown of the Duo it booted" has_call "simctl shutdown $DUO1"
+end_case "74 crash loop during a hold with no CMD: exits 1, shuts the Duo down"
+
+# lease_wait_term TARGET: a duo run queues behind a 5-minute load of 100, then TERM arrives. TARGET tool sends it to the
+# tool's pid alone, as a caller's own kill does; TARGET group sends it to the whole process group, as a terminal does.
+lease_wait_term() {
+  fresh; set_load "{ 0.50 100.00 0.50 }"
+  ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
+  need "the duo run is queued behind the load" poll_for 20 in_lease_file
+  if [[ $1 = group ]]; then kill -TERM -- "-$tool_pid" 2>/dev/null; else kill -TERM "$tool_pid" 2>/dev/null; fi
+  need "the tool ends within 5 s of TERM (a ceiling of 10 polls, 0.5 s apart)" poll_for 10 tool_ended
+  finish_tool
+  ARGS=(-scheme X)
+  need "no boot" no_boot
+  need "queue place and lease freed" lease_freed_after_reap
+  need "lock freed" lock_gone
+}
+lease_wait_term tool
+end_case "75 TERM to the tool alone during the lease wait: ends within 5 s, no boot, queue place and lock freed"
+lease_wait_term group
+end_case "76 control: TERM to the whole group during the lease wait ends within 5 s, with the same cleanup"
+
+# Case 77: the boot is held open, TERM reaches the tool alone, and then the boot is let finish. The Duo it booted is shut
+# down and recorded.
+fresh; ps_stub; devices_json "$DUO1"
+ARGS=(-scheme X); start_tool PATH="$work/psbin:$PATH" STUB_BOOT_HOLD=1
+need "the boot is in flight" poll_for 20 test -e "$work/boot_started"
+kill -TERM "$tool_pid" 2>/dev/null
+: > "$work/boot_release"
+finish_tool
+need "shutdown of the Duo it booted, after the boot" has_call "simctl shutdown $DUO1"
+need "the Duo's boot is recorded" record_names "$DUO1"
+end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
