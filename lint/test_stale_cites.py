@@ -154,19 +154,47 @@ def repo_modules_imported(path):
     return found
 
 
-def binding_kind(source, name):
-    """How a Python source binds `name` at module level: "def" for a def or class, "assign", "import", or None.
-    Read with ast, never imported. A case asserts this on its fixtures before it probes the check on the name."""
-    found = None
-    for node in ast.parse(source).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
-            found = "def"
-        elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-            found = "assign"
-        elif isinstance(node, (ast.Import, ast.ImportFrom)) and any(
-                (alias.asname or alias.name.split(".")[0]) == name for alias in node.names):
-            found = "import"
+def paths_loaded_by_path(path):
+    """Repo-relative .py files the module names as the parts of an os.path.join call, resolved from its folder:
+    a file it loads by path (importlib, not an import). Read with ast, never imported."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    folder = os.path.relpath(os.path.dirname(os.path.abspath(path)), ROOT)
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "join":
+            parts = [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+            if parts and parts[-1].endswith(".py"):
+                rel = os.path.normpath(os.path.join(folder, *parts)).replace(os.sep, "/")
+                if rel not in found:
+                    found.append(rel)
     return found
+
+
+def binding_kind(source, name):
+    """How a Python source binds `name` at module level, also under a module-level if or try: "def" for a def
+    or class, "assign", "import", or None. Read with ast, never imported. A case asserts this on its fixtures
+    before it probes the check on the name."""
+    found = []
+
+    def visit(body):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node.name == name:
+                    found.append("def")
+            elif isinstance(node, ast.Assign):
+                if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+                    found.append("assign")
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                if any((alias.asname or alias.name.split(".")[0]) == name for alias in node.names):
+                    found.append("import")
+            elif isinstance(node, (ast.If, ast.Try)):
+                for field in ("body", "orelse", "finalbody"):
+                    visit(getattr(node, field, None) or [])
+                for handler in getattr(node, "handlers", None) or []:
+                    visit(handler.body)
+    visit(ast.parse(source).body)
+    return found[-1] if found else None
 
 
 class StaleCase(unittest.TestCase):
@@ -523,6 +551,31 @@ class SymbolTests(StaleCase):
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes), change))
 
+    def test_a_constant_still_bound_under_a_module_level_if_is_not_flagged(self):
+        base_config = "LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        head_config = "if True:\n    LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        notes = "# Notes\n\n- `hooks/config.py` `LIMIT`\n"
+        self.assertEqual(binding_kind(base_config, "LIMIT"), "assign")  # scope: base binds LIMIT at module level
+        self.assertEqual(binding_kind(head_config, "LIMIT"), "assign")  # scope: head binds it under the if
+
+        def change(repo):
+            write(repo, "hooks/config.py", head_config)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"hooks/config.py": base_config}), change))
+
+    def test_an_import_still_bound_inside_a_module_level_try_is_not_flagged(self):
+        base_out = "from json import dumps\n\n\ndef keep():\n    return 1\n"
+        head_out = ("try:\n    from json import dumps\nexcept ImportError:\n    pass\n\n\n"
+                    "def keep():\n    return 1\n")
+        notes = "# Notes\n\n- `hooks/out.py` `dumps`\n"
+        self.assertEqual(binding_kind(base_out, "dumps"), "import")  # scope: base imports dumps at module level
+        self.assertEqual(binding_kind(head_out, "dumps"), "import")  # scope: head imports it inside the try
+
+        def change(repo):
+            write(repo, "hooks/out.py", head_out)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"hooks/out.py": base_out}), change))
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
@@ -615,8 +668,14 @@ class PinTests(unittest.TestCase):
 
     def test_lint_files_holds_every_repo_file_the_check_imports(self):
         listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
-        needed = repo_modules_imported(MODULE) + ["lint/stale_cites.py"]
+        needed = repo_modules_imported(MODULE) + paths_loaded_by_path(MODULE) + ["lint/stale_cites.py"]
         self.assertEqual([f for f in needed if f not in listed], [], "bin/ste-changed LINT_FILES lacks these")
+
+    def test_the_py_facts_file_stale_cites_loads_by_path_is_in_lint_files(self):
+        self.assertIn("skills/plain-english-map/scripts/lib/py-facts.py", paths_loaded_by_path(MODULE))  # scope
+        listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
+        self.assertIn("skills/plain-english-map/scripts/lib/py-facts.py", listed,
+                      "bin/ste-changed LINT_FILES lacks the py-facts file stale_cites loads by path")
 
 
 class CostTests(StaleCase):
@@ -661,10 +720,20 @@ class CostTests(StaleCase):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
+        self.assert_run_writes_no_file(change)
+
+    def test_a_touched_py_that_loads_py_facts_writes_no_file_next_to_it(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
+            commit(repo)
+        self.assert_run_writes_no_file(change)
+
+    def assert_run_writes_no_file(self, change):
         rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
         # Run a copy of the script's folders, so any file the run writes next to the script shows here.
+        # skills/ holds py-facts, which a touched .py loads by path.
         scripts = os.path.join(rng.case, "scripts")
-        tracked_tree.copy_tracked(scripts, "lint", "hooks")
+        tracked_tree.copy_tracked(scripts, "lint", "hooks", "skills")
         before = (paths_under(rng.repo), paths_under(scripts))
         env = dict(os.environ, TMPDIR=rng.case)
         env.pop("PYTHONDONTWRITEBYTECODE", None)  # a set variable would hide a .pyc the run writes
