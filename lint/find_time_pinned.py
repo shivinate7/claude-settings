@@ -11,7 +11,8 @@ tool lists the tests that do. It fixes none, and it writes nothing. Each finding
 - wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
   Kept apart because it may be fine. The plan decides case by case.
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
-  `time.localtime()`, JS `new Date()`). Decision test-practices P5.
+  `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.tzname`, `time.timezone`,
+  JS `new Date()` and any `Date(...)` call without `new`). Decision test-practices P5.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -444,8 +445,11 @@ PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
-# A date or zone read with no time given. `time.strftime(fmt)` and `time.localtime()` read the clock only
-# when no time argument is passed, so they are matched apart from the always-real forms.
+# A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
+# `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
+# matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
+PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime"}
+PY_CALENDAR_ATTRS = {"time.tzname", "time.timezone"}
 PY_CALENDAR_NOW = {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow",
                    "date.today", "datetime.today", "datetime.date.today", "datetime.datetime.today"}
 
@@ -520,7 +524,10 @@ def scan_python(text):
                 imports[a.asname or a.name] = node.module + "." + a.name
 
     def names_of(call):
-        d = dotted(call.func)
+        return names_of_node(call.func)
+
+    def names_of_node(node):
+        d = dotted(node)
         if d is None:
             return set()
         first, _, rest = d.partition(".")
@@ -592,7 +599,6 @@ def scan_python(text):
 
     found = set()
     calendar_calls = []
-    in_elapsed = set()  # calls inside an assert already listed as elapsed-assert: listed once, not twice
     decorator_calls = {id(d) for n in ast.walk(tree)
                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                        for d in n.decorator_list if isinstance(d, ast.Call)}
@@ -604,7 +610,7 @@ def scan_python(text):
                     and isinstance(first.value, (int, float)) and first.value == 0):
                 found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
         if names & PY_CALENDAR_NOW or (
-                not call.args and not call.keywords and names & {"time.localtime"}) or (
+                not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
                 len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
             calendar_calls.append(call)
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
@@ -622,13 +628,14 @@ def scan_python(text):
         for n in walk_scope(root):
             if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
-                in_elapsed.update(id(c) for c in ast.walk(n.test))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
                 if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
-                    in_elapsed.update(id(c) for x in assert_parts(n, name) for c in ast.walk(x))
-    found.update((c.lineno, "calendar") for c in calendar_calls if id(c) not in in_elapsed)
+    found.update((c.lineno, "calendar") for c in calendar_calls)
+    found.update((n.lineno, "calendar") for n in ast.walk(tree)
+                 if isinstance(n, (ast.Attribute, ast.Name)) and isinstance(n.ctx, ast.Load)
+                 and names_of_node(n) & PY_CALENDAR_ATTRS)
     return found
 
 
@@ -924,6 +931,9 @@ def scan_js(text):
 
     for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(\s*\)", m):
         hits.add(mm.start(), "calendar")
+    for mm in re.finditer(r"(?<![\w$.])Date\s*\(", m):  # without `new`, Date(...) ignores its arguments
+        if not re.search(r"(?<![\w$])(?:new|function)\s+$", m[max(0, mm.start() - 12):mm.start()]):
+            hits.add(mm.start(), "calendar")
 
     tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
     for mm in JS_ASSERT.finditer(m):
