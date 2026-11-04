@@ -1211,3 +1211,4 @@
 - verdict-marker-prefixed: a test success marker after `\r`, a timestamp or a `sed` prefix is not at a line start, so `verdict` does not mark it. Same family as debt verdict-rewritten-xcode-output.
 - verdict-sgr-in-count: EXEC (bin/verdict) reads raw text, so a colour code inside a count line with a marker reads FAIL. Forced colour only.
 - playwright-pass-with-no-tests: `npx playwright test --pass-with-no-tests` exits 0 with no count and reads PASS in `verdict`. Opt-in flag only.
+- tier-line-lane-tests-loose: `SessionStartMergeRoleTests` (hooks/test_session_start.py) does not pin "never merges" or the literal `cs-build:lane` tag on the hand-off sentence, so a reworded line that drops either stays green. The line itself is right today. Decision: session-tiers (who started a session decides its merge path)
