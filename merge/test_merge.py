@@ -9655,7 +9655,20 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
         self.assertIn("run 904", out)
-        self.assertNotIn("gh run rerun", out, "the UNKNOWN verdict of a cancelled run names a re-run, though no red run is named\n" + out)
+        # a cancelled UNKNOWN run with a run id names its plain re-run, `gh run rerun <id>`, never --failed (decision no-merge-onto-red-main)
+        self.assertEqual(re.findall(r"gh run rerun (\d+)( --failed)?", out), [("904", "")],
+                         "the UNKNOWN refusal does not name the plain `gh run rerun 904` once, without --failed\n" + out)
+
+    def test_two_cancelled_runs_of_two_workflow_files_each_name_their_plain_re_run(self):
+        # each cancelled run is UNKNOWN on its own file and names its plain re-run, by its own id, never --failed
+        runs = [main_run(904, "cancelled"), main_run(932, "cancelled", name="links", event="schedule", path=LINKS_PATH)]
+        jobs = {904: [main_job("scope", "success"), main_job("checks", "cancelled", 2)], 932: [main_job("readme-links", "cancelled", 2)]}
+        rc, out, before = self.go(runs, jobs)
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 932 of links", out)
+        self.assertEqual(sorted(re.findall(r"gh run rerun (\d+)( --failed)?", out)), [("904", ""), ("932", "")],
+                         "the UNKNOWN refusal does not name one plain `gh run rerun <id>` for each cancelled run 904 and 932\n" + out)
 
     def test_a_newest_run_cancelled_by_a_timeout_is_not_red(self):
         jobs = {904: [main_job("scope", "success"), main_job("checks-macos", "cancelled", 30)]}
