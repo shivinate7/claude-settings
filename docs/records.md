@@ -41,7 +41,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-archive-then-delete` | Push an unmerged branch to `archive/<branch>` on origin, or a new archive name if taken. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-machine-wide-kill` | Kill only yours. | [`CLAUDE.md`](../CLAUDE.md) |
-| `shared-trees-one-checkout-per-agent` | Give one checkout to each concurrent agent. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-own-ports-data` | A branch switch is a whole-tree act. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-confirm-before-write` | Confirm which checkout and branch you stand in before any git write or merge. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
