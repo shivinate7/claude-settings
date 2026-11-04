@@ -197,9 +197,10 @@ Other tools, in `judge` order:
                        deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
                        after the cap and twin rules. The remedy is `sim-test` for the `test` action,
                        else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
-  simulator-boot-locked
-                       deny. A simulator MCP `launch` of a shut-down device while the sim-test lock
-                       has a live holder. Judged after the cap and twin rules. An override lifts it.
+  simulator-boot-lease
+                       deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
+                       holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
+                       rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -3705,36 +3706,10 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_lock_holder():
-    """The holder of <config>/state/sim-test.lock as a string (a live pid, or "unknown" for a lock folder with no
-    readable pid file under 60 s old), or "" when the lock is free. The lock is the one bin/sim-test takes."""
-    try:
-        lock = os.path.join(guard_core.config_dir(), "state", "sim-test.lock")
-        age = time.time() - os.stat(lock).st_mtime
-        try:
-            with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
-                text = f.read().strip()
-        except OSError:
-            text = ""
-        if text.isdigit() and int(text) > 0:
-            try:
-                os.kill(int(text), 0)
-            except ProcessLookupError:
-                return ""
-            except PermissionError:
-                return ""  # bin/sim-test reads a failed `kill -0`, EPERM too, as a holder that is gone
-            except OSError:
-                pass
-            return text
-        return "unknown" if age < 60 else ""
-    except Exception:
-        return ""  # fail open: an unreadable lock is not held
-
-
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch while the sim-test lock is held as simulator-boot-locked."""
+    simulator-boot-route, and an MCP launch as simulator-boot-lease."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3773,12 +3748,11 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
         shut_down.append(name)
     for name in shut_down:
         if tool == SIM_MCP:
-            holder = sim_lock_holder()
-            if holder:
-                refuse(tool, "deny", "simulator-boot-locked",
-                       "`sim-test` holds the one simulator lock (pid %s). A launch of a shut-down simulator "
-                       "boots outside that lock. Wait for sim-test to end, or launch a simulator that is "
-                       "already booted. (decision sim-test-is-the-one-boot-path)" % holder, name)
+            refuse(tool, "deny", "simulator-boot-lease",
+                   "A launch of the shut-down simulator %s needs a lease, and no session holds one: the Mac "
+                   "shares one simulator across repos. Run `sim-test`, which leases and boots it under its "
+                   "lock, or launch a simulator that is already booted. "
+                   "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
                    "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
