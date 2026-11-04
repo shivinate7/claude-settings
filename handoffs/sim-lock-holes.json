@@ -1,0 +1,29 @@
+[
+    {
+        "id": "oq-mcp-launch-full-refusal",
+        "kind": "decision",
+        "status": "open",
+        "title": "Refuse every booting MCP launch, or only under the sim-test lock?",
+        "short": "MCP launch refusal scope",
+        "owner": "session_013NEJKzhGfPvj1DTXeyBnFT",
+        "home": "claude-settings decision sim-test-is-the-one-boot-path, ruling 5",
+        "context": "Goal: Every simulator boot goes through the sim-test lock.\nProblem (goal): The simulator MCP launch cannot run inside sim-test, so it can only be refused. A full refusal changes what sessions can do, so it needs your word.\nBased on (read): bin/sim-test shuts down each simulator it booted, and simulator-boot-bypass refuses a raw simctl boot (PR #1145, head 425c2a073).\nDeparts from: main lets an MCP launch boot under the cap and reuse rules — PR #1145 refuses it while a live pid holds the sim-test lock.",
+        "options": [
+            {
+                "key": "a",
+                "label": "Refuse only under the lock",
+                "how": "Keep PR #1145 as built.",
+                "gain": "Sessions can still view an app on a fresh simulator.",
+                "lose": "An MCP launch that boots just before a sim-test run skips the lock."
+            },
+            {
+                "key": "b",
+                "label": "Refuse every booting launch",
+                "how": "Widen simulator-boot-locked to every MCP launch of a shut-down device.",
+                "gain": "No boot skips the lock.",
+                "lose": "Viewing an app on a simulator needs you to boot one first, and the cap and reuse rules no longer judge MCP launches."
+            }
+        ],
+        "repo": "shivinate7/claude-settings"
+    }
+]
