@@ -1318,3 +1318,6 @@
 - export-scan-encoded-tokens: a Telegram token with its colon URL-encoded (`%3A`) or HTML-escaped (`&#58;`) passes the scan, and so does `@<digits>:<tail>` in page text, since the version-pin blank eats `@<digits>`. Decision: waiting-data-in-repo.
 - export-scan-red-checks-verdict: `assert_refused` in `test_export_page.py` checks the refused verdict, not the kind, so a case can stay red through the wrong shape. Each case hits only its own shape today. Decision: waiting-data-in-repo.
 - launchd-sweep-log-growth: the daily job's stdout log, `<config>/janitor/launchd-sweep.log`, has no cap, and its growth per run is unmeasured. Decision: the-janitor-is-one-machine-wide-sweep.
+- agent-end-note-sees-200-rows: the daily note's agent-end check reads only the last 200 rows of the payload log. A 7-day window can hold more runs than that on a busy machine. A run whose rows were cut is not counted. Decision: guard-log-read-weekly.
+- agent-end-lock-wait-hides-kill: a started row lost to the payload log's 30 s lock wait (`LOG_WAIT_SECONDS`) hides a killed run from the daily note. Decision: agent-end-reap-stops-what-a-finished-agent-left.
+- agent-end-lost-done-reads-killed: a lost done row (debt `agent-end-log-loses-row`) makes a finished run read as killed in the daily note, and the note's line names that cause. Rate unmeasured. Decision: guard-log-read-weekly.
