@@ -1423,7 +1423,7 @@ test("a send gives one notice that names the item and the choice", async (t) => 
   await choose(page, DECISION, "a");
   await addNote(page, DECISION, "bold");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /27 a \(bold\)/);
@@ -1499,7 +1499,7 @@ test("a not_found on the stored thread starts a new anchored thread", async (t) 
   const page = await open(t, { comments: { can: "available", goneThreads: ["t-old"] }, storage: { "waiting.thread": "t-old" } });
   if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 2);
   assert.equal(s[0].threadId, "t-old");
@@ -1577,7 +1577,7 @@ test("a canSendToClaude that never answers does not hold the send", async (t) =>
 test("Undo tells Claude the answers are withdrawn", async (t) => {
   const page = await open(t); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.match((await sent(page))[1].text, /Undone on the waiting page\. Owners: test thread\. Items: 27 are open again\./);
@@ -1663,7 +1663,7 @@ test("the template declares utf-8", () => {
 test("a failed receipt delete does not stop Undo, the page state or the notice", async (t) => {
   const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.equal(await page.evaluate((id) => id in state.answers, DECISION.id), false, "the page still shows the item as sent");
@@ -3936,7 +3936,7 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.deepEqual(await ticked(page, it), ["a", "c"]);
   assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const a = (await answers(page))[it.id];
   assert.deepEqual([a.choice, a.note], [["a", "c"], ""], "the answer is not in option order");
   const s = await sent(page);
@@ -4136,7 +4136,7 @@ test("the notice to Claude writes a list pick as 31 a+c, in rank order when rank
   await tick(page, m, "a"); await tick(page, m, "c"); await addNote(page, m, "bold");
   await tick(page, r, "c"); await tick(page, r, "a");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /31 a\+c \(bold\)/);
