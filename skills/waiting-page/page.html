@@ -1110,12 +1110,16 @@ const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
 // A parked line is a meta/page.parked entry. It is live only with a unique id of the slug form; any other line has both acts off.
 // Each live line is modelled as a pseudo item, so staged, Send, Undo, Withdraw and the draft store take it with no second path.
 // Its key is "park.<id>". An item slug holds no dot, so it can never meet an item's key, and no card or count reads it.
-const ACTS = ["unpark", "drop"], PARK_ID = new RegExp(JSON.parse(document.getElementById("parkId").textContent)), parkKey = (id) => "park." + id;
+// The pattern is the parkId block (the guard reads the same one). A missing or bad block reads as unknown: no line is live.
+function parkPattern() {
+  try { const t = JSON.parse(document.getElementById("parkId").textContent); return typeof t === "string" && t ? new RegExp(t) : null; } catch (e) { return null; }
+}
+const ACTS = ["unpark", "drop"], PARK_ID = parkPattern(), parkKey = (id) => "park." + id;
 function parkItems() {
   const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = new Map(); // a Map: an id such as "constructor" is no prototype name here
   list.forEach((p) => { count.set(p.id, (count.get(p.id) || 0) + 1); });
   const owner = plain(m && m.writer) || "the page's writer";
-  return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
+  return list.filter((p) => PARK_ID && typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
 }
 function pressPark(it, act) {
   edited();

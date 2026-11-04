@@ -1258,7 +1258,7 @@ def _park_pattern(path):
     if not isinstance(text, str) or not text:
         return None
     try:
-        return re.compile(text)
+        return re.compile(text, re.ASCII)  # JS \d and \w match ASCII only
     except re.error:
         return None
 
