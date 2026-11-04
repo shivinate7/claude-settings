@@ -128,7 +128,7 @@ A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a w
 carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a repo path under the design folder
 (`docs/design/<item folder>/<file>`), and the file is on origin as a file, on any ref under `refs/remotes/origin/` (decision `mockup-home`).
 
-The build judges only open steps (status not done); a done step is skipped. It prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. A cited id misses when it has no entry, or its path is outside the
+The build judges only open steps (status not done); a done step is skipped. It prints `mockup with no file: <step id> <mockup id> (commit the file under the design folder and push it; if it is pushed, run git fetch)` for each cited id that has no usable file. A cited id misses when it has no entry, or its path is outside the
 design folder (a machine-home path, a link or a folder too). It also misses when origin does not hold the file, even if the checkout does. The build writes the
 page, then exits 1. The fix is to commit the file, push it, and name it in `mockups`.
 
@@ -212,7 +212,7 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file the build already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
-The mockup check runs two short git reads per entry that names a design-folder path, plus one `ls-tree` per origin ref until one holds the file. It adds no file, timer or log.
+The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
