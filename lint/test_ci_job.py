@@ -24,11 +24,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+WORKFLOWS = os.path.join(HERE, "..", ".github", "workflows")
 STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
@@ -466,6 +467,82 @@ class StepMaps(unittest.TestCase):
     def test_an_env_inline_comment_is_not_part_of_the_value(self):
         value = step_env(mapped("env", "          NOTE: x # y\n"))
         self.assertEqual(value.get("NOTE"), "x", "the inline comment stayed in the env: NOTE value")
+
+    def test_an_env_literal_block_value_is_exact(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n"))
+        self.assertEqual(value.get("MSG"), "hello\n", "a literal env: block kept a space from its indent")
+
+    def test_an_env_literal_block_keeps_extra_indent_on_a_later_line(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n              world\n"))
+        self.assertEqual(value.get("MSG"), "hello\n  world\n", "a literal env: block lost or added indent on a later line")
+
+    def test_an_env_literal_block_keeps_a_blank_line(self):
+        value = step_env(mapped("env", "          MSG: |\n            hello\n\n            world\n"))
+        self.assertEqual(value.get("MSG"), "hello\n\nworld\n", "a literal env: block lost its blank line")
+
+    def test_an_env_strip_block_drops_the_final_newline(self):
+        value = step_env(mapped("env", "          X: |-\n            a\n"))
+        self.assertEqual(value.get("X"), "a", "env: X: |- kept the final newline its header strips")
+
+    def test_a_with_folded_block_value_is_exact(self):
+        value = step_with(mapped("with", "          paths: >\n            a/\n            b/\n\n            c/\n"))
+        self.assertEqual(value.get("paths"), "a/ b/\nc/\n", "with: paths: > is not folded as YAML folds it")
+
+    def test_a_quoted_value_with_an_escaped_quote_keeps_its_hash_and_drops_the_comment(self):
+        value = step_env(mapped("env", '          MSG: "a \\" # b" # c\n'))
+        self.assertEqual(value.get("MSG"), '"a \\" # b"', "the quoted env: value was cut at its inner # or kept the comment")
+
+    def test_a_single_quoted_value_with_a_doubled_quote_keeps_its_hash_and_drops_the_comment(self):
+        value = step_env(mapped("env", "          MSG: 'it''s # x' # y\n"))
+        self.assertEqual(value.get("MSG"), "'it''s # x'", "the quoted env: value was cut at its inner # or kept the comment")
+
+
+def run_as_yaml_reads_it(step):
+    """(kind, text) of a step's run: as YAML reads it. A literal `run: |` body is its lines indented 10 or more, or
+    blank, with the 10 spaces removed, the blank lines at each end dropped, and one final newline. A one-line run is its
+    text. kind is None when the step has no run:, and "other" for a header this reading does not cover."""
+    lines = step.split("\n")
+    for i, line in enumerate(lines):
+        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
+        if not m:
+            continue
+        head = m.group(1)
+        if not head.startswith(("|", ">")):
+            return "line", head
+        if head != "|":
+            return "other", None
+        body = []
+        for ln in lines[i + 1:]:
+            if ln.strip() and not ln.startswith(" " * 10):
+                break
+            body.append(ln[10:] if ln.strip() else "")
+        while body and not body[0]:
+            body.pop(0)
+        while body and not body[-1]:
+            body.pop()
+        return "literal", "\n".join(body) + "\n"
+    return None, None
+
+
+class RunBodiesOfWorkflows(unittest.TestCase):
+    """run_body reads each run: block of the repo's workflows as YAML reads it. The reading is written out in
+    run_as_yaml_reads_it, from the YAML definition, so a change to run_body's text for a real workflow fails here."""
+
+    def test_every_workflow_run_block_reads_as_yaml_reads_it(self):
+        literal = 0
+        for name in sorted(os.listdir(WORKFLOWS)):
+            if not name.endswith(".yml"):
+                continue
+            with open(os.path.join(WORKFLOWS, name), encoding="utf-8") as f:
+                text = f.read()
+            for step in step_blocks(text):
+                kind, expected = run_as_yaml_reads_it(step)
+                if kind is None:
+                    continue
+                self.assertNotEqual(kind, "other", "%s: a run: header this reading does not cover" % name)
+                literal += kind == "literal"
+                self.assertEqual(run_body(step), expected, "%s: run_body's text for a run: block changed" % name)
+        self.assertGreater(literal, 0, "no literal run: block was read, so the check covered nothing")
 
 
 class RealChecks(unittest.TestCase):
