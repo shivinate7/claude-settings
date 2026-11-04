@@ -1291,7 +1291,7 @@ class MockupHomes(Tree):
         self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
 
     def test_the_only_home_is_the_design_folder(self):
-        homes = [str(h) for h in self.fn("mockup_homes")(self.tree, home=self.home) if h]
+        homes = [str(h) for h in self.fn("mockup_homes")(self.tree) if h]
         design = os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/"))
         self.assertEqual(homes, [design], "mockup_homes names a home other than the design folder")
 

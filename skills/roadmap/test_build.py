@@ -1659,11 +1659,13 @@ class MockupFiles(UpkeepFixture):
 
     def failing_origin_git(self, verbs=("cat-file", "ls-tree")):
         """A patch of the build's git read. A read of an origin ref by one of `verbs` (None: any verb) returns None, as a
-        failed read does; every other read goes to git. Empty output means the path is absent, and None means the read failed."""
+        failed read does; every other read goes to git. An origin ref counts in the argv or on stdin, since the batched
+        type read passes its refs on stdin. Empty output means the path is absent, and None means the read failed."""
         real = build.git
 
         def read(repo, *args, stdin=None):
-            if args and (verbs is None or args[0] in verbs) and any("refs/remotes/origin/" in arg for arg in args):
+            named = any("refs/remotes/origin/" in arg for arg in args) or "refs/remotes/origin/" in (stdin or "")
+            if args and named and (verbs is None or args[0] in verbs):
                 return None
             return real(repo, *args, stdin=stdin)
         return mock.patch.object(build, "git", read)
