@@ -7,8 +7,9 @@ The one check is the all-jobs-passed rollup (decision same-check-kinds), the con
 Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
 sets the required check: a branch with no protection gets it (the check, strict off, admins included, no review rule, no restriction);
 a protected branch with a check rule gets only its required check set (its strict setting stays), and an equal check is left alone.
-The PATCH keeps the app id of the required check, read from the live rule and never a constant: the app id held by the entry named
-REQUIRED_CHECK (null and -1 ignored), else the one app id all held entries share. With no such id it sends the check with no app id, and
+The PATCH keeps the app id of the required check, read from the live rule and never a constant: only the app id held by the entry
+named REQUIRED_CHECK (null and -1 ignored). Another held check's app id is never copied: that app may never post the rollup, which
+would block every merge. With no such id it sends the check with no app id, and
 GitHub then picks the app that recently posted the check, or any app if none did. The PATCH never sends `contexts`; the PUT still does, with no
 app id. The printed line names the app id, or says "no app id"; an equal check with no app id says so before "Nothing to set.".
 A branch protected without a check rule is refused, naming its rules: a PUT would replace them. merge/merge.py reads the
@@ -64,15 +65,14 @@ def main(argv, gh=run_gh):
             rule = json.loads(out)
             held = rule["contexts"]
             live = rule.get("checks") or []
-            own = {c.get("app_id") for c in live if c.get("context") == REQUIRED_CHECK} - {None, -1}  # the required check's own id wins
-            ids = own or ({c.get("app_id") for c in live} - {None, -1})
+            ids = {c.get("app_id") for c in live if c.get("context") == REQUIRED_CHECK} - {None, -1}  # the required check's own id only
         except (ValueError, KeyError, TypeError, AttributeError):
             print(f"protect: cannot read the required checks of {a.branch}: {out}", file=sys.stderr)
             return 1
         if set(held) == set(checks):
             print(f"protect: {a.branch} already requires {', '.join(checks)}{'' if len(ids) == 1 else ' (no app id)'}. Nothing to set.")
             return 0
-        pin = {"app_id": next(iter(ids))} if len(ids) == 1 else {}  # one live app id is kept; none or several send no app id
+        pin = {"app_id": next(iter(ids))} if len(ids) == 1 else {}  # its one own app id is kept; none or several send no app id
         call, body = ["-X", "PATCH", base + "/required_status_checks"], {"checks": [{"context": REQUIRED_CHECK, **pin}]}
         what = f"set the required checks of {a.branch} to {', '.join(checks)} ({'app id ' + str(pin['app_id']) if pin else 'no app id'}; now: {', '.join(held) or 'none'}{'; drops: ' + ', '.join(sorted(set(held) - set(checks))) if set(held) - set(checks) else ''})"
     elif "HTTP 404" in out:
