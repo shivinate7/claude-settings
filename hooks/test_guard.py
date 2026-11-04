@@ -22749,15 +22749,15 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None):
+            temp=None, env=None, load=None, env_path=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a lane-start call meets
-    (LB_NORMAL when None)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
-        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
         "env": fixed, "tool_input": tool_input, "load": load,
     })
@@ -26456,6 +26456,10 @@ FAMILY = "simulator"
 #                        hour" is the newest line in <config>/state/sim-boots.jsonl. Unrecorded is
 #                        not idle.
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
+#   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
+#                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
+#   simulator-boot-locked  refuses an MCP launch of a shut-down device while the sim-test lock is held by
+#                          a live pid, or by a pid-less folder under 60 s old. A booted device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -26474,9 +26478,11 @@ SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its 
 SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
 SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
 SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
+SIM_RT17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-0"
+SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0): the copy OS=17.0 names
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -26590,6 +26596,11 @@ def register_simulator_boot_cases():
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
+        # Delta shut down on 25.0 (listed first) and booted on 17.0. OS=17.0 names only the booted copy, so a
+        # destination that picks the 17.0 runtime boots nothing.
+        "os_two_rt": (make_fake_xcrun(os.path.join(ROOT, "sim_os_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_U17, "Delta", "Booted", SIM_TYPE_PRO, SIM_RT17)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -26606,6 +26617,7 @@ def register_simulator_boot_cases():
     cap_path, cap_cfg = on("cap")
     one_path, one_cfg = on("one")
     twin_path, twin_cfg = on("twin")
+    os_two_path, os_two_cfg = on("os_two_rt")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
     # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
@@ -26684,8 +26696,11 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot by destination is allowed",
-       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    # The controls from here to the twin section boot through the simulator MCP launch, with no lock held.
+    # simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down device
+    # would be refused by it before the cap or twin rule is read. The MCP launch runs the same cap and twin code.
+    add("control: one booted, a second boot by MCP launch is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -26711,21 +26726,170 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    sh("control: the twin booted 10 minutes ago is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
-       config=cfgs["twin_recent"][1])
-    sh("control: an unrecorded booted twin is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
-       config=cfgs["twin_unrecorded"][1])
-    sh("control: an idle twin on another runtime does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
-       config=cfgs["twin_other_runtime"][1])
-    sh("control: an idle twin of another device type does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
-       config=cfgs["twin_other_type"][1])
-    sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
-       config=cfgs["twin_rebooted"][1])
+    add("control: the twin booted 10 minutes ago is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
+        config=cfgs["twin_recent"][1])
+    add("control: an unrecorded booted twin is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
+        config=cfgs["twin_unrecorded"][1])
+    add("control: an idle twin on another runtime does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
+        config=cfgs["twin_other_runtime"][1])
+    add("control: an idle twin of another device type does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
+        config=cfgs["twin_other_type"][1])
+    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
+        config=cfgs["twin_rebooted"][1])
+
+    # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
+    # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
+    # on the action: `test` names sim-test, any other action names the generic destination. A booted
+    # device is not a boot, so it is allowed. The "one" fixture holds one booted device and one shut-down
+    # device of another type, so neither the cap nor the twin rule judges these commands.
+    generic = "generic/platform=iOS Simulator"
+    # The remedy is the phrase "Run `sim-test", not the bare word: the refusal's own text also names the
+    # sim-test lock, so the bare word would hold whatever remedy the refusal printed.
+    sh("route: a test of a shut-down simulator by id names sim-test",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with the action after its options, a shut-down simulator by name, names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a build of a shut-down simulator names the generic destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: build-for-testing of a shut-down simulator by name names the generic destination",
+       "xcodebuild build-for-testing -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: no action on a shut-down simulator names the generic destination",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("control: a test of a booted simulator by id is allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UA + "'",
+       "allow", env_path=one_path, config=one_cfg)
+    sh("control: a build of a booted simulator by name is allowed",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Alpha Pro'",
+       "allow", env_path=one_path, config=one_cfg)
+    # Order: route is judged after cap and twin, so a test of a shut-down device that either rule
+    # refuses names that rule, not simulator-boot-route.
+    sh("route is judged after the cap: a test of a shut-down simulator with two booted names the cap",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("route is judged after the twin: a test of a shut-down twin names the idle twin",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
+       "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+
+    # The route rule judges an xcodebuild boot wherever it sits: inside a wrapper (bash -c, sh -lc), with a `)`
+    # glued to the destination, or after an option with a colon (`-only-testing:X`). Each case pins that the boot
+    # is refused with its remedy, since a boot the route misses skips the lock.
+    sh("route: a test of a shut-down simulator inside bash -c names sim-test",
+       "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
+       "sh -lc 'xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
+    sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
+       "bash -c \"xcrun simctl boot " + SIM_UC + "\"", "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
+    sh("route: a test in a subshell, the closing paren glued to the destination, names sim-test",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: the same subshell with the paren apart from the quote. The guard reads this one today, so the
+    # glued case fails on the glue, not on the subshell.
+    sh("route: a test in a subshell, the closing paren apart from the destination, names sim-test (control)",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with -only-testing before the action names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
+    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("2>&1", ">", "&"))
+    sh("route: a test of a shut-down simulator with > out.log names sim-test -scheme App, with no > word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("&",))
+    sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    # A boolean flag between the scheme and the action is no option with a value, so the action is still `test`.
+    sh("route: a boolean flag before the action, -skipMacroValidation, still names sim-test",
+       "xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # OS=17.0 picks the 17.0 copy of Delta, which is booted, so nothing is booted and the route allows. The
+    # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
+    # drops the runtime filter, and judges the shut-down 25.0 copy too.
+    sh("route: OS=17.0 in a subshell, its paren glued to the value, judges the 17.0 copy only: booted, so allowed",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+    sh("control: OS=17.0 with no glued paren judges the 17.0 copy only: booted, so allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+
+    # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
+    # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
+    # pid. Held: a pid file naming a live pid, or, with no pid file, a lock folder under 60 s old. A dead
+    # pid is not held. A launch of a booted device is never refused by the lock.
+    def lock_config(name, pid_text=None, age=None):
+        cfg = os.path.join(ROOT, "simcfg_lock_" + name)
+        lock = os.path.join(cfg, "state", "sim-test.lock")
+
+        def build():
+            # Built just before the case that names cfg runs (lazy_fixture), so `age` is the age at that run.
+            os.makedirs(lock, exist_ok=True)
+            if pid_text is not None:
+                write(os.path.join(lock, "pid"), pid_text + "\n")
+            if age is not None:
+                stamp = time.time() - age
+                os.utime(lock, (stamp, stamp))
+        lazy_fixture([cfg], build)
+        return cfg
+
+    # The test runner's own pid is alive for as long as the cases run.
+    live_cfg = lock_config("live", str(os.getpid()))
+    add("lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
+    add("lock: a live holder refuses an MCP launch that names the shut-down device by udid",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
+    add("lock: a live holder does not refuse an MCP launch of a booted device",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=live_cfg)
+
+    # A holder that has exited and been reaped is not held: the cap and twin rules judge the launch alone.
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=10)
+    dead_cfg = lock_config("dead", str(gone.pid))
+    add("lock: a dead holder is not held, so an MCP launch with two booted goes to the cap",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=dead_cfg, carries=(SIM_UA, SIM_UB))
+    add("lock: a dead holder is not held, so an MCP launch with room goes through",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=dead_cfg)
+
+    # A lock folder with no pid file is held for 60 s by its mtime, then it is not held.
+    fresh_cfg = lock_config("nopid_fresh", None, age=10)
+    add("lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=fresh_cfg, carries="sim-test")
+    stale_cfg = lock_config("nopid_stale", None, age=600)
+    add("lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=stale_cfg)
+    # The partner of the allow above: the same stale folder, with two booted, so the cap refuses. An
+    # allow that a guard reaches by failing open would not show the cap, so this case shows the cap ran.
+    add("lock: a folder with no pid file, 10 minutes old, is not held: the cap still judges the launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=stale_cfg, carries=(SIM_UA, SIM_UB))
 
 
 def folder_path(name):
@@ -26798,11 +26962,11 @@ def register_simulator_hold_cases():
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
-           env_path=env_for("hold_%d" % index, rows), config=cfg)
-    sh("control: a twin is not idle when the process table cannot be read",
-       sim_boot_by_destination(SIM_UT1), "allow",
-       env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg)
+    add("control: a twin is not idle when the process table cannot be read",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
 
 
 def register_simulator_bypass_cases():
@@ -26883,6 +27047,55 @@ def sim_bypass_override_check(timed):
     return check
 
 
+def sim_route_override_check():
+    """The owner override lifts simulator-boot-route. With no override a test of a shut-down device is
+    refused. After `override` the same call is allowed once, and the second call is refused again. The
+    call runs on the "one" fixture PATH (one booted, one shut down), so the route rule is what refuses it."""
+    def check():
+        config, session = ov_config("sim-route-override"), "ov-sim-route-override"
+        rule = "simulator-boot-route"
+        path = folder_path("one")
+        command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+
+        def call(seconds):
+            return lambda: ov_call("Bash", {"command": command}, NOGIT, config, session, seconds,
+                                   env_path=path)
+
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override")
+        ok, why = ov_story([("first call", call(60), "allow", rule),
+                            ("second call, override spent", call(120), "deny", rule)], note)
+        if not ok:
+            return False, why
+        return True, "denied with no override, then allowed once"
+    return check
+
+
+def sim_lock_eperm_check():
+    """A lock whose pid the guard cannot signal is not held. bin/sim-test reads a failed `kill -0`, EPERM
+    included, as the holder being gone, and takes the lock over, so the guard must read the same. Root can
+    signal any pid, so no real pid gives EPERM in this sandbox: os.kill is patched to raise PermissionError,
+    in process, and the lock's pid is this process's own pid."""
+    guard = _load_guard_module()
+    cfg = os.path.join(ROOT, "simcfg_lock_eperm")
+    lock = os.path.join(cfg, "state", "sim-test.lock")
+    os.makedirs(lock, exist_ok=True)
+    write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+        # Scope first: with the real os.kill, the lock is read and this process is its live holder. Without
+        # this, a "" below could mean the lock was never read rather than that EPERM reads as free.
+        read = guard.sim_lock_holder()
+        if read != str(os.getpid()):
+            return False, "fixture not read: sim_lock_holder() returned %r before the patch, want this pid" % read
+        with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
+            got = guard.sim_lock_holder()
+    if got != "":
+        return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
+    return True, "a lock whose pid cannot be signalled reads as free"
+
+
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
 # on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
 FAMILY = "simulator"
@@ -26897,6 +27110,12 @@ if os.name != "nt":
                      "simulator: an owner override lifts a raw boot once (a one-act override)")
         LOG_FAMILY[sim_label] = FAMILY
         LOG_CHECKS = LOG_CHECKS + ((sim_label, sim_bypass_override_check(sim_timed)),)
+    sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
+    LOG_FAMILY[sim_route_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
+    sim_eperm_label = "simulator: a lock whose pid the guard cannot signal (EPERM) reads as free"
+    LOG_FAMILY[sim_eperm_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_eperm_label, sim_lock_eperm_check),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
