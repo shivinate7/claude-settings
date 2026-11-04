@@ -74,7 +74,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   gets no subshell. A stalled job of that kind leaves its two files. A job killed before it can run its
   trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
   `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
-  and two held handles in the watcher, no new process. The watcher no longer polls for the beat file.
+  and two held handles in the watcher, no new process. In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
 ## The Stop-time check
 
@@ -93,7 +93,8 @@ Stop has hookErrors not empty, or preventedContinuation true. The next run had `
 where the check prints nothing, so it listed nothing. A job whose crossing is not later than the
 previous Stop was listed there, so it is silent now. A job that goes quiet again after new output crosses again, and is listed
 again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
-time must be later than the previous Stop. With no summary, or a summary with no readable timestamp,
+time must be later than the previous Stop. Limit: a job whose output file existed at the previous Stop and
+is gone now is not listed. With no summary, or a summary with no readable timestamp,
 every quiet job is listed. The state is the transcript: no file is written and no process is started.
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop.
