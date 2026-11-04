@@ -1,0 +1,9 @@
+{
+ "title": "Waiting page: refuse a parked line with no id at write time",
+ "phase": "page",
+ "status": "todo",
+ "order": 535,
+ "why": "Owner, page comment Nov 3 19:26 CST: \"fix this id issue it happens often in general on my repos artifacts\". Writers in several repos write meta/page.parked lines with no id, so the page turns off Unpark and Drop on them; the owner finds dead buttons.",
+ "note": "Fix the cause, not each page: hooks/question_form.py (it already reviews page item writes) also refuses a meta/page write whose parked list has a line with no id, a non-slug id, or a duplicate id, and prints the fix. Red test first in hooks/test_question_form.py. Cites skill waiting-page, meta/page spec. Ready.",
+ "updatedAt": "2026-11-04T01:30:00Z"
+}
