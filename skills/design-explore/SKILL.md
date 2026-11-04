@@ -75,8 +75,7 @@ designer.
    (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, from a branch of the
    target repo, into that repo's design folder (the `design` kind in `~/.claude/lint/layout.json`). The PR
    goes through that repo's normal PR path and merges there (owner ruling, 2026-11-02 14:58 CST: git is
-   every artifact's home, mockups included). The builder and the design reviewer read the kept pair from
-   the target repo's main, so they start after the merge.
+   every artifact's home, mockups included).
 8. **Clean up.** Push each lane branch to `archive/<branch>`, then delete it locally
    (`shared-trees-archive-then-delete`).
 
