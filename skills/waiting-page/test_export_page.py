@@ -1079,32 +1079,46 @@ class All(Base):
         self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
 
     def test_the_switch_steps_out_dir_fetch_exports_each_artifact_changed(self):
-        # Step 2 of "Before you switch Claude accounts" sets out_dir from backticks in the skill's own text. ArtifactData
-        # writes each doc to <out_dir>/<collection>/<doc_id>.json, and the marker goes in <folder>/<id>/<collection>.
-        # The template is read from SKILL.md, never copied here, so a change to that step is what this case checks.
+        # Step 2 of "Before you switch Claude accounts" names out_dir and the marker's path in backticks. ArtifactData
+        # writes each doc to <out_dir>/<collection>/<doc_id>.json. The marker is touched where the step names it, and an
+        # empty collection gets a folder only where the step says to make one by hand. The text is read from SKILL.md,
+        # never copied here, so a change to that step is what this case checks.
         sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Before you switch Claude accounts", 1)
         self.assertEqual(len(sections), 2, "SKILL.md has no 'Before you switch Claude accounts' section")
         steps = sections[1].split("\n## ", 1)[0].split("\n2. ", 1)
         self.assertEqual(len(steps), 2, "the 'Before you switch Claude accounts' section has no step 2")
-        found = re.search(r"`out_dir` set to `([^`]+)`", steps[1].split("\n3. ", 1)[0])
+        step2 = steps[1].split("\n3. ", 1)[0]
+        found = re.search(r"`out_dir`\s+(?:set\s+to|=)\s*`([^`]+)`", step2)
         self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
         template = found.group(1)
         self.assertTrue("<folder>" in template and "<id>" in template,
                         "step 2's out_dir %r lacks <folder> or <id>" % template)
+        marked = re.search(r"`([^`]*/\.complete)`", step2)
+        self.assertTrue(marked, "step 2 names no backticked path ending in /.complete, so the marker's place cannot be read")
+        marker = marked.group(1)
+        by_hand = re.search(r"\bmake\b[^.]*\bby\s+hand\b", step2, re.I)
+
+        def place(text, artifact_id, collection):
+            names = {"folder": fetched, "id": artifact_id, "collection": collection}
+            return re.sub(r"<(folder|id|collection)>", lambda m: names[m.group(1)], text)
 
         root = self.repo()
         registry = json.loads(read_text(os.path.join(root, ".claude", "layout-extras.json")))["artifacts"]
         pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
         docs = self.docs()
+        docs[self.WAIT]["groups"] = {}  # an empty collection: the tool writes no file for it
         fetched = os.path.join(self.tmp.name, "switch")
         for entry in registry:
             artifact_id = entry["id"]
             for collection in entry.get("collections", COLLECTIONS):
-                names = {"folder": fetched, "id": artifact_id, "collection": collection}
-                out_dir = re.sub(r"<(folder|id|collection)>", lambda m: names[m.group(1)], template)
+                out_dir = place(template, artifact_id, collection)
                 for doc_id, data in (docs[artifact_id].get(collection) or {}).items():
                     write_text(os.path.join(out_dir, collection, doc_id + ".json"), canonical(data))
-                write_text(os.path.join(fetched, artifact_id, collection, MARKER), "")
+                folder = os.path.dirname(place(marker, artifact_id, collection))
+                if by_hand and not os.path.isdir(folder):
+                    os.makedirs(folder)  # the step makes the folder of a collection the tool wrote nothing to
+                if os.path.isdir(folder):
+                    write_text(place(marker, artifact_id, collection), "")  # touch: a missing folder cannot be touched
             write_bytes(os.path.join(fetched, artifact_id, "page.html"), pages[artifact_id])
 
         worktree = self.out("worktree")
@@ -1113,7 +1127,8 @@ class All(Base):
             artifact_id = entry["id"]
             line = self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
             self.assertRegex(line, r"changed\s+\d+",
-                             "%s: not changed after the switch step's out_dir %r. Its line:\n%s" % (artifact_id, template, line))
+                             "%s: not changed after the switch step's out_dir %r and marker %r. Its line:\n%s"
+                             % (artifact_id, template, marker, line))
         self.assertEqual(r.returncode, 0, shown(r))
 
 
