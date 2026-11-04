@@ -315,6 +315,17 @@ jobs_of 51 checks-windows-merge-3:success all-jobs-passed:failure
 jobs_of 52 checks-windows-merge-3:success all-jobs-passed:skipped
 serve_real_checks "$(printf '%040x' 52)"
 t red red-job-whose-if-excludes-the-push-event-is-never-dropped "" "" https://runs/pr-only-schedule-51
+# A certain red needs no workflow file: a red job the newer green run lacks, or did not pass, alarms even when the contents read fails.
+runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/absent-push-61 push 61)" \
+  "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/absent-schedule-60 schedule 60)"
+jobs_of 60 checks-windows-merge-3:failure all-jobs-passed:skipped
+jobs_of 61 all-jobs-passed:skipped
+t red red-job-missing-from-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/absent-schedule-60
+runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/skipped-push-63 push 63)" \
+  "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/skipped-schedule-62 schedule 62)"
+jobs_of 62 checks-windows-merge-3:failure all-jobs-passed:skipped
+jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
+t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.

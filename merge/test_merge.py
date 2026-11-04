@@ -10170,6 +10170,21 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out, "a failed read of the workflow file is unknown: never red, and never a clear")
         self.assertIn("the read failed", out)
 
+    def test_a_red_job_the_green_run_lacks_or_did_not_pass_is_red_not_unknown_when_the_workflow_read_fails(self):
+        # A certain red needs no workflow file: a green run that lacks a red job, or did not pass it, clears nothing whatever the if:.
+        # The read fails here and must not turn the red into unknown. The control is the test above: a green run that passed the red job needs the file.
+        red_run = main_run(1310, "failure", event="schedule")
+        red_jobs = [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")]
+        for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
+                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
+            with self.subTest(variant=variant):
+                rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
+                                          text_fail="HTTP 500: Internal Server Error (fake contents read)")
+                self.refused(rc, out, before)
+                self.assertNotIn("UNKNOWN", out, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
+                self.assertIn("latest completed run is red", out)
+                self.assertIn("checks-windows-merge-3: fail", out)
+
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
                              {940: [main_job("checks", "failure", 20), main_job("scope", "success")],
