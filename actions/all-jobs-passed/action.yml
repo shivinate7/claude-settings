@@ -1,17 +1,23 @@
 name: All jobs passed
 description: >
-  Fan-in check. Fails when any needed job failed, was cancelled or was skipped. The caller job
+  Fan-in check with two checks. It fails when any needed job failed, was cancelled or was skipped,
+  and, when `workflow` is set, when the calling workflow's wiring breaks the fan-in rules. The caller job
   MUST set `needs: [...]` and `if: always()`; without `always()` GitHub skips this job when a
   needed job fails, and a skipped required check reads as green.
 inputs:
   needs:
     description: "Pass toJSON(needs) from the calling job, written as an expression in its with: block."
     required: true
+  workflow:
+    description: "The calling workflow's path, such as .github/workflows/checks.yml. The caller job needs a checkout for it."
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
-    - name: Every needed job passed
+    - name: Every needed job passed, and the wiring holds
       shell: bash
       env:
         NEEDS: ${{ inputs.needs }}
-      run: bash "${{ github.action_path }}/check.sh"
+        WORKFLOW: ${{ inputs.workflow }}
+      run: bash "${{ github.action_path }}/run.sh"

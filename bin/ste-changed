@@ -4,6 +4,7 @@
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
 # input default, so an EXCLUDE in the caller's environment is ignored.
+# TREE_CITES=true in the env runs tree mode, as an opted-in repo's CI does; the workflow's tree-cites setting is not read.
 # Pin check: when the repo's CI pins this repo's ste-lint action at a commit whose lint files differ
 # from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves the pin
 # before CI spends a run (decision action-pins-follow-sessions). A pin this clone does not hold is
@@ -42,7 +43,7 @@ ACTION = os.path.join(ROOT, "actions", "ste-lint")
 # Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
 LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",
               "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py", "lint/stale_cites.py",
-              "hooks/_nowindow.py")
+              "hooks/_nowindow.py", "skills/plain-english-map/scripts/lib/py-facts.py")
 PIN = re.compile(r"[\w.-]+/claude-settings/actions/ste-lint@([0-9a-f]{40})")
 
 
