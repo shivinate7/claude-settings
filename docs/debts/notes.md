@@ -971,6 +971,10 @@
 - mcp-launch-before-lock: an MCP `launch` that boots just before a `sim-test` run takes the lock skips the lock rule; both then run on the machine. Decision: sim-test-is-the-one-boot-path.
 - route-unread-wrappers: simulator-boot-route and the cap do not read `xcrun xcodebuild` or `arch -arm64 xcodebuild`, and they judge `ssh mac "xcodebuild ..."` against local devices. Decision: sim-test-is-the-one-boot-path.
 - detached-launch-glued-amp: detached-launch passes a `&` glued to a closing quote (`xcodebuild ... "id=U"&`). Decision: sim-test-is-the-one-boot-path.
+- route-remedy-glued-action: simulator-boot-route reads `(cd ios && xcodebuild ... test)` and `test-without-building` as no test action, so the remedy names the generic destination; the verdict is still deny. Decision: sim-test-is-the-one-boot-path.
+- route-glued-fd-redirect: a redirect glued to the destination quote (`'name=iPhone 15'2>&1`) reads as another name, so the boot is not judged. Decision: sim-test-is-the-one-boot-path.
+- sim-test-record-silent: sim-test drops the record call's output and failure, so a failed record leaves its device unrecorded and the sweep keeps it. Decision: sim-test-is-the-one-boot-path.
+- route-build-unmeasured: simulator-boot-route refuses `build`, `clean` and `-showBuildSettings` naming a shut-down simulator; whether those boot one is unmeasured (needs a Mac). Decision: sim-test-is-the-one-boot-path.
 - sim-test-untested-stops: no red test pins the 10 s KILL fallback, the crash window expiring, or the cleanup stop of the child. The HUP trap is pinned by outcome only, since bash 5 runs the EXIT trap on a fatal signal (lint/test_sim_test.sh). Decision: sim-test-stops-a-crash-loop.
 - sim-test-child-signals: a backgrounded xcodebuild ignores INT and QUIT (no job control), so sim-test stops only xcodebuild itself, with TERM then KILL; its children may outlive it. Unmeasured. Decision: sim-test-stops-a-crash-loop.
 - sim-test-late-reports: late reports of an earlier crash loop on the same UDID can stop a healthy run. Unmeasured. Decision: sim-test-stops-a-crash-loop.
