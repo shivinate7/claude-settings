@@ -31,6 +31,13 @@ inputs:
       behavior for every existing caller.
     required: false
     default: "*.md"
+  tree-cites:
+    description: >
+      'true' also runs lint/stale_cites.py --tree, in both scopes: a path or line anchor that a
+      tracked Markdown file cites and the tree does not hold fails the step, even on lines this
+      change did not touch. The default 'false' keeps the range check alone.
+    required: false
+    default: "false"
   decisions-dir:
     description: >
       Folder of D-nnn decision records. STE001 then stops counting the words a gloss
@@ -55,5 +62,6 @@ runs:
         EXCLUDE: ${{ inputs.exclude }}
         CHANGED_PATHS_GLOB: ${{ inputs.changed_paths }}
         DECISIONS_DIR: ${{ inputs.decisions-dir }}
+        TREE_CITES: ${{ inputs.tree-cites }}
       run: |
         bash "${{ github.action_path }}/run.sh"

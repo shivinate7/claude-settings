@@ -212,6 +212,9 @@ jobs:
       - name: Stop-hook guard fixture suite
         run: python3 lint/test_report_guard.py
 
+      - name: Stop-hook question route suite
+        run: python3 lint/test_report_guard_route.py
+
       - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_ste_autofix.py
@@ -498,8 +501,10 @@ jobs:
           bash actions/ci-alarm/test_action.sh
           python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
+          bash actions/silent-undo/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
+          bash githooks/test_pre_commit.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
@@ -876,6 +881,10 @@ jobs:
       - name: Stop-hook guard fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard.py
+
+      - name: Stop-hook question route suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_route.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1435,6 +1444,10 @@ jobs:
       - name: Stop-hook guard fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard.py
+
+      - name: Stop-hook question route suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_route.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}

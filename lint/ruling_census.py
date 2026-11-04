@@ -77,7 +77,7 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import read_transcript, tool_uses  # noqa: E402
+from _transcript import read_transcript, tool_results, tool_uses  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
@@ -248,16 +248,6 @@ def iter_ask_answers(records):
                     ASK_ANSWER_RE.findall(result_text(block))):
                 question = texts[i] if i < len(texts) else None
                 yield rec, question, answer
-
-
-def tool_results(rec):
-    msg = rec.get("message") or {}
-    content = msg.get("content")
-    if not isinstance(content, list):
-        return
-    for b in content:
-        if isinstance(b, dict) and b.get("type") == "tool_result":
-            yield b
 
 
 def result_text(block):

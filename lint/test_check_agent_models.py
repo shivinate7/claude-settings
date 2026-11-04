@@ -10,6 +10,8 @@ The lane session row of docs/decisions/agent-model-cap.md must start its effort 
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
 as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
+Every agent file that can run Bash names TaskStop in its body, and its tools: allowlist lists it (debt
+agent-reports-with-live-watcher). The test reads each agents/*.md file, not a list of names.
 """
 import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
 from unittest import mock
@@ -18,6 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_models as C  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 
@@ -240,6 +244,61 @@ class RunFolder(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "an old sibling run folder survived the sweep")
         self.assertTrue(os.path.isdir(new), "a new sibling run folder was swept")
         self.assertTrue(os.path.isdir(own))
+
+
+def agent_parts(text):
+    """(keys, body, problem) of one agent file: the frontmatter keys, the text after the frontmatter, and the problem
+    when no closed frontmatter block opens the file. Keys come from the guard's one reader of agent frontmatter."""
+    head = C.frontmatter(text)
+    if head is None:
+        return None, None, "frontmatter never closes"
+    if not head:
+        return None, None, "no frontmatter block"
+    return C._guard.frontmatter_keys(head), "\n".join(text.splitlines()[len(head) + 2:]), None
+
+
+def runs_bash(keys):
+    """True when the frontmatter lets the agent run Bash: `tools:` is absent or lists Bash (`Bash` or `Bash(...)`),
+    and `disallowedTools:` does not name Bash."""
+    allowed = tokens(keys["tools"]) if "tools" in keys else None
+    denied = tokens(keys.get("disallowedTools", ""))
+    listed = allowed is None or any(item == "Bash" or item.startswith("Bash(") for item in allowed)
+    return listed and "Bash" not in denied
+
+
+class TaskStopLine(unittest.TestCase):
+    # Debt agent-reports-with-live-watcher. An agent that can run Bash can start a background task, so its file tells it
+    # to stop its tasks with TaskStop first. A tools: allowlist without TaskStop would leave the agent unable to follow that.
+    def agent_texts(self):
+        folder = os.path.join(ROOT, "agents")
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+        self.assertTrue(names, "agents/ holds no agent file to read")
+        texts = []
+        for name in names:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                texts.append((name, handle.read()))
+        return texts
+
+    def test_bash_capable_agent_names_taskstop_in_its_body(self):
+        for name, text in self.agent_texts():
+            with self.subTest(agent=name):
+                keys, body, problem = agent_parts(text)
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                field = unread_list(keys)
+                self.assertIsNone(field, "%s: the %s list sits below its key, which this check does not read" % (name, field))
+                if runs_bash(keys):
+                    self.assertTrue("TaskStop" in body, "%s can run Bash, but its body never names TaskStop" % name)
+
+    def test_bash_capable_agent_with_a_tools_allowlist_lists_taskstop(self):
+        for name, text in self.agent_texts():
+            with self.subTest(agent=name):
+                keys, _, problem = agent_parts(text)
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                field = unread_list(keys)
+                self.assertIsNone(field, "%s: the %s list sits below its key, which this check does not read" % (name, field))
+                if "tools" in keys and runs_bash(keys):
+                    self.assertTrue("TaskStop" in tokens(keys["tools"]),
+                                    "%s can run Bash and has a tools: allowlist with no TaskStop, so it cannot follow the stop line" % name)
 
 
 def tearDownModule():
