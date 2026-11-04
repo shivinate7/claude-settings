@@ -368,14 +368,15 @@ dnew; dpr 1 "$SHA_A" "$OLD"; dpr 2 "$SHA_B" "$OLD"; dchecks "$SHA_A" '[]'; dchec
 td unknown dropped-comment-write-fails-is-unknown-and-stops "api --method*" 1 '*' '*' 1 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'
 drun ""
-want_check="$(python3 -I - "$root/merge/merge.py" <<'PY'
-import re, sys
-print(re.search(r'^DRAFT_SKIP_CHECK = "([^"]*)"', open(sys.argv[1], encoding="utf-8").read(), re.M).group(1))
-PY
-)" || want_check=""
+# The default is compared with the constant itself (hooks/required_check.py, the one home), never a string match.
+want_check="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from required_check import REQUIRED_CHECK; print(REQUIRED_CHECK)' "$root/hooks")" || want_check=""
 got_check="$(sed -n 's/^checks .*check_name=\([^&]*\).*/\1/p' "$dd/reads")"
 if [ -n "$want_check" ] && [ "$got_check" = "$want_check" ]; then echo "ok   dropped-check-default-is-draft-skip-check"
-else echo "FAIL dropped-check-default-is-draft-skip-check: default '$got_check', want DRAFT_SKIP_CHECK '$want_check'"; bad=1; fi
+else echo "FAIL dropped-check-default-is-draft-skip-check: default '$got_check', want REQUIRED_CHECK '$want_check'"; bad=1; fi
+# merge.DRAFT_SKIP_CHECK is the same constant. Importing merge only reads lint/layout.json; its bytecode cache is git-ignored.
+merge_check="$(python3 -I -c 'import sys; sys.path[:0] = [sys.argv[1], sys.argv[2]]; import merge; print(merge.DRAFT_SKIP_CHECK)' "$root/merge" "$root/hooks")" || merge_check=""
+if [ -n "$merge_check" ] && [ "$merge_check" = "$want_check" ]; then echo "ok   dropped-check-merge-draft-skip-check-is-required"
+else echo "FAIL dropped-check-merge-draft-skip-check-is-required: merge.DRAFT_SKIP_CHECK '$merge_check', want REQUIRED_CHECK '$want_check'"; bad=1; fi
 cause="$(python3 -I - "$here/action.yml" <<'PY'
 import re, sys
 lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
