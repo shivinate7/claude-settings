@@ -28,8 +28,9 @@ the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the e
 The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
 line starts `stale-cites: report, `. It has two halves.
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
-            code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test) and whether this range
-            touched its holder. A repo with no lint/rule_mechanisms.json prints no anchor line and no error.
+            code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
+            changed under RULE_DIRS, or "none". It gives no verdict; the reviewer judges. A repo with no
+            lint/rule_mechanisms.json prints no anchor line and no error.
   Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
             names it, and each mechanism row whose ref or test is it.
 
@@ -38,11 +39,11 @@ Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no 
 A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
 --batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
 loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
-The report adds, for a changed non-Markdown file, one `ls-tree` of docs/decisions and the mechanisms file (none when
-the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
-then takes its Home line) and the mechanisms file once. A changed RULE_FILES file adds its base and head blobs and
-the mechanisms file to that read. A guard row's anchor edit adds the head blob of each hooks/guard*.py, and one
-`ls-tree` of hooks/ when the run listed no whole tree, to find the module that holds the rule.
+The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
+when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
+then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
+`candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
+mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
 """
 import argparse
 import ast
@@ -56,7 +57,8 @@ import sys
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from rule_audit import ANCHOR_RE, RULE_FILES, guard_rule_names  # noqa: E402  the one home of the anchor pattern, the rule files and the rule ids a guard module names
+import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
@@ -267,7 +269,6 @@ class Range:
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.unknowns = []
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
-        self.guard_ids = None  # {guard module: rule ids it passes to refuse/record}, read once by the report
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
@@ -406,9 +407,9 @@ def tree_paths(entries):
 # The report (decision stale-cites-at-merge). Its lines are no finding and never set the exit code.
 REPORT = "stale-cites: report, "
 MECHANISMS = "lint/rule_mechanisms.json"
-LAYOUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.json")  # the one home of the folder name
-GUARD_MODULE = re.compile(r"hooks/guard[^/]*\.py\Z")  # the guard modules rule_audit.guard_paths reads
-WORKFLOW = ".github/workflows/checks.yml"
+# Where a rule's guard, check or CI step lives. No other module holds this set (report_guard.ANSWERED_TOP_DIRS is the
+# top dirs a source path may start with, a different set), so it lives here.
+RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
 HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 
@@ -428,9 +429,10 @@ def anchor_sentences(text):
     return found
 
 
-def decisions_dir():
-    with open(LAYOUT, encoding="utf-8") as f:
-        return json.load(f)["kinds"]["decisions"]["path"].strip("/")
+def decision_folders():
+    """The places the layout lets a repo keep its decisions, first choice first (lint/layout.py candidates). A repo
+    not rolled out to the layout may hold them at either place."""
+    return layout.candidates(".", "decisions")
 
 
 def mechanism_rows(rng):
@@ -453,42 +455,16 @@ def mechanism_rows(rng):
     return rules
 
 
-def guard_holders(rng, ref):
-    """The guard modules at head (hooks/guard*.py) whose refuse(), record() or ask_command() call names `ref`, as
-    rule_audit.guard_rule_names reads them. The module list reuses the whole-tree listing, else one `ls-tree` of
-    hooks/ (a guard row's anchor edit only). A module that does not parse is no holder."""
-    if rng.guard_ids is None:
-        entries = rng.tree if rng.tree is not None else head_tree(rng.head, "hooks/")
-        rng.guard_ids = {}
-        for path in sorted(p for p in tree_paths(entries) if GUARD_MODULE.match(p)):
-            blob = rng.batch.get("%s:%s" % (rng.head, path))
-            try:
-                rng.guard_ids[path] = guard_rule_names((blob or b"").decode("utf-8", "replace"), path)
-            except (SyntaxError, ValueError):
-                rng.guard_ids[path] = set()
-    return [path for path, ids in rng.guard_ids.items() if ref in ids]
-
-
-def holder_note(rng, mechanism):
-    """The holder of a mechanism row and whether the range touched it, as one phrase."""
-    kind, ref = mechanism.get("kind"), mechanism.get("ref")
-    if kind == "guard":
-        held = guard_holders(rng, ref) if isinstance(ref, str) else []
-        if not held:
-            hit = sorted(p for p in rng.changed if GUARD_MODULE.match(p))
-            return "holder not identified; %s" % ("guard modules changed: " + ", ".join(hit) if hit
-                                                  else "hooks/guard*.py untouched")
-        return "holder " + ", ".join("%s %s" % (p, "touched" if p in rng.changed else "untouched") for p in held)
-    if kind == "check" and isinstance(ref, str):
-        return "holder %s %s" % (ref, "touched" if ref in rng.changed else "untouched")
-    if kind == "ci":
-        return "holder %s %s" % (WORKFLOW, "touched" if WORKFLOW in rng.changed else "untouched")
-    return "no holder file"
+def rule_dir_changes(rng):
+    """`changed under <RULE_DIRS>: <files>`, the files this range changed there, or `none`. No verdict: a guard row's
+    logic can sit in any module, so the reviewer judges. Read from the diff; no git start."""
+    hit = sorted(p for p in rng.changed if p.startswith(RULE_DIRS))
+    return "changed under %s: %s" % (", ".join(RULE_DIRS), ", ".join(hit) if hit else "none")
 
 
 def anchor_report(rng, rules):
     """One line per anchor whose sentence differs between base and head in a rule file the range changed."""
-    lines = []
+    lines, changes = [], rule_dir_changes(rng)
     for path in (p.replace(os.sep, "/") for p in RULE_FILES):
         if path not in rng.changed:
             continue
@@ -499,21 +475,23 @@ def anchor_report(rng, rules):
             what = "added" if slug not in before else "removed" if slug not in after else "changed"
             row = (rules.get(slug) or {}).get("mechanism")
             if not isinstance(row, dict):
-                lines.append("%sanchor %s %s in %s; no row in %s" % (REPORT, slug, what, path, MECHANISMS))
+                lines.append("%sanchor %s %s in %s; no row in %s; %s" % (REPORT, slug, what, path, MECHANISMS, changes))
                 continue
             ref = row.get("ref")
             lines.append("%sanchor %s %s in %s; kind %s%s%s; %s" % (
                 REPORT, slug, what, path, row.get("kind"), ", ref %s" % ref if ref else "",
-                ", test %s" % row["test"] if row.get("test") else "", holder_note(rng, row)))
+                ", test %s" % row["test"] if row.get("test") else "", changes))
     return lines
 
 
-def home_report(rng, rules, entries):
-    """One line per changed code file that a decision's Home line or a mechanism row names."""
+def home_report(rng, rules, entries, folders):
+    """One line per changed code file that a decision's Home line or a mechanism row names. The decisions are read
+    from the first of `folders` that holds a file at head."""
     code = sorted(p for p in rng.changed if not p.endswith(".md"))
-    folder = decisions_dir()
+    paths = tree_paths(entries)
+    folder = next((f for f in folders if any(p.startswith(f + "/") for p in paths)), None)
     homes = {}  # file -> decision stems whose Home names it
-    for path in tree_paths(e for e in entries if e.split("\t", 1)[1].startswith(folder + "/")):
+    for path in (p for p in paths if folder is not None and p.startswith(folder + "/")):
         if path.endswith(".md"):
             blob = rng.batch.get("%s:%s" % (rng.head, path))
             for home in HOME_LINE.findall((blob or b"").decode("utf-8", "replace")):
@@ -541,9 +519,10 @@ def report(rng):
     code = any(not p.endswith(".md") for p in rng.changed)
     if not code and not rng.changed & set(rule_files):
         return []
-    entries = None
+    entries, folders = None, ()
     if code:
-        entries = rng.tree if rng.tree is not None else head_tree(rng.head, decisions_dir() + "/", MECHANISMS)
+        folders = decision_folders()
+        entries = rng.tree if rng.tree is not None else head_tree(rng.head, *[f + "/" for f in folders], MECHANISMS)
     present = entries is None or any(e.split("\t", 1)[1] == MECHANISMS for e in entries)
     rules = None
     if present:
@@ -551,8 +530,8 @@ def report(rng):
             rules = mechanism_rows(rng)
         except Unknown as exc:  # the Home half still prints, without rows
             rng.unknowns.append(str(exc))
-    lines =anchor_report(rng, rules) if rules is not None else []
-    return lines + (home_report(rng, rules, entries) if code else [])
+    lines = anchor_report(rng, rules) if rules is not None else []
+    return lines + (home_report(rng, rules, entries, folders) if code else [])
 
 
 def scan(range_text):
@@ -567,7 +546,7 @@ def scan(range_text):
         found = find_stale(rng)
         try:
             lines = report(rng)
-        except (Unknown, OSError, ValueError) as exc:  # ValueError: a rule_mechanisms.json that is not JSON
+        except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read
             rng.unknowns.append("report not read, %s" % exc)
     finally:
         batch.close()
