@@ -49,10 +49,10 @@ When a fact changes, rewrite the claim in place. Keep only what is true now, in 
 words. Never add a "was X, now Y" line or a history. Git keeps the history
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
 its own record (`git-one-record-per-question`).
-The ste-lint CI step refuses a pull request that leaves a tracked Markdown line naming a file or Python
-function or module-level name that the same pull request deleted, renamed or moved, or citing a
-`script --flag` that the pull request removed from that script
-(`lint/stale_cites.py`, STALE001, STALE002 and STALE003).
+The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale_cites.py`).
+STALE001 fires on a tracked Markdown line that names a file the same pull request deleted or renamed.
+STALE002 fires on a line that cites a Python file and a name the pull request removed from that file.
+STALE003 fires on a code span that cites a script and a `--flag` the pull request removed from that script.
 
 ## Proof
 

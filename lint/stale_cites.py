@@ -7,10 +7,11 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
   STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
-            in that file at base (read with `ast`) and is not bound at head. A name counts when a module-level
-            def, class, assignment or import binds it, also under a module-level if or try, or when it is a
-            def directly in a module-level class. A name that moved but is still bound in the file is not
-            removed.
+            in that file at base (read with `ast`) and is not bound at head. `names_in` walks each module-level
+            statement, also inside a module-level if, try, with, for, while or match, never inside a def or
+            class. A name counts when a def, class, import or assignment binds it there, also a tuple, for,
+            with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
+            but is still bound in the file is not removed.
   STALE003  one backticked code span cites a script and a `--flag` of it, and the range removed that flag from the
             script. A `~/.claude/<path>` cite is `<path>` at the repo root. A Python flag is an `add_argument`
             string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
@@ -19,7 +20,9 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             fires.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
-            `stale-cites: unknown, <path>:<line> ...` and never fails the run.
+            `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
+            removes a path, a Python name or a flag, since only then is Markdown read. A range that touches only such
+            files prints nothing and passes.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003). Fenced blocks count as prose.
@@ -31,12 +34,11 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py,
-.mjs, .js, .cjs, .ts or .sh. A touched .py adds one `git cat-file --batch`. A removed path, name or flag, or a touched
-.mjs, .js, .cjs, .ts or .sh, adds `ls-tree` and that `cat-file --batch`, so 5 at most. The flag reader reads the
-touched .py and .sh blobs through that same open `cat-file`. Each tracked .md is read
-once, only when one of those holds. A touched .py also loads the py-facts script once, in-process (no start,
-no .pyc). It writes no file and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py or .sh.
+A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share. A removed
+path, name or flag adds `ls-tree` and reads the Markdown through that `cat-file`, so 5 at most. Each tracked .md
+is read once, only when something was removed. A touched .py also loads the py-facts script once, in-process (no
+start, no .pyc). It writes no file and leaves no process running.
 """
 import argparse
 import ast
@@ -213,16 +215,61 @@ def module_statements(body):
             yield from module_statements(part.body)
 
 
+def target_names(target):
+    """Each name one binding target binds: a name, or each name inside a tuple, list or starred target."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from target_names(target.value)
+
+
+def statement_expressions(node):
+    """Each expression node of one module-level statement. Nested statements are left out, since
+    `module_statements` yields them on their own, and so is a lambda body, which is its own scope."""
+    stack = [child for child in ast.iter_child_nodes(node) if not isinstance(child, ast.stmt)]
+    while stack:
+        child = stack.pop()
+        yield child
+        if not isinstance(child, ast.Lambda):
+            stack.extend(c for c in ast.iter_child_nodes(child) if not isinstance(c, ast.stmt))
+
+
+def target_bindings(statements):
+    """Names the module-level statements bind that py-facts `defined_names` does not read: each name in a
+    tuple, list or starred assignment target, a for target, a with-as target, and a walrus target."""
+    names = set()
+    for node in statements:
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            targets = [item.optional_vars for item in node.items if item.optional_vars is not None]
+        else:
+            targets = []
+        for target in targets:
+            names.update(target_names(target))
+        names.update(e.target.id for e in statement_expressions(node) if isinstance(e, ast.NamedExpr))
+    return names
+
+
 def names_in(source):
-    """Names a prose line can cite: each name py-facts `defined_names` finds in the module-level statements
-    (def, class, assignment, import; also under a module-level if or try), plus each def directly in a
-    module-level class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
+    """Names a prose line can cite, read from every module-level statement (`module_statements`): each name
+    py-facts `defined_names` finds (def, class, plain-name assignment, import), each name `target_bindings`
+    finds, and each def directly in a module-level class. A def nested in a function is no public name. Read
+    with `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
     flat = list(module_statements(tree.body))
     names = py_facts().defined_names(ast.Module(body=flat, type_ignores=[]))  # defined_names reads `.body` only
+    names.update(target_bindings(flat))
     for node in flat:
         if isinstance(node, ast.ClassDef):
             names.update(m.name for m in module_statements(node.body) if isinstance(m, FUNCTIONS))
@@ -286,6 +333,7 @@ class Range:
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
+        self.shell_files = {p for p in self.foreign_files if SHELL_SCRIPT.search(p)}
 
 
 class PathReader:
@@ -347,7 +395,8 @@ class NameReader:
 
 class ForeignReader:
     """STALE002 unknown: a line that cites `file.mjs name` of a JavaScript or shell file the range touched. Those
-    names are not read, so the line is reported as unknown, never as a pass. Reports through `unknown`."""
+    names are not read, so the line is reported as unknown. Reports through `unknown`, and only when another
+    reader made the run read Markdown."""
     code = "STALE002"
     unknown = True
 
@@ -372,7 +421,7 @@ class FlagReader:
     def prepare(self, rng):
         removed_flags = {}  # script at head -> flags the range removed
         files = dict(rng.py_files)  # base path -> head path
-        shell = {p for p in list(rng.foreign_files) if SHELL_SCRIPT.search(p)}
+        shell = rng.shell_files
         files.update({old: new for old, new in rng.renamed.items() if new in shell})
         files.update({p: p for p in shell if p not in rng.renamed.values()})
         for path in sorted(files):
@@ -419,12 +468,12 @@ def scan(range_text):
     found = {}
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch)
-    if not removed and not renamed and not rng.py_files and not rng.foreign_files:
+    if not removed and not renamed and not rng.py_files and not rng.shell_files:
         return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     try:
         active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
-        if not active:
-            return found, rng.unknowns
+        if all(getattr(reader, "unknown", False) for reader, _ in active):
+            return found, rng.unknowns  # an unknown line never starts the Markdown read
 
         excludes = exclude_patterns(".")
         tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")

@@ -103,8 +103,8 @@ export PYTHONPATH="$EMIT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 LOG_OUT="$(mktemp)"
 
-# Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path or
-# function this range removed. Scope changed only. It runs before the "no markdown changed" exit, so a
+# Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path, or
+# a Python name bound at module level, that this range removed. Scope changed only. It runs before the "no markdown changed" exit, so a
 # code-only PR is checked. Its findings never go through the split script below: every stale line is
 # untouched by the range, and the split makes an untouched line report-only. FAIL=false prints them and
 # keeps the exit 0, as it does for the STE findings.
