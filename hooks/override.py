@@ -36,7 +36,7 @@ rule's settings-write ask, and it reaches agents.
       length. Any other first `opus` is a plain ask.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
     - The roles the ask names are granted, two or more as a list. A role word with not, no, don't, never, except
-      or without just before it: no grant.
+      or without within three words before or after it: no grant (`builders, no problem` grants nothing too).
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
       scope from context, fall back to every role). _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -102,7 +102,7 @@ BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
-NEGATION_SPAN = 3  # a negation within this many words before a role word negates it
+NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
 ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
 # A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
@@ -239,7 +239,8 @@ def _keyword_rest(rest):
 
 def _ask_scope(text):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
-    length, or a negated role. `roles` is the sorted list of the roles it names, empty when it names none."""
+    length, or a role with a negation within NEGATION_SPAN words before or after it. `roles` is the sorted list of
+    the roles it names, empty when it names none."""
     lengths = ASK_LENGTH.findall(text)
     if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
         return None
@@ -249,7 +250,8 @@ def _ask_scope(text):
         role = opus_role(word)
         if role not in ASK_ROLES:
             continue
-        if NEGATIONS & {w.lower() for w in words[max(0, at - NEGATION_SPAN):at]}:
+        near = words[max(0, at - NEGATION_SPAN):at] + words[at + 1:at + 1 + NEGATION_SPAN]
+        if NEGATIONS & {w.lower() for w in near}:
             return None
         roles.add(role)
     length = DEFAULT_ASK_LENGTH

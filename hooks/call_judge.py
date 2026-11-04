@@ -270,8 +270,8 @@ def opus_ask(text):
 
 def opus_scope(text, context):
     """The roles the owner's earlier prompts `context` (a list of strings, oldest first) name for the plain ask `text`,
-    as a list of roles from override.ASK_ROLES, or None for every role. Fails open to None with one stderr line: an
-    error, a timeout or an odd answer. A role the model names that is not in ASK_ROLES is dropped."""
+    as the model's raw role strings (a list), or None for every role. Fails open to None with one stderr line: an
+    error, a timeout or an odd answer. It does not filter: override._scoped_roles is the one filter, against ASK_ROLES."""
     try:
         import decision_watch  # lazy: the one home of the model's name
         from override import ASK_ROLES  # the one home of the roles; a copy would drift
@@ -286,7 +286,7 @@ def opus_scope(text, context):
         roles = verdict.get("roles")
         if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
             raise ValueError("the answer has no list of roles")
-        return [role for role in roles if role in ASK_ROLES] or None
+        return roles
     except Exception as exc:
         print("call judge: opus scope grants every role: %s" % " ".join(str(exc).split()), file=sys.stderr)
         return None
