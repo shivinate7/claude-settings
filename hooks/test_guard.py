@@ -580,6 +580,7 @@ PUSHLANE = os.path.join(ROOT, "pushlane")
 PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
+PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1807,6 +1808,11 @@ def _build_push():
         run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
         run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
 
+    make_repo(PUSHSTACK, {"base.txt": "base\n"})
+    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
+
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
     run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -1814,7 +1820,7 @@ def _build_push():
 
     for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
                             (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
-                            (PUSHMAINUP, "origin/main")):
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
         got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
         if got != upstream:
             sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
@@ -2127,7 +2133,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -6786,6 +6792,8 @@ for form, tail in (
         ("--mirror alone, which forces by itself", "--mirror"),
         ("--all", "--all --force"),
         ("--all with a lease", "--all" + LEASE),
+        ("--branches, git's alias of --all", "--branches --force"),
+        ("--branches with a lease", "--branches" + LEASE),
         ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
         ("the short flag", "-f origin HEAD:main")):
     push_case("forced to the default branch asks: " + form, tail, "ask",
@@ -6931,13 +6939,17 @@ sh("push: a force push inside a loop's do-block still counts",
    carries=REMEDY)
 
 # ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
-# colon-less refspec naming the current branch) that lands off the branch's upstream asks. PUSHSTRAY is
-# `mylocal`, whose upstream is origin/lane/x.
+# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
+# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
+# origin/lane/x.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
           cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
-push_case("stray branch, -u with HEAD asks", "-u origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+# The same pushes without -u still ask: -u is what makes a new upstream on purpose.
+push_case("stacked lane, HEAD without -u asks", "origin HEAD", "ask", cwd=PUSHSTACK, rule=PUSH_STRAY_RULE)
+push_case("stacked lane, the local name without -u asks", "origin lane/fix", "ask", cwd=PUSHSTACK,
+          rule=PUSH_STRAY_RULE)
 push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
           cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
 # Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
@@ -6955,6 +6967,11 @@ push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAI
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
 push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
+push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
+          cwd=PUSHSTACK, rule=PUSH_MAIN_RULE)
 push_case("main, HEAD:main asks where origin/HEAD names trunk", "origin HEAD:main", "ask", cwd=PUSHTRUNK,
           rule=PUSH_MAIN_RULE)
 # A branch that tracks main writes main on a bare push. The upstream is main, so 206 a stays silent here.
@@ -6985,6 +7002,18 @@ push_case("push.default simple, a bare push with a mismatched upstream is git's 
           cwd=PUSHSTRAY, silent=True)
 # Another remote than the upstream's remote: the rule reads only branch.<cur>.remote.
 push_case("another remote than the upstream's is silent", "fork HEAD", "allow", cwd=PUSHSTRAY, silent=True)
+# A -u push whose destination is the local branch's own name sets that upstream on purpose (ruling 206 a).
+# PUSHSTACK is lane/fix, cut from origin/lane/base. PUSHSTRAY is `mylocal`,
+# tracking origin/lane/x: its -u push writes `mylocal` by the same rule, so it is silent too.
+push_case("stacked lane, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stacked lane, --set-upstream HEAD is silent", "--set-upstream origin HEAD", "allow", cwd=PUSHSTACK,
+          silent=True)
+push_case("stacked lane, -u naming the local branch is silent", "-u origin lane/fix", "allow", cwd=PUSHSTACK,
+          silent=True)
+sh("push: stacked lane, a bare -u under push.default current writes the local name, is silent",
+   VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
+          cwd=PUSHSTRAY, silent=True)
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
@@ -6993,6 +7022,8 @@ push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, 
 push_case("a dry run to main, --dry-run origin HEAD:main, is silent", "--dry-run origin HEAD:main", "allow",
           silent=True)
 push_case("a dry run to main, -n origin main, is silent", "-n origin main", "allow", silent=True)
+push_case("a dry run of --branches, --branches --dry-run origin, is silent", "--branches --dry-run origin",
+          "allow", silent=True)
 # Tags move no branch. On main tracking origin/main a bare push would ask main, so the tags check is what
 # keeps this one silent.
 push_case("--tags on main tracking origin/main is silent", "origin --tags", "allow", cwd=PUSHMAINUP, silent=True)
