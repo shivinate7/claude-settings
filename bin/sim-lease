@@ -2,14 +2,15 @@
 """sim-lease: the one Mac-wide queue and lease for phone simulators (decision sim-lease-tool).
 
 Usage:
-  sim-lease take --device duo|pro [--pid PID] [--session ID] [--wait S]
-  sim-lease give [--pid PID]
+  sim-lease take --device duo|pro --pid PID [--session ID] [--wait S]
+  sim-lease give --pid PID
   sim-lease status
 
-take  queues PID (default: the caller's parent pid) and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`,
+take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`,
       and exits 0. Not granted within the wait: one stderr line with the holders and the load, exit 1, and PID leaves
       the queue. The wait is --wait, else SIM_LEASE_WAIT (default 300) seconds. The state is read again every
-      SIM_LEASE_POLL (default 2) seconds. A bad argument exits 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
+      SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
+      exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
 status  prints one line per lease, one per waiter, and the load.
 
@@ -19,8 +20,10 @@ Limits on every grant: the 5-minute load is under 100 and the 1-minute load is u
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
-Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS is set and not empty,
-take prints `none` and exits 0, give exits 0, and no file is written.
+Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
+take prints `none` and exits 0, give exits 0, and no file is written. On Darwin, a no-op take also prints one stderr
+line saying no lease was taken. Any other CI value, such as `false` or empty, is not a no-op.
+Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matches the same process read under another.
 
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
@@ -51,22 +54,24 @@ def state_dir():
                         "state", "sim-lease")
 
 
-def out(cmd):
+def out(cmd, env=None):
     """The stdout of a command, stripped; '' when it fails or is missing."""
     try:
-        r = _nowindow.run(cmd, capture_output=True, text=True, timeout=30)
+        r = _nowindow.run(cmd, capture_output=True, text=True, timeout=30, env=env)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
 def is_noop():
-    return out(["uname", "-s"]) != "Darwin" or bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    """(no-op?, on Darwin?): a no-op on a non-Darwin host, or on Darwin when CI or GITHUB_ACTIONS equals `true`."""
+    darwin = out(["uname", "-s"]) == "Darwin"
+    return (not darwin or "true" in (os.environ.get("CI"), os.environ.get("GITHUB_ACTIONS"))), darwin
 
 
 def start_time(pid):
     """The `ps -o lstart=` text of pid, or '' when the pid is dead."""
-    return out(["ps", "-o", "lstart=", "-p", str(pid)])
+    return out(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, TZ="UTC"))
 
 
 def read_load():
@@ -164,11 +169,14 @@ def describe(data, load):
 
 
 def cmd_take(args):
-    pid = args.pid if args.pid is not None else os.getppid()
+    pid = args.pid
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
     poll = float(os.environ.get("SIM_LEASE_POLL") or 2)
     session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
-    if is_noop():
+    noop, darwin = is_noop()
+    if noop:
+        if darwin:
+            print("sim-lease: no lease taken: CI or GITHUB_ACTIONS is true", file=sys.stderr)
         print("none")
         return 0
     started = start_time(pid)
@@ -213,8 +221,8 @@ def cmd_take(args):
 
 
 def cmd_give(args):
-    pid = args.pid if args.pid is not None else os.getppid()
-    if is_noop():
+    pid = args.pid
+    if is_noop()[0]:
         return 0
     with State(create=False) as st:
         st.drop(pid)
@@ -222,7 +230,7 @@ def cmd_give(args):
 
 
 def cmd_status(_args):
-    if is_noop():
+    if is_noop()[0]:
         print("sim-lease: off on this host")
         return 0
     with State(create=False) as st:
@@ -235,16 +243,25 @@ def cmd_status(_args):
     return 0
 
 
+class OneLineParser(argparse.ArgumentParser):
+    """A bad argument prints one usage line on stderr and exits 2 (argparse's own text is two lines)."""
+
+    def error(self, message):
+        print("usage: sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] | give --pid PID | status;"
+              " %s" % message.replace("\n", " "), file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
-    p = argparse.ArgumentParser(prog="sim-lease", description="The Mac-wide simulator queue and lease.")
+    p = OneLineParser(prog="sim-lease", description="The Mac-wide simulator queue and lease.")
     sub = p.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("take")
     t.add_argument("--device", required=True, choices=("duo", "pro"))
-    t.add_argument("--pid", type=int)
+    t.add_argument("--pid", type=int, required=True)
     t.add_argument("--session")
     t.add_argument("--wait", type=float)
     g = sub.add_parser("give")
-    g.add_argument("--pid", type=int)
+    g.add_argument("--pid", type=int, required=True)
     sub.add_parser("status")
     args = p.parse_args()
     return {"take": cmd_take, "give": cmd_give, "status": cmd_status}[args.cmd](args)
