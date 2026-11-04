@@ -286,7 +286,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt .line .changebtn { grid-column: 3; grid-row: 1; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
 .receipt .line b { overflow-wrap: anywhere; color: var(--good); }
-.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
 /* A multi answer lists each pick with its letter and title, in order. */
 .receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
 .receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
@@ -663,10 +663,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
 /* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
 .g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
-/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading. */
-.tier.ruled { gap: 10px; }
-.tier.ruled > header { display: grid; gap: 2px; }
-.tier.ruled > header h2 { font: 700 17px/1.25 var(--body); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading.
+   The Answered section (.sunk) has the same shape, and its cards take a ruling card's size. */
+.tier.ruled, .tier.sunk { gap: 10px; }
+.tier.ruled > header, .tier.sunk > header { display: grid; gap: 2px; }
+.tier.ruled > header h2, .tier.sunk > header h2 { font: 700 17px/1.25 var(--body); }
 .rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
 .rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
 .rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
@@ -676,9 +677,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* Not .rbody: the Status tab already uses that class. */
 .rlist { display: grid; gap: 10px; }
 /* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
-.card.rcard { padding: 14px 16px; gap: 8px; }
+.card.rcard, .tier.sunk .card { padding: 14px 16px; gap: 8px; }
 .card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
-.rcard .title { font-size: 17px; max-width: 60ch; }
+.rcard .title, .tier.sunk .card .title { font-size: 17px; max-width: 60ch; }
 .rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
 .ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
 .ruledline .key { flex: none; max-width: none; }
@@ -840,7 +841,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1005,7 +1006,8 @@ const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[
 // and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-const feed = { items: false, answers: false, all: [] };
+// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
+const feed = { items: false, answers: false, receipts: false, all: [] };
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
   // The last Send is the newest answer anywhere, a closed item's last answer included.
@@ -1014,9 +1016,21 @@ function freezeSeen() {
   const old = (it) => !isRuling(it) && !state.answers[it.id] && ts(it.added) < last;
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
 }
+// Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
+// A Send on the open page, or a receipt that arrives later, moves no card (ux-order-holds-still); a reload works it out again.
+// A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
+// A group sinks only when every member is in the set, so it never splits.
+const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
+function freezeSunk() {
+  if (state.sunk || !feed.items || !feed.answers) return;
+  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && isSaved(it)).map((it) => it.id));
+}
 function sorted() {
-  const by = { holds: [], due: [], calm: [], stands: [] };
-  state.items.forEach((it) => by[tierOf(it)].push(it));
+  const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
+  state.items.forEach((it) => by[isSunk(it) ? "answered" : tierOf(it)].push(it));
+  // Newest answer first; a group sits at its newest member's time.
+  const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse((state.answers[x.id] || {}).at) || 0));
+  by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
   const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
   const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
@@ -1297,7 +1311,8 @@ function ruledOf(it) {
   const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
   return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
 }
-function receipt(it) {
+// noNote: the owner's note is held by the fold of a card in the Answered section, so the answer line shows without it.
+function receipt(it, noNote) {
   const sv = savedOf(it), rc = rcOf(it);
   let what, picks = null;
   if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
@@ -1313,7 +1328,7 @@ function receipt(it) {
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
       h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
     picks,
-    sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
+    !noNote && sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
 // The thread on a card: the owner's last answer, then the writer's reply. Either part may be absent, and a card with neither draws nothing.
 const lastOf = (it) => (it.lastAnswer && typeof it.lastAnswer === "object" && !Array.isArray(it.lastAnswer) ? it.lastAnswer : null);
@@ -1425,15 +1440,16 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen card's fold stays open and its control is locked.
+// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen or answered card's fold stays open and its control is locked.
 const foldLocked = (it) => !!eff(it) || withdrawing(it);
-function unfoldBtn(it, open, locked, ncmd) {
+// words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
+function unfoldBtn(it, open, locked, ncmd, words) {
   const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
   const nopts = (it.options || []).length, nsteps = (it.steps || []).length, cmdWord = ncmd > 1 ? "commands" : "command";
   // A task with no steps and no command folds only its links, the ready line, Mark done and the note box.
   const rest = ncmd ? "the " + cmdWord : "Mark done and the note";
-  const show = dec ? "Show the " + nopts + (nopts === 1 ? " option" : " options") : nsteps ? "Show the " + nsteps + (nsteps === 1 ? " step" : " steps") + tail : "Show " + rest;
-  const hide = dec ? "Hide the " + (nopts === 1 ? "option" : "options") : nsteps ? "Hide the " + (nsteps === 1 ? "step" : "steps") + (ncmd > 1 ? " and the commands" : tail) : "Hide " + rest;
+  const show = words ? words.show : dec ? "Show the " + nopts + (nopts === 1 ? " option" : " options") : nsteps ? "Show the " + nsteps + (nsteps === 1 ? " step" : " steps") + tail : "Show " + rest;
+  const hide = words ? words.hide : dec ? "Hide the " + (nopts === 1 ? "option" : "options") : nsteps ? "Hide the " + (nsteps === 1 ? "step" : "steps") + (ncmd > 1 ? " and the commands" : tail) : "Hide " + rest;
   // The lock is read at the press: a note typed after the build flips it in place (see the note's input handler).
   return h("button", { class: "unfold", type: "button", id: "unfold-" + it.id, "aria-expanded": String(open), "aria-controls": "fold-" + it.id, "aria-disabled": locked ? "true" : null,
     onclick: () => { if (foldLocked(it)) return; state.unfold[it.id] = !open; repaint(it); } },
@@ -1441,12 +1457,20 @@ function unfoldBtn(it, open, locked, ncmd) {
     h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
     h("span", { class: "sr" }, " for No. " + it.n));
 }
+// The fold of a seen card and of a sunk one: the control, then the body. One home for the lock, so a draft on either keeps the fold open.
+function foldEls(it, parts, ncmd, words) {
+  const locked = foldLocked(it);
+  if (locked) state.unfold[it.id] = true;
+  return [unfoldBtn(it, !!state.unfold[it.id], locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, ...parts)];
+}
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
-  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
-  const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
+  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
+  // A sunk card holds nothing up, so it drops its tier class.
+  const card = h("article", { class: "card" + (sunk ? "" : " " + T) + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
+    // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   if (laneOf(it)) top.append(h("span", { class: "onlane" }, "waits on lane " + laneOf(it)));
@@ -1457,6 +1481,16 @@ function buildCard(it) {
   const odd = unknownFields(it);
   if (odd.length) card.append(h("div", { class: "status", role: "status" }, "This item carries " + (odd.length === 1 ? "a field" : "fields") + " the page does not draw.",
     h("details", { class: "cmd-more" }, h("summary", {}, "Which " + (odd.length === 1 ? "field" : "fields")), h("p", {}, odd.join(", ") + ". Ask the session to add " + (odd.length === 1 ? "it" : "each") + " to itemFields in the page or to remove " + (odd.length === 1 ? "it" : "each") + "."))));
+  if (saved && sunk) {
+    // The fold holds the parts below the answer line, named by the parts that are present. With none, there is no control.
+    const sv = savedOf(it), parts = [sv.note && sv.note !== "accepted pick" ? "your note" : null, lastOf(it) ? "your last answer" : null, replyOf(it) ? "the reply" : null].filter(Boolean);
+    card.append(receipt(it, true));
+    if (parts.length) {
+      const list = parts.length < 2 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+      card.append(...foldEls(it, [parts[0] === "your note" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null, threadEl(it)], 0, { show: "Show " + list, hide: "Hide " + list }));
+    }
+    return card;
+  }
   if (saved) { card.append(receipt(it)); const th = threadEl(it); if (th) card.append(th); return card; }
   if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
@@ -1471,8 +1505,8 @@ function buildCard(it) {
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
-  // A seen card folds every part the owner answers with, behind one control. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
-  let ncmd = 0; const fold = isSeen(it) ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
+  // A seen card, or a sunk one changed on the page (a Change keeps it in the Answered section), folds every part the owner answers with, behind one control. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
+  let ncmd = 0; const fold = isSeen(it) || sunk ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
   const multi = isMulti(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
@@ -1506,11 +1540,7 @@ function buildCard(it) {
   });
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
   put(nb);
-  if (fold) {
-    const locked = foldLocked(it);
-    if (locked) state.unfold[it.id] = true;
-    card.append(unfoldBtn(it, !!state.unfold[it.id], locked, ncmd), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, fold));
-  }
+  if (fold) card.append(...foldEls(it, fold, ncmd));
   if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
@@ -1568,7 +1598,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1640,32 +1670,49 @@ function tierEl(T) {
   }
   return tierEls[T.k];
 }
-function bundleEl(slug) {
+// The writer's title for a group, else the default words: a group that sank is answered, so it is not asked to be answered.
+const groupTitle = (slug, sunk) => (state.groups[slug] || {}).title || (sunk ? "Answered together" : "Answer these together");
+function bundleEl(slug, sunk) {
   if (!bundleEls[slug]) bundleEls[slug] = { el: h("section", { class: "bundle", id: "group-" + slug }), head: h("header", {}) };
   const g = state.groups[slug] || {}, b = bundleEls[slug];
-  const title = g.title || "Answer these together";
+  const title = groupTitle(slug, sunk);
   b.el.setAttribute("aria-label", title);
   b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
   return b;
 }
-// The section after the open tiers: a disclosure head, a line of its own, and the rulings newest first. It is open on load.
-const ruledAt = (it) => Date.parse(it.ruled) || 0;
-const rulingEls = {};
-function rulingsEl() {
-  if (!rulingEls.el) {
-    rulingEls.ct = h("span", { class: "ct" });
-    rulingEls.head = h("button", { class: "rhead", type: "button", "aria-controls": "rb", onclick: () => { state.rulingsOpen = !state.rulingsOpen; render(); } }, h("span", { class: "chev", "aria-hidden": "true" }), glyph("ruled"), "Arbiter rulings", rulingEls.ct);
-    rulingEls.sub = h("p", { class: "rsub" });
-    rulingEls.list = h("div", { class: "rlist", id: "rb" });
-    rulingEls.el = h("section", { class: "tier ruled", id: "tier-ruled", "aria-labelledby": "th-ruled" }, h("header", {}, h("h2", { id: "th-ruled" }, rulingEls.head), rulingEls.sub), rulingEls.list);
+// A section after the open tiers: a disclosure head (glyph, name, count), a line of its own, and a list. One builder for the rulings and the Answered
+// section. o: { cls, glyph, name, count, open, toggle, sub, listId, btnId, body }. Each draws only with items in it.
+const sectionEls = {};
+function sectionEl(k, o) {
+  let e = sectionEls[k];
+  if (!e) {
+    const ct = h("span", { class: "ct" }), sub = h("p", { class: "rsub" }), list = h("div", { class: "rlist", id: o.listId });
+    const head = h("button", { class: "rhead", type: "button", id: o.btnId || null, "aria-controls": o.listId, onclick: o.toggle }, h("span", { class: "chev", "aria-hidden": "true" }), glyph(o.glyph), o.name, ct);
+    e = sectionEls[k] = { ct, sub, list, head, el: h("section", { class: "tier " + o.cls, id: "tier-" + k, "aria-labelledby": "th-" + k }, h("header", {}, h("h2", { id: "th-" + k }, head), sub), list) };
   }
+  e.ct.textContent = String(o.count);
+  e.head.setAttribute("aria-expanded", String(o.open));
+  e.sub.textContent = o.sub;
+  e.list.hidden = !o.open;
+  reconcile(e.list, o.body);
+  return e.el;
+}
+// The rulings, newest first. Open on load.
+const ruledAt = (it) => Date.parse(it.ruled) || 0;
+function rulingsEl() {
   const list = state.rulings.slice().sort((a, b) => ruledAt(b) - ruledAt(a) || b.n - a.n), on = state.rulingsOpen;
-  rulingEls.ct.textContent = String(list.length);
-  rulingEls.head.setAttribute("aria-expanded", String(on));
-  rulingEls.sub.textContent = "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".");
-  rulingEls.list.hidden = !on;
-  reconcile(rulingEls.list, list.map(cardFor));
-  return rulingEls.el;
+  return sectionEl("ruled", { cls: "ruled", glyph: "ruled", name: "Arbiter rulings", count: list.length, open: on, listId: "rb", body: list.map(cardFor),
+    toggle: () => { state.rulingsOpen = !state.rulingsOpen; render(); },
+    sub: "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".") });
+}
+// The items answered before this visit (isSunk), newest first. Open on load, each card folded.
+function answeredEl(items, place) {
+  const on = state.answeredOpen, stamps = items.map((i) => Date.parse((state.answers[i.id] || {}).at)).filter(Number.isFinite);
+  const body = [], done = new Set();
+  items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
+  return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
+    toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
+    sub: "Sent before this visit, newest first." + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
@@ -1674,6 +1721,15 @@ function renderList() {
   }
   const live = new Set();
   let wordsShown = false;
+  // One card, or one group's frame with all its members, into body. A tier and the Answered section place their items the same way.
+  const place = (items, it, done, body) => {
+    const m = it.group ? items.filter((x) => x.group === it.group) : [it];
+    if (m.length < 2) { done.add(it.id); body.push(cardFor(it)); return; }
+    m.forEach((x) => done.add(x.id));
+    const b = bundleEl(it.group, isSunk(it)); live.add(it.group);
+    reconcile(b.el, [b.head, ...m.map(cardFor)]);
+    body.push(b.el);
+  };
   TIERS.forEach((T) => {
     const items = by[T.k]; if (!items.length) return;
     const te = tierEl(T), body = [], done = new Set();
@@ -1682,16 +1738,12 @@ function renderList() {
     items.forEach((it) => {
       if (done.has(it.id)) return;
       if (!lined && isSeen(it)) { lined = true; body.push(seenHead(T.k, !wordsShown)); wordsShown = true; }
-      const m = it.group ? items.filter((x) => x.group === it.group) : [it];
-      if (m.length < 2) { done.add(it.id); body.push(cardFor(it)); return; }
-      m.forEach((x) => done.add(x.id));
-      const b = bundleEl(it.group); live.add(it.group);
-      reconcile(b.el, [b.head, ...m.map(cardFor)]);
-      body.push(b.el);
+      place(items, it, done, body);
     });
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
   });
+  if (by.answered.length) want.push(answeredEl(by.answered, place));
   if (state.rulings.length) want.push(rulingsEl());
   const open = new Set(answerable().map((i) => i.id));
   Object.keys(cards).forEach((id) => { if (!open.has(id)) delete cards[id]; });
@@ -1758,18 +1810,25 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
-  TIERS.forEach((T) => {
-    const list = by[T.k]; if (!list.length) return;
-    const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  // The chips of a tier or of the Answered section, a group's chips side by side.
+  const chipRow = (list) => {
+    const row = h("div", { class: "chips-n" }), seen = new Set();
     list.forEach((it) => {
       if (seen.has(it.id)) return;
       const m = it.group ? list.filter((x) => x.group === it.group) : [it];
       m.forEach((x) => seen.add(x.id));
-      row.append(m.length > 1 ? h("span", { class: "pairchips", title: (state.groups[it.group] || {}).title || "Answer these together" }, m.map(chip)) : chip(it));
+      row.append(m.length > 1 ? h("span", { class: "pairchips", title: groupTitle(it.group, isSunk(it)) }, m.map(chip)) : chip(it));
     });
+    return row;
+  };
+  TIERS.forEach((T) => {
+    const list = by[T.k]; if (!list.length) return;
+    const open = list.filter((i) => !isSaved(i)).length, row = chipRow(list);
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
+  // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
+  if (by.answered.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-answered", "aria-label": by.answered.length + " answered", onclick: (e) => { e.preventDefault(); state.answeredOpen = true; render(); jump("tier-answered"); } }, glyph("done"), "Answered", h("span", { class: "ct" }, String(by.answered.length))), chipRow(by.answered)));
   // One row for the rulings: no chips, so a ruling never counts as open or sent.
   if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
   kids.push(askRailRow());
@@ -2299,11 +2358,11 @@ render(); renderAsks();
     const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
     // A closed item stays hidden, unless the arbiter's writer filed it as a ruling.
     state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true;
-    feed.items = true; feed.all = all; freezeSeen(); render();
+    feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
   }, () => {});
-  db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); render(); }, () => {});
+  db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
-  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
+  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();

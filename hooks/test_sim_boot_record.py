@@ -572,6 +572,7 @@ class SimBootRecordTests(unittest.TestCase):
                 self.assertIn(U1, reason, "the reason does not name the UDID")
                 self.assertIn("broken", reason.lower())
                 self.assertIn("stop", reason.lower(), "the reason does not say to stop using it")
+                self.assertIn("decision sim-boot-is-verified", reason, "the reason does not cite its decision")
                 names = [c.split()[0] for c in self.check_calls()]
                 self.assertEqual(names.count("shutdown"), 1, "more or fewer than one shutdown")
                 self.assertEqual(names.count("boot"), 1, "more or fewer than one boot")
