@@ -1381,6 +1381,23 @@ MUTATIONS = [
      "        if not has_agent and under_session_scratchpad(resolved, session_id):",
      "        if under_session_scratchpad(resolved, session_id):",
      "guard", "a write into a worktree in the session's own scratchpad"),
+    # RULE 0, other-checkout, the separate-clone act: `_same_repo` and the stranded arm of `_clone_scope`.
+    ("other-checkout: no two clones read as the same repo, so a separate clone of this repo passes",
+     "    urls = (_clone_origin(common), _clone_origin(other))",
+     "    return False\n    urls = (_clone_origin(common), _clone_origin(other))",
+     "guard", "a Write into a separate clone of the same repo is refused"),
+    ("other-checkout: every two clones read as the same repo, so a clone of a different repo is refused",
+     "    urls = (_clone_origin(common), _clone_origin(other))",
+     "    return True\n    urls = (_clone_origin(common), _clone_origin(other))",
+     "guard", "a Write into a clone of a different repo is allowed"),
+    ("other-checkout: a cwd is never stranded, so its relative write into a separate clone passes",
+     "        if common and _separate_clone(own, [top], common):",
+     "        if False and _separate_clone(own, [top], common):",
+     "guard", "a cwd stranded in a separate clone refuses a relative Write"),
+    ("other-checkout: a git verb in a shell call is not read, so a git -C commit into a separate clone passes",
+     '    return "git" in command and any(',
+     '    return False and "git" in command and any(',
+     "guard", "a git -C commit into a separate clone of the same repo is refused"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
@@ -2118,7 +2135,8 @@ MUTATIONS = [
 # take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
-    ("lint/report_guard.py", ["lint/test_report_guard.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
+    ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",

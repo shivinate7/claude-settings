@@ -194,10 +194,28 @@ class ScratchCase(unittest.TestCase):
             handle.write(data)
         return path
 
-    def env(self, binary=None, agent=AI_AGENT):
-        env = {"AI_AGENT": agent}
+    def claude_on_path(self, data, name):
+        """(directory, executable): a directory whose `claude` runs the fixture bytes. On POSIX the
+        fixture is a file in the bin folder and claude is a link to it, so the check must follow
+        the link. Windows gets a copy named claude.exe: os.symlink needs a privilege the test can
+        not count on."""
+        directory = self.scratch(name)
+        target = self.write_binary(data, name=name + "-claude")
+        os.chmod(target, 0o755)  # shutil.which needs an execute bit, even for root
+        if os.name == "nt":
+            executable = os.path.join(directory, "claude.exe")
+            shutil.copyfile(target, executable)
+        else:
+            executable = os.path.join(directory, "claude")
+            os.symlink(target, executable)
+        return directory, executable
+
+    def env(self, binary=None, agent=AI_AGENT, path=None):
+        env = {} if agent is None else {"AI_AGENT": agent}
         if binary is not None:
             env["CLAUDE_CODE_EXECPATH"] = binary
+        if path is not None:
+            env["PATH"] = path
         return env
 
     def assert_one_line(self, line):
@@ -310,6 +328,70 @@ class NoBinaryTests(ScratchCase):
         self.assert_one_line(first)
         self.assertIn("unknown", first)
         self.assertEqual(check(env=self.env(missing), config=self.config), "")
+
+
+class PathFallbackTests(ScratchCase):
+    """With CLAUDE_CODE_EXECPATH unset and AI_AGENT set, the check looks up `claude` on the PATH in
+    the injected env, follows its link and reads the file. Without a PATH in env it does no lookup,
+    and it never reads os.environ PATH. Each test has its own config folder, because the cache
+    answers a second visit to the same path with ""."""
+
+    def changed_bytes(self):
+        base = self.baseline()
+        return binary_bytes(NEXT_VERSION, dict(base["facts"], summary_fraction_default=0.25))
+
+    def assert_no_os_environ_lookup(self, env):
+        """Puts a changed claude on os.environ PATH, runs the check with env, and expects the unknown
+        line. A check that reads os.environ PATH prints the changed line instead."""
+        check = self.need("cc_version_check")
+        _, leak = self.claude_on_path(self.changed_bytes(), name="leak")
+        with mock.patch.dict(os.environ, {"PATH": os.path.dirname(leak)}):
+            self.assertIsNotNone(shutil.which("claude"), "the os.environ PATH trap is not in place")
+            line = check(env=env, config=self.config)
+        self.assert_one_line(line)
+        self.assertNotIn("changed compaction facts", line,
+                         "the check read claude from os.environ PATH: %r" % line)
+        self.assertIn("unknown", line, "expected the unknown line: %r" % line)
+
+    def test_execpath_unset_with_ai_agent_reads_claude_from_env_path_through_its_link(self):
+        check = self.need("cc_version_check")
+        directory, executable = self.claude_on_path(self.changed_bytes(), name="path")
+        path = os.pathsep.join([self.scratch("empty"), directory])  # a miss first, then the hit
+        self.assertIsNotNone(shutil.which("claude", path=path),
+                             "the harness did not put a runnable claude on the env PATH")
+        if os.name != "nt":  # Windows holds a copy, not a link: see claude_on_path
+            self.assertTrue(os.path.islink(executable), "the claude on the env PATH is not a link")
+        line = check(env=self.env(path=path), config=self.config)
+        self.assert_one_line(line)
+        self.assertIn("changed compaction facts", line,
+                      "the check did not read claude from the env PATH: %r" % line)
+        self.assertIn("summary_fraction_default", line)
+
+    def test_execpath_unset_and_env_path_without_claude_prints_unknown_and_ignores_os_environ(self):
+        empty = self.scratch("empty")
+        self.assertIsNone(shutil.which("claude", path=empty),
+                          "the empty PATH folder holds a claude: the case is not empty")
+        self.assert_no_os_environ_lookup(self.env(path=empty))
+
+    def test_execpath_unset_and_no_path_in_env_does_no_lookup_and_ignores_os_environ(self):
+        self.assert_no_os_environ_lookup(self.env())
+
+    def test_neither_execpath_nor_ai_agent_prints_nothing_with_claude_on_env_path(self):
+        check = self.need("cc_version_check")
+        directory, _ = self.claude_on_path(self.changed_bytes(), name="path")
+        self.assertIsNotNone(shutil.which("claude", path=directory),
+                             "the harness did not put a runnable claude on the env PATH")
+        line = check(env=self.env(agent=None, path=directory), config=self.config)
+        self.assertEqual(line, "", "no CLAUDE_CODE_EXECPATH and no AI_AGENT should print nothing: %r"
+                         % line)
+
+    def test_execpath_set_to_the_same_link_reads_the_changed_facts(self):
+        check = self.need("cc_version_check")
+        _, executable = self.claude_on_path(self.changed_bytes(), name="control")
+        line = check(env=self.env(executable), config=self.config)
+        self.assert_one_line(line)
+        self.assertIn("changed compaction facts", line,
+                      "the variable's own file was not read: %r" % line)
 
 
 class DailyNoteTests(ScratchCase):

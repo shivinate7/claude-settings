@@ -3,7 +3,7 @@
 ## The ruling
 
 Owner, 2026-10-26 (waiting-page item 15, answer b): a lane that touches a screen gets two design
-agents, and both run Opus.
+agents, both on Opus, except a text-only change (owner, 2026-11-03: design reviewer only).
 
 - The designer (`agents/designer.md`) runs before the builder. It draws one HTML mockup per changed
   screen, with a notes file, in the repo's design folder (the `design` kind in `lint/layout.json`).
@@ -11,8 +11,19 @@ agents, and both run Opus.
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
 - The design reviewer (`agents/design-reviewer.md`) runs after the build. It judges each built screen
   against the mockup and the repo's design rules, at every size and theme, with a verdict per screen.
-- Routing has one test: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
-  still reviews the code.
+- Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
+  still reviews the code. Exception: a text-only change skips the designer. The design
+  reviewer still runs after the build. Owner ask `ask-mw18vywh8g` (small text changes on existing
+  screens), 2026-11-03 16:13 CST.
+  - A text-only change edits an existing screen's files and changes only user-visible copy. User-visible
+    copy is text nodes, locale values, and an element's visible or read-aloud label, placeholder, title or
+    alt. A class, style, token, icon name, URL, key or test id is never copy. It adds, removes or moves no
+    element, class, style, token or layout, and adds no screen.
+  - Outcome the designer protected: the new copy fits the screen, seen before the build. The design
+    reviewer protects it now. It compares the built screen with main's screenshots of the same screen,
+    at every size and theme, and catches overflow, wrapping and truncation from the new copy. It reads the
+    built diff too: any element, class, style, token or layout change in a text-only change is a finding
+    that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
   step, after the blind list is complete (`design-skills`).
@@ -35,7 +46,7 @@ stop the same way (`designer-diff`). Risk: likely. A designer that writes produc
 second builder, unreviewed as one. Landed 2026-10-26.
 
 Reason: the owner wants each screen seen before it is built, and judged after against what was
-seen. Reopen when the owner rules on `/design`, or when a design agent's Opus cost shows in a cull.
+seen. A text-only change is the exception: no designer sees it first, and the design reviewer judges it against main's screenshots. Reopen when the owner rules on `/design`, or when a design agent's Opus cost shows in a cull.
 
 Kind: process
 Home: agents/designer.md
