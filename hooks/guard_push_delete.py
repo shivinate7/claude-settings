@@ -26,6 +26,19 @@ AGENT_BRANCH_PREFIX = "worktree-agent-"
 AGENT_PUSH_RULE = "agent-branch-push"
 
 
+# One shell call reads each git answer once: push_verdict and the record-branch rule resolve the same
+# destinations, and the force loop resolves them again. judge_shell clears this at its start, so a read
+# never outlives the call it served. Key: the folder and the git arguments.
+PUSH_READS = {}
+
+
+def _push_git(cwd: str, *args):
+    key = (cwd,) + args
+    if key not in PUSH_READS:
+        PUSH_READS[key] = guard_core._git(cwd, *args)
+    return PUSH_READS[key]
+
+
 def _push_config(cwd: str, key: str, overrides=None):
     """The config value, '' when the key is unset, None when git cannot answer.
 
@@ -33,14 +46,14 @@ def _push_config(cwd: str, key: str, overrides=None):
     """
     if overrides and key.lower() in overrides:
         return overrides[key.lower()]
-    answer = guard_core._git(cwd, "config", "--get", key) if cwd else None
+    answer = _push_git(cwd, "config", "--get", key) if cwd else None
     if answer is None or answer.returncode not in (0, 1):
         return None
     return answer.stdout.strip()
 
 
 def _push_current_branch(cwd: str):
-    answer = guard_core._git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
+    answer = _push_git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
     # no `--short`: it prints `heads/<name>` when a tag has the branch's name

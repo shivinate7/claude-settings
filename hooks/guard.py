@@ -338,7 +338,7 @@ while True:
         from guard_push_delete import (
             AGENT_PUSH_REASON, AGENT_PUSH_RULE, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON,
             PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
-            push_text, push_verdict, rm_delete_hit,
+            PUSH_READS, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -2909,6 +2909,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
+    PUSH_READS.clear()  # a call reads each push destination once; nothing carries to the next call
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
