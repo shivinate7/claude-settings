@@ -54,6 +54,10 @@ def step(name, run=None, **keys):
     return text + "\n"
 
 
+SUMMARY = re.compile(r"^(?:ran|would run) \d+ of \d+ steps$")  # the last line of a --lint run or plan
+NOT_RUN = re.compile(r"^not run(?! locally)\b")  # a step --lint does not run: its own line, never a verdict
+
+
 class Job(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="cijob_", dir=RUN_FOLDER)
@@ -77,7 +81,8 @@ class Job(unittest.TestCase):
         return done.returncode, lines, done.stdout + done.stderr
 
     def verdicts(self, lines):
-        return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines]
+        return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
+                if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
 
 
 class Steps(Job):
@@ -468,7 +473,7 @@ class LintMode(unittest.TestCase):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
         done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
-        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
+        lines = [ln for ln in done.stdout.splitlines() if ln.startswith("would run ") and not SUMMARY.match(ln)]
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
@@ -484,8 +489,7 @@ class LintMode(unittest.TestCase):
             step("ste", "bin/ste-changed origin/main"),
             step("noise", "true")))
         self.assertEqual(code, 0, out)
-        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines],
-                         ["old lint", "brand new lint", "new action check", "ste"], out)
+        self.assertEqual(selected(lines), ["old lint", "brand new lint", "new action check", "ste"], out)
 
     def test_full_suites_and_mutation_tests_are_not_selected(self):
         code, lines, out = plan_lint(self.root, workflow(
@@ -499,7 +503,173 @@ class LintMode(unittest.TestCase):
             step("wrapped", "bash lint/run.sh"),
             step("kept", "python3 lint/check_a.py")))
         self.assertEqual(code, 0, out)
-        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["kept"], out)
+        self.assertEqual(selected(lines), ["kept"], out)
+
+
+LINT_SCRIPT = ("import os, sys\n"
+               "open('lint-ran.txt', 'w').close()\n"
+               "if not os.path.exists('installed.marker'):\n"
+               "    print('install marker missing: the install step did not run before this lint step')\n"
+               "    sys.exit(1)\n")
+VERDICT_WORDS = ("would run", "not run locally", "not run", "skipped", "unknown", "PASS", "SKIP", "FAIL")
+
+
+def by_step(lines):
+    """{step name: verdict word} from a job's lines: each line is a verdict word, the step's name, then ': detail'.
+    The summary line names no step, so it is no entry."""
+    found = {}
+    for ln in lines:
+        word = next((w for w in VERDICT_WORDS if ln.startswith(w + " ")), None)
+        if word and not SUMMARY.match(ln):
+            found[ln[len(word):].strip().split(": ", 1)[0]] = word
+    return found
+
+
+def would_run(lines):
+    """The sorted names of the steps a --lint plan would run."""
+    return sorted(name for name, word in by_step(lines).items() if word == "would run")
+
+
+def selected(lines):
+    """Each `would run` line's step name, in order. The summary line is not one."""
+    return [ln.replace("would run", "", 1).strip() for ln in lines
+            if ln.startswith("would run ") and not SUMMARY.match(ln)]
+
+
+class InstallSteps(Job):
+    """--lint runs a job's install steps before the lint steps after them. An install step is a run: whose every line
+    is one lockfile install or framework type generation. A failed install is unknown, never FAIL, and the lint steps
+    after it do not run. npm and npx are stubs on a temp PATH, so no case reaches the network."""
+
+    LINT = "python3 lint/check_installed.py"
+    INSTALL_FORMS = ("npm ci", "pnpm install --frozen-lockfile", "yarn install --frozen-lockfile", "yarn install --immutable",
+                     "pip install -r requirements.txt", "python3 -m pip install -r requirements.txt",
+                     "npx astro sync", "npx --no-install astro sync", "npx astro generate")
+    NOT_INSTALL_FORMS = ("npm run build", "npx eslint .", "npx astro check", "pip install requests")
+    NPM_OK = 'touch installed.marker\necho "$*" >> npm-calls.txt'
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "lint"))
+        with open(os.path.join(self.root, "lint", "check_installed.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(LINT_SCRIPT)
+
+    def stub_path(self, **tools):
+        """PATH with each named tool first, as a shell script that runs its body."""
+        bin_dir = os.path.join(self.root, "stubs")
+        os.makedirs(bin_dir, exist_ok=True)
+        for name, body in tools.items():
+            path = os.path.join(bin_dir, name)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("#!/bin/sh\n" + body + "\n")
+            os.chmod(path, 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+
+    def npm_calls(self):
+        """What the npm stub recorded, or a note that it recorded nothing."""
+        try:
+            with open(os.path.join(self.root, "npm-calls.txt"), encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return "(no npm call)"
+
+    def test_a_lockfile_install_runs_before_the_lint_step_that_needs_it(self):
+        env = self.stub_path(npm=self.NPM_OK)
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), step("Lint check", self.LINT),
+                                      args=("--lint",), env=env)
+        self.assertEqual(by_step(lines).get("Lint check"), "PASS",
+                         "the lint step failed: the install step before it did not run\n" + out)
+        self.assertEqual((rc, self.npm_calls()), (0, "ci\n"), out)
+
+    def test_a_failed_install_is_unknown_and_each_lint_step_after_it_is_unknown_and_does_not_run(self):
+        env = self.stub_path(npm='echo "npm: stub install failed" >&2\nexit 1')
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), step("Lint one", self.LINT),
+                                      step("Lint two", self.LINT), args=("--lint",), env=env)
+        self.assertEqual((rc, by_step(lines)), (2, {"Install deps": "unknown", "Lint one": "unknown",
+                                                    "Lint two": "unknown"}), out)
+        for ln in lines:
+            if "Lint one" in ln or "Lint two" in ln:
+                self.assertIn("Install deps", ln, "a lint line does not name the failed install\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "lint-ran.txt")),
+                         "a lint step ran after its install failed\n" + out)
+
+    def test_a_framework_type_generation_is_selected_under_lint_plan(self):
+        code, lines, out = plan_lint(self.root, workflow(step("Astro types", "npx astro sync"),
+                                                         step("Lint check", self.LINT)))
+        self.assertEqual((code, would_run(lines)), (0, ["Astro types", "Lint check"]), out)
+
+    def test_every_install_form_the_goal_names_is_selected_under_lint_plan(self):
+        got = {}
+        for form in self.INSTALL_FORMS:
+            got[form] = would_run(plan_lint(self.root, workflow(step("Install deps", form), step("Lint check", self.LINT)))[1])
+        self.assertEqual(got, {form: ["Install deps", "Lint check"] for form in self.INSTALL_FORMS},
+                         "an install form is not selected under --lint --plan")
+
+    def test_a_command_outside_the_install_forms_is_not_selected_under_lint_plan(self):
+        got = {}
+        for form in self.NOT_INSTALL_FORMS:
+            got[form] = would_run(plan_lint(self.root, workflow(step("Other", form), step("Lint check", self.LINT)))[1])
+        self.assertEqual(got, {form: ["Lint check"] for form in self.NOT_INSTALL_FORMS},
+                         "a command that is no install form is selected under --lint --plan")
+
+    def test_a_step_that_mixes_an_install_with_another_line_is_not_selected(self):
+        code, lines, out = plan_lint(self.root, workflow(step("Mixed", 'npm ci\necho done >> "$GITHUB_PATH"'),
+                                                         step("Lint check", self.LINT)))
+        self.assertEqual((code, would_run(lines)), (0, ["Lint check"]), out)
+
+    def test_an_install_whose_only_later_lint_step_is_skipped_does_not_run(self):
+        env = self.stub_path(npm=self.NPM_OK)
+        _, lines, out = self.run_job(
+            step("Install deps", "npm ci"),
+            step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
+            args=("--lint",), env=env)
+        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
+                         "the install ran though no lint step after it runs\n" + out)
+
+
+class NotRunLines(Job):
+    """--lint prints one `not run` line for each step it does not run, then a summary: how many of the job's steps ran.
+    --plan with --lint prints the same lines with `would run`. Neither changes the exit code, and no not-run line reads
+    as FAIL or unknown, the two words merge.py's lane lint reads."""
+
+    DEGEN = (step("Checkout", uses="actions/checkout@v4"),
+             step("Setup node", uses="actions/setup-node@v4"),
+             step("Python lint", "python3 lint/check_clean.py"),
+             step("Make lint-py", "make lint-py"),
+             step("Make gen-check", "make gen-check"))
+    EXPECTED_NOT_RUN = ["Checkout", "Make gen-check", "Make lint-py", "Setup node"]
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "lint"))
+        for name, body in (("check_clean.py", "print('clean')\n"),
+                           ("check_fails.py", "import sys\nprint('lint fails')\nsys.exit(1)\n")):
+            with open(os.path.join(self.root, "lint", name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+
+    def test_under_lint_each_step_not_run_gets_a_line_and_the_summary_counts_the_run_ones(self):
+        rc, lines, out = self.run_job(*self.DEGEN, args=("--lint",))
+        self.assertEqual(by_step(lines), {"Checkout": "not run", "Setup node": "not run", "Python lint": "PASS",
+                                          "Make lint-py": "not run", "Make gen-check": "not run"}, out)
+        self.assertIn("ran 1 of 5 steps", lines, out)
+
+    def test_plan_under_lint_prints_the_same_not_run_lines_with_would_run_counts(self):
+        code, lines, out = plan_lint(self.root, workflow(*self.DEGEN))
+        self.assertEqual((code, by_step(lines)), (0, {"Checkout": "not run", "Setup node": "not run",
+                                                      "Python lint": "would run", "Make lint-py": "not run",
+                                                      "Make gen-check": "not run"}), out)
+        self.assertIn("would run 1 of 5 steps", lines, out)
+
+    def test_not_run_lines_leave_the_exit_code_and_never_read_as_fail_or_unknown(self):
+        rc, lines, out = self.run_job(*self.DEGEN, args=("--lint",))
+        self.assertEqual(sorted(n for n, word in by_step(lines).items() if word == "not run"), self.EXPECTED_NOT_RUN, out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([ln for ln in lines if ln.startswith(("FAIL", "unknown"))], [], out)
+        rc, lines, out = self.run_job(step("Checkout", uses="actions/checkout@v4"), step("Make lint-py", "make lint-py"),
+                                      step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
+                                                    "Python lint": "FAIL"}), out)
 
 
 class Shallow(Job):
@@ -677,7 +847,7 @@ class LintTools(Job):
         code, lines, out = plan_lint(self.root, workflow(step("loose", "pipx run zizmor .github/"),
                                                          step("chained", "pipx run zizmor==1.0 . && rm -rf x"),
                                                          step("pinned", "pipx run zizmor==1.0 .")))
-        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["pinned"], out)
+        self.assertEqual(selected(lines), ["pinned"], out)
 
     def test_a_session_github_token_does_not_reach_a_step(self):
         rc, lines, out = self.run_job(step("offline", 'test -z "$GH_TOKEN$GITHUB_TOKEN"'),
