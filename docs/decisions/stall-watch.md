@@ -64,7 +64,18 @@ guard rule, so the watcher does the waiting and the session is told once.
   from the once-a-second check can be a second old, and miss a write or the job's end.
   Cost: no new process or timer. Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  heartbeat. The watcher reads it on each 0.2 s loop pass, and tries one open a second until it exists. The wrapper removes it with the log.
+  heartbeat. The watcher reads it on each 0.2 s loop pass.
+- The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
+  until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
+  kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
+  handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
+  handle. An EXIT trap in the job does the removal. Limits: an original that execs (the exec'd command
+  must stay the job's one process, so the job gets no subshell) or sets its own EXIT trap drops the trap,
+  and a stalled job of that kind leaves its two files; a job killed before it can run its trap leaves
+  them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's `Log:` line says
+  the file goes when the job
+  ends. Cost: two small files created per job and two held handles in the watcher, no new process. The
+  watcher no longer polls for the beat file.
 
 ## The Stop-time check
 
@@ -73,6 +84,16 @@ lists each open background shell whose output file has been quiet longer than th
 command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
 the shell or tell the owner.
+
+A job is listed only at the first Stop after its stall crossed. The crossing is its output file's mtime
+(or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the last
+transcript record before the current turn's opening user prompt or wake record; a prompt or notice that
+follows a tool call or tool result is queued mid-turn and opens nothing. A job whose crossing is not later than the previous Stop was
+listed there, so it is silent now. A job that goes quiet again after new output crosses again, and is
+listed again. An unknown job (no output file) is listed once, at the first Stop after its call. With no
+prior turn, or no readable timestamp, every quiet job is listed. The state is the transcript: no file is
+written and no process is started. Cost: one more regex search per transcript line the scan skips,
+in the one pass that `scan_jobs` already makes, at each Stop.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has

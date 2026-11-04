@@ -11,24 +11,37 @@ Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
   (no permissionDecision), with this command, run by the harness shell:
 
-    { export STALL_WATCH_BEAT=BEAT
+    : > LOG; : > BEAT; {
+    {
+    trap 'rm -f LOG BEAT' EXIT; export STALL_WATCH_BEAT=BEAT
     { <original>
-    }
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT;
-    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
 
-  BEAT is stall-watch-<id>.beat next to LOG; the hook does not create it. A tool that is quiet by
+    }
+    } >| LOG 2>&1 9<&- 8<&- & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT
+      --log-fd 9 --beat-fd 8;
+    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
+    } 9< LOG 8< BEAT
+
+  The wrapper creates LOG and BEAT and opens both (fds 9 and 8) before the job starts; the watcher
+  streams from those handles, so a job that ends at once, and removes its files, loses no output. The
+  job's EXIT trap removes both files when the job ends, also after a stall (the job keeps running and
+  writing until then) and for the original's `exit N`, whose code the wrapper keeps. The STALL report
+  says the log is removed when the job ends. Limit: an original that execs or sets its own EXIT trap
+  drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled.
+
+  BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
   design (bin/verdict) appends its heartbeat there too, and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
-  Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher, and one open attempt a second until BEAT exists.
+  Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
 
 Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [--also F]...
-  Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. It streams each new byte
+         [--log-fd N] [--beat-fd N]
+  Streams LOG to stdout (from fd N when given: the handle the wrapper opened, else by path). Any new byte, also a bare \\r, resets the timer. It streams each new byte
   of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
   300) without new bytes, and with no change to any --also log, it prints a STALL report and exits 3,
   and the job keeps running. The
@@ -41,7 +54,9 @@ Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
   (also a foreground call that its timeout moved to the background, which --hook never sees),
   and prints one {"systemMessage": ...} line that lists each open job whose output file, and each
-  log its command names, has not changed for the quiet age. A job closes on a <task-notification> with status completed, failed,
+  log its command names, has not changed for the quiet age, and whose stall crossed after the previous
+  Stop (the last transcript record before the current turn's opening prompt). A job with no output
+  file is listed once, at the first Stop after its call. With no earlier turn, all are listed. A job closes on a <task-notification> with status completed, failed,
   killed or stopped (a user message, or a queued_command attachment record), or on the result of
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
@@ -52,6 +67,7 @@ Stop: stall_watch.py --stop
 
 See docs/decisions/stall-watch.md.
 """
+import calendar
 import json
 import os
 import re
@@ -190,7 +206,9 @@ def job_tree(pid):
     return found
 
 
-def report(pid, quiet, log, also=(), beat=None):
+def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
+    """Print the STALL report. logf and beatf are the handles the watcher holds (the job removes the
+    files by path when it ends, so the tail reads the handle, never the path)."""
     rows = job_tree(pid)
     pids = ",".join(r[0] for r in rows) or str(pid)
     lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pids),
@@ -210,36 +228,56 @@ def report(pid, quiet, log, also=(), beat=None):
     else:
         lines.append("lsof is not installed: open files and connections not listed.")
     try:
-        with open(log, "rb") as f:
-            tail = f.read().decode("utf-8", "replace").replace("\r", "\n").splitlines()[-TAIL_LINES:]
-    except OSError:
+        if logf is not None:
+            logf.seek(0)
+            raw = logf.read()
+        else:
+            with open(log, "rb") as f:
+                raw = f.read()
+        tail = raw.decode("utf-8", "replace").replace("\r", "\n").splitlines()[-TAIL_LINES:]
+    except (OSError, ValueError):
         tail = []
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
-    lines.append("Log: " + log)
+    lines.append("Log: %s (removed when the job ends)" % log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
-    if beat and os.path.exists(beat):
+    try:  # the wrapper creates the beat file empty: a heartbeat is a non-empty one
+        beat_used = os.fstat(beatf.fileno()).st_size > 0 if beatf is not None else bool(beat and os.path.exists(beat))
+    except (OSError, ValueError):
+        beat_used = False
+    if beat_used:
         lines.append("Beat file (verdict heartbeat), no growth: " + os.path.abspath(beat))
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
 
 
-def watch(pid, log, quiet, also=(), beat=None):
+def held(fd):
+    """A read handle on an fd the wrapper opened before the job started, or None when fd is not
+    given or not open (the watcher then opens the path, as a direct run does)."""
+    try:
+        return os.fdopen(int(fd), "rb") if fd is not None else None
+    except (OSError, ValueError):
+        return None
+
+
+def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
     """Stream LOG and BEAT; report a stall after quiet seconds with no new byte on either and no
     change to any named log (named_logs). The named logs cost one stat each a second, in this loop.
     BEAT is where a quiet-by-design tool (bin/verdict) appends its heartbeat; it may not exist at
-    start, so it is opened at the first check that finds it."""
+    start, so it is opened at the first check that finds it. The wrapper creates both files and opens
+    both before the job starts, and the job removes them when it ends; log_fd and beat_fd are those
+    handles, so a job that ends at once loses no output."""
     last = time.monotonic()
     marks = log_marks(also)
     next_check = 0.0
     recheck = False
     waited = 0
-    while not os.path.exists(log):  # the shell creates it a moment before this runs
+    lf, bf = held(log_fd), held(beat_fd)
+    while lf is None and not os.path.exists(log):  # the shell creates it a moment before this runs
         waited += 1
         if waited % 10 == 0 and ended_state(job_state(pid)):  # a dead job with no log: stop
             return 0
         time.sleep(0.05)
-    bf = None
-    with open(log, "rb") as f:
+    with (lf if lf is not None else open(log, "rb")) as f:
         while True:
             now = time.monotonic()
             ended = checked = False
@@ -271,7 +309,7 @@ def watch(pid, log, quiet, also=(), beat=None):
                 if not checked:  # the last sample may be a second old: sample again, then decide
                     recheck = True
                     continue
-                report(pid, quiet, log, also, beat)
+                report(pid, quiet, log, also, beat, f, bf)
                 if bf is not None:
                     bf.close()
                 return STALL_EXIT
@@ -309,13 +347,23 @@ def hook():
     # there, double the last one. The blank line before `}` stops the join in shells that drop it.
     if (len(original) - len(original.rstrip("\\"))) % 2 and eof_backslash_literal():
         original += "\\"
+    # The wrapper creates LOG and BEAT and opens both (fds 9 and 8) before the job starts. The watcher
+    # inherits the handles, so the job may remove the files by path the moment it ends and no output
+    # is lost. The job closes both fds, so the original may use them. An EXIT trap in the job removes
+    # the files when it ends, also after the watcher gave up on a stall, and for the original's `exit N`.
+    # Limit: an original that execs, or sets its own EXIT trap, drops that trap; the wrapper's own
+    # `rm -f` after `wait` still cleans up a job that never stalled.
+    cleanup = "rm -f " + q(log) + " " + q(beat)
     wrapped = (
-        "{ export STALL_WATCH_BEAT=" + q(beat) + "\n{ " + original + "\n\n}\n} > " + q(log) + " 2>&1 & pid=$!; "
+        ": > " + q(log) + "; : > " + q(beat) + "; {\n{\ntrap " + q(cleanup) + " EXIT; export STALL_WATCH_BEAT=" + q(beat)
+        + "\n{ " + original + "\n\n}\n} >| " + q(log) + " 2>&1 9<&- 8<&- & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --beat " + q(beat)
+        + " --log-fd 9 --beat-fd 8"
         + "".join(" --also " + q(p) for p in named_logs(original))
         + "; rc=$?; "
-        + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + " " + q(beat) + "; exit $rc"
+        + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; " + cleanup + "; exit $rc\n} 9< "
+        + q(log) + " 8< " + q(beat)
     )
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=wrapped)}}))
@@ -339,32 +387,84 @@ def text_of(content):
     return "\n".join(p for p in parts if isinstance(p, str))
 
 
+ISO_Z = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d+))?Z$")
+TIMESTAMP_KEY = re.compile(rb'"timestamp"\s*:\s*"([^"]*)"')
+USER_KEY = re.compile(rb'"type"\s*:\s*"user"')
+
+
+def parse_time(text):
+    """Epoch seconds of an ISO timestamp ending in Z, or None. Not fromisoformat: before Python 3.11
+    it rejects the Z."""
+    m = ISO_Z.match(text) if isinstance(text, str) else None
+    if not m:
+        return None
+    try:
+        whole = calendar.timegm(tuple(int(g) for g in m.groups()[:6]) + (0, 0, 0))
+    except (ValueError, OverflowError):
+        return None
+    return whole + (float("0." + m.group(7)) if m.group(7) else 0.0)
+
+
+class Turns:
+    """Finds the previous Stop while scan_jobs reads the transcript: the time of the last record before
+    the current turn's opener. A user prompt or a queued notice opens a turn, unless it follows a tool
+    call or tool result: that one is queued in the middle of a turn."""
+
+    def __init__(self):
+        self.last = self.prev_stop = None
+        self.after_tool = False
+
+    def see(self, when, opens=False, tool=None):
+        if opens and not self.after_tool:
+            self.prev_stop = self.last
+        if tool is not None:
+            self.after_tool = tool
+        if when is not None:
+            self.last = when
+
+
 def scan_jobs(transcript):
-    """Return {job id: (output path or None, until note or '', (named logs, cwd))} for every job with
-    no terminal task notice and no TaskStop result. The note and the named logs come from the call
-    that started the job, matched by tool_use_id."""
-    jobs, done, stops, notes, job_call, logs = {}, set(), set(), {}, {}, {}
+    """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None)},
+    previous Stop time or None) for every job with no terminal task notice and no TaskStop result. The
+    note and the named logs come from the call that started the job, matched by tool_use_id. The
+    previous Stop is the time of the last record before the current turn's opening prompt (Turns); None
+    when no turn came before or the records carry no timestamp."""
+    jobs, done, stops, notes, job_call, logs, began = {}, set(), set(), {}, {}, {}, {}
+    turns = Turns()
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use") + NOTICE_KEY):
+            wanted = any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use") + NOTICE_KEY)
+            if not wanted and not (USER_KEY.search(line) and b"tool_result" not in line and b"isMeta" not in line):
+                # A skipped record is text, a hook note or a system note, never a tool call or result:
+                # the turn is not mid-tool after it, unless it is an attachment (a hook note, mid-turn).
+                m = TIMESTAMP_KEY.search(line)
+                turns.see(parse_time(m.group(1).decode("ascii", "replace")) if m else None,
+                          tool=None if b"attachment" in line else False)
                 continue
             try:
                 rec = json.loads(line)
                 kind = rec.get("type")
+                when = parse_time(rec.get("timestamp"))
                 if kind == "attachment":  # a completion notice that arrives as a queued command
                     att = rec.get("attachment")
                     notice = att.get("prompt") if isinstance(att, dict) else None
                     if isinstance(notice, str):
                         done.update(closed_by_notice(notice))
+                    turns.see(when, opens=isinstance(notice, str))
                     continue
                 content = rec["message"]["content"]
                 text = text_of(content)
             except Exception:  # a bad or half-written line is skipped
                 continue
+            blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+            is_result = any(b.get("type") == "tool_result" for b in blocks)
+            turns.see(when, opens=kind == "user" and not is_result and not rec.get("isMeta"),
+                      tool=is_result or (kind == "assistant" and any(b.get("type") == "tool_use" for b in blocks)))
             tur = rec.get("toolUseResult")
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 m = RESULT_PATH.search(text)
                 jobs.setdefault(tur["backgroundTaskId"], m.group(1) if m else None)
+                began.setdefault(tur["backgroundTaskId"], when)
                 if isinstance(content, list):
                     job_call.setdefault(tur["backgroundTaskId"], next(
                         (b.get("tool_use_id") for b in content if isinstance(b, dict)
@@ -386,8 +486,8 @@ def scan_jobs(transcript):
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
-    return {k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None))
-            for k, v in jobs.items() if k not in done}
+    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k))
+             for k, v in jobs.items() if k not in done}, turns.prev_stop)
 
 
 def closed_by_notice(text):
@@ -426,7 +526,8 @@ def stop():
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows = []
-        for job, (path, note, (named, cwd)) in scan_jobs(call["transcript_path"]).items():
+        open_jobs, prev_stop = scan_jobs(call["transcript_path"])
+        for job, (path, note, (named, cwd), began) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
@@ -434,12 +535,16 @@ def stop():
             try:
                 idle = now - os.stat(real).st_mtime
             except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
+                if prev_stop is not None and began is not None and began <= prev_stop:
+                    continue  # started before the previous Stop, which listed it
                 rows.append("%s: unknown, output file not found: %s%s" % (job, path or "(path not recorded)", until))
                 continue
             for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
                     idle = min(idle, now - mark[1])
             if idle >= quiet:
+                if prev_stop is not None and now - idle + quiet <= prev_stop:
+                    continue  # its stall crossed before the previous Stop, which listed it
                 rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
         if rows:
             head = "Background shells still running and quiet: stop it or tell the owner."
@@ -456,7 +561,8 @@ def main(argv):
         return hook()
     if argv[:1] == ["--stop"]:
         return stop()
-    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None}
+    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None,
+            "--log-fd": None, "--beat-fd": None}
     also = []
     for i in range(0, len(argv) - 1, 2):
         if argv[i] == "--also":
@@ -466,7 +572,8 @@ def main(argv):
     if not opts["--watch-pid"] or not opts["--log"]:
         print(__doc__)
         return 2
-    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also, opts["--beat"])
+    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also, opts["--beat"],
+                 opts["--log-fd"], opts["--beat-fd"])
 
 
 if __name__ == "__main__":
