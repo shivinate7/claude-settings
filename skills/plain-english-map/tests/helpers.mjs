@@ -100,11 +100,14 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9', 'MAP10'];
+
+// The verdict a check prints when the fixture leaves its setting out. MAP10 skips when no decision key is set.
+const DEFAULT_VERDICT = { MAP10: 'SKIP' };
 
 /** The verdict lines of a run as one string, such as `MAP1=PASS MAP2=FAIL`. A line looks like `[PASS] MAP1`. */
 export const verdicts = (out) =>
   [...out.matchAll(/^\[(PASS|FAIL|SKIP)\]\s+(MAP\d+)\b/gm)].map((m) => `${m[2]}=${m[1]}`).join(' ');
 
 /** What the verdict string says when every check in `IDS` passes, except the ids in `except`, which get the given verdict. */
-export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? 'PASS'}`).join(' ');
+export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? DEFAULT_VERDICT[id] ?? 'PASS'}`).join(' ');
