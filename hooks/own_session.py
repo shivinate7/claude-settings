@@ -86,6 +86,8 @@ def own_session_read(transcript, own_id, created=False):
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
                         continue
+                    if not isinstance(body, str):
+                        continue
                     try:
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
