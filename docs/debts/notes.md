@@ -1279,3 +1279,4 @@
 - opus-plain-ask: the check-in fixtures in `hooks/test_local_time.py` put the record in the transcript, the unmeasured shape, and none sets `isMeta`.
 - sim-test-sigkill-leaves-pro-booted: SIGKILL skips the EXIT trap of sim-test, so the 18 Pro stays booted while its lease is reaped, and a Duo can be granted beside it. Decision: sim-lease-tool.
 - sim-test-term-waits-for-take: a TERM or INT sent to sim-test alone while `sim-lease take` waits runs its trap only when `take` returns, up to SIM_LEASE_WAIT (300 s). No boot happens and the lease is given on exit, but the queue head is held until then. A Ctrl-C or a process-group kill reaches `take` at once. Decision: sim-lease-tool.
+- artifactdata-list-others-docs: `ArtifactData list` with `out_dir` saves docs that others wrote, and refuses none; it labels them collaborator-written data. Measured 2026-11-04 02:40 CST on the waiting page's `answers`, 18 docs. Decision: waiting-data-in-repo.
