@@ -1748,11 +1748,11 @@ def case_unread_offset_line_is_collected_when_dw_real_config_dir_is_unset():
 
 
 # --------------------------------------------------------------------------- dw-unread-dst (d)
-# The repeated 01:00-02:00 hour of the 2026-11-01 US Central fall-back. The turn bound and each guard.log line are
+# The repeated 01:00-02:00 hour of the US Central fall-back. The turn bound and each guard.log line are
 # both naive local, so a line in the second 01:xx hour sorts against a bound from the first, and the reverse. The
 # reader must compare instants. Each zone is a POSIX TZ string: a tzdata name falls back to UTC silently where
 # tzdata is missing, and then the case would pass with no zone at all.
-DST_CST = "CST6CDT,M3.2.0,M11.1.0"  # CDT until 2026-11-01 07:00Z, CST after
+DST_CST = "CST6CDT,M3.2.0,M11.1.0"  # CDT before the 07:00Z change, CST after
 DST_TURN_FWD = "2026-11-01T06:45:00Z"  # 01:45 CDT, before the change
 DST_TURN_REV = "2026-11-01T07:10:00Z"  # 01:10 CST, after the change
 DST_LINE_FWD = "2026-11-01T01:30:00-06:00"  # 07:30Z: after both turn starts, so it is in the turn
@@ -1766,7 +1766,7 @@ EARLY_SUBJ = "UNREAD-SUBJECT-DST-EARLY"
 _MISSING = object()
 
 
-def _zone_gate(name):
+def _zone_unavailable(name):
     """True when this platform cannot force a zone: the case prints SKIP and is counted, never a PASS."""
     if os.name == "nt" or not hasattr(time, "tzset"):
         skip(name, "no time.tzset here, so the zone cannot be forced")
@@ -1818,7 +1818,7 @@ def _fallback_dst_case(name, label, turn, local_turn, tz, lines, want=None, unwa
 
 def case_unread_dst_forward_line_is_collected_under_cst():
     # 01:30 CST is 07:30Z, after the 06:45Z turn start. Read as naive local it is 01:30, below the bound 01:44:59.
-    if _zone_gate("unread DST forward, CST"):
+    if _zone_unavailable("unread DST forward, CST"):
         return
     _unread_fallback_case("unread_dst_fwd_cst", DST_LINE_FWD, FWD_SUBJ, "unread DST forward, CST",
                           turn=DST_TURN_FWD, tz=DST_CST, local_turn=LOCAL_FWD_CST)
@@ -1827,7 +1827,7 @@ def case_unread_dst_forward_line_is_collected_under_cst():
 def case_unread_dst_reverse_line_stays_out_under_cst():
     # 01:50 CDT is 06:50Z, before the 07:10Z turn start. Read as naive local it is 01:50, above the bound 01:09:59.
     # The anchor after the turn shows first, so a reader that drops every line cannot pass the stays-out check.
-    if _zone_gate("unread DST reverse, CST"):
+    if _zone_unavailable("unread DST reverse, CST"):
         return
     _unread_fallback_case("unread_dst_rev_cst", DST_LINE_ANCHOR, ANCHOR_SUBJ, "unread DST reverse, CST",
                           early=(DST_LINE_EARLY, EARLY_SUBJ), turn=DST_TURN_REV, tz=DST_CST, local_turn=LOCAL_REV_CST)
@@ -1835,7 +1835,7 @@ def case_unread_dst_reverse_line_stays_out_under_cst():
 
 def case_unread_dst_forward_line_is_collected_under_utc():
     # Control: the same stamps under UTC. Both instants compare in one zone, so the forward line is collected.
-    if _zone_gate("unread DST forward, UTC control"):
+    if _zone_unavailable("unread DST forward, UTC control"):
         return
     _unread_fallback_case("unread_dst_fwd_utc", DST_LINE_FWD, FWD_SUBJ, "unread DST forward, UTC control",
                           turn=DST_TURN_FWD, tz="UTC", local_turn=LOCAL_FWD_UTC)
@@ -1843,7 +1843,7 @@ def case_unread_dst_forward_line_is_collected_under_utc():
 
 def case_unread_dst_reverse_line_stays_out_under_utc():
     # Control: the same stamps under UTC. The early line is before the turn, so it stays out.
-    if _zone_gate("unread DST reverse, UTC control"):
+    if _zone_unavailable("unread DST reverse, UTC control"):
         return
     _unread_fallback_case("unread_dst_rev_utc", DST_LINE_ANCHOR, ANCHOR_SUBJ, "unread DST reverse, UTC control",
                           early=(DST_LINE_EARLY, EARLY_SUBJ), turn=DST_TURN_REV, tz="UTC", local_turn=LOCAL_REV_UTC)
@@ -1851,7 +1851,7 @@ def case_unread_dst_reverse_line_stays_out_under_utc():
 
 def case_unread_fallback_dst_forward_line_is_collected_under_cst():
     # The fallback parser alone: the reader's import is made to fail, and the same instants are read in CST.
-    if _zone_gate("unread fallback DST forward, CST"):
+    if _zone_unavailable("unread fallback DST forward, CST"):
         return
     _fallback_dst_case("unread_fb_dst_fwd_cst", "unread fallback DST forward, CST", DST_TURN_FWD, LOCAL_FWD_CST,
                        DST_CST,
@@ -1861,7 +1861,7 @@ def case_unread_fallback_dst_forward_line_is_collected_under_cst():
 
 
 def case_unread_fallback_dst_reverse_line_stays_out_under_cst():
-    if _zone_gate("unread fallback DST reverse, CST"):
+    if _zone_unavailable("unread fallback DST reverse, CST"):
         return
     _fallback_dst_case("unread_fb_dst_rev_cst", "unread fallback DST reverse, CST", DST_TURN_REV, LOCAL_REV_CST,
                        DST_CST,
@@ -1871,7 +1871,7 @@ def case_unread_fallback_dst_reverse_line_stays_out_under_cst():
 
 
 def case_unread_fallback_dst_forward_line_is_collected_under_utc():
-    if _zone_gate("unread fallback DST forward, UTC control"):
+    if _zone_unavailable("unread fallback DST forward, UTC control"):
         return
     _fallback_dst_case("unread_fb_dst_fwd_utc", "unread fallback DST forward, UTC control", DST_TURN_FWD,
                        LOCAL_FWD_UTC, "UTC",
@@ -1881,7 +1881,7 @@ def case_unread_fallback_dst_forward_line_is_collected_under_utc():
 
 
 def case_unread_fallback_dst_reverse_line_stays_out_under_utc():
-    if _zone_gate("unread fallback DST reverse, UTC control"):
+    if _zone_unavailable("unread fallback DST reverse, UTC control"):
         return
     _fallback_dst_case("unread_fb_dst_rev_utc", "unread fallback DST reverse, UTC control", DST_TURN_REV,
                        LOCAL_REV_UTC, "UTC",
