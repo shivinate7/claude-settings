@@ -2083,6 +2083,15 @@ MUTATIONS = [
      "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
      "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
      "route: a build of a shut-down simulator names the generic destination"),
+    # RULE simulator-boot-lease (decision sim-test-is-the-one-boot-path, ruling 5). Each mutant breaks one arm.
+    ("simulator-boot-lease: the refusal is an ask, not a deny",
+     'refuse(tool, "deny", "simulator-boot-lease",',
+     'refuse(tool, "ask", "simulator-boot-lease",', "guard",
+     "lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease"),
+    ("simulator-boot-lease: a booted device is judged by the lease too",
+     '        hits = [d for d in hits if d["state"] != "Booted"]',
+     '        hits = list(hits)', "guard",
+     "lease: an MCP launch of a booted device with no lock is allowed"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
