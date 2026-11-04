@@ -3582,24 +3582,44 @@ def _simctl_boot_args(word: str, rest: list):
     return None
 
 
-def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
+def _sim_commands(segment: str):
+    """(command word as written, its arguments) at each command of SEGMENT and, through `inner_commands`, of each
+    command a wrapper hands on (`bash -c`, `sh -lc`, `sudo`, `$(...)`). The one walk of the simulator rules.
+    A quoted or echoed text is not a command and is not read."""
     tokens = segment_tokens(segment)
-    index = resolve_command(tokens) if tokens else None
-    if index is None:
-        return []
-    word, rest = basename(tokens[index]), tokens[index + 1:]
-    if word == "xcodebuild":
-        found = []
-        for i, token in enumerate(rest):
-            value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
-                token[len("-destination="):] if token.startswith("-destination=") else "")
-            fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
-            if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
-                found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
-        return found
-    return []
+    if not tokens:
+        return
+    for start in command_indexes(tokens):
+        yield tokens[start], tokens[start + 1:]
+    for text in inner_commands(tokens):
+        for part in split_segments(text):
+            yield from _sim_commands(part)
+
+
+def _xcodebuild_boot_names(rest: list) -> list:
+    """The device names or UDIDs the arguments of an `xcodebuild` boot by `-destination`. Empty when it boots none."""
+    found = []
+    for i, token in enumerate(rest):
+        value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
+            token[len("-destination="):] if token.startswith("-destination=") else "")
+        fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
+        if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
+            os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
+            os_ = "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_
+            name = fields.get("id") or fields["name"]
+            found.append((name, os_))
+            if name.endswith(")"):
+                # Bandaid: a `)` glued to the quote, `(cd ios && xcodebuild ... 'id=X')`, is read into the value.
+                # A device name can end in `)` ("iPhone SE (3rd generation)"), so judge both. A name no device
+                # holds is not a boot.
+                found.append((name[:-1], os_))
+    return found
+
+
+def _sim_boots(segment: str) -> list:
+    """[(name or (name, OS), remedy)] for each simulator the xcodebuild commands of SEGMENT boot by `-destination`."""
+    return [(n, _sim_route_remedy(rest)) for command, rest in _sim_commands(segment)
+            if basename(command) == "xcodebuild" for n in _xcodebuild_boot_names(rest)]
 
 
 def _simulator_app_open(rest: list) -> bool:
@@ -3620,18 +3640,14 @@ def _simulator_app_open(rest: list) -> bool:
 def sim_bypass_hit(segment: str) -> str:
     """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
     command word, at each command of the segment and in each command a wrapper hands on
-    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    for start in command_indexes(tokens):
-        word, rest = basename(tokens[start]), tokens[start + 1:]
+    (`_sim_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    for command, rest in _sim_commands(segment):
+        word = basename(command)
         if word == "open" and _simulator_app_open(rest):
             return ("open " + " ".join(rest))[:100]
         if _simctl_boot_args(word, rest) is not None:
-            return " ".join([tokens[start]] + rest)[:100]
-    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
-                 if (hit := sim_bypass_hit(part))), "")
+            return " ".join([command] + rest)[:100]
+    return ""
 
 
 SIM_BYPASS_REASON = (
@@ -3645,15 +3661,12 @@ SIM_ROUTE_BOOLEAN_FLAGS = frozenset({"-quiet", "-verbose", "-json", "-dry-run", 
                                      "-allowProvisioningDeviceRegistration", "-skipUnavailableActions"})
 
 
-def _sim_route_remedy(segment: str) -> str:
-    """The remedy for the `xcodebuild -destination` command of SEGMENT: `sim-test` with its arguments (no
+def _sim_route_remedy(rest: list) -> str:
+    """The remedy for an `xcodebuild -destination` command with arguments REST: `sim-test` with its arguments (no
     -destination, no `test` action: sim-test adds it) when the action is `test`, else the generic
-    destination. The action is the word `test` that no option takes as its value."""
-    tokens = segment_tokens(segment)
-    index = resolve_command(tokens) if tokens else None
-    if index is None:
-        return ""
-    rest, args, action, skip = tokens[index + 1:], [], False, False
+    destination. The action is the word `test` that no option takes as its value. An option with a
+    colon (`-only-testing:X`) holds its value in the same word."""
+    args, action, skip = [], False, False
     for i, token in enumerate(rest):
         if skip:
             skip = False
@@ -3662,7 +3675,7 @@ def _sim_route_remedy(segment: str) -> str:
         elif token.startswith("-destination="):
             pass
         elif token == "test" and not (i and rest[i - 1].startswith("-") and rest[i - 1] not in SIM_ROUTE_BOOLEAN_FLAGS
-                                      and "=" not in rest[i - 1]):
+                                      and "=" not in rest[i - 1] and ":" not in rest[i - 1]):
             action = True
         else:
             args.append(token)
@@ -3687,8 +3700,10 @@ def sim_lock_holder():
                 os.kill(int(text), 0)
             except ProcessLookupError:
                 return ""
+            except PermissionError:
+                return ""  # bin/sim-test reads a failed `kill -0`, EPERM too, as a holder that is gone
             except OSError:
-                pass  # EPERM: the pid exists
+                pass
             return text
         return "unknown" if age < 60 else ""
     except Exception:
@@ -4327,9 +4342,9 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
             names, remedies = [], {}
             for seg in segments:
-                for n in _sim_boot_names(seg):
+                for n, remedy in _sim_boots(seg):
                     names.append(n)
-                    remedies.setdefault(n[0] if isinstance(n, tuple) else n, _sim_route_remedy(seg))
+                    remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
         return

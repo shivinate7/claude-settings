@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-140 rows: exact 87, looser 9, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+142 rows: exact 88, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -74,7 +74,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `playwright-install` | playwright-install-once | "An agent never runs a Playwright browser install, in any form." | exact | exact | `npx playwright install` is denied | - |
 | `simulator-boot-cap` | sweep-shuts-down-idle-simulators | "refuses a session's boot when 2 devices are already booted, and names them" | exact | exact | a third boot is denied | - |
 | `simulator-boot-twin` | sweep-shuts-down-idle-simulators | "refuses a boot when an idle booted device of the same type and runtime exists" | exact | exact | a twin boot is denied, with the idle device named | - |
-| `simulator-boot-route` | sim-test-is-the-one-boot-path | "An `xcodebuild -destination` that names a shut-down device still boots outside the lock." | exact | exact | a test of a shut-down device is denied, with `sim-test` as the remedy | - |
+| `simulator-boot-route` | sim-test-is-the-one-boot-path | "An `xcodebuild -destination` that names a shut-down device still boots outside the lock." | looser | exact | a test of a shut-down device is denied, with `sim-test` as the remedy; a destination held in a variable (`-destination "$D"`) passes, because the rule reads command text only | - |
 | `simulator-boot-locked` | sim-test-is-the-one-boot-path | "MCP `launch` still boots outside the lock." | exact | exact | a launch of a shut-down device is denied while a live pid holds the lock, naming the pid | - |
 | `impeccable-review-only` | design-skills | "the Skill tool loads impeccable only for `audit` or `critique`" | stricter | exact | Skill args "audit the page; focus on a11y" are denied for the `;` | tool fix: apply the chain check to the shell form only |
 | `cite-by-id` | git-cite-by-id | "Ids, not paths. A path breaks when its file moves." | exact | exact | a commit message "see docs/decisions/foo.md" is denied | - |
