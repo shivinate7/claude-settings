@@ -743,10 +743,10 @@ MUTATIONS = [
     # Each mutant drops ONE flag from the one constant, so each form's own case must go red.
     ("shared-tree: reset --merge no longer takes --hard's verdict",
      'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
-     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file denies'),
+     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file refuses'),
     ("shared-tree: reset --keep no longer takes --hard's verdict",
      'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
-     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout denies'),
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout refuses'),
     # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
     # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
     # the defect these arms fix.

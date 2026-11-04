@@ -2275,9 +2275,9 @@ sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
-sh("reset: --keep at another commit denies where there is no git tree",
+sh("reset: --keep at another commit refuses where there is no git tree",
    VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
-sh("reset: --merge at another commit denies where there is no git tree",
+sh("reset: --merge at another commit refuses where there is no git tree",
    VCS + " reset --merge HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: a reset naming a path only touches the index",
    VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
@@ -2363,23 +2363,23 @@ sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
 # THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Each form has its own deny or ask line,
 # so dropping either flag alone turns a line red. SUBJSTAGED holds a staged edit and a staged new
 # file, so any change denies.
-sh("reset: --merge at HEAD over a staged edit and a staged new file denies",
+sh("reset: --merge at HEAD over a staged edit and a staged new file refuses",
    VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
-sh("reset: a bare --merge over a staged edit denies", VCS + " reset --merge", "deny",
+sh("reset: a bare --merge over a staged edit refuses", VCS + " reset --merge", "deny",
    "shared-tree", cwd=SUBJSTAGED)
 sh("reset: --merge at HEAD in a clean tree takes nothing", VCS + " reset --merge HEAD", "allow",
    cwd=SUBJCLEAN)
 sh("reset: --keep at HEAD in a clean tree takes nothing", VCS + " reset --keep HEAD", "allow",
    cwd=SUBJCLEAN)
-sh("reset: --keep at another commit moves the branch, so a shared checkout denies",
+sh("reset: --keep at another commit moves the branch, so a shared checkout refuses",
    VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
 sh("reset: --keep at another commit asks in a clean worktree", VCS + " reset --keep HEAD~1",
    "ask", "shared-tree", cwd=SUBJCLEANWT)
 sh("reset: --merge at another commit asks in a clean worktree", VCS + " reset --merge HEAD~1",
    "ask", "shared-tree", cwd=SUBJCLEANWT)
-sh("reset: a flag after the commit still counts, --merge denies", VCS + " reset HEAD~1 --merge",
+sh("reset: a flag after the commit still counts, --merge refuses", VCS + " reset HEAD~1 --merge",
    "deny", "shared-tree", cwd=SUBJCLEAN)
-sh("reset: --merge aimed at a dirty checkout with -C denies",
+sh("reset: --merge aimed at a dirty checkout with -C refuses",
    VCS + " -C " + slash(SUBJSTAGED) + " reset --merge", "deny", "shared-tree", cwd=SUBJCLEAN)
 sh("reset: an echo that quotes a merge reset is not a call", 'echo "git reset --merge"', "allow",
    cwd=SUBJSTAGED)
