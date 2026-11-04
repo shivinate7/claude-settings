@@ -1740,10 +1740,10 @@ skills_case2() {
   rm -rf "$h"
 }
 
-# ---- cloud settings: the refresh hook is added after the repo's own SessionStart hooks ------
-# The expected list is read from the repo's settings.json, so a new SessionStart hook needs no edit here.
+# ---- cloud settings: the startup entries are dropped, and the refresh hook is the one startup entry ----
+# The expected kept list is read from the repo's settings.json, so a new SessionStart hook needs no edit here.
 cloud_settings1() {
-  name="cloud_settings1: cloud settings.json keeps every repo SessionStart hook, then adds the refresh hook"
+  name="cloud_settings1: cloud settings.json keeps the repo SessionStart entries that do not match startup, and its only startup entry is the refresh hook"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/cloud_settings1-checkout"
   make_checkout "$co" "# cloud_settings1 content"
@@ -1751,26 +1751,195 @@ cloud_settings1() {
   cp "$REPO_ROOT/settings.json" "$co/settings.json"
   ( cd "$co" && git add -A && git commit -q -m settings )
 
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+  # CLAUDE_CODE_REMOTE is set, as in a cloud container. The repo's startup pull hook exits on it. Without it,
+  # the startup entries install.sh runs here would start a background fetch.
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
         bash ./install.sh --cloud 2>&1); rc=$?
-  want=$(jq -c '.hooks.SessionStart' "$REPO_ROOT/settings.json")
-  n=$(jq '.hooks.SessionStart | length' "$REPO_ROOT/settings.json")
-  got=$(jq -c --argjson n "$n" '.hooks.SessionStart[:$n]' "$cfg/settings.json" 2>/dev/null)
-  tail_cmd=$(jq -r --argjson n "$n" '.hooks.SessionStart[$n:] | map(.hooks[].command) | join("\n")' \
-        "$cfg/settings.json" 2>/dev/null)
-  extra=$(jq --argjson n "$n" '.hooks.SessionStart | length - $n' "$cfg/settings.json" 2>/dev/null)
+  want=$(jq -c '[.hooks.SessionStart[] | select(.matcher | test("startup") | not)]' "$REPO_ROOT/settings.json")
+  got=$(jq -c '[.hooks.SessionStart[] | select(.matcher | test("startup") | not)]' "$cfg/settings.json" 2>/dev/null)
+  starts=$(jq '[.hooks.SessionStart[] | select(.matcher | test("startup"))] | length' "$cfg/settings.json" 2>/dev/null)
+  last=$(jq -r '.hooks.SessionStart[-1].matcher' "$cfg/settings.json" 2>/dev/null)
+  tail_cmd=$(jq -r '.hooks.SessionStart[-1].hooks[0].command' "$cfg/settings.json" 2>/dev/null)
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
   elif [ "$got" != "$want" ]; then
-    bad "$name" "the first $n SessionStart entries differ from the repo settings.json; the cloud install dropped or changed a repo hook"
-  elif [ "$extra" != 1 ]; then
-    bad "$name" "expected one entry after the repo hooks, found ${extra:-none}"
+    bad "$name" "the compact and clear|fork SessionStart entries differ from the repo settings.json"
+  elif [ "$starts" != 1 ]; then
+    bad "$name" "expected one startup SessionStart entry, found ${starts:-none}"
+  elif [ "$last" != "startup|resume" ]; then
+    bad "$name" "the startup entry is not the refresh hook: its matcher is ${last:-none}"
   else
     case "$tail_cmd" in
-      "curl -fsSL "*"/install.sh | bash -s -- --cloud") ok "$name" ;;
-      *) bad "$name" "the last SessionStart entry is not the refresh hook: $tail_cmd" ;;
+      'i=$(cat); curl -fsSL '*'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud') ok "$name" ;;
+      *) bad "$name" "the refresh hook does not pass its stdin to install.sh: $tail_cmd" ;;
     esac
+  fi
+  rm -rf "$h"
+}
+
+# ---- cloud startup entries: install.sh runs the dropped ones itself, from the fresh hooks copy ----
+# True when $1 holds the text $2.
+contains() { case "$1" in *"$2"*) return 0 ;; esac; return 1; }
+# True when $1 holds the text $2, and then the text $3 after it.
+in_order() { case "$1" in *"$2"*"$3"*) return 0 ;; esac; return 1; }
+# hookfix_checkout DIR: a checkout whose settings.json has the four entries these cases need. Its own settings.json
+# is not used: the repo's startup pull hook would start a background fetch in a test. mark_a.sh is a startup|resume
+# entry: it prints FRESH_A and the bytes it read on stdin. mark_b.sh is a startup entry: it prints FRESH_B. The
+# compact and clear|fork entries print text that no case may see from the install.
+hookfix_checkout() {
+  co=$1
+  make_checkout "$co" "# hookfix content"
+  copy_tracked "$co" hooks || return 1
+  cp "$INSTALL_SH" "$co/install.sh"
+  cat > "$co/hooks/mark_a.sh" <<'SH'
+#!/bin/sh
+n=$(cat | wc -c | tr -d ' ')
+echo "FRESH_A stdin_bytes=$n"
+SH
+  printf '#!/bin/sh\necho FRESH_B\n' > "$co/hooks/mark_b.sh"
+  cat > "$co/settings.json" <<'JSON'
+{"hooks": {"SessionStart": [
+  {"matcher": "compact", "hooks": [{"type": "command", "command": "echo COMPACT_KEPT"}]},
+  {"matcher": "clear|fork", "hooks": [{"type": "command", "command": "echo CLEAR_KEPT"}]},
+  {"matcher": "startup|resume", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/mark_a.sh\""}]},
+  {"matcher": "startup", "hooks": [{"type": "command", "command": "sh \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/mark_b.sh\""}]}
+]}}
+JSON
+  ( cd "$co" && git add -A && git commit -q -m hookfix )
+}
+# hookfix_install HOME CHECKOUT [CS_HOOK_INPUT]: one piped cloud install of CHECKOUT, as the refresh hook runs it, with
+# the cloud flag set. A third argument is passed as CS_HOOK_INPUT; without one the variable is unset.
+# Sets rc, out (stdout only) and err (stderr only).
+hookfix_install() {
+  hk_so=$(mktemp "$work/hk-out.XXXXXX"); hk_se=$(mktemp "$work/hk-err.XXXXXX")
+  if [ "$#" -ge 3 ]; then
+    ( cd "$2" && env -i PATH="$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" CLAUDE_CODE_REMOTE=true \
+        CS_HOOK_INPUT="$3" bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
+  else
+    ( cd "$2" && env -i PATH="$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" CLAUDE_CODE_REMOTE=true \
+        bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
+  fi
+  out=$(cat "$hk_so"); err=$(cat "$hk_se")
+}
+
+# A stale copy in the config dir must never run: the install copies the checkout's hooks, then runs the entries from them.
+cloud_startup1() {
+  name="cloud_startup1: cloud install runs the dropped startup entries from the fresh hooks copy, never the stale one"
+  h=$(new_home); co="$work/cloud_startup1-checkout"
+  hookfix_checkout "$co"
+  mkdir -p "$h/.claude-cfg/hooks"
+  printf 'echo STALE_A\n' > "$h/.claude-cfg/hooks/mark_a.sh"
+  printf 'echo STALE_B\n' > "$h/.claude-cfg/hooks/mark_b.sh"
+  hookfix_install "$h" "$co"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif ! grep -q FRESH_A "$h/.claude-cfg/hooks/mark_a.sh"; then
+    bad "$name" "the config dir's mark_a.sh is still the stale copy after install"
+  elif ! in_order "$out" FRESH_A FRESH_B; then
+    bad "$name" "install.sh did not print FRESH_A then FRESH_B on stdout: the dropped startup entries did not run"
+  elif contains "$out" STALE_; then
+    bad "$name" "install.sh printed a STALE_ marker: a stale hooks copy ran"
+  elif contains "$out" COMPACT_KEPT || contains "$out" CLEAR_KEPT; then
+    bad "$name" "install.sh ran a kept compact or clear|fork entry"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# The dropped entry gets /dev/null as stdin. Piped, install.sh is its own stdin, so a child that inherits it would read the rest of the script.
+cloud_startup2() {
+  name="cloud_startup2: a dropped startup entry gets /dev/null on stdin, never the rest of the install script"
+  h=$(new_home); co="$work/cloud_startup2-checkout"
+  hookfix_checkout "$co"
+  hookfix_install "$h" "$co"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif ! contains "$out" "FRESH_A stdin_bytes="; then
+    bad "$name" "install.sh printed no FRESH_A line: the startup entry did not run"
+  elif ! printf '%s\n' "$out" | grep -qx 'FRESH_A stdin_bytes=0'; then
+    bad "$name" "the startup entry read bytes from stdin: install.sh did not give it /dev/null"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+cloud_startup3() {
+  name="cloud_startup3: CS_HOOK_INPUT with source resume runs the startup|resume entry and not the startup-only entry"
+  h=$(new_home); co="$work/cloud_startup3-checkout"
+  hookfix_checkout "$co"
+  hookfix_install "$h" "$co" '{"source":"resume"}'
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif ! contains "$out" FRESH_A; then
+    bad "$name" "the startup|resume entry did not run for source resume"
+  elif contains "$out" FRESH_B; then
+    bad "$name" "the startup-only entry ran for source resume"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+cloud_startup4() {
+  name="cloud_startup4: an unreadable CS_HOOK_INPUT takes source startup, so both startup entries run in order"
+  h=$(new_home); co="$work/cloud_startup4-checkout"
+  hookfix_checkout "$co"
+  hookfix_install "$h" "$co" 'not json'
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif ! in_order "$out" FRESH_A FRESH_B; then
+    bad "$name" "the startup entries did not both run in order for an unreadable CS_HOOK_INPUT"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# The generated refresh hook, run as Claude Code runs it with a resume on stdin, passes that source on to install.sh.
+cloud_startup5() {
+  name="cloud_startup5: the refresh hook in settings.json passes its stdin to install.sh, so a resume runs only the startup|resume entry"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(new_home); co="$work/cloud_startup5-checkout"
+  hookfix_checkout "$co"
+  hookfix_install "$h" "$co"
+  refresh=$(jq -r '.hooks.SessionStart[-1].hooks[0].command' "$h/.claude-cfg/settings.json" 2>/dev/null)
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "the first install exited $rc: $err"
+  elif [ -z "$refresh" ]; then
+    bad "$name" "the generated settings.json has no refresh hook command"
+  else
+    stub="$work/cloud_startup5-bin"; mkdir -p "$stub"
+    printf '#!/bin/sh\ncat "%s"\n' "$co/install.sh" > "$stub/curl"; chmod +x "$stub/curl"
+    hk_so=$(mktemp "$work/hk-out.XXXXXX")
+    ( cd "$co" && printf '%s' '{"source":"resume"}' | env -i PATH="$stub:$PATH" HOME="$h" \
+        CLAUDE_CONFIG_DIR="$h/.claude-cfg" CLAUDE_CODE_REMOTE=true sh -c "$refresh" > "$hk_so" 2>&1 ); hook_rc=$?
+    hook_out=$(cat "$hk_so")
+    if ! contains "$hook_out" FRESH_A; then
+      bad "$name" "the refresh hook ran with source resume, and the startup|resume entry did not run (rc $hook_rc)"
+    elif contains "$hook_out" FRESH_B; then
+      bad "$name" "the refresh hook ran with source resume, and the startup-only entry ran"
+    else
+      ok "$name"
+    fi
+  fi
+  rm -rf "$h"
+}
+
+# Green control: local mode is unchanged. It links settings.json and runs no startup entry, before and after the change.
+cloud_startup_local1() {
+  name="cloud_startup_local1 (green control): a local install links settings.json and runs no startup entry"
+  h=$(new_home); co="$work/cloud_startup_local1-checkout"
+  hookfix_checkout "$co"
+  local_out=$(run_local_install "$co" "$h" "$h/.claude-cfg")
+  if [ ! -L "$h/.claude-cfg/settings.json" ] || [ "$(readlink "$h/.claude-cfg/settings.json")" != "$co/settings.json" ]; then
+    bad "$name" "$h/.claude-cfg/settings.json is not a link to the checkout's settings.json"
+  elif contains "$local_out" FRESH_A || contains "$local_out" FRESH_B; then
+    bad "$name" "a local install ran a startup entry"
+  else
+    ok "$name"
   fi
   rm -rf "$h"
 }
@@ -4860,6 +5029,12 @@ run retired_case17
 run skills_case1
 run skills_case2
 run cloud_settings1
+run cloud_startup1
+run cloud_startup2
+run cloud_startup3
+run cloud_startup4
+run cloud_startup5
+run cloud_startup_local1
 run skills_bak1
 run skills_bak2
 run skills_bak3
