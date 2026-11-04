@@ -54,7 +54,7 @@ COUNT_HEADER = "Blind designers:"
 KIND_LINE = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*(blind|informed|directed)\b", re.I)
 BLIND_KIND_ONLY = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*blind\s*$", re.I)
 LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
-BLIND_LANES = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
+BLIND_COUNT = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
 # The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
 OLD_KIND_LINE = re.compile(r"^lane\s+kind:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
@@ -342,10 +342,10 @@ def brief_faults(text, current=(), template=None, devices=None):
     return faults
 
 
-def blind_lanes_ok(text):
+def blind_designers_ok(text):
     """True when an informed or directed brief says its run has a blind designer, or carries the owner's
     words for none."""
-    m = BLIND_LANES.search(text)
+    m = BLIND_COUNT.search(text)
     if not m:
         return False
     value = m.group(1)
@@ -371,7 +371,7 @@ def run_faults(texts, owner_none="", current=(), template=None, devices=None):
     if not texts:
         faults.append(("no-brief", "run", ""))
     elif blind == 0 and not owner_none.strip():
-        faults.append(("no-blind-lane", "run", "no blind designer, and no owner words for none"))
+        faults.append(("no-blind-lane", "run", "no blind designer, and no grant for none"))  # glossary-ok: the fault code is pinned by test_blind_brief
     return faults
 
 
@@ -446,7 +446,7 @@ def hook(stdin):
                 reason += " " + REFUSE_IOS
             refuse(payload, payload["tool_name"], reason, describe(faults)[:200])
         return
-    reasons = [] if blind_lanes_ok(prompt) else [REFUSE_COUNT]
+    reasons = [] if blind_designers_ok(prompt) else [REFUSE_COUNT]
     if ios_skill_faults(prompt, devices):
         reasons.append(REFUSE_IOS)
     if reasons:
