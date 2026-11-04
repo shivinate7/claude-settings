@@ -9,7 +9,7 @@ description: >
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
   Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
-  workflow with `permissions: {actions: read, issues: write}`; it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
+  workflow with `permissions: {actions: read, contents: read, issues: write}` (contents: the clear reads the workflow file); it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
 
   Opt-in `dropped-start: 'true'` also flags an open, ready pull request, updated over 300 s ago, whose head
   commit has no real `all-jobs-passed` run (a dropped `pull_request` event; a skipped run counts as absent).
