@@ -60,8 +60,34 @@ wire 2 "wiring: a missing file exits 2" ".github/workflows/missing.yml"
 if [ -f "$here/wiring.sh" ]; then
   case "$out" in *unknown*) echo "ok   wiring: a missing file's output says unknown";; *) echo "FAIL wiring: a missing file's output does not say unknown"; bad=1;; esac
 fi
-# Static: action.yml declares input workflow, and the one step that runs wiring.sh is under always() and sets WORKFLOW from
-# inputs.workflow. The reader drops full-line comments, so a commented-out if: does not count. Each line it prints is one cause.
+
+# Combined step: action.yml has one step, and its command is run.sh. run.sh runs check.sh, then wiring.sh, and fails when
+# either fails. The NEEDS values are the fake check's input: ONE_FAILED has a failed needed job, ALL_PASS has none.
+ALL_PASS='{"lint":{"result":"success"},"test-mac":{"result":"success"}}'
+ONE_FAILED='{"lint":{"result":"failure"},"test-mac":{"result":"success"}}'
+combined() { # combined <0 or nz> <label> <NEEDS json> <WORKFLOW>: run.sh over the fixture workspace
+  if [ ! -f "$here/run.sh" ]; then echo "FAIL $2: run.sh is missing, so the action has no combined step"; bad=1; return; fi
+  out="$(NEEDS="$3" GITHUB_WORKSPACE="$ws" WORKFLOW="$4" bash "$here/run.sh" 2>&1)"; got=$?
+  if { [ "$1" = nz ] && [ "$got" -ne 0 ]; } || { [ "$1" != nz ] && [ "$got" -eq "$1" ]; }; then echo "ok   $2"; else echo "FAIL $2 (exit $got, wanted $1)"; bad=1; fi
+}
+combined nz "combined: a failed needed job fails the step, with a clean wiring" "$ONE_FAILED" ".github/workflows/checks.yml"
+combined nz "combined: a wiring defect fails the step, with every needed job green" "$ALL_PASS" ".github/workflows/dropped.yml"
+combined 0 "combined: both clean pass the step" "$ALL_PASS" ".github/workflows/checks.yml"
+
+# python3 off PATH: a PATH of the tools wiring.sh uses, and no python3. The case is void unless python3 is really absent.
+nopy="$work/nopy"; mkdir -p "$nopy"
+for t in dirname basename cat jq; do p="$(command -v "$t")" && ln -s "$p" "$nopy/$t"; done
+bash_abs="$(command -v bash)"
+nopy_case() { # nopy_case <label>: wiring.sh with python3 off PATH must exit non-zero, never 0
+  if [ ! -f "$here/wiring.sh" ]; then echo "FAIL $1: wiring.sh is missing, so the action has no wiring step"; bad=1; return; fi
+  if env PATH="$nopy" "$bash_abs" -c 'command -v python3' >/dev/null 2>&1; then echo "FAIL $1: python3 is still on the test PATH"; bad=1; return; fi
+  out="$(env PATH="$nopy" GITHUB_WORKSPACE="$ws" WORKFLOW=.github/workflows/checks.yml "$bash_abs" "$here/wiring.sh" 2>&1)"; got=$?
+  if [ "$got" -ne 0 ]; then echo "ok   $1 (exit $got)"; else echo "FAIL $1 (exit 0 with python3 off PATH)"; bad=1; fi
+}
+nopy_case "wiring: python3 off PATH exits non-zero, never 0"
+
+# Static: action.yml has exactly one step under runs.steps. That step runs run.sh, sets no if: and no continue-on-error:,
+# and sets WORKFLOW from inputs.workflow. The reader drops full-line comments and matches each key and the run line exactly.
 static_run() { # static_run <action.yml>: sets $problems to the reader's lines and $rc to its exit
   problems="$(python3 -I -c '
 import re, sys
@@ -71,61 +97,62 @@ inputs = re.search(r"^inputs:\n((?:[ \t]+[^\n]*\n|\n)*)", text, re.M)
 if not inputs or not re.search(r"^  workflow:[ \t]*(?:#[^\n]*)?$", inputs.group(1), re.M):
     print("input workflow is not declared under inputs")
 steps = [s for s in re.split(r"^(?=    - )", text.partition("\n  steps:\n")[2], flags=re.M) if s.startswith("    - ")]
-wiring = [s for s in steps if "wiring.sh" in s]
-if len(wiring) != 1:
-    print("want one step that runs wiring.sh, found %d" % len(wiring))
+if len(steps) != 1:
+    print("want exactly one step under runs.steps, found %d" % len(steps))
     sys.exit(0)
-step = wiring[0]
-if not re.search(r"^      if:[ \t]*(?:\$\{\{[ \t]*)?always\(\)", step, re.M):
-    print("the wiring step is not under always(): after a failed needs step it is skipped, and a skip reads green")
+step = steps[0]
+if not re.search(r"^      run: bash \"\$\{\{ github\.action_path \}\}/run\.sh\"[ \t]*(?:#[^\n]*)?$", step, re.M):
+    print("the one step does not run run.sh")
+if re.search(r"^[ \t]*if[ \t]*:", step, re.M):
+    print("the one step sets if:")
+if re.search(r"^[ \t]*continue-on-error[ \t]*:", step, re.M):
+    print("the one step sets continue-on-error:")
 if not re.search(r"^        WORKFLOW:[ \t]*\$\{\{[ \t]*inputs\.workflow[ \t]*\}\}[ \t]*(?:#[^\n]*)?$", step, re.M):
-    print("the wiring step does not set WORKFLOW from inputs.workflow")' "$1" 2>&1)"; rc=$?
+    print("the one step does not set WORKFLOW from inputs.workflow")' "$1" 2>&1)"; rc=$?
 }
-static_check() { # static_check <action.yml> <label>: one FAIL line per problem, or ok
-  static_run "$1"
-  if [ "$rc" -ne 0 ]; then echo "FAIL $2: the static reader crashed (exit $rc)"; bad=1; return; fi
-  if [ -z "$problems" ]; then echo "ok   $2"; return; fi
-  while IFS= read -r line; do echo "FAIL $2: $line"; done <<< "$problems"; bad=1
+static_expect() { # static_expect <label> <ok, or a substring the reader must print> <action.yml>: one FAIL line per problem
+  static_run "$3"
+  if [ "$rc" -ne 0 ]; then echo "FAIL $1: the static reader crashed (exit $rc)"; bad=1; return; fi
+  if [ "$2" = ok ]; then
+    if [ -z "$problems" ]; then echo "ok   $1"; return; fi
+    while IFS= read -r line; do echo "FAIL $1: $line"; done <<< "$problems"; bad=1; return
+  fi
+  case "$problems" in *"$2"*) echo "ok   $1";; *) echo "FAIL $1: the reader did not print: $2"; bad=1;; esac
 }
-static_check "$here/action.yml" "static: action.yml declares workflow and wires wiring.sh under always()"
-# A commented-out if: does not count as the wiring step's if. This mutant is a checker control: it is green on this head.
-mut="$work/action-commented.yml"
-cat > "$mut" <<'YML'
-name: mutant
+one_step() { # one_step <extra step key line, or empty> <run line>: a one-step action.yml as the step is written
+  cat <<YML
+name: All jobs passed
 inputs:
+  needs:
+    description: "Pass toJSON(needs) from the calling job."
+    required: true
   workflow:
-    description: "child workflow"
+    description: "The calling workflow's path."
+    required: false
     default: ''
 runs:
   using: composite
   steps:
-    - name: Wiring
+    - name: Every needed job passed, and the wiring holds
       shell: bash
-      # if: always()
+$1
       env:
-        WORKFLOW: ${{ inputs.workflow }}
-      run: bash "${{ github.action_path }}/wiring.sh"
+        NEEDS: \${{ inputs.needs }}
+        WORKFLOW: \${{ inputs.workflow }}
+$2
 YML
-static_run "$mut"
-case "$problems" in *"not under always()"*) echo "ok   static: a commented-out if: always() is reported as missing";; *) echo "FAIL static: a commented-out if: always() was not reported as missing";; esac
-# Inline comments after a value and a # inside a string are not problems. This is a checker control: green on this head.
-inl="$work/action-inline.yml"
-cat > "$inl" <<'YML'
-name: inline
-inputs:
-  workflow: # the child workflow, relative to the workspace
-    description: "child #1 workflow path"
-    default: ''
-runs:
-  using: composite
-  steps:
-    - name: Wiring
-      shell: bash
-      if: always() # after a failed needs step
-      env:
-        WORKFLOW: ${{ inputs.workflow }} # the child
-      run: bash "${{ github.action_path }}/wiring.sh"
-YML
-static_run "$inl"
-if [ "$rc" -eq 0 ] && [ -z "$problems" ]; then echo "ok   static: inline and in-string # are not problems"; else echo "FAIL static: an inline or in-string # was read as a problem: $problems"; bad=1; fi
+}
+run_line='      run: bash "${{ github.action_path }}/run.sh" # both checks'
+static_expect "static: action.yml has one step, which runs run.sh with WORKFLOW from inputs.workflow" ok "$here/action.yml"
+# Checker controls, green on this head. A valid one-step action with an iffy key (not an if:) and inline comments is clean.
+one_step "      iffy: a key that starts with if" "$run_line" > "$work/static-ok.yml"
+static_expect "static control: a valid one-step action with an iffy key and inline comments is clean" ok "$work/static-ok.yml"
+one_step "" '      # run: bash "${{ github.action_path }}/run.sh"' > "$work/static-commented.yml"
+static_expect "static control: a commented-out run line does not count as run.sh" "does not run run.sh" "$work/static-commented.yml"
+{ one_step "" "$run_line"; printf '    - name: extra\n      run: echo extra\n'; } > "$work/static-two.yml"
+static_expect "static control: a second step is reported" "found 2" "$work/static-two.yml"
+one_step "      if: always()" "$run_line" > "$work/static-if.yml"
+static_expect "static control: an if: key on the step is reported" "sets if:" "$work/static-if.yml"
+one_step "      continue-on-error: true" "$run_line" > "$work/static-coe.yml"
+static_expect "static control: a continue-on-error: key on the step is reported" "continue-on-error" "$work/static-coe.yml"
 exit $bad
