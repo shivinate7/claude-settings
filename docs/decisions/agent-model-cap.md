@@ -197,7 +197,7 @@ model is refused, and the owner's typed override lifts it, the same for Sonnet a
 under the 2026-10-21 grant). An Agent or Task spawn that sets model opus is refused under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer or
 design-reviewer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` marker (the step-up names the forms), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
-it is refused. An override, `opus 2h`, `opus <role> 2h` or a step grant lifts the spawn refusal. The ask on a settings write under the same
+it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
