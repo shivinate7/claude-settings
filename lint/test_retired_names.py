@@ -12,10 +12,15 @@ HISTORY files below, each with its reason. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
+import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELF = "lint/test_retired_names.py"
 GLOSSARY = "GLOSSARY.md"  # its "Not" cells name retired words on purpose
@@ -53,6 +58,7 @@ RETIRED = {
     "roles-sonnet-is-the-default": "roles-model-per-role-table",
     "running_lane_hit": "running_agent_hit",
     "RUNNING_LANE_TOOLS": "RUNNING_AGENT_TOOLS",
+    "LANE_TOOLS": "START_TOOLS",
     "Lane kind:": "Designer kind:",
 }
 
@@ -93,6 +99,58 @@ class RetiredNames(unittest.TestCase):
         files = subprocess.run(["git", "-C", self.repo, "ls-files"], capture_output=True, encoding="utf-8").stdout
         old = [p for p in files.splitlines() if any(n.strip('"') in p for n in RETIRED if "-" in n or "_" in n)]
         self.assertEqual(old, [], "files still under a retired name")
+
+
+def tracked(repo):
+    """The tracked paths of repo, relative to it."""
+    return set(subprocess.run(["git", "-C", repo, "ls-files"], capture_output=True, encoding="utf-8",
+                              errors="replace").stdout.splitlines())
+
+
+def make_repo(files):
+    """A git repo in this run's folder that tracks `files` (path -> text). Each case makes its own."""
+    repo = tempfile.mkdtemp(prefix="repo-", dir=RUN_FOLDER)
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    for path, text in files.items():
+        full = os.path.join(repo, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    return repo
+
+
+class History(unittest.TestCase):
+    def test_every_history_path_is_a_tracked_file(self):
+        files = tracked(ROOT)
+        for name, paths in HISTORY.items():
+            for path in paths:
+                self.assertTrue(path in files, "HISTORY exempts %s for %r, and no such file is tracked" % (path, name))
+
+
+class LineScope(unittest.TestCase):
+    OLD = "Lane kind:"
+    FILE = "hooks/test_blind_brief.py"
+
+    def test_unmarked_old_header_line_in_its_file_is_a_hit(self):
+        repo = make_repo({self.FILE: 'old = brief(header="Lane kind: blind")\n'})
+        self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
+        self.assertEqual(hits(repo, self.OLD), [self.FILE])
+
+    def test_marked_old_header_line_in_its_file_is_not_a_hit(self):
+        repo = make_repo({self.FILE: 'old = brief(header="Lane kind: blind")  # glossary-ok: quoted to be refused\n'})
+        self.assertTrue(self.FILE in tracked(repo), "the fixture does not track %s" % self.FILE)
+        self.assertEqual(hits(repo, self.OLD), [])
+
+    def test_marker_does_not_exempt_another_file(self):
+        other = "hooks/other.py"
+        repo = make_repo({other: 'old = "Lane kind: blind"  # glossary-ok: quoted to be refused\n'})
+        self.assertTrue(other in tracked(repo), "the fixture does not track %s" % other)
+        self.assertEqual(hits(repo, self.OLD), [other])
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":
