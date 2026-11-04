@@ -23,14 +23,57 @@ named "role model" pair matches no spawn of that role (`reports-done-names-model
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
-On any turn whose reply holds an Input Needed item that offers a pick with options, it also blocks
-unless the same main-session turn opened the question box (AskUserQuestion), or the repo has a
-waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
-waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
-check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
+options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
+holds a qualifying act (`questions-reach-page`: every question goes to the page writer in the same
+turn it is asked, no clock). The turn is every record after the last
+incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
+starts no turn. Owner-facing session: the question box (main session), a send to
+the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
+collection items to this repo's page. Lane (own get_session record tagged cs-build:lane, or with a
+parent): a send to @parent, the parent id or the writer. A promise or a page link passes nothing. A
+repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
+does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
+transcript this hook already holds. Only on a turn that asks with no send to @parent or the writer: the
+own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id; and
+one layout read when no box counts either (`decisions-reach-a-clickable-pick`).
+A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
+`past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
+On landed turns it also refuses a reply sentence that says a decision was rewritten (rewritten, rewrote,
+rewrites, rewrite of) for a ruling when that decision's record was last committed before the ruling, on
+every local branch, every remote branch and HEAD (`rewrite-cite-predates-ruling`, named incident F119:
+a report said a decision was rewritten for a ruling that its record's last commit predates). A cited id is a word next to the rewrite word that names a file in the
+decisions folder; no "decision" word is needed, and an id after under, by, per, following or see is not
+checked. A queued sentence (pending, queued), or a rewrite word just after a negation or a modal (not,
+no, never, will, should, must, can, may, could, needs and the like), claims no rewrite. The ruling time is
+the stamp next to the word "ruling" ("the <stamp> ruling", "ruling at <stamp>", "ruling of <stamp>"):
+`YYYY-MM-DD HH:MM <zone>`, or `HH:MM <zone>` on the turn's Central date, the day before when that is
+later than the turn. With no such stamp the sentence passes. "In place" alone does not trigger. An id
+with no record file or a failed git read passes. Cost: one regex read of the reply, and only on a reply
+that matches it, one `git log -1` process per distinct cited id with a record file in the reply, at most
+REWRITE_CAP; no file written, no timer, no log.
 
+The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
+that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
+unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
+`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
+refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
+kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
+
+After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
+may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
+report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
+Each line is tracked alone: any main-session reply after it that holds the line satisfies that
+demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
+its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
+the current Recovered line (split on ";" outside parentheses) names a whole-word source: git, page
+or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
+has the report shape. Cost: a scan of the records main()
+already loaded (the rewrite reads the transcript once, as before); no file, log or process.
 On every Stop, landed or not, it also reads <config dir>/state/refusals/<session_id>.jsonl, which
 hooks/refusal_note.py writes for each tool the auto-mode classifier refused. A pending tool the reply
 does not name in its Input Needed section blocks. A built-in tool counts only in backticks; an MCP
@@ -45,7 +88,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
+from _transcript import (  # noqa: E402
+    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    read_transcript, records_after_last_human, send_targets, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -81,8 +126,9 @@ LANDING_TOOLS = {
     "mcp__github__create_or_update_file",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
-# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), never a report label.
-LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from))(.+?)\*\*")
+# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
+# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below; none is a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -322,6 +368,67 @@ def bare_cite(text):
     return ""
 
 
+# answered-needs-source: a reply line that says "answered" names where the answer came from. The source
+# patterns reuse DONE_REF_RE (`#<n>`, PR refs, commit hashes, /pull/ and /commit/ URLs) and CODE_SPAN. Fence lines
+# are found as in prose_questions. A quote pairs only inside one line. A repo path is a token with `/` that has a
+# file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
+# The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
+# same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
+ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
+ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
+ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
+ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
+ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
+ANSWERED_FILE_RE = re.compile(
+    r"\b[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log|cfg|ini)\b")
+ANSWERED_SOURCE_RE = re.compile(
+    r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
+ANSWERED_REASON = (
+    "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
+    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
+    "inbox id, or the time), or say what is meant in other words. Lines: ")
+
+
+def _has_path(line):
+    for token in line.split():
+        if "/" in token and (re.search(r"\w\.\w", token) or ANSWERED_TOP_DIRS & set(re.split(r"[/\s]+", token))):
+            return True
+    return bool(ANSWERED_FILE_RE.search(line))
+
+
+def _claims_answered(plain):
+    """True when `plain` holds the word with no negator in its clause before it."""
+    for m in ANSWERED_RE.finditer(plain):
+        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
+        if not ANSWERED_NEGATOR_RE.search(clause):
+            return True
+    return False
+
+
+def answered_problem(text):
+    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
+    if not ANSWERED_RE.search(text):
+        return ""
+    bad, fence = [], ""
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence or body.rstrip("*_)\"' ").endswith("?"):
+            continue
+        plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        if not _claims_answered(plain):
+            continue
+        kept = CODE_SPAN.sub(lambda m: m.group(2), body)
+        if DONE_REF_RE.search(kept) or ANSWERED_SOURCE_RE.search(kept) or _has_path(kept):
+            continue
+        bad.append(body)
+    return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
@@ -430,24 +537,23 @@ OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 
-# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15, 25
-# or "twenty-five". A spelled "five" after a tens word is caught in the `tens` group and refused,
-# since a fixed-width lookbehind cannot hold the tens words.
-FIVE_MINUTES_RE = re.compile(
-    r"(?<![\w.-])(?:(?P<tens>(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[ -]+)?"
-    r"five[ -]minutes?|5[ -]?min(?:ute)?s?)\b", re.I)
-PAGE_WORDS_RE = re.compile(r"\bwaiting[ -]page\b", re.I)
-
-PICK_REFUSAL = (
-    "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat "
-    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only "
-    "with nothing running, open the question box."
+OWNER_REFUSAL = (
+    "Pick guard: every question goes to the page writer in the same turn it is asked (owner, 2026-11-01 "
+    "23:31 CST). Send it now: %s. With nothing running, the question box also counts."
 )
-
-
-def names_five_minutes(section):
-    """True when `section` names the 5-minute wait, never 15, 25 or twenty-five minutes."""
-    return any(not m.group("tens") for m in FIVE_MINUTES_RE.finditer(section))
+LANE_REFUSAL = (
+    "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent "
+    "(send_message session_id @parent) now."
+)
+NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
+LANE_TAG = "cs-build:lane"
+PARENT_TARGETS = {"@parent", "parent"}
+# A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
+# text, backticked text and a blockquoted line are past words, never a question asked now. A straight
+# quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
+# (Don't) cannot span to the next quote.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
 def input_needed_section(text):
@@ -486,6 +592,154 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+def asks_a_question(text):
+    """True when the Input Needed item holds a sentence that ends in "?" outside quotes, backticks and
+    blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
+    section = input_needed_section(text)
+    kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+
+
+# compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
+# from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
+# did not), each until one lands. A label counts only where it starts an item: at line start (after
+# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
+# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
+CARRY_MARKS = "*_`\"'“”‘’"
+CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
+               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
+CARRY_LINES = (
+    ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
+    ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
+)
+CARRY_FORMS = {
+    "Recovered": "`Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`",
+    "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
+                    "or `Handoff gave: none`",
+}
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
+
+
+def _reply_text(rec):
+    """The text of a main-session assistant record, else None."""
+    if rec.get("type") != "assistant" or rec.get("isSidechain"):
+        return None
+    content = (rec.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return None
+    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(parts) if parts else None
+
+
+def _carry_split(rest):
+    """`rest` split into items on ";" outside parentheses, each stripped of marks and a trailing . or ;."""
+    items, depth, cur = [], 0, ""
+    for ch in rest:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+        elif ch == ";" and depth == 0:
+            items.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    items.append(cur)
+    out = []
+    for item in items:
+        item = item.strip(" \t" + CARRY_MARKS).rstrip(" .;").strip(" \t" + CARRY_MARKS)
+        if item:
+            out.append(item)
+    return out
+
+
+def recovered_items(text):
+    """The items of each Recovered line in `text`, or None when it holds no Recovered line. A line's
+    text runs to the end of its line, or to a Handoff gave label on the same line. A bare
+    `Recovered:` takes the lines below it, up to the next report label or carry label, as its items;
+    with nothing below it is no line."""
+    found = None
+    lines = text.splitlines()
+    rx, handoff = CARRY_LINES[0][1], CARRY_LINES[1][1]
+    for n, line in enumerate(lines):
+        m = rx.search(line)
+        if not m:
+            continue
+        cut = handoff.search(line, m.end())
+        items = _carry_split(line[m.end():cut.start() if cut else len(line)])
+        if not items and not cut:
+            for below in lines[n + 1:]:
+                below = below.strip().lstrip(">").strip()
+                label = LABEL_RE.match(below)
+                if label and label.group(1).strip().rstrip(":").strip() in LABEL_ORDER:
+                    break
+                if any(r.match(below) for _, r in CARRY_LINES):
+                    break
+                items.extend(_carry_split(BULLET_RE.sub("", below)))
+        if items:
+            found = (found or []) + items
+    return found
+
+
+def carry_present(name, text):
+    """Whether `text` holds the carry line `name`: a Recovered line with at least one item, or a
+    Handoff gave label where it starts an item."""
+    if name == "Recovered":
+        return recovered_items(text) is not None
+    return bool(dict(CARRY_LINES)[name].search(text))
+
+
+def unsourced_recovered_item(block):
+    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    An item that starts with "none" or "nothing" needs no source."""
+    for item in recovered_items(block) or []:
+        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
+            return item[:60]
+    return ""
+
+
+def recovered_problem(records, text):
+    """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
+    since, or a Recovered item of `text` names no source while no earlier reply has met the Recovered
+    demand, else ''. The newest `compact_boundary` record anywhere in `records` marks the compaction
+    (its subtype alone is read). Each line is tracked alone: a main-session reply after the boundary
+    that holds it, anywhere in its text, satisfies it, and that reply is not judged for sources. The
+    current reply (the last reply record, when its report block equals `text`'s) counts by its
+    blockquote."""
+    boundary = None
+    last_text = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            boundary = i
+        if _reply_text(rec) is not None:
+            last_text = i
+    if boundary is None:
+        return ""
+    block = block_text(text)
+    pending = [name for name, _ in CARRY_LINES]
+    for i in range(boundary + 1, len(records)):
+        reply = _reply_text(records[i])
+        if reply is None:
+            continue
+        if i == last_text:
+            if block_text(reply) == block:
+                continue
+            reply = block_text(reply)
+        pending = [name for name in pending if not carry_present(name, reply)]
+    missing = [name for name in pending if not carry_present(name, block)]
+    reasons = []
+    if missing:
+        reasons.append("a compaction came before this report and no %s line has landed since. "
+                       "Under Deviations, add %s, inside the report blockquote." %
+                       (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
+    bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
+    if bad:
+        reasons.append("the Recovered item %r names no source. End each item with git, page or "
+                       "digest; items split on \";\" outside parentheses." % bad)
+    return "Recovered guard: " + " ".join(reasons) if reasons else ""
+
+
 def repo_root(cwd):
     """The nearest folder at or above `cwd` that holds a git entry, else None."""
     here = os.path.realpath(cwd or os.getcwd())
@@ -514,24 +768,217 @@ def departs_problem(text):
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
 
 
-def pick_has_a_control(records, text, cwd):
-    """True when the main session's turn opened the question box, or this repo has a waiting page
-    and the reply links it or its Input Needed item names the 5-minute wait and the page. An
-    agent's own box (isSidechain) never counts."""
-    for rec in records:
-        if rec.get("isSidechain"):
-            continue
-        if any(b.get("name") == ASK_TOOL for b in tool_uses(rec)):
-            return True
-    root = repo_root(cwd)
+def _own_lane_read(path, own_id):
+    """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
+    tag cs-build:lane or a parent_session_id. No record reads as owner-facing."""
+    import own_session
+    tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
+    return tags is not None and (LANE_TAG in tags or bool(parent)), parent
+
+
+def _turn_acts(records, turn, acks):
+    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
+    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+    cut = len(records) - len(turn)
+    if cut and peer_sender(records[cut - 1]) in acks:
+        idx = last_incoming_index(records, acks)
+        turn = records if idx is None else records[idx + 1:]
+    uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
+    return uses, [send_targets(u) for u in uses]
+
+
+def question_problem(records, turn, text, hook):
+    """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
+    sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
+    ack of a send this turn made to the writer or the parent starts no turn.
+    Owner-facing: the question box, a send to the page writer, or an items write to this repo's page.
+    Lane: a send to the parent or the page writer. A send to @parent passes in any session. Cost: nothing
+    past the text check when the turn has no question or sends to @parent or the writer. Else the own-record
+    import and a transcript read, only in a session with a remote id; and the layout read only when no box
+    or send counts."""
+    if not (offers_a_pick(text) or asks_a_question(text)):
+        return "", ""
+    writer = page_writer_id(records)
+    acks = {writer: {writer}} if writer else {}
+    uses, sends = _turn_acts(records, turn, acks)
+    if any(t & PARENT_TARGETS for t in sends) or (writer and any(writer in t for t in sends)):
+        return "", ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from override import remote_session_id
+    own_id = remote_session_id()
+    boxed = any(u.get("name") == ASK_TOOL for u in uses)
+    if boxed and not own_id:
+        return "", ""  # no remote id, so no own record: owner-facing, where the box counts
+    lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
+    if lane:
+        if parent:
+            acks[parent] = {parent} | PARENT_TARGETS
+            uses, sends = _turn_acts(records, turn, acks)
+        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+    if boxed:
+        return "", ""
+    root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
-    if page == "unknown":
+    here = None if page == "unknown" else page.rstrip("/")
+    for u in uses:
+        inp = u.get("input")
+        if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
+                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+            return "", ""
+    if here is None:
+        return "", NO_PAGE_NOTE
+    route = ("send_message to the writer " + writer if writer else
+             "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
+    return OWNER_REFUSAL % route, ""
+
+
+# rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
+REWRITE_RE = re.compile(r"\b(?:rewrote|rewritten|rewrites|rewrite\s+of)\b", re.I)
+# A negation or a modal just before the rewrite word: "not rewritten yet", "no rewrite of", "will be rewritten",
+# "should be rewritten", "needs a rewrite of". No rewrite has happened.
+REWRITE_UNDONE_RE = re.compile(
+    r"(?:(?<![\w-])(?:not|never|no|will|would|shall|should|must|can|may|could|needs?|yet)(?![\w-])|n't\b"
+    r"|\bto\s+be\b|\bgoing\s+to\b)"
+    r"[\w\s'`-]{0,20}$", re.I)
+# A status word anywhere in the sentence: the rewrite waits in a queue.
+REWRITE_QUEUED_RE = re.compile(r"(?<![\w-])(?:pending|queued)(?![\w-])", re.I)  # a hyphen keeps an id like no-x whole
+REWRITE_CAP = 5  # most distinct records one reply may make this check read
+SLUG = r"`?[a-z0-9]+(?:-[a-z0-9]+)*`?"
+SLUG_RE = re.compile(r"(?<![\w-])[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+# The ids right before a rewrite word: "decision X was rewritten", "Decisions X and Y were rewritten".
+IDS_BEFORE_RE = re.compile(
+    r"(?<![\w-])(%s(?:\s*,\s*(?:and\s+)?%s|\s+and\s+%s)*)\s+(?:(?:decisions?|records?|was|were|is|are|has|have|been|now|also|both)\s+)*$"
+    % (SLUG, SLUG, SLUG))
+# The ids right after a rewrite word: "rewrote decision X", "the rewrite of X and Y". An id after under, by,
+# per, following or see is never next to the rewrite word, so it is not checked.
+IDS_AFTER_RE = re.compile(
+    r"^\s*(?:(?:of|the|a|an|decisions?|records?)\s+)*(%s(?:\s*,\s*(?:and\s+)?%s|\s+and\s+%s)*)(?![\w-])"
+    % (SLUG, SLUG, SLUG))
+STAMP_FULL_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+STAMP_CLOCK_RE = re.compile(r"(?<![\d:-])(\d{1,2}:\d{2})\s*(CST|CDT|UTC|GMT)\b")
+RULING_WORD_RE = re.compile(r"\brulings?\b", re.I)
+STAMP_AFTER_RULING_RE = re.compile(r"^\s+(?:at|of)\s+$", re.I)  # "ruling at <stamp>", "ruling of <stamp>"
+STAMP_BEFORE_RULING_RE = re.compile(r"^\s*(?:owner(?:'s)?\s+)?$", re.I)  # "the <stamp> ruling"
+STAMP_ZONE_HOURS = {"CST": -6, "CDT": -5, "UTC": 0, "GMT": 0}
+FENCE_RE = re.compile(r"```.*?```", re.S)
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n")
+
+
+def _central(at):
+    """`YYYY-MM-DD HH:MM CST` (or CDT) for an instant, from the time hook's own clock."""
+    import local_time
+    return " ".join(local_time.line(lambda: at).split()[2:5])
+
+
+def _parse_iso(value):
+    from datetime import datetime, timezone
+    at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _claims_a_rewrite(sentence):
+    """True when the sentence is not queued, and a rewrite word in it has no negation or modal just before it."""
+    if REWRITE_QUEUED_RE.search(sentence):
         return False
-    page = page.rstrip("/")
-    section = input_needed_section(text)
-    if names_five_minutes(section) and PAGE_WORDS_RE.search(section):
-        return True
-    return bool(re.search(re.escape(page) + r"(?![\w-])", text))
+    return any(not REWRITE_UNDONE_RE.search(sentence[max(0, m.start() - 40):m.start()])
+               for m in REWRITE_RE.finditer(sentence))
+
+
+def _rewritten_ids(sentence):
+    """The words next to each rewrite word that may name a record, in order, with no repeat."""
+    found = []
+    for m in REWRITE_RE.finditer(sentence):
+        if REWRITE_UNDONE_RE.search(sentence[max(0, m.start() - 40):m.start()]):
+            continue
+        for near in (IDS_BEFORE_RE.search(sentence[max(0, m.start() - 200):m.start()]),
+                     IDS_AFTER_RE.match(sentence[m.end():])):
+            if near:
+                found += [w for w in SLUG_RE.findall(near.group(1).replace("`", " ")) if w not in found]
+    return found
+
+
+def _ruling_stamp(sentence):
+    """(day, clock, zone) of the stamp next to the word "ruling" in `sentence`, else None. The stamp sits right
+    before the word ("the YYYY-MM-DD HH:MM CST ruling"), or follows it after "at" or "of" ("ruling of
+    YYYY-MM-DD HH:MM CST"). Any other stamp, such as a merge time, is not the ruling time. `day` is None for a
+    clock-only stamp."""
+    stamps = [(m.start(), m.end(), m.groups()) for m in STAMP_FULL_RE.finditer(sentence)]
+    for m in STAMP_CLOCK_RE.finditer(sentence):
+        if not any(s <= m.start() < e for s, e, _ in stamps):
+            stamps.append((m.start(), m.end(), (None,) + m.groups()))
+    for word in RULING_WORD_RE.finditer(sentence):
+        for start, end, groups in sorted(stamps):
+            if start >= word.end() and STAMP_AFTER_RULING_RE.match(sentence[word.end():start]):
+                return groups
+            if end <= word.start() and STAMP_BEFORE_RULING_RE.match(sentence[end:word.start()]):
+                return groups
+    return None
+
+
+def _stamp_time(stamp, human_ts):
+    """The instant a (day, clock, zone) stamp names. A clock-only stamp takes the turn's Central date: the last
+    human record's timestamp, else the hook's clock. A clock later than the turn names the day before."""
+    from datetime import datetime, timedelta, timezone
+    day, clock, zone = stamp
+    tz = timezone(timedelta(hours=STAMP_ZONE_HOURS[zone]))
+    hour, minute = (int(x) for x in clock.split(":"))
+    if day is not None:
+        year, month, date = (int(x) for x in day.split("-"))
+        return datetime(year, month, date, hour, minute, tzinfo=tz)
+    import local_time
+    try:
+        turn = _parse_iso(human_ts)
+    except (TypeError, ValueError):
+        turn = local_time.clock()
+    year, month, date = (int(x) for x in _central(turn).split()[0].split("-"))
+    at = datetime(year, month, date, hour, minute, tzinfo=tz)
+    return at - timedelta(days=1) if at > turn else at
+
+
+def rewrite_stamp_problem(text, human_ts, cwd):
+    """The refusal text when a sentence says a decision was rewritten for a ruling that is later than the
+    record's last commit on every local branch, every remote branch and HEAD, else ''. A cited id is a word next
+    to the rewrite word that names a file in the decisions folder of the checkout. Fails open on any unknown: no
+    record file, no stamp next to "ruling", a failed read. Git runs once per distinct cited id in the reply, and
+    not at all for an id with no record file. A shallow clone shows a later last commit than the real one, so
+    it can miss a stale rewrite and never refuses a fresh one."""
+    sentences = [s for s in SENTENCE_SPLIT_RE.split(FENCE_RE.sub(" ", text))
+                 if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
+    if not sentences:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from datetime import datetime, timezone
+    root = repo_root(cwd)
+    if not root:
+        return ""
+    folder = layout.path(root, "decisions")
+    reasons, epochs = [], {}
+    for sentence in sentences:
+        ids = [d for d in _rewritten_ids(sentence)
+               if os.path.isfile(os.path.join(root, *folder.split("/"), d + ".md"))]
+        stamp = _ruling_stamp(sentence) if ids else None
+        if stamp is None:
+            continue
+        ruling = _stamp_time(stamp, human_ts)
+        import git_reads
+        for d in ids:
+            if d not in epochs:
+                if len(epochs) >= REWRITE_CAP:
+                    continue
+                epochs[d] = git_reads.last_commit_epoch(root, "%s/%s.md" % (folder, d))
+            d_epoch = epochs[d]
+            if d_epoch is None or d_epoch >= ruling.timestamp():
+                continue
+            reason = (
+                "Rewrite-stamp guard: decision `%s` was last committed %s, on every branch and HEAD, before the "
+                "ruling %s that it is said to be rewritten for. Rewrite the record, fetch the branch that holds "
+                "the rewrite, or say it is not rewritten yet."
+                % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)),
+                   ruling.strftime("%Y-%m-%d %H:%M ") + stamp[2]))
+            if reason not in reasons:
+                reasons.append(reason)
+    return " ".join(reasons)
 
 
 def names_tool(section, tool):
@@ -629,6 +1076,12 @@ def rewrite_problems(hook):
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
+        answered = answered_problem(text)
+        if answered:
+            reasons.append(answered)
+        recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
+        if recovered:
+            reasons.append(recovered)
         return reasons
     except Exception:
         return []
@@ -645,6 +1098,201 @@ def write_marker(hook, idx):
         pass
 
 
+# A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
+# a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
+# the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
+# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+RELAY_RULE_REASON = (
+    "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
+    "that names that ruling and says why the owner is asked again.")
+UNVETTED_REASON = (
+    "Unvetted guard: the past-ruling check could not run (%s), so this question would reach the owner unchecked. "
+    "Add the line `Unvetted: <why it could not be checked>` to the question and send it again.")
+KEYS_REASON = (
+    "Question-keys guard (rule question-keys): two questions to the owner use the option key(s) %s, so his answer "
+    "could mean either. Give each question its own keys, such as 1a/1b for the first and 2a/2b for the second, and "
+    "send the questions again.")
+ASK_TEXT_MAX = 6000
+# A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
+# code span is no question.
+SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
+# A code span: a run of backticks, its text, and a closing run of the same length (CommonMark).
+CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)
+LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
+
+
+def prose_questions(text):
+    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
+    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
+    inside a list an indented line is list text, never code."""
+    found, fenced, code_ok, in_list = [], False, True, False
+    for line in text.splitlines():
+        inner = QUOTE_PREFIX.sub("", line, count=1)
+        body = inner.strip()
+        if body.startswith("```"):
+            fenced, code_ok = not fenced, True
+            continue
+        if fenced:
+            continue
+        if not body:
+            code_ok = True
+            continue
+        indented = bool(INDENTED_CODE.match(inner))
+        if code_ok and indented and not in_list:
+            continue  # code_ok stays True: the next indented line is code too
+        code_ok = False
+        if LIST_ITEM.match(inner):
+            in_list = True
+        elif not indented:
+            in_list = False
+        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
+            found.append(body)
+    return found
+
+
+def has_input_needed(text):
+    """True when the reply's Input Needed label holds an item (hooks/reply_judge.py, the one reader)."""
+    if "input needed" not in text.casefold():
+        return False
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from reply_judge import has_input_needed as home
+        return home(text)
+    except Exception:
+        return True  # an unreadable reader means the item is judged, never skipped
+
+
+def asked_text(text):
+    """The text that asks the owner something, capped from the front so the end of a report stays: the whole text
+    when Input Needed holds an item, else its prose question lines with its `Unvetted:` lines, else ''. The
+    Unvetted lines stay so the Unvetted remedy can be met in a prose question."""
+    if has_input_needed(text):
+        return text[-ASK_TEXT_MAX:]
+    questions = prose_questions(text)
+    if not questions:
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form  # the one home of the Unvetted line
+    # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
+    questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
+    unvetted = [line.strip() for line in text.splitlines() if question_form.UNVETTED_LINE.match(line)]
+    return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
+
+
+def cannot_run(asked, why):
+    """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
+    `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
+
+
+def past_ruling_problem(asked, cwd):
+    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
+    print(question_form.unknown_line(unknown), file=sys.stderr)
+    unreadable = question_form.unreadable_sources(unknown)
+    if unreadable:
+        return cannot_run(asked, "; ".join(unreadable))
+    import call_judge  # the one home of item 8, its model and its time limit
+    import decision_watch
+    prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
+              + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
+              "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
+              "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
+              + question_form.candidates_block(candidates, unknown))
+    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
+                                                 timeout=call_judge.PAST_RULING_TIMEOUT,
+                                                 shape=call_judge.OK_SHAPE, effort=None)
+    if error:
+        return cannot_run(asked, " ".join(str(error).split()))
+    if verdict.get("ok") is not False:
+        return ""
+    reason = verdict.get("reason")
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
+    if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
+        return cannot_run(asked, "the review cited a record that was not in the list")
+    return RELAY_RULE_REASON % reason
+
+
+def since_last_message(after):
+    """The records after the last user record that is not a tool result: an owner message or a peer's message. A
+    past-ruling check reads only the replies to that message, so an older question is not judged again."""
+    start = 0
+    for i, rec in enumerate(after):
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "user" or rec.get("isSidechain"):
+            continue
+        if isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            continue
+        start = i + 1
+    return after[start:]
+
+
+def earlier_replies(after, text):
+    """The assistant text replies since the last human message, without the reply being judged."""
+    texts = []
+    for rec in after:
+        content = (rec.get("message") or {}).get("content")
+        if rec.get("type") != "assistant" or rec.get("isSidechain") or not isinstance(content, list):
+            continue
+        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        if parts:
+            texts.append("\n".join(parts))
+    if texts and texts[-1].strip() == text.strip():
+        texts.pop()
+    return texts
+
+
+def question_keys_problem(after, text):
+    """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
+    if "input needed" not in text.casefold():
+        return ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    clash = question_form.key_overlap(text, earlier_replies(after, text))
+    return KEYS_REASON % clash if clash else ""
+
+
+def relay_reasons(after, text, cwd):
+    """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
+    human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
+    is a check that could not run, so it refuses as Unvetted."""
+    reasons = []
+    try:
+        reasons.append(question_keys_problem(after, text))
+    except Exception as exc:
+        print("question-keys check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    try:
+        asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
+        if asked:
+            try:
+                reasons.append(past_ruling_problem(asked, cwd))
+            except Exception as exc:
+                print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+                reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
+    except Exception as exc:
+        print("past-ruling check could not start: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    return [r for r in reasons if r]
+
+
+def rewrite_relay(hook):
+    """The relay refusals for the rewrite that follows a block: it is checked again, so a rewrite that keeps a ruled
+    question is refused again. At most one model call per Stop."""
+    try:
+        path = hook.get("transcript_path")
+        records = read_transcript(path) if path and os.path.exists(path) else []
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+    except Exception as exc:
+        print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return []
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -657,6 +1305,7 @@ def main():
     if hook.get("stop_hook_active"):
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
+        reasons += rewrite_relay(hook)
         if reasons:
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
         return
@@ -698,22 +1347,39 @@ def main():
     for i, rec in enumerate(records):
         if is_last_human(rec):
             last_human_idx = i
-    if last_human_idx is None:
-        return stop_for_refusal()
 
-    after = records[last_human_idx + 1:]
     text = last_reply(hook)
-    if not turn_landed(after):
-        # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
-        # either fails open on its own: the Departs from check never drops the pick refusal.
-        pick = []
+    # The pick check reads the turn after the last incoming message, a peer's included (a lane's input),
+    # and runs whether or not the transcript holds a human record. Landing and the report's shape still
+    # anchor on the last human message.
+    incoming = last_incoming_index(records)
+    turn = records if incoming is None else records[incoming + 1:]
+    after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    note = ""
+    pick_reason = ""
+    try:
+        pick_reason, note = question_problem(records, turn, text, hook)
+    except Exception:
+        pass
+    relay = []
+    if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
+        relay = relay_reasons(after, text, hook.get("cwd"))
         try:
-            if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-                pick.append(PICK_REFUSAL)
+            relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
+    if last_human_idx is None or not turn_landed(after):
+        # An unlanded turn is judged on the question check and the Departs from check alone. An error in
+        # either fails open on its own: the Departs from check never drops the question refusal.
+        pick = [pick_reason]
         try:
             pick.append(departs_problem(text))
+        except Exception:
+            pass
+        pick += relay
+        try:
+            if report_shape_ok(text):
+                pick.append(recovered_problem(records, text))
         except Exception:
             pass
         try:
@@ -722,6 +1388,8 @@ def main():
             if pick:
                 reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
+            elif note:
+                print(json.dumps({"systemMessage": note}))
         except Exception:
             pass
         return
@@ -739,15 +1407,25 @@ def main():
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
-    try:
-        if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-            reasons.append(PICK_REFUSAL)
-    except Exception:
-        pass
+    if pick_reason:
+        reasons.append(pick_reason)
     try:
         departs = departs_problem(text)
         if departs:
             reasons.append(departs)
+    except Exception:
+        pass
+    reasons += [r for r in relay if r]
+    try:
+        rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
+        if rewrite:
+            reasons.append(rewrite)
+    except Exception:
+        pass
+    try:
+        recovered = recovered_problem(records, text) if shape_ok else ""
+        if recovered:
+            reasons.append(recovered)
     except Exception:
         pass
     cite = bare_cite(text)
@@ -764,6 +1442,8 @@ def main():
         else:
             write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))
+    elif note:
+        print(json.dumps({"systemMessage": note}))
 
 
 if __name__ == "__main__":

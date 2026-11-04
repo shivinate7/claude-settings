@@ -15,7 +15,7 @@ orchestrator assigns it to a builder.
 
 When you rewrite, keep every fact. Drop words, never facts. Follow
 `speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
-now). Write in Simplified Technical English.
+now). Write plainly (rule output-write-in-ste).
 
 You do the work yourself. Before you stop for any reason, commit your work to your own branch
 and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.

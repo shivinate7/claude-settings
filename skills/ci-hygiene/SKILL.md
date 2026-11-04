@@ -59,7 +59,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `bin/ci-job checks --lint --base origin/main` before it joins. A lane never runs a whole CI job
+   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
+   each lane head before the join. A red lane does not join. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run.
@@ -198,6 +199,8 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
+- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
+  claude-settings record text instead of naming the record. The caller needs checkout first.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally,

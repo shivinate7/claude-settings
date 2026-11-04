@@ -10,10 +10,14 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    inline_script, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from guard_pointer import (
     pointer_checkout,
+)
+from guard_push_delete import (
+    push_destinations, push_target, push_text,
 )
 
 
@@ -70,7 +74,7 @@ def gh_call_of(segment: str):
 MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
+# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
 # batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
 # 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
@@ -189,8 +193,8 @@ MERGE_CHECK_REASON = (
 
 # The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
 MERGE_BATCH_REASON = (
-    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base: %s. A merge "
-    "now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
+    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base, and its head "
+    "does not contain this head: %s. A merge now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
     "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
 )
 
@@ -244,7 +248,8 @@ def pinned_required(where: str):
 BARE_MERGE_REASON = (
     "Rule (Git): this repo merges with the merge tool, and a bare `gh pr merge` skips its claim and "
     "leaves the local main behind origin. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call."
+    "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
+    "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
 )
 
 
@@ -478,12 +483,12 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("coordinator", "batch-runner")
+ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is a coordinator or batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session: hand the branch, head and PR to the batch runner "
+    "If this session is the batch runner: run get_session (no argument) alone in its own "
+    "turn, then retry. Any other session, the coordinator too: hand the branch, head and PR to the batch runner "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo)."
 )
 
@@ -519,35 +524,8 @@ def role_call_of(segment: str):
 
 
 def _own_session_read(transcript: str, own_id: str):
-    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
-    None, and whether a set_session_tags call follows that result."""
-    uses, newest, tagged_after = set(), None, False
-    with open(transcript, encoding="utf-8") as handle:
-        for line in handle:
-            try:
-                content = json.loads(line)["message"]["content"]
-            except (ValueError, KeyError, TypeError):
-                continue
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
-                    uses.add(block.get("id"))
-                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
-                    tagged_after = True
-                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
-                    body = block.get("content")
-                    if isinstance(body, list):
-                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
-                    try:
-                        ccr = json.loads(body)["ccr"]
-                        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
-                    except (ValueError, KeyError, TypeError):
-                        continue
-    return newest, tagged_after
+    """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
+    return own_session.own_session_read(transcript, own_id)[:2]
 
 
 def _own_get_session_tags(transcript: str, session_id: str):
@@ -574,6 +552,86 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         except Exception:
             pass
         return "merge role " + tier
+    return ""
+
+
+# ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
+RECORD_WRITER_TIER = "triage"
+DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
+    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
+    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+)
+
+
+def _own_tier_proved(transcript: str, tier: str) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+    except Exception:
+        pass
+    return False
+
+
+def _command_words(args):
+    """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
+    newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
+    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    words = []
+    for arg in args:
+        word = arg.rstrip(")&")
+        if word != arg:
+            if word:
+                words.append(word)
+            break
+        words.append(arg)
+    return words
+
+
+def _push_calls(segment: str, script: str, cwd: str):
+    """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
+    segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
+    `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
+    runs in the folder its segment's own `cd` or `git -C` names."""
+    for subcommand, args in git_calls(push_text(segment)):
+        if subcommand == "push":
+            where, overrides = push_target(segment, script, cwd)
+            yield _command_words(args), where, overrides
+    tokens = segment_tokens(segment)
+    inner = inner_commands(tokens) if tokens else []
+    if inner:
+        inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        for text in inner:
+            for part in split_segments(text):
+                yield from _push_calls(part, text, inner_cwd)
+
+
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
+    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
+    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
+    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
+    reaches the branch."""
+    for segment in split_segments(stripped):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if read_verb("push", args):
+                continue
+            top = _git(where, "rev-parse", "--show-toplevel") if where else None
+            root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else where
+            try:
+                record = record_branch_of(root)
+            except Exception:
+                record = DEFAULT_RECORD_BRANCH
+            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
+                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                return "git push to the record branch"
     return ""
 
 
@@ -611,19 +669,19 @@ ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
-    "then retry."
+    "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
-    "that pull request merges or is closed as replaced, then retry."
+    "that pull request merges or is closed as replaced, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry."
+    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers."
+    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 

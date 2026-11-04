@@ -6,16 +6,20 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_report_guard.py -v
 """
+import contextlib
 import errno
 import importlib.util
+import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
@@ -26,9 +30,12 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
 # of os.environ). Point CLAUDE_CONFIG_DIR at this run's folder for the whole module, so no test
@@ -38,9 +45,19 @@ _ISOLATION = {}
 
 
 def setUpModule():
-    _ISOLATION["dir"] = _test_temp.run_folder()
+    _ISOLATION["dir"] = RUN_FOLDER  # the run's one folder, made at import (test-temp-standard); teardown removes it
     _ISOLATION["prev"] = os.environ.get("CLAUDE_CONFIG_DIR")  # None means unset
     os.environ["CLAUDE_CONFIG_DIR"] = _ISOLATION["dir"]
+    stub = os.path.join(_ISOLATION["dir"], "stub")  # the stub lives in this run's folder
+    os.makedirs(stub)
+    _ISOLATION["stub"] = stub
+    with open(os.path.join(stub, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(tcj.STUB_SITE)
+    _ISOLATION["env"] = {k: os.environ.get(k) for k in MODEL_ENV}
+    os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (stub, os.environ.get("PYTHONPATH")) if p)
+    os.environ.update(CJ_LOADED_DIR=stub, CJ_RECORD=os.path.join(stub, "calls.jsonl"),
+                      CJ_ANSWER=tcj.ALLOW)
+    os.environ.pop("CJ_MODEL_FAIL", None)
 
 
 def tearDownModule():
@@ -49,23 +66,30 @@ def tearDownModule():
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
     else:
         os.environ["CLAUDE_CONFIG_DIR"] = prev
+    for key, value in _ISOLATION.pop("env").items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
     shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
 
 
-def peer_msg(body, stamp=None):
+def peer_msg(body, stamp=None, from_session="local_fixture"):
     """A cross-session reply in the shape a real transcript stores: type user, origin.kind peer,
-    isMeta true. It lands mid-turn, so it is never the owner's last message."""
+    isMeta true. It lands mid-turn, so it is never the owner's last message. `from_session` is the
+    id of the session that sent it."""
     rec = {"type": "user", "isSidechain": False, "isMeta": True,
            "origin": {"kind": "peer", "from": "uds:fixture-pipe", "msg_id": "m-" + body[:8],
-                      "name": "peer-cf", "fromSession": "local_fixture", "fromMode": "bypass",
+                      "name": "peer-cf", "fromSession": from_session, "fromMode": "bypass",
                       "body": body},
            "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                       '<cross-session-message from="uds:fixture-pipe" from-session="local_fixture" '
-                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % body}}
+                       '<cross-session-message from="uds:fixture-pipe" from-session="%s" '
+                       'from-name="peer-cf" from-mode="bypass">%s</cross-session-message>' % (from_session, body)}}
     if stamp:
         rec["timestamp"] = stamp
     return rec
@@ -84,6 +108,20 @@ def tool_result_msg(tool_use_id="tu_1"):
 def assistant_text(text):
     return {"type": "assistant", "isSidechain": False,
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def compact_boundary():
+    """The system record Claude Code writes when a compaction finishes. Its token fields are as the
+    hook-inputs-carry-token-counts decision measured them, top level; their nesting is unmeasured."""
+    return {"type": "system", "subtype": "compact_boundary", "isSidechain": False,
+            "preTokens": 37179, "postTokens": 6250, "cumulativeDroppedTokens": 30929}
+
+
+def compact_summary():
+    """The user record Claude Code writes after a boundary. Its string content makes is_last_human read
+    it as a human message."""
+    return {"type": "user", "isSidechain": False, "isCompactSummary": True,
+            "message": {"role": "user", "content": "This session is being continued from a previous conversation."}}
 
 
 def write_transcript(records, tmpdir, name="transcript.jsonl"):
@@ -106,11 +144,25 @@ BLOCK_IMPORTS_CODE = (
 )
 
 
-def run_guard(guard, hook, raw_stdin=None, env=None, block=()):
+# The same run with subprocess.Popen refused, so a process start inside the hook fails the run instead of
+# passing silently. The cost case reads it (refuse_process).
+NO_PROCESS_CODE = (
+    "import runpy, subprocess, sys\n"
+    "def _refuse(*args, **kwargs):\n"
+    "    raise RuntimeError('the hook tried to start a process: %r' % (args,))\n"
+    "subprocess.Popen = _refuse\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     argv = [sys.executable, guard]
     if block:
         argv = [sys.executable, "-c", BLOCK_IMPORTS_CODE, guard, json.dumps(list(block))]
+    if refuse_process:
+        argv = [sys.executable, "-c", NO_PROCESS_CODE, guard]
     run = subprocess.run(
         argv,
         input=stdin_text,
@@ -1054,6 +1106,19 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
 
+    def test_rw_red_rewrite_keeps_an_unsourced_answered_line_is_refused_again(self):
+        # Red then pass. With the report marker set, the rewrite is judged again, so a line that says
+        # "answered" with no source is refused again. Without the marker the same line stays quiet
+        # (test_an_green_stop_hook_active_stays_quiet). A sourced line in the same rewrite passes.
+        self.missing_report_block()
+        reply = "Answered: no permission rule can lift it.\n\n" + self.GOOD
+        out = self.stop(reply, True)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Answered: no permission rule can lift it.", out["reason"])
+        self.missing_report_block()
+        self.assertIsNone(self.stop("Item 143 answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
+
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
         bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
         self.assertIsNone(self.stop(bad, True))
@@ -1080,6 +1145,449 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                    assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** merge")]
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
+
+
+REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
+
+
+def report_lines(*deviations):
+    """A report whose Deviations bullets are the given lines, for the compaction-carry cases."""
+    bullets = "".join("\n> - %s" % line for line in deviations)
+    return "> **Done** BUILT abc123\n> **Deviations**%s\n> **Next** ship it" % bullets
+
+
+REPORT_BOTH_NONE = report_lines("Recovered: none", "Handoff gave: none")
+REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR 978 (git); fact Y (page)", "Handoff gave: none")
+
+
+class CompactionCarryTests(unittest.TestCase):
+    """After a compaction, each report holds a `Recovered:` line and a `Handoff gave:` line (report_guard.py, Stop)."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.sid = "cc-" + uuid.uuid4().hex
+
+    def stop(self, records, active=False):
+        path = write_transcript(records, self.folder)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
+                "session_id": self.sid}
+        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    @staticmethod
+    def compacted_turn(reply):
+        """A turn that compacts mid-turn, then commits and replies. The summary record sits after the
+        boundary and before the commit, so the commit lands after the last human message."""
+        return [human("do the task"), compact_boundary(), compact_summary(),
+                tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                assistant_text(reply)]
+
+    def assertBlocksForRecovered(self, out):
+        self.assertIsNotNone(out, "no block: the first report after a compaction has no Recovered line")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Recovered guard", out["reason"])
+
+    def assertBlocksNaming(self, out, *names):
+        """A block whose reason starts "Recovered guard:" and names each of `names`."""
+        self.assertIsNotNone(out, "no block; the reason should name %r" % (names,))
+        self.assertEqual(out["decision"], "block")
+        self.assertTrue(out["reason"].startswith("Recovered guard:"), out["reason"][:200])
+        for name in names:
+            self.assertIn(name, out["reason"])
+
+    def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
+        # Catches: a landed turn after a compaction passes with no Recovered line.
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
+
+    def test_cc_red_recovered_line_in_the_wrong_place_blocks(self):
+        rows = [
+            # Catches: a line above the report blockquote counts, when only the blockquote may hold it.
+            "Recovered: none\n\n" + REPORT_NO_LINE,
+            # Catches: a word that ends in "recovered:" is read as the line.
+            "> **Done** BUILT abc123\n> **Deviations** Unrecovered: P3 ruling\n> **Next** ship it",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_recovered_line_forms_pass(self):
+        rows = [
+            # Catches: the bullet line under Deviations is refused.
+            REPORT_BOTH_NONE,
+            # Catches: the line written inline after the Deviations label is refused.
+            "> **Done** BUILT abc123\n> **Deviations** Recovered: none\n> Handoff gave: none\n> **Next** ship it",
+            # Catches: an upper-case label is refused (the label is any case).
+            "> **Done** BUILT abc123\n> **Deviations** RECOVERED: none\n> Handoff gave: none\n> **Next** ship it",
+            # Catches: the line after a semicolon in Next is refused.
+            "> **Done** BUILT abc123\n> **Deviations** Handoff gave: none\n> **Next** ship it; Recovered: none",
+            # Catches: a ruling with a source named in the line is refused.
+            report_lines("Recovered: P3 ruling from PR #978 (git)", "Handoff gave: none"),
+            # Catches: a bold bullet line is refused. Bold passes, as it does at line start.
+            "> **Done** BUILT abc123\n> **Deviations**\n> - **Recovered:** none\n> - Handoff gave: none\n> **Next** ship it",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_green_earlier_report_with_both_lines_satisfies_the_demand(self):
+        # Catches: lines given earlier since the boundary still demand them again, in a report or in prose.
+        for earlier in (REPORT_BOTH_NONE, "Recovered: none\nHandoff gave: none"):
+            with self.subTest(earlier=earlier):
+                records = [human("do the task"), compact_boundary(), compact_summary(),
+                           assistant_text(earlier),
+                           human("next task"),
+                           tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                           assistant_text(REPORT_NO_LINE)]
+                self.assertIsNone(self.stop(records))
+
+    def test_cc_red_earlier_report_without_the_line_does_not_satisfy(self):
+        # Catches: an earlier report with no Recovered line since the boundary satisfies the demand.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(REPORT_NO_LINE),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_red_same_turn_earlier_report_without_line_does_not_satisfy(self):
+        # Catches: a report given earlier in the same turn, with no line, satisfies the final report's demand.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(REPORT_NO_LINE),
+                   tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_green_bold_recovered_line_keeps_the_report_shape(self):
+        # Catches: "**Recovered:**" read as an unknown report label fails the shape and sends the
+        # missing-report block. Like "Departs from", it is not a report label.
+        reply = "> **Done** BUILT abc123\n> **Deviations** none\n> **Recovered:** none\n> Handoff gave: none\n> **Next** ship it"
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_rewrite_without_report_shape_has_no_demand(self):
+        # Catches: the rewrite after a missing-report block demands the line on a reply that is no report.
+        first = self.stop(self.compacted_turn("All done."))
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("Send the report now", first["reason"])
+        self.assertIsNone(self.stop(self.compacted_turn("Correction: the Done line needs a PR ref."), active=True))
+
+    def test_cc_green_correction_line_satisfies_a_later_report(self):
+        # Catches: a correction line posted after a block is not read as a Recovered line, so a later report
+        # demands it again.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("All done."),
+                   assistant_text("Recovered: none\nHandoff gave: none"),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_two_text_blocks_report_in_the_second_blocks(self):
+        # Catches: a final message split into two text blocks is read from the first block only.
+        final = {"type": "assistant", "isSidechain": False,
+                 "message": {"role": "assistant", "content": [
+                     {"type": "text", "text": "Committed the guard."},
+                     {"type": "text", "text": REPORT_NO_LINE}]}}
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), final]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_red_boundary_in_an_earlier_turn_demands_the_line_on_the_next_report(self):
+        # Catches: a boundary from an earlier turn, with no report since, is ignored.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text("Working on it."),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_green_no_boundary_no_demand(self):
+        # Catches: the line is demanded on a turn that never compacted.
+        records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                   tool_result_msg(), assistant_text(REPORT_NO_LINE)]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_mid_turn_compaction_landed_without_line_blocks(self):
+        rows = [
+            # Catches: a check that needs the summary record after the boundary misses a boundary with none.
+            [human("do the task"), tool_use_msg("Bash", {"command": "ls"}), tool_result_msg(),
+             compact_boundary(), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+             assistant_text(REPORT_NO_LINE)],
+            # Catches: a scan that starts at the last human message misses a boundary that sits before the
+            # summary record, which reads as a human message.
+            self.compacted_turn(REPORT_NO_LINE),
+        ]
+        for records in rows:
+            with self.subTest(records=len(records)):
+                self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_red_newest_boundary_governs(self):
+        # Catches: the oldest boundary is used, so its satisfied first report hides the newer boundary.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_BOTH_NONE),
+                   human("next task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m y"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_red_unlanded_report_after_compaction_blocks(self):
+        # Catches: an unlanded turn whose reply has the report shape passes with no Recovered line.
+        records = [human("what is the status?"), compact_boundary(), compact_summary(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertBlocksForRecovered(self.stop(records))
+
+    def test_cc_green_unlanded_prose_after_compaction_passes(self):
+        # Catches: the line is demanded on a reply with no report shape.
+        records = [human("what is the status?"), compact_boundary(), compact_summary(),
+                   assistant_text("Here is what I found.")]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_rewrite_after_missing_report_block_names_the_line(self):
+        first = self.stop(self.compacted_turn("All done."))
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("Send the report now", first["reason"])
+        # The rewrite reads the marker the missing-report block left, and checks the Recovered line once.
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
+
+    def test_cc_correction_block_leaves_no_marker(self):
+        # Catches: a Recovered correction leaves a marker, so its rewrite is checked again and loops.
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
+        self.assertIsNone(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
+
+    def test_cc_red_handoff_gave_missing_blocks(self):
+        # Catches: a Recovered line with no Handoff gave line passes.
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
+
+    def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
+        # Catches: a Handoff gave line with no Recovered line passes.
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
+
+    def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
+        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
+        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
+        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+
+    def test_cc_green_both_lines_with_sources_pass(self):
+        rows = [
+            # Catches: a sourced Recovered line with a Handoff gave line is refused.
+            REPORT_BOTH_SOURCED,
+            # Catches: the source words are read without regard to case.
+            report_lines("Recovered: fact Z (GIT); fact W (Digest)", "Handoff gave: none"),
+            # Catches: a Handoff gave item is judged for a source. Only the Recovered items need one.
+            report_lines("Recovered: none", "Handoff gave: ruling Q from PR 12"),
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_red_recovered_item_without_a_source_blocks(self):
+        # Catches: a Recovered item that names no git, page or digest source passes.
+        rows = [
+            (report_lines("Recovered: ruling X", "Handoff gave: none"), "ruling X"),
+            (report_lines("Recovered: rule A (git); fact B", "Handoff gave: none"), "fact B"),
+            (report_lines("Recovered: a (git); b", "Handoff gave: none"), None),
+        ]
+        for reply, name in rows:
+            with self.subTest(reply=reply):
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
+
+    def test_cc_red_source_word_must_match_a_whole_word(self):
+        # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
+        for item in ("fact Z (gitlab)", "fact Z (pages)"):
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), item)
+
+    def test_cc_green_bold_handoff_line_keeps_the_report_shape(self):
+        # Catches: "**Handoff gave:**" read as an unknown report label fails the shape.
+        reply = "> **Done** BUILT abc123\n> **Deviations** Recovered: none\n> **Handoff gave:** none\n> **Next** ship it"
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_no_boundary_no_demand_for_either_line(self):
+        # Catches: either line, or its sources, demanded on a turn that never compacted.
+        records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                   tool_result_msg(), assistant_text(report_lines("Recovered: ruling X"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_earlier_recovered_line_and_current_handoff_line_pass(self):
+        # Catches: a Handoff gave line in the current report is refused when an earlier report holds the Recovered line.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(report_lines("Handoff gave: none"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_earlier_satisfying_line_is_not_judged_again(self):
+        # Catches: an earlier report that already satisfied the demand is judged again for its sources.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: ruling X", "Handoff gave: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_red_rewrite_with_recovered_but_no_handoff_blocks(self):
+        # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
+        first = self.stop(self.compacted_turn("All done."))
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("Send the report now", first["reason"])
+        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
+                                "Handoff gave")
+
+    def test_cc_green_none_forms_pass_the_source_check(self):
+        # Catches: a none with a trailing mark, a backtick, or a word after it is read as a sourceless item.
+        rows = [
+            "Recovered: none needed",
+            "Recovered: none - summary complete",
+            "Recovered: none (the summary held all)",
+            "Recovered: none;",
+            "Recovered: _none_",
+            "Recovered: nothing was lost",
+            "`Recovered: none`",
+            "Recovered: X (page); nothing else.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assertIsNone(self.stop(self.compacted_turn(report_lines(line, "Handoff gave: none"))), line)
+
+    def test_cc_green_semicolon_inside_parentheses_does_not_split(self):
+        # Catches: a ";" inside parentheses splits one sourced item into an unsourced item.
+        reply = report_lines("Recovered: X from page (commit abc; merged 3 days ago)", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_green_recovered_line_starts_after_a_mark_or_a_separator(self):
+        # Catches: a line after a report label, a quote mark, or ". " is not read as a Recovered line.
+        rows = [
+            "> **Done** BUILT abc123\n> **Deviations:** Recovered: none\n> Handoff gave: none\n> **Next** ship it",
+            '> **Done** BUILT abc123\n> **Deviations**\n> "Recovered: none"\n> Handoff gave: none\n> **Next** ship it',
+            "> **Done** BUILT abc123\n> **Deviations** Handoff gave: none\n> **Next** ship it. Recovered: none",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_green_mid_sentence_recovered_after_demand_met_passes(self):
+        # Catches: a mid-sentence or backticked "recovered:" is read as a Recovered line, and its item is
+        # judged for a source, after the demand is already met.
+        earlier = report_lines("Recovered: none", "Handoff gave: none")
+        later = [
+            "> **Done** BUILT the `Recovered:` guard, PR #5\n> **Deviations** none\n> **Next** ship it",
+            "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** the janitor recovered: 3 files",
+        ]
+        for reply in later:
+            with self.subTest(reply=reply):
+                records = [human("do the task"), compact_boundary(), compact_summary(),
+                           assistant_text(earlier),
+                           human("next task"),
+                           tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                           assistant_text(reply)]
+                self.assertIsNone(self.stop(records), reply)
+
+    def test_cc_red_mid_sentence_recovered_does_not_satisfy_the_pending_demand(self):
+        # Catches: a mid-sentence or backticked "recovered:" satisfies the demand for the Recovered line.
+        rows = [
+            "> **Done** BUILT abc123\n> **Deviations** the janitor recovered: 3 files from git\n"
+            "> Handoff gave: none\n> **Next** ship it",
+            "> **Done** BUILT the `Recovered:` guard, PR #5\n> **Deviations** none\n"
+            "> Handoff gave: none\n> **Next** ship it",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                out = self.stop(self.compacted_turn(reply))
+                self.assertBlocksNaming(out)
+                self.assertIn("Recovered line", out["reason"])
+
+    def test_cc_green_unsourced_recovered_line_after_demand_met_passes(self):
+        # Catches: the source check judges a Recovered item after an earlier report already met the demand.
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   assistant_text(report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")),
+                   human("next task"),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(report_lines("Recovered: ruling X", "Handoff gave: none"))]
+        self.assertIsNone(self.stop(records))
+
+    def test_cc_green_bare_recovered_line_with_a_sourced_bullet_passes(self):
+        # Catches: a bare "Recovered:" with its items below is read as having no items.
+        reply = ("> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n"
+                 "> Recovered:\n> - ruling X (git)\n> **Next** ship it")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_red_bare_recovered_line_with_an_unsourced_bullet_blocks(self):
+        # Catches: a bullet under a bare "Recovered:" passes with no source.
+        reply = ("> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n"
+                 "> Recovered:\n> - ruling X\n> **Next** ship it")
+        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "ruling X")
+
+    def test_cc_red_bare_recovered_line_with_nothing_below_blocks(self):
+        # Catches: a bare "Recovered:" with nothing below it passes as a present line.
+        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Handoff gave: none\n> Recovered:\n> **Next** ship it"
+        out = self.stop(self.compacted_turn(reply))
+        self.assertBlocksNaming(out)
+        self.assertIn("Recovered line", out["reason"])
+
+
+class CompactionCarryCostTests(unittest.TestCase):
+    """The compaction-carry check reads the transcript it already opens: no process, and no file
+    except the marker a missing-report block already writes."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.sid = "cc-" + uuid.uuid4().hex
+        self.home = os.path.join(self.folder, "home")
+        self.config = os.path.join(self.home, ".claude")
+        os.makedirs(self.config)
+
+    def files(self):
+        found = set()
+        for root, _dirs, names in os.walk(self.folder):
+            found.update(os.path.join(root, name) for name in names)
+        return found
+
+    def run_hook(self, records):
+        write_transcript(records, self.folder)
+        hook = {"hook_event_name": "Stop", "transcript_path": os.path.join(self.folder, "transcript.jsonl"),
+                "stop_hook_active": False, "session_id": self.sid}
+        env = dict(os.environ, HOME=self.home, CLAUDE_CONFIG_DIR=self.config,
+                   CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        before = self.files()
+        run = run_guard(REPORT_GUARD, hook, env=env, refuse_process=True)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        self.assertNotIn("tried to start a process", run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else None
+        return out, sorted(self.files() - before)
+
+    def test_cc_cost_recovered_block_starts_no_process_and_writes_no_file(self):
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_NO_LINE)]
+        out, new = self.run_hook(records)
+        # The block shows the check ran, so the cost below is the check's own.
+        self.assertIsNotNone(out, "no block: the check did not run on the compacted turn")
+        self.assertIn("Recovered guard", out["reason"])
+        self.assertEqual(new, [], "the check wrote files: %r" % new)
+
+    def test_cc_cost_missing_report_writes_only_the_marker(self):
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("All done.")]
+        out, new = self.run_hook(records)
+        self.assertIsNotNone(out, "no missing-report block")
+        self.assertIn("Send the report now", out["reason"])
+        self.assertEqual([os.path.basename(path) for path in new], [self.sid + ".report-block"])
+
+    def test_cc_cost_both_lines_pass_starts_no_process_and_writes_no_file(self):
+        records = [human("do the task"), compact_boundary(), compact_summary(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(REPORT_BOTH_SOURCED)]
+        out, new = self.run_hook(records)
+        self.assertIsNone(out, "a block on a report that carries both lines: %r" % out)
+        self.assertEqual(new, [], "the check wrote files: %r" % new)
 
 
 class PickGuardTests(unittest.TestCase):
@@ -1137,9 +1645,8 @@ class PickGuardTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
                 self.assertIn("question box", out["reason"])
-                # Catches: the refusal naming the box as allowed only with nothing running.
-                self.assertRegex(out["reason"], r"question box[^.]*only with nothing running|"
-                                                r"only with nothing running[^.]*question box")
+                # Catches: the refusal dropping the box's nothing-running condition (spec v2 block text).
+                self.assertRegex(out["reason"], r"nothing running[^.]*question box")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1159,8 +1666,9 @@ class PickGuardTests(unittest.TestCase):
         out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
         self.assertIsNotNone(out)
 
-    def test_pk_red_page_write_without_link_in_reply_blocks(self):
-        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
+    def test_pk_green_page_write_without_link_passes(self):
+        # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks
@@ -1169,25 +1677,23 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, calls))
 
     def test_pk_red_pick_with_no_link_blocks_whatever_the_calls(self):
-        # With no link in the reply, the pick blocks whatever the calls: another collection, a get, or
-        # an items update (decisions-reach-a-clickable-pick).
-        for call in (self.page_set(collection="notes"), self.page_set(action="get"),
-                     self.page_set(action="update")):
+        # Catches: another collection or a get passing as the send. An items update passes (the green test below).
+        for call in (self.page_set(collection="notes"), self.page_set(action="get")):
             with self.subTest(call=call):
                 self.assertIsNotNone(self.verdict(self.PICK, [call]))
 
-    def test_pk_green_link_passes_whatever_the_calls(self):
-        # A reply that holds this repo's waiting page URL passes, whatever ArtifactData calls the
-        # turn made (decisions-reach-a-clickable-pick).
+    def test_pk_red_page_link_alone_blocks_whatever_the_calls(self):
+        # A page link alone is not a send. A link only shows the page; nothing reaches the writer, so the question still blocks.
         reply = self.PICK + "\n" + self.PAGE
         for calls in ([], [self.page_set(collection="notes")], [self.page_set(action="get")]):
             with self.subTest(calls=calls):
-                self.assertIsNone(self.verdict(reply, calls))
+                self.assertIsNotNone(self.verdict(reply, calls))
 
-    def test_pk_red_unknown_page_only_the_box_passes(self):
+    def test_pk_green_unknown_page_box_and_write_pass(self):
+        # With no waiting page, the box or the writer's items write still passes (spec v2, "No page").
         bare = os.path.join(self.tmp.name, "bare")
         os.makedirs(os.path.join(bare, ".git"))
-        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
+        self.assertIsNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
     def test_pk_green_update_and_batch_writes_pass(self):
@@ -1198,7 +1704,7 @@ class PickGuardTests(unittest.TestCase):
         reply = self.PICK + "\n" + self.PAGE
         self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
         self.assertIsNone(self.verdict(reply, [batch]))
-        self.assertIsNone(self.verdict(reply, [other]))
+        self.assertIsNotNone(self.verdict(reply, [other]))
         self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
@@ -1211,21 +1717,20 @@ class PickGuardTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Pick guard", out["reason"])
 
-    def test_pk_green_reply_links_this_repos_page_with_no_write_passes(self):
-        # Chat first, then the page (questions-go-to-owner): the session sends the question to the
-        # page's writer, so its reply links the page and it writes nothing itself.
-        self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
+    def test_pk_red_reply_links_page_with_no_write_blocks(self):
+        # A link to the page with no write does not reach the writer, so a pick with only that link still blocks.
+        self.assertIsNotNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
 
-    def test_pk_green_five_minute_wait_names_the_page_with_no_box_passes(self):
-        # Chat first, then the page (questions-go-to-owner): after 5 minutes unanswered in chat, the
-        # question goes to the page.
+    def test_pk_red_five_minute_promise_blocks(self):
+        # A promise to send after 5 minutes passes nothing. The question must reach the page writer in its
+        # own turn, so a wait does not count as a send.
         for phrase in ("5 min", "5 minutes", "5-minute", "five minutes"):
             with self.subTest(phrase=phrase):
                 reply = ("> **Done** OTHER read the code\n"
                          "> **Input Needed** Two ways. Ask in chat; after %s unanswered it goes to the "
                          "waiting page.\n> A (my pick): fold the guard\n> B: add a second hook\n> "
                          + self.DEPARTS_LINE + "\n> **Next** wait") % phrase
-                self.assertIsNone(self.verdict(reply))
+                self.assert_pick_blocked(reply)
 
     def test_pk_red_wait_needs_both_words_blocks(self):
         # Catches: a 5-minute wait with no page word, and a page word with no 5-minute wait.
@@ -1251,21 +1756,26 @@ class PickGuardTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assert_pick_blocked(reply)
 
-    def test_pk_red_wait_without_a_waiting_page_blocks(self):
-        # Catches: the 5-minute wait and the page words in a repo whose layout gives no waiting page,
-        # with no extras file and with an extras file that has no waiting-page key.
+    def test_pk_green_wait_without_a_waiting_page_is_not_blocked(self):
+        # Catches: a repo with no waiting page (no extras file, or one with no waiting-page key) blocked on
+        # the wait. Such a pick is not blocked; the hook says it was not sent (spec v2, "No page").
         reply = ("> **Done** OTHER read the code\n"
                  "> **Input Needed** Two ways. After 5 minutes unanswered it goes to the waiting page.\n"
-                 "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait")
+                 "> A (my pick): fold the guard\n> B: add a second hook\n> " + self.DEPARTS_LINE + "\n"
+                 "> **Next** wait")
         bare = os.path.join(self.tmp.name, "bare")
         os.makedirs(os.path.join(bare, ".git"))
-        self.assert_pick_blocked(reply, repo=bare)
         nokey = os.path.join(self.tmp.name, "nokey")
         os.makedirs(os.path.join(nokey, ".git"))
         os.makedirs(os.path.join(nokey, ".claude"))
         with open(os.path.join(nokey, ".claude", "layout-extras.json"), "w") as f:
             json.dump({"kinds": {}}, f)
-        self.assert_pick_blocked(reply, repo=nokey)
+        for repo in (bare, nokey):
+            with self.subTest(repo=repo):
+                out = self.verdict(reply, repo=repo)
+                self.assertIsNotNone(out, "the unsent pick was not reported")
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn("no waiting page", out.get("systemMessage", ""))
 
     def test_pk_red_other_minute_counts_block(self):
         # Catches: the five-minute wait read inside a longer number, such as 15, 25 or 35, or a
@@ -1284,18 +1794,16 @@ class PickGuardTests(unittest.TestCase):
 
     def test_pk_green_no_false_alarm(self):
         rows = [
-            # Catches: a plain ask with no options refused.
-            "> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
             # Catches: a quoted earlier answer read as a pick.
             "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait",
             "> **Done** OTHER read it\n> **Input Needed** A decision is open. B was the old plan.",
             # Catches: options outside Input Needed read as a pick.
             "> **Done** OTHER two ways: A (my pick) or B\n> **Next**\n> 1. one\n> 2. two",
-            # Catches: "X or Y" in a plain ask read as a pick.
-            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply?",
-            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code?",
-            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field?",
-            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field?",
+            # Catches: "X or Y" in a plain ask read as a pick. No question mark, so no question either (spec v2.1).
+            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply.",
+            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code.",
+            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field.",
+            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field.",
             # Catches: numbered separate asks read as options.
             "> **Done** OTHER read it\n> **Input Needed**\n> 1. Approve the cap raise.\n> 2. Confirm the date.",
             # No Input Needed label.
@@ -1365,7 +1873,8 @@ class PickGuardTests(unittest.TestCase):
         for row in rows:
             for landed in (False, True):
                 with self.subTest(row=row, landed=landed):
-                    self.assertIsNone(self.verdict(row, landed=landed))
+                    # The "?" row is a question under spec v2.1, so it carries the box to pass.
+                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed))
 
     def test_dp_one_predicate_for_the_report_and_the_chat_box(self):
         # Catches: a report copy of the rule that judges a line the chat box does not. Both read question_form.
@@ -1414,6 +1923,457 @@ class PickGuardTests(unittest.TestCase):
                 with self.subTest(line=line, landed=landed):
                     reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
                     self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
+
+
+import itertools
+_CALL_IDS = itertools.count(1)
+
+
+class SameTurnWriter:
+    """The same-turn send a question needs: an ArtifactData get of the page's meta, whose result names the
+    writer, then a send to that writer id. A TestCase mixes it in and sets PAGE to the waiting page its repo
+    names."""
+
+    WRITER = "session_writer1"
+
+    def call(self, name, input_, result=None, side=False):
+        """The records one tool call leaves: the call, and its result when one is given."""
+        use_id = "toolu_%d" % next(_CALL_IDS)
+        recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
+        if result is not None:
+            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
+        return recs
+
+    def send(self, session_id=None, to=None):
+        """A send: send_message names its target by session_id, SendMessage by to."""
+        if to is None:
+            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
+        return self.call("SendMessage", {"to": to, "message": "pick"})
+
+    def writer_read(self, writer, collection="meta", doc_id="page"):
+        """An ArtifactData get whose result carries the writer id."""
+        return self.call("ArtifactData", {"action": "get", "collection": collection, "doc_id": doc_id,
+                                          "url": self.PAGE},
+                         result=json.dumps({"writer": writer, "url": self.PAGE}))
+
+
+class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
+    """Every question for the owner reaches the page writer in the turn it is asked. A question is an
+    offered pick, or an Input Needed sentence ending in "?" outside quotes. The Stop check reads the turn
+    alone: no clock, no state file.
+    Owner-facing turn: the question box (main session), a send to the writer id, or an ArtifactData set,
+    update or batch under collection items. Lane turn: a send to @parent or the parent id, or to the writer
+    id. A promise, a page link, a box or an items write passes nothing in a lane."""
+
+    PAGE = "https://claude.ai/artifact/waitpage2"
+    OLDER_WRITER = "session_writer0"
+    PARENT = "session_parent1"
+    LANE_ENV = "cse_lane1"  # override.remote_session_id() reads this as LANE_ID
+    LANE_ID = "session_lane1"
+    DEPARTS = "Departs from: lint/report_guard.py pick check — it also needs a Departs from line"
+    PICK = ["Two ways:", "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
+    PROMISE = ["Ask in chat; after 5 minutes unanswered it goes to the waiting page.",
+               "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
+    LINKED = PICK + [PAGE]
+    QUESTION = ["Close q_max #969 as replaced by #1010?"]
+
+    def setUp(self):
+        self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.run_dir, ignore_errors=True)
+        self.cfg = os.path.join(self.run_dir, "cfg")
+        self.home = os.path.join(self.run_dir, "home")
+        os.makedirs(self.cfg)
+        os.makedirs(self.home)
+        self.repo = self.make_repo("repo")
+
+    def make_repo(self, name, page=True):
+        repo = os.path.join(self.run_dir, name)
+        os.makedirs(os.path.join(repo, ".git"))
+        if page:
+            os.makedirs(os.path.join(repo, ".claude"))
+            with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
+                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+        return repo
+
+    def reply(self, body):
+        """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
+        landed turn passes the report's shape."""
+        lines = ["> **Done** BUILT abc123", "> **Input Needed** " + body[0]]
+        lines += ["> " + line for line in body[1:]]
+        return "\n".join(lines + ["> **Next** wait"])
+
+    def items_write(self, action="set", collection="items"):
+        return self.call("ArtifactData", {"action": action, "collection": collection, "url": self.PAGE,
+                                          "doc_id": "q1", "data": {}})
+
+    def items_batch(self):
+        return self.call("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]})
+
+    def box(self, side=False):
+        return self.call("AskUserQuestion", {}, side=side)
+
+    def lane_record(self, tags=("cs-build:lane",), parent=PARENT):
+        """This session's own get_session result. A lane tag or a parent id marks a lane."""
+        ccr = {"id": self.LANE_ID, "tags": list(tags), "parent_session_id": parent}
+        return self.call("mcp__claude-code-remote__get_session", {"session_id": self.LANE_ID},
+                         result=json.dumps({"ccr": ccr}))
+
+    def stop(self, records, env_id=None, repo=None, stop_active=False):
+        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing."""
+        path = write_transcript(records, self.run_dir)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_active,
+                "cwd": repo or self.repo}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        if env_id:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = env_id
+        run = run_guard(REPORT_GUARD, hook, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def lane(self, *records, repo=None):
+        """Stop on a lane: its own record first, then `records`. A lane's input is peer messages."""
+        return self.stop([*self.lane_record(), *records], env_id=self.LANE_ENV, repo=repo)
+
+    def assert_blocked(self, out, *phrases):
+        self.assertIsNotNone(out, "the question passed; expected a block")
+        self.assertEqual(out.get("decision"), "block", out)
+        for phrase in phrases:
+            self.assertIn(phrase, out.get("reason", ""), out)
+
+    def written_files(self):
+        return [os.path.join(d, name) for top in (self.cfg, self.home)
+                for d, _, names in os.walk(top) for name in names]
+
+    # Owner-facing turn.
+
+    def test_qm_red_question_mark_sentence_blocks_with_no_send(self):
+        # Catches: an Input Needed sentence ending in "?" read as no question, so it never reaches the page.
+        out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_question_mark_rows_block(self):
+        # Catches: a plain "X or Y?" ask with no box or send passing as a non-pick (spec v2.1).
+        rows = ("Should the guard also cover Codex? I wait.", "Does Q or A mode apply?",
+                "Rename I or U in the code?", "Is X or Y the field?", "Is A or B the field?")
+        for row in rows:
+            with self.subTest(row=row):
+                self.assert_blocked(self.stop([human("decide"), assistant_text(self.reply([row]))]), "Pick guard")
+
+    def test_qm_green_question_mark_in_a_quoted_past_question_is_no_question(self):
+        # Catches: a "?" inside a quoted past question read as a question asked now (false alarm).
+        out = self.stop([human("decide"), assistant_text(self.reply(['You asked "merge it?" and I picked A.']))])
+        self.assertIsNone(out)
+
+    def test_qm_green_turn_with_no_question_has_no_output_and_no_file(self):
+        # Catches: a turn with no question writing a file, or printing a block.
+        out = self.stop([human("status?"), assistant_text(self.reply(["None."]))])
+        self.assertIsNone(out)
+        self.assertEqual(self.written_files(), [])
+
+    def test_qm_green_box_in_the_turn_passes(self):
+        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out)
+
+    def test_qm_red_sidechain_box_does_not_count(self):
+        # Catches: an agent's box read as the owner's question box.
+        out = self.stop([human("decide"), *self.box(side=True), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_send_to_the_writer_passes(self):
+        # Catches: a send to the writer id not read as the send, in either field.
+        for label, send in (("session_id", self.send(session_id=self.WRITER)),
+                            ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_send_to_another_session_blocks(self):
+        # Catches: a send to a session that is not the writer passing as the question's send.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER),
+                         *self.send(session_id="session_other9"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
+    def test_qm_red_unknown_writer_blocks_and_names_the_page_read(self):
+        # Catches: a send to an id that no meta/page read named passing; the block says how to find the writer.
+        out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", "meta/page", self.PAGE, "ArtifactData get")
+
+    def test_qm_red_writer_from_another_item_does_not_count(self):
+        # Catches: a writer id read from a get of another item taken as the page writer.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER, collection="items", doc_id="q1"),
+                         *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", "meta/page")
+
+    def test_qm_green_newest_writer_read_names_the_writer(self):
+        # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
+        reads = [*self.writer_read(self.OLDER_WRITER), *self.writer_read(self.WRITER)]
+        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                     assistant_text(self.reply(self.PICK))]))
+        out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
+                         assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
+    def test_qm_green_items_write_in_the_turn_passes(self):
+        # Catches: the writer's own items write (set, update, batch) not read as the send.
+        for label, write in (("set", self.items_write("set")), ("update", self.items_write("update")),
+                             ("batch", self.items_batch())):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_qm_red_items_read_or_other_collection_does_not_count(self):
+        # Catches: a read, or a write to another collection, passing as the send.
+        for label, write in (("get", self.items_write("get")), ("notes", self.items_write("set", "notes"))):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_act_in_an_earlier_turn_does_not_count(self):
+        # Catches: a send, a box or an items write from an earlier turn passing for this turn's question.
+        earlier = (("send", [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)]),
+                   ("box", self.box()),
+                   ("items", self.items_write("set")))
+        for label, act in earlier:
+            with self.subTest(act=label):
+                out = self.stop([human("first"), *act, assistant_text("Sent earlier."), human("decide"),
+                                 assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_send_before_a_peer_message_does_not_count(self):
+        # Catches: a send before the last incoming message (a peer's) read as this turn's send.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER), *self.send(session_id=self.WRITER),
+                         peer_msg("status?"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_ack_from_the_writer_after_a_send_keeps_the_turn(self):
+        # Catches: the writer's ack of this turn's send starting a new turn, which hides the send and blocks
+        # a question that send already covers. The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send, ack,
+                                 assistant_text(self.reply(["Close q_max #969?"]))])
+                self.assertIsNone(out)
+
+    def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # so the reply that follows it has no send and blocks.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER),
+                         peer_msg("status?", from_session=self.WRITER),
+                         assistant_text(self.reply(["Close q_max #969?"]))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_promise_words_or_page_link_alone_block(self):
+        # Catches: the 5-minute promise, or a page link, passing a question with no send (both clauses retired).
+        for body in (self.PROMISE, self.LINKED):
+            with self.subTest(body=body[0]):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_no_page_is_not_blocked_and_says_so(self):
+        # Catches: a repo with no waiting page (or no repo) blocked, or the pick left unreported.
+        bare = self.make_repo("bare", page=False)
+        loose = os.path.join(self.run_dir, "loose")
+        os.makedirs(loose)
+        for label, body, repo in (("pick", self.PICK, bare), ("promise", self.PROMISE, bare),
+                                  ("no repo", self.PICK, loose)):
+            with self.subTest(case=label):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))], repo=repo)
+                self.assertIsNotNone(out, "the unsent pick was not reported")
+                self.assertNotEqual(out.get("decision"), "block", out)
+                self.assertIn("pick not sent", out.get("systemMessage", ""))
+                self.assertIn("no waiting page", out.get("systemMessage", ""))
+
+    def test_qm_green_stop_hook_active_never_blocks(self):
+        # Catches: a rewrite blocked again for a question the first Stop already judged.
+        for body in (self.PICK, self.QUESTION):
+            with self.subTest(body=body[0]):
+                out = self.stop([human("decide"), assistant_text(self.reply(body))], stop_active=True)
+                self.assertIsNone(out)
+
+    def test_qm_landed_turn_follows_the_same_rule(self):
+        commit = self.call("Bash", {"command": "git commit -m x"})
+        self.assert_blocked(self.stop([human("decide"), *commit, assistant_text(self.reply(self.PICK))]),
+                            "Pick guard")
+        self.assertIsNone(self.stop([human("decide"), *commit, *self.writer_read(self.WRITER),
+                                     *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
+
+    def test_qm_green_own_record_without_a_lane_tag_is_owner_facing(self):
+        # Catches: a session record with no lane tag and no parent read as a lane, which would refuse the box.
+        out = self.stop([human("decide"), *self.lane_record(tags=("coordinator",), parent=None), *self.box(),
+                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV)
+        self.assertIsNone(out)
+
+    def test_qm_red_peer_only_session_with_no_lane_record_gets_the_owner_rule(self):
+        # Catches: the early return when no human record exists, which skips the pick check.
+        out = self.stop([peer_msg("status?"), assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_question_mark_before_markup_blocks(self):
+        # Catches: a "?" followed by bold, a closing bracket, a dash or a closing curly quote read as no question.
+        for body in ("**Merge #5 now?**", "(merge it now?)", "Merge it now?—", "Merge it now?”"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_url_query_alone_is_no_question(self):
+        # Catches: a "?" inside a URL read as a question. A "?" counts only before whitespace or the end.
+        out = self.stop([human("decide"), assistant_text(self.reply(["https://x.y/a?b=1"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_lone_quote_does_not_hide_a_question(self):
+        # Catches: a lone double quote paired with a later one, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(['Set 5" rack, merge it? Pick "main".']))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_single_quoted_past_question_is_no_question(self):
+        # Catches: a "?" inside a single-quoted past question read as a question asked now (false alarm).
+        out = self.stop([human("decide"), assistant_text(self.reply(["You asked 'merge it?' and I picked A"]))])
+        self.assertIsNone(out)
+
+    def test_qm_red_question_mark_before_a_word_or_link_markup_blocks(self):
+        # Catches: a "?" followed by a dash and a word, or by the closing bracket of link markup,
+        # read as no question.
+        for body in ("Merge it now?—yes", "[Merge #5?](https://x.y/5)"):
+            with self.subTest(body=body):
+                out = self.stop([human("decide"), assistant_text(self.reply([body]))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_lone_single_quote_does_not_hide_a_question(self):
+        # Catches: a lone apostrophe paired with a later single quote, which hides the "?" that falls between them.
+        out = self.stop([human("decide"), assistant_text(self.reply(["Don't merge it? Pick 'main'."]))])
+        self.assert_blocked(out, "Pick guard")
+
+    def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
+        # Catches: a session with no own record whose question goes to its parent, refused as if it had no route.
+        for label, send in (("@parent", self.send(session_id="@parent")), ("to parent", self.send(to="parent"))):
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    FRESH_QUESTION_CODE = (
+        "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
+        "print(json.dumps(list(report_guard.question_problem(data['records'], data['records'], data['text'], "
+        "data['hook']))))" % HERE)
+
+    def test_qm_question_problem_works_on_a_fresh_import(self):
+        # Catches: question_problem reaching for hooks/ modules that only pending_refusals puts on sys.path, so a
+        # caller that imports report_guard and asks straight away fails with ImportError.
+        records = [human("decide"), assistant_text(self.reply(self.QUESTION))]
+        hook = {"hook_event_name": "Stop", "transcript_path": write_transcript(records, self.run_dir),
+                "stop_hook_active": False, "cwd": self.repo}
+        payload = json.dumps({"records": records, "text": self.reply(self.QUESTION), "hook": hook})
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        run = subprocess.run([sys.executable, "-c", self.FRESH_QUESTION_CODE], input=payload, capture_output=True,
+                             text=True, timeout=15, cwd=self.run_dir, env=env)
+        self.assertEqual(run.returncode, 0, "question_problem raised on a fresh import: %s" % run.stderr[-400:])
+        refusal, _note = json.loads(run.stdout)
+        self.assertIn("Pick guard", refusal)
+
+    # Lane turn.
+
+    def test_ln_green_send_to_parent_in_the_turn_passes(self):
+        # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
+        # The human-first shape is red on main: main checks it and blocks, where a peers-only lane is skipped.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
+                 ("to parent", self.send(to="parent")))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, form=label):
+                    self.assertIsNone(self.lane(*incoming, *send, assistant_text(self.reply(self.PICK))))
+
+    def test_ln_red_promise_or_page_link_alone_blocks(self):
+        # Catches: a lane's promise or page link passing; a lane's chat never reaches the owner.
+        for body in (self.PROMISE, self.LINKED):
+            with self.subTest(body=body[0]):
+                out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
+                self.assert_blocked(out, "Lane pick guard", "@parent")
+
+    def test_ln_red_box_or_items_write_blocks(self):
+        # Catches: a lane's box or items write read as its send. Neither passes a lane.
+        for label, act in (("box", self.box()), ("items", self.items_write("set"))):
+            with self.subTest(act=label):
+                out = self.lane(peer_msg("pick?"), *act, assistant_text(self.reply(self.PICK)))
+                self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_green_send_to_writer_passes(self):
+        # Catches: a lane's send to the writer id not read as its send, in either field and either shape.
+        shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
+        forms = (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER)))
+        for shape, incoming in shapes:
+            for label, send in forms:
+                with self.subTest(shape=shape, field=label):
+                    out = self.lane(*self.writer_read(self.WRITER), *incoming, *send,
+                                    assistant_text(self.reply(self.PICK)))
+                    self.assertIsNone(out)
+
+    def test_ln_red_send_to_another_session_blocks(self):
+        # Catches: a lane's send to a session that is neither its parent nor the writer.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="session_other9"),
+                        assistant_text(self.reply(self.PICK)))
+        self.assert_blocked(out, "Lane pick guard", "@parent")
+
+    def test_ln_red_send_in_an_earlier_turn_blocks(self):
+        # Catches: a send before the lane's last incoming message passing as this turn's send.
+        out = self.lane(peer_msg("first"), *self.send(session_id="@parent"), peer_msg("second"),
+                        assistant_text(self.reply(self.PICK)))
+        self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_green_ack_from_the_parent_after_a_send_keeps_the_turn(self):
+        # Catches: the parent's ack of a lane's send starting a new turn, which hides the send and blocks the question.
+        # The ack is a peer message from the session the send went to.
+        ack = peer_msg("got it", from_session=self.PARENT)
+        forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
+                 ("to parent", self.send(to="parent")))
+        for label, send in forms:
+            with self.subTest(form=label):
+                self.assertIsNone(self.lane(*send, ack, assistant_text(self.reply(["Close q_max #969?"]))))
+
+    def test_ln_red_peer_from_the_parent_with_no_send_starts_a_turn(self):
+        # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
+        # and the reply that follows it blocks.
+        self.assert_blocked(self.lane(peer_msg("pick?", from_session=self.PARENT),
+                                      assistant_text(self.reply(["Close q_max #969?"]))), "Lane pick guard")
+
+    def test_ln_landed_turn_follows_the_lane_rule(self):
+        commit = self.call("Bash", {"command": "git commit -m x"})
+        self.assert_blocked(self.lane(peer_msg("pick?"), *commit, assistant_text(self.reply(self.PICK))),
+                            "Lane pick guard")
+        self.assertIsNone(self.lane(peer_msg("pick?"), *commit, *self.send(session_id="@parent"),
+                                    assistant_text(self.reply(self.PICK))))
+
+    def test_ln_red_lane_marked_by_tag_or_by_parent_blocks(self):
+        # Catches: a lane recognised by one of its two marks only.
+        for label, record in (("tag only", self.lane_record(tags=("cs-build:lane",), parent=None)),
+                              ("parent only", self.lane_record(tags=(), parent=self.PARENT))):
+            with self.subTest(mark=label):
+                out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))],
+                                env_id=self.LANE_ENV)
+                self.assert_blocked(out, "Lane pick guard")
+
+    def test_ln_red_lane_with_no_page_still_blocks(self):
+        # Catches: a lane failed open because its repo has no waiting page.
+        bare = self.make_repo("bare", page=False)
+        self.assert_blocked(self.lane(peer_msg("pick?"), assistant_text(self.reply(self.PICK)), repo=bare),
+                            "Lane pick guard")
+
+    def test_ln_red_question_mark_sentence_blocks(self):
+        # Catches: a lane's "?" sentence with no send read as no question (spec v2.1).
+        self.assert_blocked(self.lane(peer_msg("pick?"), assistant_text(self.reply(self.QUESTION))),
+                            "Lane pick guard")
+
+    def test_ln_green_stop_hook_active_never_blocks(self):
+        # Catches: a lane's rewrite blocked again for a question the first Stop already judged.
+        out = self.stop([*self.lane_record(), peer_msg("pick?"), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, stop_active=True)
+        self.assertIsNone(out)
 
 
 class ConfigReportTests(unittest.TestCase):
@@ -1905,6 +2865,434 @@ class PromotedRuleTests(unittest.TestCase):
         self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
         self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
         self.assertEqual(set(severities), set(ERROR_CODES) | set(ADVISORY_CODES), "a rule has no ruling")
+
+
+# rewrite-cite-predates-ruling (the rewrite-stamp check in report_guard.py, Stop, landed turns): a reply
+# that says decision D was rewritten for a ruling blocks when D's record was last committed before that
+# ruling, on any branch or on HEAD. Each case builds its own git repo. Every commit takes its
+# date from GIT_COMMITTER_DATE, so the check reads real history. Each case states the result the check
+# must give; a case that fails names a gap in the check, not in the fixture.
+RULING = "2026-11-01 18:44 CST"
+RULING_SENTENCE = "RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling of %s (PR #1001)" % RULING
+D_LAST_COMMIT = "2026-10-28T22:30:00-05:00"  # late in the Central evening, so the UTC day is the next one
+NOW = "2026-11-01T14:00:00-06:00"  # LOCAL_TIME_NOW: the hook's clock, on the ruling's own date
+
+
+def done_reply(done):
+    return "> **Done** %s\n> **Next** none" % done
+
+
+def write_file(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+class DecisionRepo:
+    """A git repo whose default branch is `main`. Records sit where the layout puts the decisions kind:
+    docs/decisions in a rolled-out repo (its extras file says so), else the legacy decisions/ folder."""
+
+    def __init__(self, folder, rolled_out=True):
+        self.path = folder
+        self.records = "docs/decisions" if rolled_out else "decisions"
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "t")
+        if rolled_out:
+            write_file(os.path.join(folder, ".claude", "layout-extras.json"),
+                       json.dumps({"kinds": {}, "rolled-out": True}))
+        self.touch("2026-10-01T10:00:00Z")
+
+    def _git(self, *args, when=None):
+        env = dict(os.environ)
+        if when:
+            env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = when
+        subprocess.run(["git", "-C", self.path, *args], check=True, capture_output=True, text=True, env=env)
+
+    def commit(self, when, *records):
+        """One commit, dated `when`, that writes one file for each record id in `records`."""
+        for rec in records:
+            write_file(os.path.join(self.path, self.records, rec + ".md"),
+                       "# %s\n\nRevision of %s.\n" % (rec, when))
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def touch(self, when):
+        """One commit, dated `when`, that moves the tip and touches no record."""
+        write_file(os.path.join(self.path, "README.md"), "Revision of %s.\n" % when)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "fixture " + when, when=when)
+
+    def branch(self, name):
+        self._git("branch", name)
+
+    def switch(self, name):
+        self._git("switch", "-q", name)
+
+    def remote_commit(self, name, when, *records):
+        """One commit, dated `when`, that only the remote-tracking ref origin/<name> holds. HEAD and the
+        local branches never reach it."""
+        temp = "tmp-" + name
+        self._git("switch", "-q", "-c", temp)
+        self.commit(when, *records)
+        self._git("update-ref", "refs/remotes/origin/" + name, "HEAD")
+        self._git("switch", "-q", "main")
+        self._git("branch", "-D", temp)
+
+
+GIT_TRACE_LINE = "trace: built-in: git "
+
+
+def git_process_count(trace_path):
+    """How many git processes wrote to a GIT_TRACE file. Git writes one `built-in: git` line per process."""
+    try:
+        with open(trace_path, encoding="utf-8", errors="replace") as f:
+            return sum(1 for line in f if GIT_TRACE_LINE in line)
+    except FileNotFoundError:
+        return 0
+
+
+class RewriteStampTests(unittest.TestCase):
+    """rewrite-cite-predates-ruling, in report_guard.py's Stop hook. The case numbers are the brief's."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=_ISOLATION["dir"])
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def repo(self, rolled_out=True):
+        return DecisionRepo(tempfile.mkdtemp(dir=self.tmp), rolled_out)
+
+    def red_repo(self):
+        """D's last commit is late in the Central evening, before the ruling. A commit after the ruling
+        moves the tip, so the tip is never D's last commit."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        return repo
+
+    def run_stop(self, repo, reply, landed=True, human_at=None, env_extra=None):
+        first = human("do the task")
+        if human_at:
+            first["timestamp"] = human_at
+        records = [first]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=self.tmp))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                "cwd": repo.path}
+        env = dict(os.environ, LOCAL_TIME_NOW=NOW)
+        env.update(env_extra or {})
+        return run_guard(REPORT_GUARD, hook, env=env)
+
+    def assertBlocks(self, run, *parts):
+        """The guard blocks, and the block's reason names each of `parts`. Stdout is checked before
+        it is parsed, so a missing block fails here and never as a JSON error."""
+        self.assertTrue(run.stdout.strip(), "no rewrite-stamp block. stderr: " + run.stderr[-300:])
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block", out)
+        for part in parts:
+            self.assertIn(part, out.get("reason", ""))
+
+    def assertPasses(self, run):
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "")
+
+    def test_f119_replay_reconstructed_blocks(self):
+        """Case 1. The reply uses the wording the PR body holds. The incident's own chat text is lost, so
+        this is a reconstruction. The variants change only the rewrite wording and the text around the stamp."""
+        repo = self.red_repo()
+        variants = {
+            "reconstructed": RULING_SENTENCE,
+            "rewritten": "RECORDED: decision `ci-job-caps` rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrites": "RECORDED: rewrites decision `ci-job-caps` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "rewrite of": "RECORDED: a rewrite of decision `ci-job-caps`, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            # Catches: a lone quote, a `//` and a `#` in one sentence hide the rewrite or the id.
+            "lone quote and URL": "RECORDED: rewrote decision `ci-job-caps` in place, for the owner's ruling of 2026-11-01 18:44 CST (PR #1001, https://github.com/shivinate7/claude-settings/pull/1001#issuecomment-2)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                run = self.run_stop(repo, done_reply(done))
+                self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+                self.assertNotIn("2026-10-29", run.stdout)  # the date is Central, not UTC
+
+    def test_ruling_stamp_zone_is_read_as_central(self):
+        """Case 1, zone. D's last commit is 14:00 CST on the ruling's own date, so it predates the 18:44 CST
+        ruling. Read as UTC, the ruling falls before D and the check stays quiet."""
+        repo = self.repo()
+        repo.commit("2026-11-01T14:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-11-01", "18:44")
+
+    def test_decisions_folder_comes_from_layout(self):
+        """Case 1, folder. The record sits where layout.path() puts the decisions kind: docs/decisions in a
+        rolled-out repo, the legacy decisions/ folder in one that has not rolled out."""
+        for rolled_out in (True, False):
+            with self.subTest(rolled_out=rolled_out):
+                repo = self.repo(rolled_out)
+                repo.commit(D_LAST_COMMIT, "ci-job-caps")
+                repo.touch("2026-11-02T09:00:00Z")
+                self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)),
+                                  "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_under_or_by_R_without_a_stamp_passes(self):
+        """Case 3, flipped to green. With no stamp there is no ruling time. R's later commit is no fallback:
+        a typo fix on R would make the check cry wolf. R is committed after D, as before."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.commit("2026-10-30T16:00:00Z", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        variants = {
+            "under R": "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)",
+            "under decision R": "RECORDED: decision `ci-job-caps` rewritten under decision `test-strategy-reset` (PR #1002)",
+            "by R": "RECORDED: decision `ci-job-caps` rewritten by test-strategy-reset (PR #1002)",
+        }
+        for name, done in variants.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_r_and_d_in_one_commit_passes(self):
+        """Case 3, green. D's last commit is R's own commit, so D does not predate the ruling."""
+        repo = self.repo()
+        repo.commit("2026-10-30T16:00:00Z", "ci-job-caps", "test-strategy-reset")
+        repo.touch("2026-11-02T09:00:00Z")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` rewritten under test-strategy-reset (PR #1002)")))
+
+    def test_bare_clock_stamp_reads_on_the_turn_date(self):
+        """The `HH:MM <zone>` form, read on the turn's local date. The turn's human record and LOCAL_TIME_NOW
+        name the same Central day. A clock time later than the turn time reads as the day before. The record
+        predates both readings, so the block holds either way."""
+        repo = self.red_repo()
+        reply = done_reply("RECORDED: rewrote decision `ci-job-caps` in place, for the owner ruling at 18:44 CST (PR #1001)")
+        self.assertBlocks(self.run_stop(repo, reply, human_at="2026-11-01T20:00:00Z"),
+                          "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_lane_commit_after_ruling_passes(self):
+        """Case 2, green. HEAD is a lane whose own commit to D is after the ruling. Main's last commit
+        to D predates the ruling, and the lane's commit is the reason the check stays quiet."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.switch("lane")
+        repo.commit("2026-11-02T12:00:00Z", "ci-job-caps")
+        self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_record_committed_after_ruling_on_main_passes_when_head_predates_it(self):
+        """Case 4, green. The record's last commit on main is after the ruling. HEAD is a lane forked before
+        that commit. A block needs the record's last commit, on any branch or on HEAD, to predate the ruling,
+        so the check stays quiet on either HEAD."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.branch("lane")
+        repo.commit("2026-11-01T18:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        for head in ("main", "lane"):
+            with self.subTest(head=head):
+                repo.switch(head)
+                self.assertPasses(self.run_stop(repo, done_reply(RULING_SENTENCE)))
+
+    def test_sentence_without_a_rewrite_word_passes(self):
+        """Case 4, green. The same record and ruling, with no rewrite word in the sentence."""
+        repo = self.red_repo()
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision `ci-job-caps` recorded for the owner ruling of 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_unknown_ids_and_no_time_pass(self):
+        """Case 4, green. An unknown D, an unknown R, and a rewrite that gives no time at all."""
+        repo = self.red_repo()
+        replies = {
+            "unknown D": "RECORDED: rewrote decision `no-such-decision` in place, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown R": "RECORDED: decision `ci-job-caps` rewritten under no-such-decision (PR #1002)",
+            "no time found": "RECORDED: rewrote decision `ci-job-caps` (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_git_missing_passes(self):
+        """Case 4, green. The red fixture, with no git on PATH. test_f119 runs the same fixture with git
+        and blocks."""
+        empty = tempfile.mkdtemp(dir=self.tmp)
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"PATH": empty}))
+
+    def test_git_failing_passes(self):
+        """Case 4, green. Git runs and fails: GIT_DIR names no repository."""
+        no_repo = os.path.join(self.tmp, "no-such-git-dir")
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), env_extra={"GIT_DIR": no_repo}))
+
+    def test_unlanded_turn_passes(self):
+        """Case 5, green. The red fixture and the same reply, on a turn with no git write."""
+        self.assertPasses(self.run_stop(self.red_repo(), done_reply(RULING_SENTENCE), landed=False))
+
+    def test_bare_id_without_a_decision_word_blocks(self):
+        """Red. The id is named bare, with no word "decision", and its record file exists."""
+        run = self.run_stop(self.red_repo(), done_reply(
+            "RECORDED: ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_only_the_stale_id_of_two_blocks(self):
+        """Red. Two ids share one ruling. test-strategy-reset is committed after the ruling, so only
+        ci-job-caps is stale, and the block may name only it."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        run = self.run_stop(repo, done_reply(
+            "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+            "of 2026-11-01 18:44 CST (PR #1001)"))
+        self.assertBlocks(run, "ci-job-caps", "2026-10-28", "18:44")
+        self.assertNotIn("test-strategy-reset", run.stdout)
+
+    def test_not_rewritten_yet_or_will_be_passes(self):
+        """Green. The id is stale, but the sentence says it is not rewritten yet, was not rewritten, or
+        will be rewritten. None of these says a rewrite has happened."""
+        repo = self.red_repo()
+        replies = {
+            "is not rewritten yet": "OTHER: Decision ci-job-caps is not rewritten yet for the owner ruling of 2026-11-01 18:44 CST.",
+            "was not rewritten": "OTHER: Decision ci-job-caps was not rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+            "will be rewritten": "OTHER: Decision ci-job-caps will be rewritten for the owner ruling of 2026-11-01 18:44 CST.",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_stamp_tied_to_the_ruling_wins_over_a_later_merge_stamp(self):
+        """Green. The sentence holds two stamps. The one tied to "ruling" is the ruling time. The merge
+        stamp is later than the record's commit, so reading it as the ruling time would block."""
+        repo = self.repo()
+        repo.commit("2026-11-02T08:50:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: decision ci-job-caps was rewritten in PR 1001 (merged 2026-11-02 09:00 CST) "
+            "for the owner ruling of 2026-11-01 18:44 CST")))
+
+    def test_reply_with_no_recorded_id_runs_no_git(self):
+        """Cost. A rewrite word with no id that has a record runs no git process."""
+        repo = self.red_repo()
+        replies = {
+            "no id": "RECORDED: rewrote a record in place for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+            "unknown id": "RECORDED: rewrote decision `no-such-decision` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertEqual(git_process_count(trace), 0)
+
+    def test_matching_reply_runs_at_most_one_git_process_per_cited_id(self):
+        """Cost. A reply that cites ids with records runs at most one git process per cited id."""
+        repo = self.red_repo()
+        repo.commit("2026-11-02T10:00:00-06:00", "test-strategy-reset")
+        replies = (
+            ("one id", 1, "RECORDED: decision ci-job-caps was rewritten for the owner ruling of 2026-11-01 18:44 CST (PR #1001)"),
+            ("two ids", 2, "RECORDED: Decisions test-strategy-reset and ci-job-caps were rewritten for the owner ruling "
+                           "of 2026-11-01 18:44 CST (PR #1001)"),
+        )
+        for name, cited, done in replies:
+            with self.subTest(variant=name):
+                trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+                self.run_stop(repo, done_reply(done), env_extra={"GIT_TRACE": trace})
+                self.assertLessEqual(git_process_count(trace), cited)
+
+    def test_trace_counter_sees_each_git_process(self):
+        """The counter behind the cost cases. A zero count means the guard ran no git, not that the counter is
+        blind: one plain git process must count as one."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        subprocess.run(["git", "-C", repo.path, "rev-parse", "HEAD"], check=True, capture_output=True,
+                       env=dict(os.environ, GIT_TRACE=trace))
+        self.assertEqual(git_process_count(trace), 1)
+
+    def test_adjacent_stamp_wins_over_a_later_merge_stamp(self):
+        """Green. The stamp next to "ruling" is the ruling time. A later stamp in the same sentence is not,
+        and read as the ruling time it would make a fresh record look stale."""
+        repo = self.repo()
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "OTHER: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling, PR #1001 (merged 2026-11-02 08:00 CST).")))
+
+    def test_queued_negated_or_future_rewrite_sentences_pass(self):
+        """Green. A queued rewrite, a rewrite not needed, one that should or must happen, one that is needed,
+        and one that is pending each say no rewrite has happened. None is blocked."""
+        repo = self.red_repo()
+        sentences = {
+            "queued": "rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST (lane queued).",
+            "not needed": "no rewrite of `ci-job-caps` is needed for the ruling at 2026-11-01 18:44 CST.",
+            "should be rewritten": "`ci-job-caps` should be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "must be rewritten": "`ci-job-caps` must be rewritten for the ruling at 2026-11-01 18:44 CST.",
+            "needs a rewrite": "needs a rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST.",
+            "pending": "the rewrite of `ci-job-caps` for the ruling at 2026-11-01 18:44 CST is pending.",
+        }
+        for name, sentence in sentences.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, "> **Done** OTHER: read the rulings.\n> **Next:** " + sentence))
+
+    def test_only_the_id_next_to_the_rewrite_word_is_checked(self):
+        """Green. other-rec is stale, but it follows "per" and is not the id next to the rewrite word, so the
+        check reads ci-job-caps alone. ci-job-caps is fresh, so the reply passes."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "other-rec")
+        repo.commit("2026-11-01T19:00:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` per `other-rec` for the ruling at 2026-11-01 18:44 CST (PR #1001)")))
+
+    def test_clock_time_later_than_the_turn_means_the_day_before(self):
+        """Green. The turn is 00:20 CST on the day after the ruling. A clock time later than the turn's clock
+        names the day before, so "23:50 CST" is the earlier evening, and the record was rewritten after it."""
+        repo = self.repo()
+        repo.commit("2026-11-01T23:55:00-06:00", "ci-job-caps")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        self.assertPasses(self.run_stop(
+            repo, done_reply("RECORDED: rewrote decision `ci-job-caps` for the 23:50 CST ruling (PR #1001)"),
+            human_at="2026-11-02T06:20:00Z", env_extra={"LOCAL_TIME_NOW": "2026-11-02T00:20:00-06:00"}))
+
+    def test_rewrite_on_a_remote_branch_only_counts(self):
+        """Green. The rewrite is on origin/lane-x only, after the ruling. main and HEAD hold only the stale
+        commit. A rewrite pushed anywhere counts, so the record is not stale."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "ci-job-caps")
+        repo.touch("2026-11-02T09:00:00Z")
+        repo.remote_commit("lane-x", "2026-11-01T19:00:00-06:00", "ci-job-caps")
+        replies = {
+            "bare id": "OTHER: lane rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+            "decision word": "OTHER: lane rewrote decision `ci-job-caps` for the 2026-11-01 18:44 CST ruling (PR draft).",
+        }
+        for name, done in replies.items():
+            with self.subTest(variant=name):
+                self.assertPasses(self.run_stop(repo, done_reply(done)))
+
+    def test_f119_replay_still_blocks_when_no_branch_holds_a_later_commit(self):
+        """Block expectation. Every local and remote branch holds only commits that predate the ruling, so the
+        F119 replay still blocks. This passes on the current head as well."""
+        repo = self.red_repo()
+        repo.branch("lane")
+        repo.remote_commit("lane-y", "2026-10-27T10:00:00-05:00", "other-rec")
+        self.assertBlocks(self.run_stop(repo, done_reply(RULING_SENTENCE)), "ci-job-caps", "2026-10-28", "18:44")
+
+    def test_same_id_in_three_sentences_runs_one_git_process(self):
+        """Cost. The same id cited in three sentences of one reply runs one git process."""
+        repo = self.red_repo()
+        trace = os.path.join(tempfile.mkdtemp(dir=self.tmp), "trace.txt")
+        self.run_stop(repo, done_reply(
+            "RECORDED: Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling. "
+            "Rewrote `ci-job-caps` for the 2026-11-01 18:44 CST ruling again. "
+            "The rewrite of `ci-job-caps` for the 2026-11-01 18:44 CST ruling is on main (PR #1001)."),
+            env_extra={"GIT_TRACE": trace})
+        self.assertEqual(git_process_count(trace), 1)
+
+    def test_ids_with_no_or_queued_before_a_hyphen_do_not_skip_the_sentence(self):
+        """Green. "no" and "queued" are skip words in the check. Inside a hyphenated id they are part of the id,
+        so the sentence is still checked, and a stale record still blocks."""
+        repo = self.repo()
+        repo.commit(D_LAST_COMMIT, "no-x", "queued-x")
+        repo.touch("2026-11-02T12:00:00-06:00")
+        replies = (
+            ("no-x", "RECORDED: Rewrote `no-x` for the 2026-11-01 18:44 CST ruling (PR #1001)."),
+            ("queued-x", "RECORDED: `queued-x` was rewritten for the ruling at 2026-11-01 18:44 CST (PR #1001)."),
+        )
+        for name, done in replies:
+            with self.subTest(variant=name):
+                self.assertBlocks(self.run_stop(repo, done_reply(done)), name, "2026-10-28", "18:44")
 
 
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
@@ -2541,6 +3929,523 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
 
 
+# ------------------------------------------------------------------ relayed questions and option keys
+#
+# A Stop whose reply holds Input Needed, or a prose line ending in `?` outside code fences, gets one past-ruling model
+# call (spec past-rulings, relayed questions). The model is the stub in hooks/test_call_judge.py, set up in setUpModule:
+# CJ_ANSWER is its answer, CJ_MODEL_FAIL makes it fail, and every call is recorded. A model error refuses once with the
+# Unvetted: remedy; an absent source allows with the stderr notice; question-keys refuses two questions on one key.
+MODEL_ENV = ("PYTHONPATH", "CJ_LOADED_DIR", "CJ_RECORD", "CJ_ANSWER", "CJ_MODEL_FAIL")
+RELAY = "> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+PROSE_Q = "Should the GitHub apps keep their access to claude-settings?"
+DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
+FENCED_Q = "```\nkeep the apps?\n```\n> **Done** OTHER read the audit\n> **Next** wait"
+UNVETTED = "Unvetted: the model review could not run, so the owner reads this question unchecked."
+REFUSE_APPS = json.dumps({"ok": False, "reason": "past-ruling: %s, 2026-10-28, already decides this." % tcj.APPS_SLUG})
+KEYS_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
+KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
+                 "> 2a) about 2x\n> 2b) under 80%")
+KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
+KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+
+
+C153_MARK = "c153-5e7a"
+C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settings as is, because calling into a repo "
+                 "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
+
+
+class PastRulingRelay(SameTurnWriter, unittest.TestCase):
+    PAGE = tcj.PAGE_URL  # the waiting page tcj.make_repo names, which the writer read cites
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.record = os.path.join(_ISOLATION["stub"], "calls.jsonl")
+        self.reset_calls()
+        self.decided = tcj.make_repo("relay-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        self.bare = tcj.make_repo("relay-bare")
+        self.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
+
+    def reset_calls(self):
+        for name in ("calls.jsonl", "git.log"):
+            path = os.path.join(_ISOLATION["stub"], name)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def git_starts(self):
+        # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
+        path = os.path.join(_ISOLATION["stub"], "git.log")
+        if not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            return len(f.read().split())
+
+    def model_calls(self):
+        if not os.path.exists(self.record):
+            return []
+        with open(self.record, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False):
+        if records is None:
+            # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
+            sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
+            records = [human("decide"), *sent, assistant_text(reply)]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
+        if model_fail:
+            overrides["CJ_MODEL_FAIL"] = "1"
+        with mock.patch.dict(os.environ, overrides):
+            run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        return out, run.stderr
+
+    @staticmethod
+    def reason(out):
+        return out.get("reason", "") if out.get("decision") == "block" else ""
+
+    def test_relayed_ruling_refuses_with_the_rule_and_the_ruling(self):
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_APPS)
+        calls = self.model_calls()
+        self.assertTrue("past-ruling" in self.reason(out) and tcj.APPS_SLUG in self.reason(out), out)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_absent_sources_allow_with_the_unknown_notice(self):
+        # The send to the writer keeps the question check quiet, so this case tests only the relay's unknown notice.
+        out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW, to_writer=True)
+        self.assertEqual(out, {}, out)
+        self.assertIn("past-ruling search unknown:", err)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_reply_with_neither_input_needed_nor_a_question_makes_no_call(self):
+        out, _ = self.stop(self.ci, DONE_ONLY)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+        self.assertNotIn("past-ruling", self.reason(out))
+
+    def test_prose_question_triggers_the_check(self):
+        self.stop(self.decided, PROSE_Q, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
+
+    def test_question_inside_a_code_fence_does_not_trigger(self):
+        self.stop(self.decided, FENCED_Q)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
+        # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
+        out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
+        self.assertEqual(out, {}, out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_question_keys_refuse_two_questions_with_the_same_keys(self):
+        out, _ = self.stop(self.decided, KEYS_SAME, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_distinct_keys_do_not_trigger_question_keys(self):
+        out, _ = self.stop(self.decided, KEYS_DISTINCT, answer=tcj.ALLOW)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
+    def test_question_keys_see_an_earlier_reply_since_the_last_human(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_unshown_id_cite_takes_the_unvetted_path(self):
+        # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
+        bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
+        out, _ = self.stop(self.decided, RELAY, answer=bogus)
+        self.assertIn("Unvetted:", self.reason(out), out)
+
+    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+        self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.assertEqual(self.git_starts(), 1)
+
+    def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
+        out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_relay_exception_refuses_unvetted_with_a_stderr_line(self):
+        # relay_reasons catches an exception and fails open. A hook cwd that is not a path raises inside the relay
+        # check, and that must refuse with the Unvetted remedy and a stderr line (owner rulings, Nov 1 19:30 CST).
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": 12345}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("past-ruling", run.stderr)
+
+    def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
+        path = write_transcript([human("decide"), assistant_text(RELAY)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True, "cwd": self.decided}
+        with mock.patch.dict(os.environ, {"CJ_ANSWER": REFUSE_APPS}):
+            run = run_guard(REPORT_GUARD, hook)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertTrue("past-ruling" in self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_earlier_blockquote_question_does_not_hide_the_input_needed_item(self):
+        # The c153 replay: an earlier blockquote line ends in "?", then the real Input Needed item asks the ruled question.
+        repo = tcj.make_repo("relay-c153", steps={"c153": C153_SENTENCE})
+        reply = "> Did the last audit finish?\n> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
+        self.stop(repo, reply, answer=tcj.ALLOW)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(C153_MARK, calls[0]["prompt"])
+
+    def test_a_question_mark_inside_a_prose_line_triggers_the_check(self):
+        self.stop(self.decided, "Ship the fix? Say go and I merge.", answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_a_question_in_an_earlier_assistant_text_block_triggers_the_check(self):
+        records = [human("decide"), assistant_text("Ship the fix?"), assistant_text(DONE_ONLY)]
+        self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+
+    def test_an_unvetted_line_beside_a_prose_question_passes_when_the_model_fails(self):
+        # A prose question with no Input Needed item. The Unvetted line beside the question passes it, whether it sits
+        # on its own line, in a blockquote, or on the question line.
+        beside = ("Should the GitHub apps keep their access to claude-settings?\n" + UNVETTED,
+                  "> Should the GitHub apps keep their access to claude-settings?\n> " + UNVETTED,
+                  "Should the GitHub apps keep their access to claude-settings? " + UNVETTED)
+        for reply in beside:
+            self.reset_calls()
+            out, _ = self.stop(self.decided, reply, model_fail=True)
+            self.assertEqual(out, {}, reply)
+
+    def test_a_second_stop_after_a_peer_message_makes_no_call_for_an_old_question(self):
+        # The question was asked on the first Stop. A plain reply after a peer message must not ask it again.
+        first = [human("decide"), assistant_text(PROSE_Q)]
+        self.stop(self.ci, records=first, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1)
+        self.reset_calls()
+        second = first + [peer_msg("status: the lane ended"), assistant_text(DONE_ONLY)]
+        self.stop(self.ci, records=second, answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+        self.assertEqual(self.git_starts(), 0)
+
+    def test_question_keys_keep_their_window_across_a_peer_message(self):
+        records = [human("decide"), assistant_text(KEYS_EARLIER), peer_msg("status: the lane ended"),
+                   assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records, answer=tcj.ALLOW)
+        self.assertIn("question-keys", self.reason(out), out)
+
+    def test_a_question_mark_only_inside_a_code_span_makes_no_call(self):
+        self.stop(self.decided, "Use `keep the apps?` as the probe.", answer=tcj.ALLOW)
+        self.assertEqual(self.model_calls(), [])
+
+    def test_question_keys_pass_an_earlier_reply_before_the_last_human(self):
+        records = [assistant_text(KEYS_EARLIER), human("second"), assistant_text(KEYS_NOW)]
+        out, _ = self.stop(self.decided, records=records)
+        self.assertNotIn("question-keys", self.reason(out), out)
+
+
+
+class AnsweredNeedsSourceTests(unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
+
+    def hook(self, reply, landed=False, stop_hook_active=False):
+        records = [human("ask the owner")]
+        if landed:
+            records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+
+    def verdict(self, reply, **kw):
+        run = run_guard(REPORT_GUARD, self.hook(reply, **kw))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, *needles, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNotNone(out, reply)
+        self.assertEqual(out.get("decision"), "block", reply)
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+        return out
+
+    def assert_allowed(self, reply, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    # Red: each case below fails until the verdict exists.
+
+    def test_an_red_synthetic_f188_replay_blocks(self):
+        # Synthetic replay, not a copy. The real F188 line (docs/plans/owner-feedback-audit.md, decision
+        # answered-needs-source) never used the word. This line stands in for a reply that did.
+        # Catches: a line that says "Answered" with no source passes.
+        self.assert_blocked("Answered: no permission rule can lift it.", "Answered: no permission rule can lift it.")
+
+    def test_an_red_any_case_and_any_position_blocks(self):
+        rows = [
+            # Catches: an upper-case ANSWERED passes, so the match is case-sensitive.
+            "The owner ANSWERED it.",
+            # Catches: the word at the end of a line passes.
+            "The owner said yes and answered",
+            # Catches: a word for a number is read as item <n>.
+            "Item one answered in chat.",
+            # Catches: a lane number is read as a source.
+            "Lane 4 answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_each_offending_line_is_listed_in_one_block(self):
+        # Catches: only the first offending line is listed, or a cited line is listed with the red ones.
+        cited = "Item 143 answered in chat at 17:25 CST."
+        reply = "\n".join(["Answered: no permission rule can lift it.", cited, "The owner answered it."])
+        out = self.assert_blocked(reply, "Answered: no permission rule can lift it.", "The owner answered it.")
+        self.assertNotIn(cited, out["reason"])
+
+    def test_an_red_lone_quote_opens_no_quoted_phrase(self):
+        # Catches: a lone double quote counts as a quoted owner phrase, so a line with no pair passes.
+        self.assert_blocked('Answered 9" after the call.', 'Answered 9" after the call.')
+
+    def test_an_red_quotes_do_not_pair_across_lines(self):
+        # Catches: a quote on one line pairs with a quote on the next line, so the first line passes.
+        first = 'Answered, the owner wrote "no.'
+        self.assert_blocked(first + '\nHe then said "yes" later.', first)
+
+    def test_an_red_fence_marker_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
+        self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
+                            "Typed ``` in the middle, then answered.", "The next line answered too.")
+
+    def test_an_red_text_after_a_closed_fence_is_judged(self):
+        # Catches: a fence that never closes in the scan hides the lines after it.
+        self.assert_blocked("```\nkeep the apps\n```\nAnswered: no permission rule can lift it.",
+                            "Answered: no permission rule can lift it.")
+
+    def test_an_red_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        reply = "Answered: no permission rule can lift it.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_blocked(reply, "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_joins_a_missing_report_in_one_block(self):
+        # Catches: the answered line is dropped when the report is missing, or sent as a second block.
+        reply = "Answered: no permission rule can lift it.\n\nAll done."
+        self.assert_blocked(reply, "Report-shape guard", "Answered: no permission rule can lift it.", landed=True)
+
+    def test_an_red_and_or_is_not_a_repo_path_blocks(self):
+        # Ruling (lane orchestrator, process-only): "and/or" is not a repo path, so the slash in it cites nothing.
+        self.assert_blocked("Answered: use a and/or b.", "Answered: use a and/or b.")
+
+    def test_an_red_double_quoted_phrase_is_no_source(self):
+        # Lane choice (process-only): a double-quoted phrase is no longer a source. This re-points the
+        # quoted-phrase row that the green list held.
+        rows = [
+            # Catches: an owner phrase in double quotes still cites the line.
+            'Answered "no, keep the apps" in chat.',
+            # Catches: a quoted label in a Q-line still cites the line.
+            'Q1 ("Departs from" line) was answered.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_each_source_cites_the_word(self):
+        rows = [
+            # Catches: a URL is not read as a source.
+            "Answered at https://github.com/shivinate7/claude-settings/pull/1008 today.",
+            # Catches: a PR ref #<n> is not read as a source.
+            "Answered on PR #1008.",
+            # Catches: a commit hash is not read as a source.
+            "Answered in commit 1a2b3c4d.",
+            # Catches: a repo path with a slash is not read as a source.
+            "Answered in lint/report_guard today.",
+            # Catches: a repo path ending in a file extension is not read as a source.
+            "Answered in report_guard.py and its tests.",
+            # Catches: item <n> is not read as a source.
+            "Answered in item 143.",
+            # Catches: page:<n> is not read as a source.
+            "Answered on page:12.",
+            # Catches: an fb- inbox id is not read as a source.
+            "fb-1042 answered in chat.",
+            # Catches: a session_ id is not read as a source.
+            "Answered by session_0a1b2c3d4e5f.",
+            # Catches: a Central time HH:MM is not read as a source.
+            "Answered at 17:25 CST.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_docs_path_after_the_word_passes(self):
+        # Brief (b): the synthetic F188 line with a docs path.
+        self.assert_allowed("Answered: no permission rule can lift it. (docs: code.claude.com/docs/en/permissions)")
+
+    def test_an_green_item_and_central_time_pass(self):
+        # Brief (c): the item number and the Central time both cite.
+        self.assert_allowed("Item 143 answered in chat at 17:25 CST.")
+
+    def test_an_green_negations_and_inbox_home_word_pass(self):
+        rows = [
+            # Catches: unanswered is read as the word.
+            "Q2 is unanswered.",
+            # Catches: not answered is read as the word.
+            "The owner has not answered.",
+            # Catches: a line that opens with Not answered is read as the word.
+            "Not answered.",
+            # Catches: never answered is read as the word.
+            "The owner never answered.",
+            # Catches: hasn't answered is read as the word.
+            "The lane hasn't answered yet.",
+            # Catches: the upper-case form of a negation is read as the word.
+            "The owner has NOT ANSWERED.",
+            # Catches: the inbox home word in [question] -> answered is read as a claim.
+            "[question] -> answered",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_code_span_and_fence_pass(self):
+        rows = [
+            # Catches: the word inside a one-tick code span is read as a claim.
+            "Use `answered` as the probe.",
+            # Catches: the word inside a two-tick code span is read as a claim.
+            "Use ``answered`` as the probe.",
+            # Catches: the words inside a multi-line fence are read as claims.
+            "```\nAnswered: no permission rule can lift it.\nThe owner answered it.\n```",
+            # Catches: a fence with an info string is read as text.
+            "```text\nanswered\n```",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_not_yet_answered_passes(self):
+        # Ruling (lane orchestrator, process-only): "not yet answered" is exempt, like "not answered".
+        for line in ("The owner has not yet answered.", "Not yet answered."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_source_inside_a_code_span_counts(self):
+        # Ruling (lane orchestrator, process-only): a source in an inline code span counts.
+        for line in ("Answered in `report_guard.py`.", "Answered at `https://github.com/o/r/pull/1`."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_sources_match_in_any_case(self):
+        # Catches: item <n> and fb- ids match only in lower case, so a capitalised source reads as no source.
+        for line in ("Item 143 answered in chat.", "FB-1042 answered in chat."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_negated_forms_beyond_the_list_pass(self):
+        # Catches: a negated "answered" outside the exempt list (wasn't, has not been, could not be, haven't,
+        # has yet to be, No one) is read as a claim.
+        rows = [
+            "The ask wasn't answered.",
+            "The ask has not been answered.",
+            "No one answered.",
+            "The ask could not be answered.",
+            "We haven't answered.",
+            "The ask has yet to be answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_hyphen_joined_word_is_not_the_word(self):
+        # Catches: the word inside a hyphen-joined name (answered-needs-source) is read as the word.
+        self.assert_allowed("The rule answered-needs-source holds.")
+
+    def test_an_green_no_and_nothing_forms_pass(self):
+        # Catches: "No question", "None", "Nothing", and "Cannot tell whether" with "answered" are read as a claim.
+        rows = [
+            "No question was answered.",
+            "None were answered.",
+            "Nothing was answered.",
+            "Cannot tell whether it was answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_green_tilde_fence_passes(self):
+        # Catches: a line inside a ~~~ fence is read as text, since only ``` fences are skipped.
+        rows = [
+            "~~~\nThe owner answered it.\n~~~",
+            "~~~text\nanswered\n~~~",
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_an_green_question_line_passes(self):
+        # Catches: a question that asks whether the word happened is read as a claim.
+        self.assert_allowed("Has the owner answered?")
+
+    def test_an_green_word_forms_that_are_not_the_word_pass(self):
+        # Catches: answers, answering, or answer is read as answered.
+        self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
+
+    def test_an_green_landed_turn_with_a_cited_line_passes(self):
+        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        self.assert_allowed(reply, landed=True)
+
+    def test_an_green_stop_hook_active_stays_quiet(self):
+        # Catches: the check blocks a rewrite, which this guard leaves quiet today.
+        self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
+
+    # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
+    # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
+
+    def guard_opens(self, reply):
+        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
+        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
+        import layout  # noqa: F401
+        import local_time  # noqa: F401
+        hook = self.hook(reply)
+        opened, real_open = [], open
+
+        def watch(path, mode="r", *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, mode, *args, **kwargs)
+        out = io.StringIO()
+        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
+                contextlib.redirect_stdout(out):
+            runpy.run_path(REPORT_GUARD, run_name="__main__")
+        return out.getvalue().strip(), opened, hook["transcript_path"]
+
+    def test_an_cost_no_word_opens_only_the_transcript(self):
+        # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
+        for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
+            with self.subTest(reply=reply):
+                out, opened, transcript = self.guard_opens(reply)
+                self.assertEqual(out, "")
+                self.assertEqual(set(opened), {transcript})
+
+    def test_an_cost_offending_line_still_opens_only_the_transcript(self):
+        # The block is the red part. The read is the cost: the verdict reads the reply, and nothing else opens.
+        out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
+        self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
+        self.assertEqual(set(opened), {transcript})
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed. The refusals file is written here by hand, so these cases do not depend on
@@ -2549,6 +4454,7 @@ class PendingRefusalTests(unittest.TestCase):
     SID = "pd-sid-1"
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     ADD_REPO = "mcp__claude-code-remote__add_repo"
+    PAGE = "https://claude.ai/artifact/waitpage3"
     PROSE = "Nothing landed. The state is unchanged."
     LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
                         "> **Input Needed** allow `mcp__github__update_pull_request`?\n> **Next** wait")
@@ -2560,6 +4466,12 @@ class PendingRefusalTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.scratch, True)
         self.cfg = os.path.join(self.scratch, "cfg")
         os.makedirs(self.cfg)
+        # A repo with a waiting page: an owner question in it is judged, not handed the no-page note.
+        self.repo = os.path.join(self.scratch, "repo")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as handle:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE}, handle)
 
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
@@ -2579,14 +4491,14 @@ class PendingRefusalTests(unittest.TestCase):
         except FileNotFoundError:
             return []
 
-    def stop(self, reply, landed=False, active=False, sid=SID):
+    def stop(self, reply, landed=False, active=False, sid=SID, cwd=None):
         records = [human("do the task")]
         if landed:
             records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         records += [tool_use_msg(self.ARCHIVE), tool_result_msg(), assistant_text(reply)]
         path = write_transcript(records, self.scratch)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
-                "session_id": sid, "cwd": self.scratch}
+                "session_id": sid, "cwd": cwd or self.scratch}
         run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
         self.assertEqual(run.returncode, 0, run.stderr)
         return run
@@ -2610,25 +4522,32 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
-    def test_e_named_under_input_needed_passes_and_clears_the_entry(self):
-        styles = (("backticks", "> **Input Needed** allow `%s`?"),
-                  ("plain", "> **Input Needed** allow %s?"))
-        for label, line in styles:
+    def test_e_allow_line_with_no_send_blocks_as_a_question(self):
+        # An "allow <tool>?" line is a question for the owner (spec v2.1), so it blocks until the question is
+        # sent. Naming the refused tool still clears its entry: the owner was asked about that refusal.
+        styles = (("backticks", "Bash", "> **Input Needed** allow `Bash`?"),
+                  ("should I", "Bash", "> **Input Needed** Should I allow `Bash`?"),
+                  ("plain MCP name", self.ARCHIVE, "> **Input Needed** allow %s?" % self.ARCHIVE))
+        for label, tool, line in styles:
             with self.subTest(label):
-                self.write_refusals([self.ARCHIVE])
-                reply = ("> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait"
-                         % (line % self.ARCHIVE))
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a named refusal still blocked: %s" % run.stdout)
-                self.assertNotIn(self.ARCHIVE, self.pending_tools(), "the passing reply did not clear the entry")
+                self.write_refusals([tool])
+                reply = "> **Done** OTHER read the state\n> **Deviations** none\n%s\n> **Next** wait" % line
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "an allow line with no send passed as the answer")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("Pick guard", out["reason"])
+                self.assertNotIn("Refusal guard", out["reason"], "the named refusal was raised again")
+                self.assertNotIn(tool, self.pending_tools(), "the reply did not clear the entry")
 
-    def test_e2_every_pending_tool_named_passes_and_clears_all(self):
+    def test_e2_every_pending_tool_named_clears_all_and_the_question_still_blocks(self):
         self.write_refusals([self.ARCHIVE, self.ADD_REPO])
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                  "> **Input Needed** allow `%s` and `%s`?\n> **Next** wait" % (self.ARCHIVE, self.ADD_REPO))
-        run = self.stop(reply)
-        self.assertEqual(run.stdout.strip(), "", "a reply that names both refusals still blocked: %s" % run.stdout)
-        self.assertEqual(self.pending_tools(), [], "the passing reply left an entry in the file")
+        out = self.blocked(self.stop(reply, cwd=self.repo))
+        self.assertIsNotNone(out, "a reply that asks about two refusals with no send passed")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Pick guard", out["reason"])
+        self.assertEqual(self.pending_tools(), [], "the reply left an entry in the file")
 
     def test_e3_a_name_outside_input_needed_is_no_answer(self):
         self.write_refusals([self.ARCHIVE])
@@ -2655,14 +4574,18 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(self.pending_tools(), [tool], "a plain mention cleared the entry")
 
     def test_k2_a_backticked_built_in_tool_name_clears_it(self):
+        # The named refusal clears and is not raised again. The allow line is a question (spec v2.1), so the
+        # reply still blocks until the question is sent.
         for tool in ("Edit", "Bash"):
             with self.subTest(tool):
                 self.write_refusals([tool])
                 reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
                          "> **Input Needed** allow `%s`?\n> **Next** wait" % tool)
-                run = self.stop(reply)
-                self.assertEqual(run.stdout.strip(), "", "a backticked %s still blocked: %s" % (tool, run.stdout))
-                self.assertEqual(self.pending_tools(), [], "the passing reply left %s in the file" % tool)
+                out = self.blocked(self.stop(reply, cwd=self.repo))
+                self.assertIsNotNone(out, "a backticked %s allow line with no send passed" % tool)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertNotIn("Refusal guard", out["reason"], "a backticked %s was raised again" % tool)
+                self.assertEqual(self.pending_tools(), [], "the reply left %s in the file" % tool)
 
     def test_k3_a_short_mcp_name_does_not_clear_the_full_name(self):
         self.write_refusals([self.ARCHIVE])

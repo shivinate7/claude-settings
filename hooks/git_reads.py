@@ -1,6 +1,7 @@
 """The git and session reads the guard and the janitor share: one `git` call, the primary
 checkout, a tree's status, the default branch, a branch's proof of survival, a worktree's lock
-and whether a live session stands in it.
+and whether a live session stands in it. The roadmap build also imports it for `github_repo`, the one
+reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
@@ -242,17 +243,94 @@ def resolve_default_base(where: str, remote: str = "origin"):
     return read_default_base(where, remote)[0]
 
 
+def last_commit_epoch(where: str, pathspec: str):
+    """The commit time, in epoch seconds, of the newest commit that touches `pathspec` on any local
+    branch, any remote-tracking branch or HEAD. One `git log -1` call, and no read of the default
+    branch: a commit pushed to any branch counts. None when git does not answer, or when no such
+    commit exists (an unknown file): the caller cannot tell the two apart and fails open."""
+    answer = _git(where, "log", "-1", "--format=%ct", "--branches", "--remotes", "HEAD", "--", pathspec)
+    if answer is None or answer.returncode != 0:
+        return None
+    try:
+        return int(answer.stdout.strip())
+    except ValueError:
+        return None
+
+
+# The repo's layout extras file, from its root. lint/layout.json "extras" holds the same path; the guard reads this
+# literal so a lane create_session reads one file, not the layout file too.
+LAYOUT_EXTRAS = (".claude", "layout-extras.json")
+_READ_EXTRAS = object()
+
+
+def origin_slug(url):
+    """`owner/name` from the last two segments of an origin URL's path, `.git` and a trailing slash stripped, or None.
+    The host is never read: the cloud proxy serves `http://local_proxy@127.0.0.1:<port>/git/<owner>/<name>`.
+    `scheme://host[:port]/path` keeps the path; scp `user@host:path` (a colon before the first slash) keeps what
+    follows the colon; a POSIX path with no scheme is the path itself."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if "://" in url:
+        path = url.split("://", 1)[1].partition("/")[2]
+    elif ":" in url.partition("/")[0]:
+        path = url.partition(":")[2]
+    else:
+        path = url
+    segments = [part for part in path.split("/") if part]  # an empty part, as from a trailing slash, is dropped
+    if len(segments) < 2:
+        return None
+    owner, name = segments[-2], segments[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return "%s/%s" % (owner, name) if owner and name else None
+
+
+def github_repo(root, extras=_READ_EXTRAS):
+    """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
+    "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it
+    already found; the guard passes none, so this reads the "roadmap" object of `root`'s layout extras file: one
+    file read. The origin costs one git start, and only when the extras name no repo."""
+    if extras is _READ_EXTRAS:
+        try:
+            with open(os.path.join(root, *LAYOUT_EXTRAS), encoding="utf-8") as handle:
+                extras = json.load(handle).get("roadmap")
+        except Exception:  # no file, or one that does not parse: the origin decides
+            extras = None
+    if isinstance(extras, dict) and isinstance(extras.get("github"), str):
+        return extras["github"]
+    done = _git(str(root), "remote", "get-url", "origin")
+    if done is None or done.returncode != 0:
+        return None
+    return origin_slug(done.stdout)
+
+
+def is_shallow(where: str):
+    """True in a shallow clone, False in a full one, None when git could not tell. The one home of the
+    shallow probe: a shallow clone cuts history, so an ancestry exit 1 there proves nothing."""
+    answer = _git(where, "rev-parse", "--is-shallow-repository")
+    if answer is None or answer.returncode != 0:
+        return None
+    text = answer.stdout.strip()
+    return True if text == "true" else False if text == "false" else None
+
+
 def branch_is_ancestor(where: str, base: str, branch: str):
     """True when `branch`'s tip is already reachable from `base`, False when it plainly is not,
     None when the question could not be answered (an unresolvable revision, a git that would not
-    run)."""
+    run, or a shallow clone).
+
+    `--is-ancestor` exits 1 both for "not an ancestor" and for a shallow clone that cut the history
+    between the two, so a shallow clone's exit 1 is unknown, never False. The shallow probe runs only
+    on that exit, so an ancestor answer costs no extra process. A probe that fails is unknown too.
+    The helper never fetches: guards call it, and a read must not change the clone."""
     answer = _git(where, "merge-base", "--is-ancestor", branch, base)
     if answer is None:
         return None
     if answer.returncode == 0:
         return True
     if answer.returncode == 1:
-        return False
+        return False if is_shallow(where) is False else None
     return None
 
 
@@ -285,7 +363,11 @@ def branch_proof(where: str, base: str, branch: str, ancestor=None):
     if ancestor is None:
         ancestor = branch_is_ancestor(where, base, branch)
     if ancestor is None:
-        return None
+        # A shallow clone's cut ancestry proves nothing: it is "not proven", as a full clone's exit 1 is, so the
+        # cherry and on-remote tests still decide. Any other unknown (a failed read) stays unknown.
+        if is_shallow(where) is not True:
+            return None
+        ancestor = False
     if ancestor:
         return "ancestor"
     cherry_empty = branch_cherry_empty(where, base, branch)
@@ -304,6 +386,157 @@ def branch_is_empty(where: str, base: str, branch: str):
     None when any one of the three tests could not be read."""
     proof = branch_proof(where, base, branch)
     return None if proof is None else bool(proof)
+
+
+# ------------------------------------------------------------------ a worktree of pushed copies
+#
+# A worktree whose branch ref moved under its index shows staged files that equal an older commit,
+# so `git status` is dirty although every byte already sits in a pushed commit. The record is the
+# decision when-a-worktree-may-be-removed.
+#
+# TRUE only when ALL hold; a read that fails is None, anything else False:
+#   - no untracked file, and no unmerged path;
+#   - `git rev-list HEAD --not --remotes` is empty: local refs only, no fetch, no network;
+#   - each dirty path's index entry AND worktree content equal that path's entry (mode and blob, or
+#     its absence for a deletion) in ONE candidate commit, and that commit is on a remote-tracking
+#     ref. Candidates: HEAD, HEAD's merge-base with the default branch, HEAD's reflog (capped).
+#     A blob found only in a local-only commit never counts.
+# No `--find-object` and no history walk: the candidate set is bounded.
+#
+# COST, per call, and only on `git worktree remove` with a dirty tree: at most 14 fixed git process
+# starts, then one `ls-tree` per candidate tried (stops once every path matched; at most
+# 2 + BASE_COPY_REFLOG_CAP) and one `for-each-ref --contains` per candidate a match uses. Files
+# written: none. No timer, no log, no long-lived process.
+BASE_COPY_REFLOG_CAP = 20
+BASE_COPY_PATH_CAP = 200  # one command line carries the paths; more than this is not judged
+
+
+def _z_names(answer):
+    """NUL-split names of a `-z` read, or None when the read failed."""
+    if answer is None or answer.returncode != 0:
+        return None
+    return [name for name in answer.stdout.split("\0") if name]
+
+
+def _tree_entries(where: str, rev: str, paths):
+    """{path: (mode, blob)} for PATHS in commit REV (a missing path is absent), None on failure.
+    Literal pathspecs: a name holding a glob character names only itself."""
+    answer = _git(where, "--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev, "--", *paths)
+    if answer is None or answer.returncode != 0:
+        return None
+    entries = {}
+    for record in answer.stdout.split("\0"):
+        head, _, name = record.partition("\t")
+        parts = head.split()
+        if len(parts) == 3 and name:
+            entries[name] = (parts[0], parts[2])
+    return entries
+
+
+def _index_entries(where: str, paths):
+    """{path: (mode, blob)} of PATHS in the index, None on failure or when a path is unmerged."""
+    answer = _git(where, "--literal-pathspecs", "ls-files", "-s", "-z", "--full-name", "--", *paths)
+    if answer is None or answer.returncode != 0:
+        return None
+    entries = {}
+    for record in answer.stdout.split("\0"):
+        head, _, name = record.partition("\t")
+        parts = head.split()
+        if len(parts) == 3 and name:
+            if parts[2] != "0" or name in entries:
+                return None
+            entries[name] = (parts[0], parts[1])
+    return entries
+
+
+def _worktree_entries(where: str, paths):
+    """{path: (mode, blob) or None} for the worktree content of PATHS (None: file deleted).
+    False when a path is a link or a directory (not judged), None when the read failed."""
+    entries, hashed = {}, []
+    for path in paths:
+        full = os.path.join(where, path)
+        if not os.path.lexists(full):
+            entries[path] = None
+        elif os.path.islink(full) or not os.path.isfile(full):
+            return False
+        else:
+            hashed.append(path)
+    if hashed:
+        answer = _git(where, "hash-object", "--", *hashed)
+        if answer is None or answer.returncode != 0:
+            return None
+        blobs = answer.stdout.split()
+        if len(blobs) != len(hashed):
+            return None
+        for path, blob in zip(hashed, blobs):
+            executable = os.stat(os.path.join(where, path)).st_mode & 0o100
+            entries[path] = ("100755" if executable else "100644", blob)
+    return entries
+
+
+def dirty_paths_are_pushed_copies(where: str, lines):
+    """True when every dirty path of the worktree at WHERE equals a copy held by a pushed commit
+    (see the block comment above), False when one does not or the tree is not judged, None when a
+    read failed. LINES are the `git status --porcelain` lines the caller already holds."""
+    for line in lines:
+        if line.startswith("?? ") or "U" in line[:2] or line[:2] in ("AA", "DD"):
+            return False
+    unpushed = _git(where, "rev-list", "HEAD", "--not", "--remotes")
+    if unpushed is None or unpushed.returncode != 0:
+        return None
+    if unpushed.stdout.strip():
+        return False
+    staged = _z_names(_git(where, "diff-index", "--cached", "--name-only", "-z", "HEAD"))
+    edited = _z_names(_git(where, "diff-files", "--name-only", "-z"))
+    if staged is None or edited is None:
+        return None
+    paths = sorted(set(staged) | set(edited))
+    # A name git printed that this decode altered cannot be looked up again, so it proves nothing.
+    if not paths or len(paths) > BASE_COPY_PATH_CAP or any("�" in path for path in paths):
+        return False
+    index = _index_entries(where, paths)
+    if index is None:
+        return None
+    changed = _worktree_entries(where, [p for p in paths if p in set(edited)])
+    if changed is None:
+        return None
+    if changed is False:
+        return False
+    # What the worktree holds: the index entry, unless the file differs from the index.
+    held = {p: (index.get(p), changed[p] if p in changed else index.get(p)) for p in paths}
+    if any(entry and entry[0] == "160000" for pair in held.values() for entry in pair):
+        return False  # a submodule is not a blob
+    head = _git(where, "rev-parse", "HEAD")
+    if head is None or head.returncode != 0:
+        return None
+    candidates = [head.stdout.strip()]
+    base = resolve_default_base(where)
+    if base:
+        merged = _git(where, "merge-base", "HEAD", base)
+        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
+            candidates.append(merged.stdout.strip())
+    reflog = _git(where, "log", "-g", "--format=%H", "-n", str(BASE_COPY_REFLOG_CAP), "HEAD")
+    if reflog is not None and reflog.returncode == 0:
+        candidates.extend(reflog.stdout.split())
+    remaining, tried = set(paths), set()
+    for commit in candidates:
+        if not remaining:
+            break
+        if commit in tried:
+            continue
+        tried.add(commit)
+        tree = _tree_entries(where, commit, sorted(remaining))
+        if tree is None:
+            continue
+        matched = {p for p in remaining if held[p][0] == held[p][1] == tree.get(p)}
+        if not matched:
+            continue
+        on_remote = branch_on_remote(where, commit)
+        if on_remote is None:
+            return None
+        if on_remote:
+            remaining -= matched
+    return not remaining
 
 
 def worktree_locked(where: str, target: str):

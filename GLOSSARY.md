@@ -22,7 +22,7 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 
 | Term | Meaning | Home | Not |
 |---|---|---|---|
-| lane | One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | — |
+| lane | The unit of work. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. In a coordinator build a lane session runs it. In a solo or one-lane session an agent runs it. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | `workstream` |
 | batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
 | integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge` | — |
@@ -38,26 +38,35 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | finding | Anything a reviewer or an audit reports. An open finding becomes a debt or a note. | `rule:roles-findings-are-debts-or-notes` | `issue (this sense)` |
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-statements` | `bug` |
 | round | One review and the fix after it. A change gets at most three. The builder brief for the fix after review round N-1 still carries the marker `Round N of 3`, which the guard reads on a line that starts with it, or as the leftmost marker in a first line that starts with none. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | — |
-| audit marker | The first `Audit:` on the brief's first non-blank line, with any text ahead of it. Case-sensitive. The guard lets an `Agent` or `Task` Explore spawn run Sonnet only with it; any other such spawn that names a model, except opus (the Opus aside, judged by the Opus ask), runs below Sonnet. | `docs/decisions/agent-model-cap.md`, `hooks/shared_names.py` | — |
+| audit marker | The first `Audit:` on the brief's first non-blank line, with any text ahead of it. Case-sensitive. The guard lets an `Agent` or `Task` Explore spawn run Sonnet or Opus only with it; any other such spawn that names a model runs below Sonnet, and Opus without it is refused by the Opus ceiling. | `docs/decisions/agent-model-cap.md`, `hooks/shared_names.py` | — |
 | safety hole | A guard or check that lets through an act that main refuses or asks about. Always both words. | `rule:roles-review-cap-three`, `docs/decisions/hold-unsafe-after-round-3.md` | `hole` |
 | refuse | What a guard does when it stops an act. The code wraps Claude Code's own `deny` and `block` values in `refuse()`. | `hooks/guard_core.py`, `docs/decisions/guard-guards-mistakes-only.md` | `block (this sense)`, `deny` |
 | owner | The person who owns these repos. Only the owner makes a grant. The owner makes a ruling. An arbiter makes one inside its own repo, and the owner can overturn it. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
 | chat | The reply, or the terminal question box, where a session talks with the owner. | `rule:questions-go-to-owner`, `docs/decisions/questions-go-to-owner.md` | — |
-| override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn ask. | `docs/decisions/owner-override.md` | `override pass` |
+| override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn refusal. | `docs/decisions/owner-override.md` | `override pass` |
 | grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval` |
-| step grant | A grant that triage writes on a lane's roadmap step, in the step's `grants` field. It lifts only the Opus spawn ask of that lane. | `docs/decisions/agent-model-cap.md`, `docs/decisions/owner-override.md` | — |
-| orchestrator | Any session that spawns agents. Coordinator, triage, batch runner, arbiter and lane session are kinds of orchestrator. Every orchestrator but a solo session builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds`, `docs/decisions/session-tiers.md` | — |
-| coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | — |
-| triage | The standing session that a coordinator starts first, with the batch runner. It is the only writer of the roadmap and the waiting page. | `docs/decisions/session-tiers.md` | — |
-| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager` |
-| arbiter | A standing session that holds a repo's ruling voice, below the owner. Only a repo that asks has one. The coordinator starts it when the owner says "spawn arbiter". Batch checks go to the batch runner, not to it. | `docs/decisions/session-tiers.md` | — |
+| step grant | A grant that triage writes on a lane's roadmap step, in the step's `grants` field. It lifts only the Opus spawn refusal of that lane. | `docs/decisions/agent-model-cap.md`, `docs/decisions/owner-override.md` | — |
+| orchestrator | Any session that spawns agents. It names an act, not an identity. A session's identity is its tier: coordinator, triage, batch runner, arbiter or lane session. Every orchestrator but a solo session builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds`, `docs/decisions/session-tiers.md` | — |
+| coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | `oversight session`, `primary orchestrator` |
+| triage | The standing session that a coordinator starts first, with the batch runner. It is the only writer of the roadmap. It writes the waiting page where it runs. | `docs/decisions/session-tiers.md` | `gatekeeper` |
+| page writer | The session that writes the waiting page. Triage writes it where triage runs. Elsewhere the coordinator does. | `docs/decisions/session-tiers.md`, `skills/waiting-page/SKILL.md` | waiting-page writer |
+| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager`, `point guard` |
+| arbiter | A standing session that holds a repo's ruling voice, below the owner. Any repo may have one, for long-running work. A coordinator starts one only on the owner's grant, such as "spawn arbiter". Batch checks go to the batch runner, not to it. | `docs/decisions/session-tiers.md` | — |
 | lane session | A one-lane session that a coordinator starts to run one lane. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
+| shape | The pick a new session makes from the ask: solo, one lane or coordinator. A session may grow to a larger shape. A solo session has no tier. | `rule:roles-pick-mode-from-request`, `docs/decisions/session-tiers.md` | — |
+| tier | A session's role in a build: coordinator, triage, batch runner, arbiter or lane session. Sessions only. | `docs/decisions/session-tiers.md` | — |
+| standing session | A session that lives across many lanes until autocompact. Triage, batch runner and arbiter rotate. A coordinator has no successor. | `docs/decisions/session-tiers.md` | — |
 | task | What one brief asks one agent to do. | `rule:roles-brief-contents` | — |
-| builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
+| builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. Only an agent is a builder. A script is never a builder. | `agents/builder.md` | — |
 | test-author | An agent that writes the new cases first and shows them red on the old code, before a builder changes product code. | `agents/test-author.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
-| session | A top-level Claude Code conversation. | `rule:roles-pick-mode-from-request` | — |
-| agent | Anything the Agent tool or a workflow starts. Claude Code's own names `SubagentStop`, `SubagentStart` and `subagent_type` stay as the platform spells them. | `rule:roles-one-role-per-agent` | `subagent`, `sub-agent`, `worker (this sense)` |
+| session | A top-level Claude Code conversation. | `rule:roles-pick-mode-from-request` | `bridge session` |
+| agent | Anything the Agent tool or a workflow starts. Claude Code's own names `SubagentStop`, `SubagentStart` and `subagent_type` stay as the platform spells them. | `rule:roles-one-role-per-agent` | `subagent`, `sub-agent`, `worker (this sense)`, `helper (this sense)` |
+| Explore | Claude Code's built-in read-only search agent. It runs Haiku. It runs Sonnet or Opus only with an audit marker. | `docs/decisions/agent-model-cap.md` | — |
+| Plan | Claude Code's built-in read-only planning agent. It runs Opus. | `docs/decisions/agent-model-cap.md` | — |
+| advisor | The built-in second opinion, set by `advisorModel`. It decides nothing. | `rule:questions-go-to-owner` | — |
+| record-writer | An agent that writes Markdown records only. It runs Haiku. | `agents/record-writer.md` | — |
+| fan-out | One session starts several agents at once, each in its own checkout. | `rule:parallelism-each-own-checkout` | — |
 | suite | Every test a check runs. | `rule:roles-each-layer-proves-once` | — |
 | mutation test | A script that breaks the code on purpose, one mutant at a time, to prove the tests catch each break. | `hooks/mutate_guard.py`, `janitor/mutate_sweep.py` | `mutation harness` |
 | red run | The recorded run of a test-author's new cases on the old code, where they fail. | `rule:roles-each-layer-proves-once` | `red proof` |
@@ -71,3 +80,5 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
 | fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |
+| Red-run trailer | A commit-message line on the commit that adds test lines: `Red-run: <command> -> <N> failed on <sha>`, or `Red-run: none: <reason>`. It records that each new case failed on the old code. | `docs/decisions/red-run-trailer-on-test-commits.md` | — |
+| Unvetted | A question that reaches the owner with no past-ruling check, because the check could not run. Its text carries the line `Unvetted: <reason>`, so he reads it as unchecked. | `docs/decisions/question-form.md` | — |

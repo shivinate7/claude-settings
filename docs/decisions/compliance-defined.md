@@ -7,6 +7,7 @@ Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins 
 - Child text is any guard, hook, `CLAUDE.md` line or other text in a child repo.
 - Child text that conflicts with how repos inherit from claude-settings, and cites no known exemption, is wrong. It is stale prose for the compliance check to find.
 - A known exemption names the claude-settings rule by id, as `rule:<id>`, with the words "known exemption", in the same paragraph or list item.
+- A known exemption needs the owner's grant for that child repo (owner, 2026-11-02 14:11 CST).
 - A bare mention of `rule:<id>` is no exemption.
 - The fix goes in the child repo: rewrite its text, or name the exemption. The claude-settings rule stays as it is.
 

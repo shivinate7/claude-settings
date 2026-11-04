@@ -29,10 +29,45 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
 
+# THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
+# marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
+# brief text, no I/O, no process, no file. Its position decides where the row reads:
+#   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
+#   "first-line": the brief's first non-blank line only, case-sensitive, with any text ahead of the marker.
+# The two positions differ because the owner ruled them apart: a role word or markup ahead of `Round N of 3` on the
+# first line still counts, but lowercase prose must not. A group 1 in a row is the marker's number n; a row with none
+# has no n.
+_N_OF_3 = r"[ \t]+(\d)[ \t]+of[ \t]+3\b"
+# The round or try shape with no number group, for the lookaheads of the first-line round row.
+_ANY_ROUND_SHAPE = r"(?:Round|Try)[ \t]+\d[ \t]+of[ \t]+3\b"
+BRIEF_MARKERS = (
+    ("round", r"(?im)^[ \t]*round" + _N_OF_3, "line-start"),
+    # `Try N of 3` counts at a line start only, until note try-marker-sunset.
+    ("try", r"(?im)^[ \t]*try" + _N_OF_3, "line-start"),
+    # The first-line round row reads a first line that starts with no marker in any case (the whole lookahead
+    # ignores case, as the line-start rows do, and leaves that line to them). On it, the leftmost marker-shaped text counts, and only when it is `Round`: the tempered
+    # `.` stops at a leftmost `Try`, so a later `Round` on that line is prose and adds nothing.
+    ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
+     "first-line"),
+    ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+)
+
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
+
+# The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
+# the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
+REPO_TAG = "cs-repo:"
+STEP_TAG = "cs-step:"
+
+
+def repo_tag_names(tag: object, slug: str) -> bool:
+    """True when `tag` is exactly REPO_TAG plus `slug` (owner/name), the slug compared without case. The one
+    reading of a repo tag: no strip, the exact prefix, so a tag one reader accepts the other accepts."""
+    return isinstance(tag, str) and tag.startswith(REPO_TAG) and tag[len(REPO_TAG):].lower() == slug.lower()
+
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"

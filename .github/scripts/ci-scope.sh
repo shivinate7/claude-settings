@@ -22,7 +22,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
@@ -32,7 +32,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
       install.sh) on="$on $M $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/mutate_js.mjs) on="$on code guard " ;;
+      hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/mutate_js.mjs) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
       hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)

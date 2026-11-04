@@ -36,6 +36,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -46,6 +47,9 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import guard_log_report as glr  # noqa: E402
 import rule_audit  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 NOW = datetime(2026, 10, 11, 12, 0, 0)
 REVERTED = "2026-10-09T11:00:00\tBash\treverted\tshared-tree\tgit stash drop"
@@ -881,6 +885,97 @@ class OffsetWindowTests(unittest.TestCase):
         self.assertEqual((rows, unknown), ([], 1))
 
 
+CLOUD_NA = "n/a (cloud)\n"
+UNKNOWN_LINE = "unknown (old lines with no zone that could fall inside): %d"
+BRAKE_WINDOW = ["--between", "2026-11-01T06:30:00+00:00", "2026-11-01T07:30:00+00:00"]  # 07:00 UTC is inside
+SHARED_INSIDE = "2026-11-01T12:00:00+05:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID  # 07:00 UTC
+OLD_SHARED = "2026-11-01T07:00:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID  # no zone
+
+
+def fresh_log(lines=None):
+    """A guard.log path in a new folder under this run's folder. The file is written only when `lines` is given."""
+    path = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "guard.log")
+    if lines is not None:
+        write_log(path, lines)
+    return path
+
+
+class CloudCheckOneHome(unittest.TestCase):
+    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) gate
+    and the brake gate in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
+
+    def helper(self):
+        import guard_core
+        return getattr(guard_core, "is_cloud", None)
+
+    def test_guard_core_has_is_cloud_true_only_for_exactly_true(self):
+        fn = self.helper()
+        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
+        for value, want in ((None, False), ("true", True), ("TRUE", False), ("1", False), ("", False), ("false", False)):
+            with self.subTest(value=value), mock.patch.dict(os.environ):
+                os.environ.pop("CLAUDE_CODE_REMOTE", None)
+                if value is not None:
+                    os.environ["CLAUDE_CODE_REMOTE"] = value
+                self.assertIs(fn(), want)
+
+    def test_the_report_check_holds_the_guard_core_is_cloud(self):
+        fn = self.helper()
+        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
+        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) gate does not hold guard_core.is_cloud")
+
+
+class CloudPaceReadTests(unittest.TestCase):
+    """Pace number four (reports-batch-pace-numbers) reads the local brake count. In a cloud session,
+    CLAUDE_CODE_REMOTE == "true" (the check merge/merge.py makes), `--between ... --rule load-brake` prints
+    `n/a (cloud)`, never 0: a 0 would claim a reading that was never taken. Every other read keeps today's
+    output. Each test sets or pops the variable itself, so the runner's own environment decides nothing.
+    """
+
+    def read(self, argv, remote):
+        """Run main(argv) with CLAUDE_CODE_REMOTE set to `remote`, or unset when `remote` is None."""
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            if remote is not None:
+                os.environ["CLAUDE_CODE_REMOTE"] = remote
+            return run_main(argv)
+
+    def test_cloud_brake_read_prints_n_a_and_not_the_line(self):
+        path = fresh_log([PLUS_FIVE_LINE])
+        rc, out = self.read(["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"], "true")
+        self.assertEqual((rc, out), (0, CLOUD_NA))
+
+    def test_cloud_brake_read_with_no_log_file_prints_n_a(self):
+        path = fresh_log()
+        self.assertFalse(os.path.exists(path))
+        rc, out = self.read(["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"], "true")
+        self.assertEqual((rc, out), (0, CLOUD_NA))
+
+    def test_local_brake_read_keeps_the_row_and_the_unknown_count(self):
+        path = fresh_log([PLUS_FIVE_LINE, OLD_LINE])
+        argv = ["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"]
+        expected = PLUS_FIVE_LINE + "\n" + UNKNOWN_LINE % 1 + "\n"
+        for remote in (None, "false"):
+            with self.subTest(CLAUDE_CODE_REMOTE=remote):
+                self.assertEqual(self.read(argv, remote), (0, expected))
+
+    def test_cloud_read_of_another_rule_or_no_rule_keeps_today_output(self):
+        path = fresh_log([PLUS_FIVE_LINE, SHARED_INSIDE, OLD_LINE, OLD_SHARED])
+        cases = (
+            ("--rule shared-tree", ["--rule", "shared-tree"], SHARED_INSIDE + "\n" + UNKNOWN_LINE % 1 + "\n"),
+            ("no --rule", [], PLUS_FIVE_LINE + "\n" + SHARED_INSIDE + "\n" + UNKNOWN_LINE % 2 + "\n"),
+        )
+        for label, extra, expected in cases:
+            with self.subTest(read=label):
+                self.assertEqual(self.read(["--log", path] + BRAKE_WINDOW + extra, "true"), (0, expected))
+
+    def test_cloud_summary_read_matches_the_local_summary(self):
+        path = fresh_log([PLUS_FIVE_LINE, SHARED_INSIDE, OLD_LINE])
+        argv = ["--log", path, "--days", "all", "--rule", "load-brake"]
+        local = self.read(argv, None)
+        self.assertIn("| load-brake | 2 | 0 | 0 |", local[1])
+        self.assertEqual(self.read(argv, "true"), local)
+
+
 class FixedDecisionTests(unittest.TestCase):
     """A `fixed` line (an STE guard rewrite) is counted under the noted column. Pinned choice: map
     fixed to noted, the smaller change. A column of its own would change every old-only table, and
@@ -1232,6 +1327,10 @@ class AllRulesTests(unittest.TestCase):
         out = self.report([stamped(1, "deny", "shared-tree")], "--days", "7")
         self.assertIn("| shared-tree | 1 | 0 | 0 |", out)
         self.assertNotIn("git-env-set", out)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

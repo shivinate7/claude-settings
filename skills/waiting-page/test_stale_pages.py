@@ -3,6 +3,7 @@
 STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside this file), so the
 same cases run red against a checkout that lacks it.
 """
+import importlib.util
 import json
 import os
 import re
@@ -62,6 +63,15 @@ WRAPPER = os.path.join(HERE, "tests", "host-wrapper.txt")  # the real host wrapp
 with open(WRAPPER, encoding="utf-8", newline="") as f:
     WRAPPER_TEXT = f.read()
 VERDICT = re.compile(r"\b(current|behind|unknown)\b")
+
+
+def with_title(text, title):
+    """`text` with its document title's text replaced. A function replacement keeps the title's backslashes."""
+    return re.sub(r"<title>[^<]*</title>", lambda m: "<title>%s</title>" % title, text, count=1)
+
+
+# The setTitle line of main before the page was named Cockpit. Its escape is JS text, kept as written.
+OLD_TITLE_LINE = r'  document.title = (name ? name + " " : "") + "Queue" + (state.tab === "s" ? " \u00b7 Status" : "");'
 
 
 def set_body(text, body):
@@ -149,9 +159,9 @@ class Stale(unittest.TestCase):
         self.assertIn("current: mocked", out)
 
     def test_a_page_that_differs_only_in_its_title_is_current_in_both_modes(self):
-        # shiv ruling, Oct 30 14:33 CDT: the <title> text is the live page's own, so a title alone never makes a page behind.
-        # The title holds a lone quote and comment openers; every other byte is page.html's.
-        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Queue</title>", PAGE, count=1)
+        # The verdict ignores the <title> text, so a title alone never makes a page behind. The title holds a lone
+        # quote and comment openers; every other byte is page.html's.
+        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", PAGE, count=1)
         self.assertNotEqual(titled, PAGE)
         with self.subTest("batch"):
             root = self.repo("titled", "KKK")
@@ -171,11 +181,30 @@ class Stale(unittest.TestCase):
         main = write_text(os.path.join(self.fetched, "main-with-svg.html"), PAGE.replace('<header class="hdr">', svg + '<header class="hdr">', 1))
         self.assertIn(svg, open(main, encoding="utf-8").read())
         edited_svg = write_text(os.path.join(self.fetched, "svg-edited.html"), open(main, encoding="utf-8").read().replace("Icon label", "Edited label"))
-        edited_title = write_text(os.path.join(self.fetched, "title-edited.html"), open(main, encoding="utf-8").read().replace("<title>Queue</title>", "<title>Compass Queue</title>", 1))
+        main_text = open(main, encoding="utf-8").read()
+        retitled = with_title(main_text, "Compass Cockpit")
+        self.assertNotEqual(retitled, main_text, "the edit changed no title")
+        edited_title = write_text(os.path.join(self.fetched, "title-edited.html"), retitled)
         r = self.page_run(edited_svg, "--main", main)
         self.assertEqual(self.verdict(r)[0], "behind", r.stdout + r.stderr)
         r = self.page_run(edited_title, "--main", main)
         self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+
+    def test_an_old_main_page_titled_with_the_old_name_reads_behind_the_new_template(self):
+        # A live page from before the rename still runs
+        # the old setTitle line, so it reads behind. The title text alone never makes a page behind; this line does.
+        self.assertIsNotNone(re.search(r"^  document\.title = [^\n]*", PAGE, re.M), "page.html has no setTitle document.title line")
+        old = re.sub(r"^  document\.title = [^\n]*", lambda m: OLD_TITLE_LINE, PAGE, count=1, flags=re.M)
+        old = with_title(old, "Compass Queue")
+        root = self.repo("old-main", "OLD")
+        self.fetch("OLD", old)
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("behind: old-main", out)
+        page = write_text(os.path.join(self.fetched, "old-main-single.html"), old)
+        r = self.page_run(page, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(self.verdict(r)[0], "behind", r.stdout + r.stderr)
 
     def live_with_both_blocks(self):
         live = with_both_blocks(PAGE)
@@ -548,6 +577,32 @@ class Stale(unittest.TestCase):
             self.assert_only_new(before, {"behind.html", "current.html"})
         self.assertEqual(spy.call_count, 3)
         self.assertEqual({c.kwargs.get("timeout") for c in spy.call_args_list}, {30})
+
+
+def load_stale_pages():
+    """stale_pages.py as a module, loaded from CMD, so the unit checks run the function the script runs."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)  # the script imports splice from its own folder
+    spec = importlib.util.spec_from_file_location("stale_pages_under_test", CMD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CarriesData(unittest.TestCase):
+    """carries_data is False for a live page whose parts all match the template's. The title is one of those parts."""
+
+    def test_an_untouched_page_titled_with_the_old_name_carries_no_data(self):
+        stale = load_stale_pages()
+        untouched = with_title(PAGE, "Queue")
+        self.assertNotEqual(untouched, PAGE, "the fixture kept the template's title")
+        self.assertFalse(stale.carries_data(PAGE, untouched), "an untouched page titled Queue counts as carrying data")
+
+    def test_an_identical_page_carries_no_data(self):
+        self.assertFalse(load_stale_pages().carries_data(PAGE, PAGE), "the template counts as carrying data")
+
+    def test_a_changed_mockup_carries_data(self):
+        self.assertTrue(load_stale_pages().carries_data(PAGE, set_body(PAGE, MOCK_BODY)), "a live mockup is not counted as data")
 
 
 if __name__ == "__main__":

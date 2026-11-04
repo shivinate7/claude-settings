@@ -316,7 +316,7 @@ MUTATIONS = [
      '    if answer.returncode == 0:\n'
      '        return True\n'
      '    if answer.returncode == 1:\n'
-     '        return False\n'
+     '        return False if is_shallow(where) is False else None\n'
      '    return None',
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)\n'
      '    if answer is None:\n'
@@ -1484,11 +1484,10 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
     shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
-    shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
-    shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
-    # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds
-    # the target's own text for it (the mutated one, or the real one).
-    shutil.copy(GIT_READS, hooks_dir)
+    # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
+    # lazily is not covered. The loop
+    # below replaces the guard family and git_reads.py with the target's text (mutated or real).
+    mutate_shared.guard_tree(hooks_dir)
     shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
 
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]

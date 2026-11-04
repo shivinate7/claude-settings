@@ -22,12 +22,12 @@ not a plain git branch name stops the build.
 
 `--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
-`ROADMAP_DATA` is null and the Status tab says the plan is unknown. Without `--block` the builder writes
+`ROADMAP_DATA` is null and the Status tab says the plan is unknown. Without `--block` the roadmap build script writes
 the whole old read-only page. Nothing publishes it.
 
-- **On the record branch.** The checkout stands on the record branch: the builder reads the working
+- **On the record branch.** The checkout stands on the record branch: the roadmap build script reads the working
   tree. Build after each edit to `roadmap/data/`.
-- **Anywhere else.** The builder reads the record branch through the repo history, `origin/<branch>`
+- **Anywhere else.** The roadmap build script reads the record branch through the repo history, `origin/<branch>`
   first. Fetch the branch first, because the roadmap block is as old as the fetch.
 - `--block` needs `--out`, on either path.
 
@@ -69,21 +69,23 @@ home yet, and the session board's store lives on one machine, so both read "unkn
 
 The Status tab's Live work line shows each open project thread's state (asking in its chat, working,
 ready for review, failed, stopped) and the open pull requests, folded to one line of counts. Its body
-lists the threads, the pull requests and the branches. The builder cannot reach project threads or
+lists the threads, the pull requests and the branches. The roadmap build script cannot reach project threads or
 GitHub, so the publisher reads them just before the build and passes one file:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags"}],
      "items": [{"n", "status", "home"}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
-- `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
+- `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
+  optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
+  unknown. `branches`: lane branches with no open pull request.
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
   The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
   Live work.
@@ -99,20 +101,30 @@ GitHub, so the publisher reads them just before the build and passes one file:
 ## A merge marks a step
 
 A lane commit names its step in a `Step: <id>` trailer, in the last paragraph of the message, beside
-the other trailers. Several ids may share one line, split by commas. At build, the builder reads
-the log of `origin/main` (`--main-branch` names another) and marks each named open step "Landed in
+the other trailers. Several ids may share one line, split by commas. At build, the roadmap build script reads
+the log of `origin/main` (`--main-branch` names another). It marks each named open step "Landed in
 #N", where #N is the pull request whose merge put the commit on main. It never closes a step: triage
 closes it, from the upkeep list. A trailer that names no step is listed there too.
 
 ## Refusals
 
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
-  conflict marker. The builder names each file and line, and writes no page. Resolve, then build again.
+  conflict marker. The roadmap build script names each file and line, and writes no page. Resolve, then build again.
 - The checkout is not on the record branch and no `--out` is given.
+
+## The red line
+
+The build exits 1 when a `todo` step is named by an open pull request. It prints
+`todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
+step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
+fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
+`pulls` (the `sessions` list is not needed), the line reads
+`todo step with an open PR: unknown (<why>)` and the build exits 0. The conflict-marker refusal also
+exits 1. The printed line tells the two apart.
 
 ## Upkeep list
 
-After each build the builder prints the upkeep list for the triage thread. It names:
+After each build the roadmap build script prints the upkeep list for the triage thread. It names:
 
 - open-step notes that are too long;
 - untouched steps and empty notes in a live phase;
@@ -142,6 +154,13 @@ After each build the builder prints the upkeep list for the triage thread. It na
   - the repo's GitHub name cannot be read;
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old (an old list counts a dead
     lane as live), or is more than 5 minutes ahead;
+- `todo` steps whose note has the sentence `Ready.`, in the row `ready todo steps`. A live phase is not
+  needed. Each entry is the step id;
+- draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
+  lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
+  live session step equals its branch exactly (the same rule as the in-progress row). Each entry is `#N (<branch or
+  title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
+  live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
@@ -172,11 +191,14 @@ After each build the builder prints the upkeep list for the triage thread. It na
 ## Cost
 
 About six git processes and one file written per build. With `--live`, the publisher's reads add
-one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
+one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
-page) to the same publish. The builder adds no git process, file, timer or log for either row. The
+page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
+The red line and the two stale-ready rows read the live file the build already reads, and add no
+process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
+list call it already makes.
 No watcher, no timer, no log.
 
 ## Tests

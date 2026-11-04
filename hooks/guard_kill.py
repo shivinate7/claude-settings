@@ -58,8 +58,11 @@ def kill_hit(tokens) -> str:
     `pkill` and `killall` deny outright: naming a process by pattern or by name always reaches
     every match, flags or none. `taskkill` and `Stop-Process` deny only with the flag that names
     a process by image or by name; `taskkill /PID` and `Stop-Process -Id` name one process and
-    pass. `lsof` refuses only with a `-t`/`-ti` flag, which feeds a kill list; `lsof -i :3000`
-    asks which port is busy and kills nothing.
+    pass. `pkill -P <pid>` names the children of one parent: a number passes here and is judged as
+    a `kill` pid (`foreign_pid_kill`); `$$` and `$!` pass as the shell's own pid and the last job's.
+    Any other value (a substitution, `$PPID`, a variable) is a parent the guard cannot read, so it
+    is no pid this session holds, and the call is refused as `pkill` is. `lsof -t` lists pids and
+    kills nothing; it is refused only in a call that kills (`lsof_pids_reach_kill`).
     """
     index = resolve_command(tokens)
     if index is None:
@@ -67,16 +70,17 @@ def kill_hit(tokens) -> str:
     word = tokens[index]
     tool = basename(word)
     rest = tokens[index + 1:]
+    if tool == "pkill" and any(not (value in OWN_PID_VARIABLES or KILL_PID_RE.match(value))
+                               for value in parent_filter_pids(rest) or ()):
+        return word   # a parent the guard cannot read is no pid this session holds
+    if tool == "pkill" and parent_filter_pids(rest) is not None:
+        return ""   # children of ONE parent: foreign_pid_kill judges a number, as it does for `kill`
     if tool in KILL_COMMAND_WORDS:
         return word
     if tool == "taskkill" and any(flag.lower() in TASKKILL_IMAGE_FLAGS for flag in rest):
         return word
     if tool == "stop-process" and any(flag.lower() in STOP_PROCESS_NAME_FLAGS for flag in rest):
         return word
-    if tool == "lsof":
-        for arg in rest:
-            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:
-                return word + " " + arg
     # By port, the same act as `lsof -t | xargs kill`: `fuser -k` (alone or in a cluster, `-kn`) and
     # `kill-port`, run directly or through a package runner.
     if tool == "fuser" and any(
@@ -94,9 +98,40 @@ def kill_hit(tokens) -> str:
 KILL_PID_RE = re.compile(r"^-?[0-9]+$")
 ROOT_PID_RE = re.compile(r"[0-9]+")
 PID_LISTERS = {"pgrep", "pidof"}   # a kill fed by these names its target by pattern
+# `-P` as a lower-case cluster's last letter (`-fP 12`), glued digits (`-P12`), or `--parent=12`. A
+# signal name such as `-SIGPIPE` or `-PIPE` is no parent filter: only digits glue to the flag.
+OWN_PID_VARIABLES = {"$$", "$!"}   # the shell's own pid, and the last background job's
+PARENT_FLAG_RE = re.compile(r"^(?:-[a-z]*P|--parent)(?:=(.*)|([0-9,]+))?$")
+
+
+def parent_filter_pids(rest):
+    """The values of a `pkill -P`/`--parent` filter, as text, in order (comma lists split), or None
+    when `rest` holds no such filter. A value that is no number (`$$`) is kept: the caller reads
+    only the digits."""
+    values = None
+    for i, arg in enumerate(rest):
+        found = PARENT_FLAG_RE.match(arg)
+        if not found:
+            continue
+        value = found.group(1) or found.group(2)
+        if not value and i + 1 < len(rest):
+            value = rest[i + 1]
+        values = (values or []) + (value or "").split(",")
+    return values
+
+
+def lsof_lists_pids(tokens) -> bool:
+    """True when the segment's command is `lsof` with a `-t` flag (alone or bundled): a pid list."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) != "lsof":
+        return False
+    return any(arg.startswith("-") and not arg.startswith("--") and "t" in arg
+               for arg in tokens[index + 1:])
+PID_SUBSTITUTION_RE = re.compile(r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof)\b")
 # `lsof` counts only with a `-t` flag, which makes it a pid list; `lsof -i :3000` lists and no more.
-PID_SUBSTITUTION_RE = re.compile(
-    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?(pgrep|pidof|lsof(?=[^)`]*\s-[A-Za-z]*t))\b")
+LSOF_SUBSTITUTION_RE = re.compile(
+    r"(?:\$\(|`)\s*(?:command\s+)?(?:\S*/)?lsof(?=[^)`]*\s-[A-Za-z]*t)\b")
+KILLING_WORDS = {"kill", "pkill", "killall"}
 KILL_SIGNAL_ARG_FLAGS = {"-s", "-n"}   # these two take the next token as a signal
 
 
@@ -290,6 +325,11 @@ def _kill_pids(tokens):
     """The numeric pid arguments of a `kill` segment, as text, in order. Nothing for any other
     command, or for `kill -l`. Signal flags and their values are skipped."""
     index = resolve_command(tokens)
+    if index is not None and basename(tokens[index]) == "pkill":
+        for value in parent_filter_pids(tokens[index + 1:]) or ():
+            if KILL_PID_RE.match(value):
+                yield value
+        return
     if index is None or basename(tokens[index]) != "kill":
         return
     rest = tokens[index + 1:]
@@ -368,6 +408,26 @@ def kill_fed_by_name(tokens) -> str:
     return "kill " + found.group(1) if found else ""
 
 
+def lsof_pids_reach_kill(all_tokens) -> str:
+    """Return the matched text when one call lists pids with `lsof -t` and also kills.
+
+    A pid list reaches a kill across a filter (`| head -1 | xargs kill`), a `while read` loop, a
+    `for` header, or a file written and read later. Reading each shape would leave a gap, so the
+    CALL is read: `lsof -t` passes only when no segment of it runs `kill`, `pkill` or `killall`.
+    `all_tokens` holds the tokens of every parsed segment of the call (rule
+    shared-trees-no-machine-wide-kill).
+    """
+    kill_word = ""
+    listed = ""
+    for tokens in all_tokens:
+        index = resolve_command(tokens)
+        if index is not None and basename(tokens[index]) in KILLING_WORDS:
+            kill_word = kill_word or basename(tokens[index])
+        if lsof_lists_pids(tokens) or LSOF_SUBSTITUTION_RE.search(" ".join(tokens)):
+            listed = "lsof -t"
+    return listed + " ... " + kill_word if listed and kill_word else ""
+
+
 def kill_fed_by_pipe(tokens, previous) -> str:
     """The `xargs kill` half of `pgrep x | xargs kill`; `previous` is the segment before it."""
     index = resolve_command(tokens)
@@ -404,7 +464,7 @@ KILL_REASON = (
 # MEASURED on macOS: a background job in a subshell,
 # `(python3 -m http.server 8000 >/tmp/http_server_wtweb.log 2>&1 &)`, exits the subshell at
 # once. Pid 1 adopts the server, the harness never tracks it, and no pid is kept. Rule 2 above
-# refuses `pkill -f` and `lsof -t`, and its remedy needs a pid this session started, so the
+# refuses `pkill -f` and `kill $(lsof -t ...)`, and its remedy needs a pid this session started, so the
 # server stays up. This rule refuses the LAUNCH, before a session reaches a machine-wide kill.
 #
 # THE SAME "resolve, not match" STANCE as rule 2 (see the comment above `KILL_COMMAND_WORDS`):
@@ -418,7 +478,6 @@ KILL_REASON = (
 # reading. This rule reads the wrapper word ITSELF, with `_skip_assignments_and_keywords`, the
 # same prefix skip `resolve_command` uses before it unwraps, so a plain detached launch such as
 # `nohup python3 server.py &` is caught here without duplicating rule 2's kill list.
-DETACH_WRAPPERS = {"nohup", "setsid"}
 
 
 def _ends_in_background_paren(tokens) -> bool:
@@ -433,13 +492,29 @@ def _ends_in_background_paren(tokens) -> bool:
 
 
 def detach_wrapper_hit(tokens) -> str:
-    """Return the matched word when a segment's own head, BEFORE any wrapper unwrap, is `nohup`
-    or `setsid`, else ''."""
+    """Return the matched word when a segment's own head, BEFORE any wrapper unwrap, is a wrapper
+    that detaches its child, else ''.
+
+    `setsid` starts its own session and returns at once, so the child outlives the call; `-w`
+    (`--wait`) makes it wait for the child, which then runs in the foreground, so it passes.
+    `nohup` only ignores the hangup signal and waits for its child: with no `&` it detaches
+    nothing. The `&` forms (`nohup cmd &`) are refused by `bare_background_hit`. A `setsid` that
+    `nohup` wraps detaches the same way, so the check reads past `nohup` to it.
+    """
     index = _skip_assignments_and_keywords(tokens)
+    while index < len(tokens) and basename(tokens[index]) == "nohup":
+        index = _skip_assignments_and_keywords(tokens, index + 1)   # nohup hands on to its child
     if index >= len(tokens):
         return ""
     word = tokens[index]
-    return word if basename(word) in DETACH_WRAPPERS else ""
+    if basename(word) != "setsid":
+        return ""
+    for arg in tokens[index + 1:]:
+        if not arg.startswith("-") or arg == "-":
+            break
+        if arg == "--wait" or (not arg.startswith("--") and "w" in arg):
+            return ""
+    return word
 
 
 def disown_after_background_hit(tokens) -> str:
@@ -565,7 +640,8 @@ DETACHED_LAUNCH_REASON = (
     "process. Or capture a pid yourself: `cmd & echo $!` in Bash, or `$p = Start-Process ... "
     "-PassThru` in PowerShell, then stop it later with `kill <pid>` or `Stop-Process -Id "
     "<id>`. Take a free port, such as port 0 or a random high port, never a port another "
-    "project may own, such as 8000, 5173, 3000, or 8080."
+    "project may own, such as 8000, 5173, 3000, or 8080. "
+    "(decision detached-launch-refused, a detached process is refused so a pid can always be named)"
 )
 
 
@@ -917,7 +993,8 @@ GIT_ENV_REASON = (
     "Measured in q_max on 2026-10-14: a test's child `git init` inherited them and wrote "
     "core.worktree into the shared config, and every checkout read the wrong tree. "
     "Remedy: pass the repo path with `git -C <dir>`, or scrub every GIT_* name from the child's "
-    "own environment."
+    "own environment. "
+    "(decision git-env-set-refused, no command sets a git location variable)"
 )
 
 

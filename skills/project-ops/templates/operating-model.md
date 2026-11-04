@@ -5,31 +5,39 @@ from `roster.md`.
 
 ## Session tiers
 
-Every session that starts agents is an orchestrator. The tiers below are kinds of orchestrator.
+Every session that starts agents is an orchestrator. A session's tier is its identity.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. The load brake, not a
-  number, decides how many lanes run at once. It does not rotate (see below).
+  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
-- **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
-  merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
+- **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
+  merges two steps, changes the work order, or closes a step. Where triage runs, only triage writes the waiting page.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
   `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
-  `id`, `session_status` and `tags`. The builder reads it to list steps in progress with no live lane.
+  `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
+  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft.
   Triage, as the waiting-page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
-  asks. It may run agents.
+  asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
+  rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
+  It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
-  record `records-index-at-merge`). Then it runs `--confirm` again to merge.
+  record `records-index-at-merge`). Then it runs `--confirm` again to merge. Batches overlap
+  (claude-settings record `no-merge-during-batch-ci`: no merge while a batch's CI runs). Once
+  batch N's ready run starts, the batch runner builds batch N+1 on N's head at ready, as a PR on
+  the same base, and runs it. N may merge while N+1's run goes on, because N+1's head contains
+  N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
+  fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
   runs names `frozen at <sha>`. It prints the merge output on the terminal, never
@@ -56,10 +64,9 @@ The coordinator does not rotate. It writes its own handoffs and compacts in plac
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads triage's and the batch runner's tally from `get_session`:
+- At each wake, the coordinator reads triage's and the batch runner's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
-  is no reading: the coordinator asks that session for its tally instead. Without a project, each
-  standing session ends every reply with its tally, and the owner reads it.
+  is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
 - The limits are `<triage limit>` and `<batch runner limit>`.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
@@ -88,6 +95,8 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
+  The lane first runs `merge --lane-lint <pr>`. The batch runner runs it again on each lane head
+  before the join, and refuses a red lane (claude-settings record `lanes-run-no-full-ci-job`).
   A lane never rebases onto main and never merges.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
@@ -105,6 +114,8 @@ parent, or miss a message while busy.
   and tell the owner in one line where it went.
 - Only triage writes new steps, merges, order and closes. Another session sends the item to triage,
   with the owner's message attached.
+- Owner feedback about another repo goes to that repo's triage, with the owner's message attached
+  (decision owner-feedback-inbox, one feedback inbox per repo).
 - A session rewrites the note, status and brief of a step it works on.
 - The roadmap is a current record, not a log. Rewrite a note to what is true now. Keep each ruling
   as one dated line.

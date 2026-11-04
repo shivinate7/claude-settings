@@ -31,10 +31,15 @@ REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jo
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
 demand and refuses nothing: no timer, no CI job.
+
+REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
+[--suite-timeout S] [--jobs N] [--pr-budget S]` scores the suites each recent merged pull request changed against mutants of the
+product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
 """
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -146,6 +151,10 @@ MUTATIONS = [
      '    answer = _git(where, "merge-base", "--is-ancestor", branch, base)',
      '    answer = _git(where, "merge-base", "--is-ancestor", base, branch)', "guard",
      'branch: a commit found nowhere else is the only copy, and the rule denies'),
+    ("branch-delete: a shallow clone's unknown ancestry stops the proof, so -D over the only copy is allowed",
+     '        ancestor = False\n    if ancestor:\n        return "ancestor"',
+     '        return None\n    if ancestor:\n        return "ancestor"', "guard",
+     'branch delete, shallow clone: the only copy is denied'),
     ("branch-delete: cherry never reads as empty, so a rebased patch looks unique",
      '    return not any(line.startswith("+") for line in answer.stdout.splitlines())',
      '    return False', "guard",
@@ -169,8 +178,8 @@ MUTATIONS = [
      'return _absolute(arg, where)\n    return ""', "guard",
      'worktree remove: the force flag does not skip the subject read'),
     ("worktree-remove: uncommitted and untracked work no longer denies",
-     '.rstrip("/"))))]\n    if lines:\n        return False',
-     '.rstrip("/"))))]\n    if False:\n        return False',
+     '    if lines and not dirty_paths_are_pushed_copies(target, lines):',
+     '    if False and not dirty_paths_are_pushed_copies(target, lines):',
      "guard", 'worktree remove: uncommitted and untracked work denies'),
     ("worktree-remove: a locked tree no longer denies",
      '    locked = worktree_locked(where, target)\n    if locked is None:\n        return None\n'
@@ -218,10 +227,11 @@ MUTATIONS = [
      '                    continue  # the call\'s own dry run is a read, never a discard', "guard",
      'worktree prune: -n itself is a read, not a discard, so it passes unconditionally'),
     ("env-file: read only the bare environment basename",
-     'ENV_BASENAME = re.compile(r"^\\.env(\\.[A-Za-z0-9_.\\-]+)?$")',
-     'ENV_BASENAME = re.compile(r"^\\.env$")', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
+     '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
+     '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(_without_message_values(cmd)):\n'
+     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
+     '            text, [header for _, _, header in bodies]):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
@@ -284,8 +294,8 @@ MUTATIONS = [
      '    return DEFAULT_BRANCH_FALLBACK + named\n\n\n# A quoted',
      '    return ("main",) + named\n\n\n# A quoted', "guard", 'forced to master when no origin/HEAD'),
     ("force-push: HEAD as a destination is not resolved",
-     '        elif target in ("HEAD", "@"):',
-     '        elif target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
+     '    if target in ("HEAD", "@"):',
+     '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
     ("force-push: refs/heads/ is not stripped",
      'target.removeprefix("refs/heads/")',
      'target', "guard", 'forced to the default branch asks: a full ref'),
@@ -355,9 +365,17 @@ MUTATIONS = [
      'flag.lower() in STOP_PROCESS_NAME_FLAGS for flag in rest):\n        return word',
      '    if False:\n        return word', "guard", 'kill: Stop-Process by name'),
     ("machine-wide-kill: lsof -t no longer feeds a kill list",
-     '            if arg.startswith("-") and not arg.startswith("--") and "t" in arg:\n'
-     '                return word + " " + arg',
-     '            if False:\n                return word + " " + arg', "guard", 'kill: lsof -t feeds a kill list'),
+     '    return any(arg.startswith("-") and not arg.startswith("--") and "t" in arg\n'
+     '               for arg in tokens[index + 1:])',
+     '    return False', "guard",
+     'kill: lsof -ti piped into xargs kill is the pid list of a kill'),
+    ("machine-wide-kill: pkill -P no longer passes, so a kill of the shell's own children denies",
+     '    if tool == "pkill" and parent_filter_pids(rest) is not None:\n        return ""',
+     '    if False:\n        return ""', "guard", "kill: pkill -P of the shell's own pid passes"),
+    ("machine-wide-kill: pkill -P of a foreign parent is no longer judged",
+     '        for value in parent_filter_pids(tokens[index + 1:]) or ():',
+     '        for value in ():', "guard",
+     "kill: pkill -P of a parent this session did not start is refused", "posix"),
     ("machine-wide-kill: a kill of a pid this session did not start no longer denies",
      '        if pid_is_owned(abs(number) if number < -1 else number, root) is False:',
      '        if False:', "guard", 'kill: a pid this session did not start',
@@ -402,10 +420,13 @@ MUTATIONS = [
      '    if last == ")":\n        return tokens[-2] == "&"\n'
      '    return last.endswith(")") and last[:-1].endswith("&")',
      '    return False', "guard", "detached: the incident's exact command orphans to pid 1"),
-    ("detached-launch: nohup/setsid no longer denies as a bare wrapper",
-     '    return word if basename(word) in DETACH_WRAPPERS else ""',
-     '    return ""', "guard", "detached: nohup alone, no background job, still detaches from "
-     "the session"),
+    ("detached-launch: setsid no longer denies as a bare wrapper",
+     '    if basename(word) != "setsid":\n        return ""',
+     '    return ""', "guard", "detached: setsid with no -w starts its own session"),
+    ("detached-launch: setsid -w no longer passes as a foreground wait",
+     '        if arg == "--wait" or (not arg.startswith("--") and "w" in arg):\n            return ""',
+     '        if False:\n            return ""', "guard",
+     "detached: setsid -w waits for its child, so it runs in the foreground"),
     ("detached-launch: disown right after a background job no longer denies",
      '        if j < len(rest) and basename(rest[j]) == "disown":\n            return "& disown"',
      '        if False:\n            return "& disown"', "guard",
@@ -519,11 +540,12 @@ MUTATIONS = [
      'word = re.sub(r"\\\\(?!\\.)", "", word)', 'word = word', "guard",
      'env: normalized, glob, heredoc or depth, cat .e\\nv'),
     ("env-file: a glob names an env file only by a fixed suffix",
-     'sample.startswith(".env.")', 'sample.startswith(".env.local")', "guard",
+     '        if names_env_file(sample):', '        if sample.startswith(".env.local"):', "guard",
      'env: normalized, glob, heredoc or depth, cat .env.bak*'),
-    ("env-file: the example glob is held",
-     '    if word.startswith(ENV_ALLOWED):\n        return False', '    if False:\n        return False', "guard",
-     'env: a normalized allowance, cat .env.example*'),
+    ("env-file: the example exemption is a prefix, not the whole name",
+     '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
+     '    return name.startswith(ENV_PREFIX) and not name.startswith(ENV_ALLOWED)', "guard",
+     'env: a glob that could name a covered backup, cat .env.example*'),
     ("env-file: a piped echo keeps the text allowance",
      'text_ok and not piped', 'text_ok', "guard", 'env: a relay of the text, echo .env | xargs'),
     ("env-file: a pipe with a double bar counts as a pipe",
@@ -803,11 +825,11 @@ MUTATIONS = [
      '        if named > ROLE_MODEL_RANK.index(row):',
      '        if False:', "guard", 'role-model: test-author on sonnet is denied'),
     ("role-model: Explore loses its audit exemption, so an audit Explore on sonnet is denied",
-     'if role == EXPLORE_ROLE and named < top and re.search(',
-     'if False and re.search(', "guard", 'role-model: Explore on sonnet with Audit: on line 1 is allowed'),
+     'if role == EXPLORE_ROLE and named < top and ("audit"',
+     'if False and ("audit"', "guard", 'role-model: Explore on sonnet with Audit: on line 1 is allowed'),
     ("role-model: the audit marker is read off any line, so an Explore with it on line 2 walks past on sonnet",
-     'brief_first_line(tool_input.get("prompt"))):',
-     'tool_input.get("prompt") or ""):', "guard",
+     '            hit = rx.search(first)',
+     '            hit = rx.search(brief)', "guard",
      'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
     ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
      'for kind, n in brief_markers(tool_input.get("prompt"))):',
@@ -816,10 +838,10 @@ MUTATIONS = [
      'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
      'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
      'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
-    ("role-model: Opus is no longer left to the ask, so a builder on opus is denied here",
+    ("role-model: Opus is no longer left to the ceiling, so a builder on opus is denied here",
      'named == top or row is None:',
      'row is None:', "guard",
-     'role-model: builder on opus with no round line asks'),
+     'role-model: builder on opus with no round line is denied under agent-model-cap, not this rule'),
     ("role-model: the default model is ignored, so a builder with no model is denied under a sonnet default",
      '    if os.environ.get(ROLE_MODEL_ENV, "").strip():',
      '    if False:', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
@@ -835,16 +857,16 @@ MUTATIONS = [
      '    if role_unread:\n        record(',
      '    if False:\n        record(', "guard",
      'role-model: a missing decision file logs one unread line'),
-    ("step-up: the marker regex loses its multiline flag, so a round line after the first line walks past",
-     'STEP_UP_MARKER = re.compile(r"(?im)^',
-     'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
-    ("step-up: the first-line marker search is dropped, so a Round 3 of 3 behind a role word on line one asks",
-     '    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])',
-     '    return found', "guard",
+    ("step-up: the line-start rows read the first line only, so a round line after the first line walks past",
+     '            found = list(rx.finditer(brief))',
+     '            found = list(rx.finditer(first))', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
+    ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
+     '            hit = rx.search(first)\n            found = [hit] if hit else []',
+     '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)'),
+     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
     ("step-up: a builder round 3 on a non-opus model is no longer refused",
      'if role == "builder" and builder_third_round(prompt) and "opus" not in model:',
      'if False and role == "builder" and builder_third_round(prompt) and "opus" not in model:',
@@ -859,13 +881,32 @@ MUTATIONS = [
      'kind.lower() in BUILDER_MARKERS and n == "3"',
      'kind.lower() in BUILDER_MARKERS and n in "23"', "guard",
      'floor step-up: builder Round 2 of 3 on sonnet is allowed'),
-    ("ceiling: the Opus spawn ask never fires, so an Opus spawn passes unasked",
-     'if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():',
-     'if True:', "guard", 'ceiling: Agent with model opus and no role asks'),
-    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unasked",
+    ("ceiling: the Opus spawn denial never fires, so an Opus spawn passes unrefused",
+     'if "opus" not in str(tool_input.get("model") or "").lower():\n        return False',
+     'if True:\n        return False', "guard", 'ceiling: Agent with model opus and no role is denied'),
+    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unrefused",
      'if role == "builder" and builder_third_round(brief):',
      'if builder_third_round(brief):', "guard",
-     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' asks"),
+     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
+    ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
+    ("ceiling: the Workflow scan skips a call whose brief it cannot read, so a variable-brief builder on opus passes",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if prompt is None or unseen & {"model", "agentType"} or not keys.get("model"):', "guard",
+     'role-model: Workflow builder on opus with a variable brief holding a Round 3 marker is denied'),
+    ("ceiling: the Workflow scan skips a call with a spread in its options, so a spread-first builder on opus passes",
+     'if unseen & {"model", "agentType"} or not keys.get("model"):',
+     'if unseen & {"model", "agentType", "..."} or not keys.get("model"):', "guard",
+     'role-model: Workflow builder on opus with a spread before its literal keys is denied'),
+    ("ceiling: the Workflow scan judges a shorthand agentType as general-purpose, so a designer loop on opus is refused",
+     'if "..." in unseen and "agentType" not in keys:',
+     'if False:', "guard",
+     'role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed'),
+    ("role row: a Workflow agent() call loses its agentType, so an Explore on sonnet runs as general-purpose",
+     'yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",',
+     'yield {"subagent_type": None, "model": keys["model"], "prompt": prompt or "",', "guard",
+     'role-model: Workflow Explore on sonnet with no marker is denied under agent-role-model'),
     ("frozen-path: the config-watch baseline store is not frozen",
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),
@@ -1244,9 +1285,79 @@ MUTATIONS = [
      "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
-     '        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):',
-     '        if not SHELL_WRITE_HINT.search(command):',
+     '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
+     '        writes = bool(SHELL_WRITE_HINT.search(command))\n        moves =',
      "guard", "worktree-home: the cross-checkout read costs"),
+    # The `cd` act: `worktree_home_cd_*_case`.
+    ("other-checkout: a cd into another checkout is not judged",
+     "        if elsewhere(move, where) and not _cd_red_run(",
+     "        if False and not _cd_red_run(",
+     "guard", "worktree-home: a cd into another checkout of the clone is refused"),
+    ("other-checkout: a bare cd with no write word is skipped like a read",
+     "    if not moves and not writes:\n        return \"\"\n    roots =",
+     "    if not writes:\n        return \"\"\n    roots =",
+     "guard", "worktree-home: a cd into another checkout of the clone is refused"),
+    ("other-checkout: a cd in a heredoc body reads as a move",
+     "    command = _strip_heredoc_bodies_unconditionally(command)\n    if not re.search(",
+     "    command = command\n    if not re.search(",
+     "guard", "worktree-home: a cd in a comment, in quotes"),
+    ("other-checkout: a PowerShell Set-Location is not read",
+     '    if not re.search(r"\\bcd\\b|set-location|\\bpushd\\b", command, re.IGNORECASE):',
+     '    if not re.search(r"\\bcd\\b|\\bpushd\\b", command, re.IGNORECASE):',
+     "guard", "worktree-home: a cd into another checkout is refused when it is a relative climb"),
+    ("other-checkout: the agent's recorded home is not exempt from the cd act",
+     '    if status == "home" and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
+     '    if False and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
+     "guard", "worktree-home: the cd exemptions pass"),
+    ("other-checkout: the session's recorded home is not exempt from the cd act",
+     "    return bool(held) and path_is_inside(target, held) is True\n\n\ndef _cd_red_run(",
+     "    return False\n\n\ndef _cd_red_run(",
+     "guard", "worktree-home: the cd exemptions pass"),
+    ("other-checkout: the agent's own red-run folder is not exempt from the cd act",
+     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '    return (False and os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     "guard", "worktree-home: the cd exemptions pass"),
+    ("other-checkout: the red-run exemption matches a prefix of the agent id",
+     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '    return (os.path.basename(owner).startswith("agent-" + agent_id)',
+     "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    ("other-checkout: a cd within its own checkout pays the git read",
+     '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
+     "                 if own_root and not _cd_home_exempt(payload, where, m)]",
+     "guard", "worktree-home: the cross-checkout read costs"),
+    ("other-checkout: a cd is judged only when the cwd has no checkout above it",
+     '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
+     "                 if not own_root and not _cd_home_exempt(payload, where, m)]",
+     "guard", "worktree-home: a cd into another checkout of the clone is refused"),
+    ("other-checkout: a cd into a folder in no checkout pays the read",
+     '_checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt',
+     '_checkout_root_by_stat(m) != own_root and not _cd_home_exempt',
+     "guard", "worktree-home: the cross-checkout read costs"),
+    ("other-checkout: an absolute cd after an untracked move is skipped",
+     "        folder = shell_abs(named, at)\n",
+     "        folder = shell_abs(named, at) if at else None\n",
+     "guard", "worktree-home: an absolute cd into another checkout is refused after an untracked move"),
+    ("other-checkout: a pushd is not read as a move",
+     '_segment_cd_target(tokens, ("cd", "set-location", "pushd"))',
+     '_segment_cd_target(tokens, ("cd", "set-location"))',
+     "guard", "worktree-home: pushd into another checkout"),
+    ("other-checkout: a command with only a pushd is skipped before it is read",
+     '    if not re.search(r"\\bcd\\b|set-location|\\bpushd\\b", command, re.IGNORECASE):',
+     '    if not re.search(r"\\bcd\\b|set-location", command, re.IGNORECASE):',
+     "guard", "worktree-home: pushd into another checkout"),
+    # RULE 0, other-checkout, the session's own scratchpad: `worktree_home_scratchpad_case`.
+    ("other-checkout: a worktree in the session's own scratchpad is refused",
+     "        if not has_agent and under_session_scratchpad(resolved, session_id):\n            return False\n",
+     "        if not has_agent and False:\n            return False\n",
+     "guard", "a write into a worktree in the session's own scratchpad"),
+    ("other-checkout: a worktree in any session's scratchpad passes",
+     "        if not has_agent and under_session_scratchpad(resolved, session_id):",
+     "        if not has_agent and in_any_session_scratchpad(resolved):",
+     "guard", "a write into a worktree in the session's own scratchpad"),
+    ("other-checkout: an agent call passes into the session's own scratchpad worktree",
+     "        if not has_agent and under_session_scratchpad(resolved, session_id):",
+     "        if under_session_scratchpad(resolved, session_id):",
+     "guard", "a write into a worktree in the session's own scratchpad"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
@@ -1459,31 +1570,56 @@ MUTATIONS = [
     # named case must go red.
     ("role-diff: every caller reads as no role",
      '    role = role.strip().lower()\n    return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE, DESIGNER_ROLE) else ""',
-     '    return ""', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+     '    return ""', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("designer-scope: an unread layout allows every path",
      '    if folder is None or ".." in parts:\n        return False',
      '    if folder is None:\n        return True\n    if ".." in parts:\n        return False',
      "guard", "designer-scope: an unread layout allows no path"),
     ("role-diff: SubagentStop is never judged",
      '    if payload.get("hook_event_name") == "SubagentStop":\n        judge_stop(payload)',
-     '    if False:\n        judge_stop(payload)', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+     '    if False:\n        judge_stop(payload)', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("role-diff: commit and push are never judged",
-     '                if subcommand in ("commit", "push"):', '                if False:', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+     '                if subcommand in ("commit", "push"):', '                if False:', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("role-diff: push is not judged, only commit",
      '                if subcommand in ("commit", "push"):', '                if subcommand in ("commit",):',
-     "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
-    ("role-diff: the merge base with the default branch is no base",
-     '    default = resolve_default_base(root)\n    if default:\n        merged',
-     '    default = None\n    if default:\n        merged', "guard",
-     "builder-diff: main's later tests merged into a long-lived worktree log nothing"),
-    ("role-diff: a path offends against ANY base, not every base",
-     '    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]',
-     '    both = [rel for s in sets for rel in s]', "guard",
-     "builder-diff: main's later tests merged into a long-lived worktree log nothing"),
+     "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
+    ("role-diff: the builder's own commits are never read",
+     'ENTRY_OWN = re.compile(r"^commit(?: \\((?:initial|amend|merge)\\))?:")',
+     'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
+     "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
+    ("role-diff: a merge commit is judged against its first parent, not git's own merge",
+     '        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
+     '        old = parents[0] if parents else ""', "guard",
+     "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop"),
+    ("role-diff: a merge in progress is judged against HEAD, not git's own merge",
+     '        old = merge_tree(root, "HEAD", merging.stdout.strip())', '        old = "HEAD"', "guard",
+     "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit"),
+    ("role-diff: a rebase pick is read as the builder's resolved replay",
+     'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")',
+     'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "reword", "edit")', "guard",
+     "builder-refuse: a rebase onto main where a test-author's commit and main change the same test file in different hunks"),
+    ("role-diff: a replay in progress is refused as the builder's own work",
+     '    changes.append((old, None, paths, NOTED if replaying else OWN))',
+     '    changes.append((old, None, paths, OWN))', "guard",
+     "builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit"),
+    ("role-diff: a write of the upstream side after a rebase is logged only",
+     '            if not builder or kind == OWN:',
+     '            if not builder or (kind == OWN and rel not in {r for _o, _n, p, k in changes if k == KEPT for r in p}):',
+     "guard",
+     "builder-refuse: after a rebase, main's bytes written back over a test file are denied at commit"),
     ("role-diff: untracked files are never read",
-     '    for rel in [p for p in tracked.stdout.split("\\0") if p] + sorted(\n'
-     '            p for p in fresh.stdout.split("\\0") if p):',
-     '    for rel in [p for p in tracked.stdout.split("\\0") if p]:', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+     '    return tracked + sorted(fresh)', '    return tracked', "guard",
+     "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
+    ("role-diff: an own commit HEAD no longer holds is still judged",
+     '        if sha in lost:\n            continue', '        if False:\n            continue', "guard",
+     "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line"),
+    ("role-diff: every path a builder changes offends",
+     '            bad = any(is_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
+     "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
+    ("role-diff: a test-author's change is judged as a builder's",
+     '        if role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
+     '        if False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
+     "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing"),
     ("role-diff: a flag on a line that calls a runner is not read",
      'any(TEST_RUNNER_CONTEXT.search(near) for near', 'any(False for near', "guard", "builder-test: addopts --deselect added to pytest.ini is refused"),
     ("role-diff: --deselect no longer disables tests",
@@ -1529,7 +1665,7 @@ MUTATIONS = [
      'record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")', 'pass', "guard",
      "role-diff: every unjudged stop is logged"),
     ("test-author: the scope is never enforced in the diff",
-     '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check logs for the reviewer and never blocks"),
+     '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("test-author: the write tool lets any path through",
      '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
      "test-author: Edit of product code is refused"),
@@ -1744,7 +1880,8 @@ MUTATIONS = [
      "guard", 'override: a refusal an override lifts ends with the main override line'),
     ("override line: the missing-module deny stops saying that no override lifts it",
      '"then retry. No override lifts this refusal, because the failed guard cannot check "\n'
-     '                    "the acts that no override lifts.")}}))',
+     '                    "the acts that no override lifts. "\n'
+     '                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
     ("override line: the Opus spawn ask no longer names the Opus word",
@@ -1773,6 +1910,161 @@ MUTATIONS = [
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60',
      'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 60',
      "calljudge", 'question: one model call, claude-opus-5-5'),
+
+    # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
+    # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
+    ("lane-repo-tag: the rule never fires",
+     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
+    ("lane-repo-tag: a tag in other case no longer matches",
+     '        if repo and repo_tag_names(tag, repo):',
+     '        if repo and tag == REPO_TAG + repo:',
+     "guard", "lane-repo-tag: origin repo tag in other case is allowed"),
+    ("lane-repo-tag: the owner is the first path segment, so a proxy origin names the wrong repo",
+     '    owner, name = segments[-2], segments[-1]\n    if name.endswith(".git"):',
+     '    owner, name = segments[0], segments[-1]\n    if name.endswith(".git"):',
+     "guard", "lane-repo-tag: proxy-host origin, origin repo tag is allowed"),
+    ("lane-repo-tag: a .git suffix stays on the repo name",
+     '    if name.endswith(".git"):\n        name = name[:-4]\n    return "%s/%s"',
+     '    if False:\n        name = name[:-4]\n    return "%s/%s"',
+     "guard", "lane-repo-tag: origin with a .git suffix, origin repo tag is allowed"),
+    ("lane-repo-tag: the no-origin fallback also applies when the origin is read",
+     '        if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
+     '        if isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(',
+     "guard", "lane-repo-tag: origin with a .git suffix, another repo's tag is denied"),
+    ("lane-repo-tag: with no readable origin, every lane is allowed (the no-origin fallback is dropped)",
+     '    # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.\n    for tag in tags:',
+     '    if not repo:\n        return "", None\n    for tag in tags:',
+     "guard", "lane-repo-tag: a checkout with no origin, short repo form is denied"),
+    ("lane-repo-tag: the tag is stripped before the exact read, so a trailing space passes",
+     '        if repo and repo_tag_names(tag, repo):',
+     '        if repo and repo_tag_names(tag.strip(), repo):',
+     "guard", "lane-repo-tag: origin repo tag with a trailing space is denied"),
+    ("lane-repo-tag: a local path origin is not parsed, so it reads as no origin",
+     '    else:\n        path = url\n',
+     '    else:\n        path = url.partition(":")[2]\n',
+     "guard", "lane-repo-tag: a local-path origin, another repo's tag is denied"),
+    ("lane-repo-tag: the scp arm is dropped, so an scp origin reads its host into the path",
+     '    elif ":" in url.partition("/")[0]:\n        path = url.partition(":")[2]\n',
+     '    elif False:\n        path = url.partition(":")[2]\n',
+     "guard", "lane-repo-tag: an scp origin, origin repo tag is allowed"),
+    ("lane-repo-tag: a URL with a scheme reads its host and port, not its path, so it reads as no origin",
+     '    if "://" in url:\n        path = url.split("://", 1)[1].partition("/")[2]\n',
+     '    if "://" in url:\n        path = url.split("://", 1)[1].partition("/")[0]\n',
+     "guard", "lane-repo-tag: an ssh origin with a port, another repo's tag is denied"),
+    ("lane-repo-tag: the extras file is never read, so the origin decides",
+     '    if extras is _READ_EXTRAS:\n        try:',
+     '    if False:\n        try:',
+     "guard", "lane-repo-tag: an extras file names the GitHub repo, its tag is allowed"),
+    ("lane-repo-tag: the origin is read before the extras, so it wins over them",
+     '    if isinstance(extras, dict) and isinstance(extras.get("github"), str):\n        return extras["github"]\n    done = _git(',
+     '    if False:\n        return extras["github"]\n    done = _git(',
+     "guard", "lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag"),
+    ("lane-repo-tag: the deny reason names no repo",
+     'LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>"))',
+     'LANE_REPO_TAG_REASON % (REPO_TAG + "<owner>/<name>")',
+     "guard", "lane-repo-tag: a denied lane names the expected repo tag in its reason"),
+    # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
+    # set_session_tags call after it.
+    ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
+     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
+     '            return tags is not None and not tagged_after', "guard",
+     "a lane's push that names roadmap is refused"),
+    ("roadmap-one-writer: a set_session_tags call after the record is ignored",
+     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
+     '            return tags is not None and ROLE_TAG_PREFIX + tier in tags', "guard",
+     "a triage record with a set_session_tags call after it is refused a push to roadmap"),
+    ("roadmap-one-writer: a push never counts as reaching the record branch",
+     '            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (',
+     '            if set() & set(push_destinations(args, where, overrides)) and (', "guard",
+     "a lane's push that names roadmap is refused"),
+    ("roadmap-one-writer: the default name roadmap is no record branch in a fork",
+     '            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (',
+     '            if {record} & set(push_destinations(args, where, overrides)) and (', "guard",
+     "a lane's push to roadmap in the fork is refused"),
+    ("roadmap-one-writer: a dry run is judged like a push",
+     '            if read_verb("push", args):\n                continue',
+     '            if False:\n                continue', "guard",
+     "a lane's dry run of a push to roadmap with --dry-run is allowed"),
+    ("roadmap-one-writer: a push handed to a shell, eval or ssh is not read",
+     '    inner = inner_commands(tokens) if tokens else []',
+     '    inner = []', "guard", "a push to roadmap inside bash -c is refused"),
+    ("roadmap-one-writer: a wrapped push runs in the call's folder, not its segment's cd",
+     '        inner_cwd = push_target(segment, script, cwd)[0] or cwd',
+     '        inner_cwd = cwd', "guard", "a push inside bash -c after a cd is judged by the folder it moved to"),
+    ("roadmap-one-writer: a set_session_tags call on another session voids the own proof",
+     '                    if not isinstance(ids, list) or own_id in ids:',
+     '                    if True:', "guard",
+     "a triage record then a tag call on another session is allowed"),
+    ("roadmap-one-writer: a set_session_tags call with no id list is ignored, so the proof stands",
+     '                    if not isinstance(ids, list) or own_id in ids:',
+     '                    if isinstance(ids, list) and own_id in ids:', "guard",
+     "a triage record then a tag call that names no sessions is refused"),
+    ("roadmap-one-writer: HEAD as a destination is not resolved to the current branch",
+     '    if target in ("HEAD", "@"):\n        return _push_current_branch(cwd)',
+     '    if False:\n        return _push_current_branch(cwd)', "guard",
+     "a lane's HEAD push from the roadmap checkout is refused"),
+    ("roadmap-one-writer: a bare push is not resolved to the current branch",
+     '    if bare:\n        return _push_bare_destination(cwd, overrides)',
+     '    if False:\n        return _push_bare_destination(cwd, overrides)', "guard",
+     "a lane's bare push from the roadmap checkout is refused"),
+    ("roadmap-one-writer: refs/heads/ is not cut off the destination",
+     '    return [t.removeprefix("refs/heads/") if t else t for t in found]',
+     '    return found', "guard", "a lane's push of a ref into refs/heads/roadmap is refused"),
+    ("roadmap-one-writer: git -C does not move the push to its checkout",
+     '            where, overrides = push_target(segment, script, cwd)\n            yield _command_words(args), where, overrides',
+     '            where, overrides = cwd, {}\n            yield _command_words(args), where, overrides', "guard",
+     "a lane's push of roadmap-fork with git -C into the fork is refused"),
+    # A `)` or `&` glued to the last word ends the command (_command_words).
+    ("roadmap-one-writer: a glued ) is kept, so a subshell's push reads roadmap)",
+     '        word = arg.rstrip(")&")',
+     '        word = arg.rstrip("&")', "guard",
+     "a lane's push to roadmap in a subshell after a cd into the roadmap checkout is refused"),
+    ("roadmap-one-writer: a glued & is kept, so a background push reads roadmap&",
+     '        word = arg.rstrip(")&")',
+     '        word = arg.rstrip(")")', "guard",
+     "a lane's push to roadmap with a trailing background & is refused"),
+    ("roadmap-one-writer: the push's words are not cut at the end of the command",
+     '            yield _command_words(args), where, overrides',
+     '            yield args, where, overrides', "guard",
+     "a lane's HEAD:roadmap push in a subshell after a cd, piped to tail, is refused"),
+    ("roadmap-one-writer: the word a glued ) or & ends keeps its mark",
+     '            if word:\n                words.append(word)\n            break',
+     '            if word:\n                words.append(arg)\n            break', "guard",
+     "a lane's push to roadmap in a subshell under bash -c after a cd is refused"),
+    ("roadmap-one-writer: the record branch is never read, so every checkout's record is roadmap",
+     '        return layout.record_branch(root)',
+     '        return DEFAULT_RECORD_BRANCH', "guard",
+     "a lane's push of roadmap-fork is refused in the fork that names it its record branch"),
+    # RULE simulator-boot-bypass (decision sim-test-is-the-one-boot-path, ruling 4). Each mutant breaks one arm.
+    ("simulator-boot-bypass: a raw simctl boot is never read",
+     '        if _simctl_boot_args(word, rest) is not None:\n            return',
+     '        if False:\n            return', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    ("simulator-boot-bypass: a boot with no device argument (xargs feeds it) is not a boot",
+     '            return after[1:]\n    return None',
+     '            return after[1:] or None\n    return None', "guard", 'simulator-boot-bypass: xargs of an echo into a boot'),
+    ("simulator-boot-bypass: an open flag cluster is not read, only a lone -a or -b",
+     'if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg)',
+     'if re.fullmatch(r"-[ab]", arg)', "guard", 'simulator-boot-bypass: open -ga Simulator'),
+    ("simulator-boot-bypass: a bare simctl word is not a boot command",
+     'if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):',
+     'if word in ("xcrun",) and "simctl" in ([word] + rest):', "guard", 'simulator-boot-bypass: bare simctl boot'),
+    ("simulator-boot-bypass: open -a Simulator is not read",
+     'if ("a" in arg and re.sub(r"\\.app$", "", value) == "simulator") or (',
+     'if (False) or (', "guard", 'simulator-boot-bypass: open -a Simulator'),
+    ("simulator-boot-bypass: open -b the simulator bundle id is not read",
+     '"b" in arg and value == "com.apple.iphonesimulator"):',
+     'False):', "guard", 'simulator-boot-bypass: open -b the simulator bundle id'),
+    ("simulator-boot-bypass: an open of the Simulator.app path is not read",
+     'elif low.endswith("/simulator.app") or low == "simulator.app":',
+     'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
+    ("simulator-boot-bypass: a command a wrapper hands on is not read",
+     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
+     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+    ("simulator-boot-bypass: the refusal is never raised",
+     '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
+     '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -1842,6 +2134,126 @@ def report_main(argv) -> int:
                                                      ", ".join(REPORT_GOLD[1])))
     print()
     print(mutate_shared.format_report(rows, gold=note))
+    return 0
+
+
+# REPLAY MODE. Repository -> how to read it (the profile keys are in hooks/mutate_shared.py). Each profile
+# was measured on its repository: the suite times, and which suites are green on a clean checkout.
+# q_max: one `node --test` file runs 0 to 15 s; harness/tests/checks-known-bad.test.mjs runs past 300 s,
+# so it reads unusable under the suite timeout.
+# banchi: the TypeScript tier runs through the Playwright unit config (the `unit` script of app/package.json),
+# one file as a path argument. Its Python harness (harness/run.py) has no per-module runner of its own, so
+# the runner below imports one harness/tests/tN_*.py and calls its `run()` under `isolated_home()`, as
+# run.py does. A module is a suite only when it is green on a clean checkout: T6 needs demo-assets/ (its
+# photos are left out of the checkout), so it reads unusable. T7 is minutes long whole, so a changed T7 group
+# module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
+# helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
+# an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
+BANCHI_MODULE_RUNNER = """\
+import importlib, os, sys
+sys.path.insert(0, os.getcwd())
+from harness.tests.home import isolated_home
+name = sys.argv[1][:-3].replace('/', '.')
+group = name.startswith('harness.tests.t7.')
+with isolated_home():
+    if group:
+        t7 = importlib.import_module('harness.tests.t7_store_and_seams')
+        wanted = tuple(importlib.import_module(name).CHECKS)
+        result = t7.run(order=lambda todo: [check for check in todo if check in wanted])
+    else:
+        result = importlib.import_module(name).run()
+passed = getattr(result, 'passed', None)
+if passed is not True and passed is not False:
+    raise TypeError('run() returned no Result with a bool passed: %r' % (result,))
+if not passed:
+    print('FAIL: ' + name)
+    print(result.detail)
+    sys.exit(1)
+"""
+REPLAY_PROFILES = {
+    "q_max": {
+        "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
+        "tests": r"^harness/tests/[^/]+\.test\.mjs$",
+        "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "sparse_skip": [],
+        "select": ["node", "harness/tests-for.mjs", "{path}"],
+    },
+    "banchi": {"parts": {
+        "ts": {
+            "code": r"^app/src/.*\.(ts|tsx)$", "tests": r"^app/tests/unit/[^/]+\.unit\.ts$",
+            "argv": ["node", "node_modules/@playwright/test/cli.js", "test", "-c", "playwright.unit.config.ts",
+                     "{suite}"],
+            "classify": "playwright", "cwd": "app",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
+            "sparse_skip": ["demo-assets", "vendor"],
+        },
+        "py": {
+            "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
+            "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$",
+            "suite_filter": {"paths": r"^harness/tests/t7/", "keep": "defines_checks"},
+            "argv": ["{deps}/venv/bin/python", "-c", BANCHI_MODULE_RUNNER, "{suite}"], "classify": "fail_line",
+            "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                        ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                         "requirements.txt"]],
+            "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+        },
+    }},
+}
+
+
+def replay_main(argv) -> int:
+    """Replay the last merged pull requests of a repository, print each row as it ends, then the table.
+    Exit 0 whatever the scores: a replay is not a check. A bad argument is the only nonzero exit."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --replay")
+    parser.add_argument("--replay", required=True, metavar="REPO", help="a clone of the repository to replay")
+    parser.add_argument("--profile", required=True, choices=sorted(REPLAY_PROFILES))
+    parser.add_argument("--prs", type=int, default=20, help="how many of the newest merged pull requests")
+    parser.add_argument("--limit", type=int, default=20, help="mutants per pull request")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--pr-budget", type=float, default=None, metavar="SECONDS",
+                        help="mutants not started this long after a pull request began count as not_run")
+    args = parser.parse_args(argv)
+    repo = os.path.abspath(args.replay)
+    try:
+        prs = mutate_shared.merged_prs(repo, "HEAD", args.prs)
+    except ValueError as error:
+        print("ERROR %s" % error)
+        return 2
+    profile = REPLAY_PROFILES[args.profile]
+    print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    rows = []
+
+    def stop(signum, _frame):
+        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
+        # then each checkout is removed and the deps folder with it.
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
+    try:
+        for sha, _number, _title in prs:
+            for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
+                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
+                                                    pr_budget=args.pr_budget,
+                                                    progress=lambda line: print(line, flush=True)):
+                rows.append(row)
+                print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
+    finally:
+        shutil.rmtree(deps, ignore_errors=True)
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
+    print()
+    print(mutate_shared.format_replay(rows))
     return 0
 
 
@@ -1966,6 +2378,8 @@ def run_mutant(sources, work: str, entry):
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
+    if "--replay" in sys.argv[1:]:
+        return replay_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:

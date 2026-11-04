@@ -5,8 +5,8 @@ Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
   order and refuses or asks on the first match. Bad input allows the call.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
-  against its role, for example a builder that changed a test path. Logs an offence for
-  the reviewer and never refuses the stop.
+  against its role, for example a builder that changed a test path. A builder's offence
+  is refused at its first stop; any other role's offence is logged for the reviewer.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -34,12 +34,19 @@ set_override_veto and session_home_keep):
                        (precompact-handoff, item 9)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
-  builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
-                       noted. A builder, test-author or record-writer `git commit` or `git push`.
+  builder-diff         deny. A builder commit or push whose diff holds a test path, judged
+                       against the commits the builder made and its working tree. The reason gives
+                       the undo route and names no path. No override lifts it. SubagentStop
+                       (`judge_stop`) refuses the builder's first stop the same way; a second stop
+                       passes.
+                       (builders-cannot-edit-tests)
+  author-diff, writer-diff, designer-diff, role-diff-*
+                       noted. A test-author or record-writer commit or push.
                        The diff it would send is logged for the reviewer. Never refuses.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
                        also role-diff-main-checkout, role-diff-unresolved and
-                       role-diff-unread.
+                       role-diff-unread. An unread diff of any role, builder included, is logged
+                       and allowed.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
@@ -74,7 +81,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
-                       the working folder or a folder above it, in either shell.
+                       the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
@@ -84,6 +91,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
+  roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
+                       the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
+                       dry run, unless the session's own get_session record (read
+                       from the transcript) shows the tag cs-build:triage with no set_session_tags after
+                       it. No record, no transcript or no env id is a refusal. An override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
@@ -102,8 +114,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   agent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
-                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
-                       designer, design-reviewer or a builder's third-round marker covers it. An override lifts the spawn ask only.
+                       deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
+                       design-reviewer, a builder's third-round marker or an Explore's `Audit:` marker
+                       covers it. The general override, `opus [role] <time>` or a step grant lifts the
+                       spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -114,23 +128,33 @@ Other tools, in `judge` order:
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
                        other than the one holding its cwd. A nested worktree owns its own files.
-                       A target in no checkout, or in the clone's `.git`, passes; unreadable git
-                       passes. The shell form reads the targets frozen-path reads, after a
-                       leading `cd`. An override lifts it.
+                       A target in no checkout, or in the clone's `.git`, passes; so does a
+                       linked checkout in this session's own scratchpad, for a call with no
+                       `agent_id` and a valid session id. Unreadable git passes. The shell form
+                       reads the targets frozen-path reads, after a leading `cd`. An override
+                       lifts it.
+                       A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
+                       checkout is refused too, bare or chained; the cd target in the caller's
+                       recorded home, a session's recorded home, or the caller's own
+                       `agent-<id>-<suffix>` red-run folder passes that act.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
                        files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
                        call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
-                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       `.git`, a target outside the clone, reads and non-writing shell pass. A git
+                       `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
                        carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
                        spawn pass it. An unread record
-                       passes and is noted as `agent-role-model-unread`. No override lifts it.
+                       passes and is noted as `agent-role-model-unread`. The general override lifts an
+                       above-row refusal; no override lifts the no-model refusal. A Workflow
+                       `agent()` call is judged as a spawn; one whose model or agentType the scan
+                       cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
@@ -147,10 +171,27 @@ Other tools, in `judge` order:
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
+  lane-repo-tag        deny. A `create_session` call with a lane tag (as for lane-effort-pin) and no tag
+                       that names the calling checkout's GitHub `owner/name` as the roadmap reads a repo tag
+                       (`repo_tag_names`): exact `cs-repo:` prefix, no strip, owner/name without case.
+                       The repo is `git_reads.github_repo`, shared with the roadmap build: the "github"
+                       key of the layout extras file's "roadmap" object first, else the last two
+                       segments of the origin's path (a scheme-less local path too), `.git` stripped;
+                       the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
+                       passes. The deny reason names the tag to add.
+                       Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
+  simulator-boot-bypass
+                       deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
+                       Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
+                       path that ends in Simulator.app, `open -b com.apple.iphonesimulator`).
+                       Judged by the command word on the text alone, before any `simctl list`,
+                       and before the two rules below. The remedy is `sim-test`. An override
+                       lifts it. (sim-test-is-the-one-boot-path)
   simulator-boot-cap, simulator-boot-twin
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
+                       They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -163,7 +204,7 @@ are not frozen. They are allowed, and the guard logs one `config-edit` line, so 
 Stop hook can show the edit at turn end. `subject-unread` is logged the same way: an allow that a
 person still gets to see.
 
-`agent-model-cap` asks and never refuses, because that same write is how an Opus agent is
+`agent-model-cap` asks on a settings write and never refuses it, because that same write is how an Opus agent is
 enabled on purpose. It stands after `frozen-path`, so only a project-scoped write reaches it. Its
 ask names the requested value and the file, which is not an exception to the remedy rule below:
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
@@ -187,10 +228,10 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+`agent-model-floor`, the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
@@ -251,12 +292,14 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            nested_script, norm,
-            path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            inner_commands, nested_script, norm,
+            _segment_cd_target, _strip_heredoc_bodies_unconditionally,
+            path_is_inside, primary_checkout, record, refuse, resolve_command,
+            resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
@@ -268,7 +311,7 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
@@ -284,13 +327,14 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            TRUST_REASON, archive_hit, trust_card_hit, undrafted_pr_create, uses_merge_tool,
+            merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, trust_card_hit,
+            undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
-            project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -302,7 +346,7 @@ while True:
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            playwright_command_hit, playwright_install_hit,
+            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_stream"
         from guard_stream import (
@@ -369,7 +413,8 @@ while True:
                     "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
                     "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
                     "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts.")}}))
+                    "the acts that no override lifts. "
+                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
         sys.exit(0)
 
 
@@ -884,6 +929,14 @@ OTHER_CHECKOUT_REASON = (
     "janitor sweep."
 )
 
+OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
+OTHER_CHECKOUT_CD_REASON = (
+    "Rule (other checkout): this command changes directory into another checkout of this clone, "
+    "not the one this session stands in. "
+    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
+    "`cd`."
+)
+
 
 # agent-worktree-discard-is-noted: inside a worktree the harness made FOR an agent
 # (`<primary>/.claude/worktrees/<name>`, the same shape `agent_worktree_home` above reads), a
@@ -949,7 +1002,8 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project."
+    "Approve it only when a model above Sonnet is wanted for this project. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
 
@@ -1165,7 +1219,8 @@ CITE_REASON = (
     "short gloss, like \"D12, short titles for records\". "
     "Remedy: write the id the record carries, or its slug while the number is unclaimed, "
     "and leave the folder and the file extension out. Only a commit's last-paragraph trailer "
-    "`Drops-lines: <path> -- <reason>` may name a path."
+    "`Drops-lines: <path> -- <reason>` may name a path. "
+    "(rule git-cite-by-id, cite a record by its id, never by its path)"
 )
 
 
@@ -1241,7 +1296,8 @@ UNREAD_MARK = "\0unread:"
 UNREAD_REASON = (
     "Rule (Git): the message file could not be read, so the guard cannot tell whether it cites a "
     "record by its path. "
-    "Remedy: pass the message inline, or name a file this directory can read."
+    "Remedy: pass the message inline, or name a file this directory can read. "
+    "(decision cite-by-id-refuses-unread-file, an unread message file is refused, not passed)"
 )
 
 
@@ -1367,7 +1423,8 @@ LANE_REASON = (
     "Rule (Git): this message names a lane by a session number. That number is handed out in one "
     "chat and means nothing outside it. "
     "Remedy: name the lane by its branch slug, like \"lane-number-cite\". A number inside a "
-    "backtick code span or a fenced block is quoted text and stays allowed."
+    "backtick code span or a fenced block is quoted text and stays allowed. "
+    "(decision lane-by-slug, a lane is named by its branch slug, never by a session number)"
 )
 
 
@@ -1445,6 +1502,7 @@ BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
     " A merge conflict in a test file takes the same route."
+    " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
@@ -1466,8 +1524,25 @@ def is_test_rel(rel: str) -> bool:
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
         or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
-        or any(p.lower() in TEST_DIRS for p in parts)
+        or _in_test_dir(parts)
     )
+
+
+# `spec` is a test folder for code (`spec/foo_spec.rb`) and for its fixtures, but a Markdown or text
+# file there is a document (`docs/spec/api.md`), not a test.
+SPEC_DOC_EXTENSIONS = {".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc"}
+
+
+def _in_test_dir(parts) -> bool:
+    for index, part in enumerate(parts):
+        name = part.lower()
+        if name not in TEST_DIRS:
+            continue
+        if (name == "spec" and index < len(parts) - 1
+                and os.path.splitext(parts[-1])[1].lower() in SPEC_DOC_EXTENSIONS):
+            continue
+        return True
+    return False
 
 
 def is_test_config_rel(rel: str) -> bool:
@@ -1512,6 +1587,12 @@ def designer_path_ok(rel: str) -> bool:
     return "/".join(parts).startswith(folder + "/")
 
 
+def drive_form_cwd(cwd: str) -> str:
+    """A Git Bash `/c/Users/...` cwd in drive form (`C:/Users/...`) on Windows, else `cwd` as given.
+    Off Windows `/c/` is a real folder. `_expanded` is the one reader of the drive spelling."""
+    return _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+
+
 def repo_rel(path: str, cwd: str, outside: bool = True):
     """The path relative to its repository root (the nearest parent holding `.git`), posix, or the
     full path when it sits in no repository (`outside` False: None there). None when it cannot be
@@ -1529,6 +1610,32 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
             return full[len(parent):]
         parent = os.path.dirname(parent)
     return full if outside else None
+
+
+def builder_test_path(path: str, cwd: str) -> bool:
+    """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
+    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
+    disables tests is judged on content, so only the Edit tools read it."""
+    rel = repo_rel(path, cwd)
+    if rel is None:
+        return False
+    # From a call that runs in a repository, a path in no repository is no test of it, as for the test-author
+    # in role_write_hit. From a call in no repository nothing says which paths are outside, so the shape decides.
+    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
+    # read but not from the probe, and the target would then count as outside.
+    where = drive_form_cwd(cwd)
+    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
+            and repo_rel(path, where, outside=False) is None):
+        return False
+    return is_test_rel(rel)
+
+
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
+    """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
+    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
+            or interpreter_write_hit(raw, cwd, builder_test_path))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -1552,7 +1659,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if repo_rel(target, cwd, outside=False) is None else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if is_test_rel(rel):
+    if builder_test_path(target, cwd):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -1560,29 +1667,155 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     return ""
 
 
-def diff_bases(root: str):
-    """The commits this agent's own work is measured against. Empty when git could not answer.
+# HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
+# `commit (merge)`. A replay the agent resolved or chose: a hand-resolved cherry-pick, a revert, and a
+# rebase step that is no plain pick. A plain cherry-pick, rebase pick or `am` copies a commit someone
+# else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
+ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
+ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
+ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
+REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
+# How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
+# rebase kept.
+OWN, NOTED, KEPT = "own", "noted", "kept"
 
-    TWO candidates, and a path counts only if it differs from BOTH:
-      - the oldest `HEAD` reflog entry: the commit the worktree was cut from. It survives a new
-        branch name (`switch -c b2`), which a branch reflog would not.
-      - the merge base of HEAD with the default branch. It moves forward each time main is merged
-        or rebased in.
-    The work the parent branch handed over differs from the first and not the second only if the
-    parent is the default branch; the work main later gained differs from the second and not the
-    first. Only the agent's own change differs from both."""
-    bases = []
-    log = guard_core._git(root, "reflog", "show", "--format=%H", "HEAD")
-    lines = log.stdout.split() if log is not None and log.returncode == 0 else []
-    if lines:
-        bases.append(lines[-1])
-    default = resolve_default_base(root)
-    if default:
-        merged = guard_core._git(root, "merge-base", "HEAD", default)
-        if merged is not None and merged.returncode == 0 and merged.stdout.strip():
-            if merged.stdout.strip() not in bases:
-                bases.append(merged.stdout.strip())
-    return bases
+
+def entry_kind(subject: str) -> str:
+    """OWN, NOTED (a replay the agent resolved or chose), 'start' (a rebase start) or '' for one HEAD
+    reflog subject."""
+    rebase = ENTRY_REBASE.match(subject)
+    if rebase:
+        step = rebase.group(1).strip()
+        if step.startswith("start"):
+            return "start"
+        return "" if step.startswith(REBASE_PLAIN_STEPS) else NOTED
+    if ENTRY_OWN.match(subject):
+        return OWN
+    return NOTED if ENTRY_RESOLVED.match(subject) else ""
+
+
+def git_names(root: str, *args):
+    """The NUL-separated names one git call prints, or None when git failed."""
+    answer = guard_core._git(root, *args)
+    if answer is None or answer.returncode != 0:
+        return None
+    return [p for p in answer.stdout.split("\0") if p]
+
+
+def changed_paths(root: str, old: str, new=None):
+    """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
+    and its untracked files when `new` is None; None when git failed."""
+    if new is not None:
+        return git_names(root, "diff", "--name-only", "-z", "--no-renames", old, new)
+    tracked = git_names(root, "diff", "--name-only", "-z", "--no-renames", old)
+    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z")
+    if tracked is None or fresh is None:
+        return None
+    return tracked + sorted(fresh)
+
+
+def merge_tree(root: str, ours: str, theirs: str):
+    """The tree git's own merge of two commits makes, each conflict left as markers; None when git
+    failed. A path that differs from it is one the agent resolved or added. Needs git 2.38 or newer
+    (`merge-tree --write-tree`), and writes the merged objects to the object store."""
+    answer = guard_core._git(root, "merge-tree", "--write-tree", "--no-messages", "-z", ours, theirs)
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.stdout.split("\0", 1)[0].strip() or None
+
+
+def upstream_kept(root: str, orig: str, onto: str):
+    """The paths a rebase of `orig` onto `onto` replayed that hold `onto`'s bytes again in the working
+    tree: the agent kept the upstream side. Empty when HEAD no longer holds `onto`; None when git
+    failed."""
+    held = guard_core._git(root, "merge-base", "--is-ancestor", onto, "HEAD")
+    if held is None or held.returncode not in (0, 1):
+        return None
+    if held.returncode:
+        return []
+    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig)
+    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto)
+    if replayed is None or moved is None:
+        return None
+    return [p for p in replayed if p not in set(moved)]
+
+
+def own_changes(root: str):
+    """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
+    unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
+
+    OWN (a builder's test path in it is refused):
+      - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
+        still holds, against its first parent. A merge commit is measured against git's own merge of
+        its parents, so only what the agent resolved or added counts;
+      - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
+        HEAD and MERGE_HEAD.
+    NOTED (logged, never refused): a replay the agent resolved or chose (a hand-resolved cherry-pick, a
+    revert, a rebase squash, fixup or continue), and the working tree while a replay is in progress.
+    KEPT (logged only): a path a held rebase replayed that holds the rebase start's bytes again, as the
+    builder left it during the rebase. A write of those bytes after the rebase finished is its own change:
+    the working tree or a commit of its own carries it, and that is refused.
+    A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
+    people's commits, and are not read."""
+    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
+    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
+    merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
+        return None
+    entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
+    kinds = {}
+    for sha, subject in entries:
+        kind = entry_kind(subject)
+        if kind in (OWN, NOTED):
+            kinds.setdefault(sha, kind)
+    lost = set()
+    if kinds:
+        # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
+        answer = guard_core._git(root, "rev-list", *kinds, "--not", "HEAD")
+        if answer is None or answer.returncode != 0:
+            return None
+        lost = set(answer.stdout.split())
+    changes = []
+    for sha, kind in kinds.items():
+        if sha in lost:
+            continue
+        parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
+        if parents is None or parents.returncode != 0:
+            return None
+        parents = parents.stdout.split()
+        if len(parents) > 2:
+            return None
+        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
+        if old is None:
+            return None
+        paths = (changed_paths(root, old, sha) if old else
+                 git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
+                           "--no-renames", sha))
+        if paths is None:
+            return None
+        changes.append((old, sha, paths, kind))
+    old = "HEAD"
+    if merging.returncode == 0:
+        old = merge_tree(root, "HEAD", merging.stdout.strip())
+        if old is None:
+            return None
+    paths = changed_paths(root, old)
+    if paths is None:
+        return None
+    replaying = merging.returncode != 0 and any(
+        os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
+    changes.append((old, None, paths, NOTED if replaying else OWN))
+    for index, (sha, subject) in enumerate(entries):
+        if index and entry_kind(subject) == "start":
+            kept = upstream_kept(root, entries[index - 1][0], sha)
+            if kept is None:
+                return None
+            if kept:
+                changes.append((sha, None, kept, KEPT))
+    return changes
 
 
 def package_json_author_ok(old: str, new: str) -> bool:
@@ -1631,38 +1864,26 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def base_text(root: str, base: str, rel: str) -> str:
-    """The file's text at the base commit, or '' when it did not exist there."""
-    answer = guard_core._git(root, "show", base + ":" + norm(rel))
+def text_at(root: str, rev, rel: str) -> str:
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+    when it does not exist there or `rev` is '' (no commit)."""
+    if rev is None:
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+                return handle.read()
+        except Exception:
+            return ""
+    if not rev:
+        return ""
+    answer = guard_core._git(root, "show", rev + ":" + norm(rel))
     return answer.stdout if answer is not None and answer.returncode == 0 else ""
 
 
-def work_text(root: str, rel: str) -> str:
-    try:
-        with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
-            return handle.read()
-    except Exception:
-        return ""
-
-
-def disabling_added(root: str, base: str, rel: str) -> bool:
-    """True when the lines a change ADDS to one file, against the base, disable tests."""
-    return disables_tests(work_text(root, rel).splitlines(), base_text(root, base, rel).splitlines())
-
-
-def role_offences(root: str, top: str, base: str, role: str):
-    """The paths whose change, against ONE base, the role may not make; None when git failed.
-
-    The files are the working tree against the base (committed, staged and unstaged work in one
-    read; a change put back to the base's own bytes is no change) plus untracked files. Each path
-    is checked as spelled and as resolved through symlinks."""
-    tracked = guard_core._git(root, "diff", "--name-only", "-z", "--no-renames", base)
-    fresh = guard_core._git(root, "ls-files", "--others", "--exclude-standard", "-z")
-    if tracked is None or fresh is None or tracked.returncode or fresh.returncode:
-        return None
+def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
+    """The paths among `paths`, changed from `old` to `new` (see `own_changes`), whose change the role
+    may not make. Each path is checked as spelled and as resolved through symlinks."""
     found = []
-    for rel in [p for p in tracked.stdout.split("\0") if p] + sorted(
-            p for p in fresh.stdout.split("\0") if p):
+    for rel in paths:
         # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
@@ -1670,36 +1891,43 @@ def role_offences(root: str, top: str, base: str, role: str):
         if role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(base_text(root, base, rel), work_text(root, rel))
+                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
+                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (
-                is_test_config_rel(rel) and disabling_added(root, base, rel))
+            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines()))
         if bad:
             found.append(rel)
     return found
 
 
 def diff_violation(root: str, role: str):
-    """Judge the agent's whole result. Returns ('', base) when clean, (the first offending path,
-    base) when not, and (None, base) when git could not answer: UNKNOWN, never clear.
-
-    A path offends only if it offends against EVERY base (see `diff_bases`)."""
-    bases = diff_bases(root)
+    """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
+    may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
+    a builder changed that are logged and never refused. Every offence of another role is logged only."""
+    changes = own_changes(root)
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
-    if not bases or top is None or top.returncode != 0:
-        return None, ""
+    if changes is None or top is None or top.returncode != 0:
+        return None, []
     top = os.path.realpath(top.stdout.strip())
-    sets = [role_offences(root, top, base, role) for base in bases]
-    if any(s is None for s in sets):
-        return None, bases[0]
-    both = [rel for rel in sets[0] if all(rel in s for s in sets[1:])]
-    return (both[0] if both else ""), bases[0]
+    builder = role == BUILDER_ROLE
+    noted = []
+    for old, new, paths, kind in changes:
+        if kind == KEPT and not builder:
+            continue
+        found = role_offences(root, top, role, paths, old, new)
+        if found is None:
+            return None, []
+        for rel in found:
+            if not builder or kind == OWN:
+                return rel, noted
+            noted.append(rel)
+    return "", noted
 
 
 def diff_rule(role: str) -> str:
@@ -1707,20 +1935,40 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
+def builder_diff_reason() -> str:
+    """The refusal text for a builder's test change. It names no path: it gives the undo route."""
+    return (
+        BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
+        "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
+        "you added. If a commit of yours holds the change, stop and report it. "
+        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+        "and report the conflict to the orchestrator; a test-author resolves it. "
+        "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
+    )
+
+
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Log a role's diff at commit or push for the reviewer. Never refuses: the base can count the
-    parent branch's files as the agent's own (docs/decisions/builders-cannot-edit-tests.md)."""
-    found, _ = diff_violation(root, role)
+    """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
+    with the undo route). A builder's logged change, any other role's offence, and a change that could
+    not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
+    found, noted = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
-    elif found:
-        record(tool, "noted", diff_rule(role), found)
+    elif found and role == BUILDER_ROLE:
+        # A role guard stays outside every override (decision owner-override): a refusal is final.
+        guard_core.set_override_veto(lambda: True)
+        refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
+    elif found or noted:
+        record(tool, "noted", diff_rule(role), found or noted[0])
 
 
 def judge_stop(payload) -> None:
-    """A builder, test-author or record-writer that stops has its whole diff judged. The stop is never blocked:
-    an offence logs as `builder-diff`, `author-diff` or `writer-diff`. A cwd that is the main checkout and a
-    diff that could not be read log too. A missing cwd logs nothing."""
+    """A builder, test-author, record-writer or designer that stops has its own change judged. A
+    builder's test change is refused at the first stop (rule `builder-diff`, with the undo route). A second
+    stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
+    its tree never loops. A builder's logged change and the other roles' offences log under the role's
+    rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
+    and allow. A missing cwd logs nothing."""
     role = agent_role(payload)
     if not role:
         return
@@ -1730,14 +1978,17 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, _ = diff_violation(where, role)
+    found, noted = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
-        # kept: role_log_case still expects this line on a second stop
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:
         record("SubagentStop", "noted", "role-diff-unread", where)
-    elif found:
-        record("SubagentStop", "noted", diff_rule(role), found)
+    elif found and role == BUILDER_ROLE:
+        record("SubagentStop", "deny", diff_rule(role), found)
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
+        sys.exit(0)
+    elif found or noted:
+        record("SubagentStop", "noted", diff_rule(role), found or noted[0])
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -1751,10 +2002,18 @@ LANE_EFFORT_REASON = (
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
     % LANE_EFFORT
 )
+# A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
+# when no repo reads.
+LANE_REPO_TAG_REASON = (
+    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
+)
+# A repo tag with no origin to compare to: the full form, one owner and one name.
+FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Start the agent or session with model sonnet or opus, "
+    "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
@@ -1866,7 +2125,7 @@ def floor_hit(tool: str, tool_input) -> str:
         model = tool_input.get("model")
         if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
             return str(model)
-    elif tool == SESSION_TOOL:
+    elif tool in (SESSION_TOOL, CREATE_SESSION_TOOL):
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -1893,14 +2152,34 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
-STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
-# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
-# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
-FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
+    """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo, or
+    ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
+    key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
+    `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return "", None
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return "", None
+    repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
+    # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
+    for tag in tags:
+        if repo and repo_tag_names(tag, repo):
+            return "", None
+        if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
+            return "", None
+    return ", ".join(str(t) for t in tags), repo
+
+
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
+# The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
+from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
+_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
 
 
 def brief_first_line(brief) -> str:
@@ -1910,16 +2189,36 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
-def brief_markers(brief) -> list:
-    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
-    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
-    home of the marker scan."""
+def marker_scan(brief) -> list:
+    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
+    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
+    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
     if not isinstance(brief, str):
         return []
-    found = STEP_UP_MARKER.findall(brief)
     first = brief_first_line(brief)
-    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
-    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+    starts, leads = [], []
+    for kind, rx, position in _MARKER_ROWS:
+        if position == "line-start":
+            found = list(rx.finditer(brief))
+            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
+        else:
+            hit = rx.search(first)
+            found = [hit] if hit else []
+            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return [(kind, n) for _, kind, n in sorted(starts)] + leads
+
+
+def marker_hits(brief) -> set:
+    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
+    return set(marker_scan(brief))
+
+
+def brief_markers(brief) -> list:
+    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
+    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
+    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
 
 
 def builder_third_round(brief) -> bool:
@@ -1931,7 +2230,8 @@ def builder_third_round(brief) -> bool:
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet or opus."""
+    frontmatter model is haiku, so a reviewer on a later-round brief must name sonnet. A later-round reviewer that names Opus
+    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -1956,7 +2256,7 @@ def step_up_reason(prompt: str, role, model) -> str:
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
-            return "Reviewer round 3 runs on Sonnet or Opus. Spawn it with model sonnet or opus."
+            return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
@@ -1977,9 +2277,10 @@ ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
-# An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
-# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+# An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
+# EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
@@ -1992,6 +2293,7 @@ ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
+ROLE_NO_MODEL_MATCH = "no model, role "   # the matched text of the no-model refusal, which never_lifted reads
 ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
@@ -1999,15 +2301,31 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
+def _layout_module():
+    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout
+
+
+def record_branch_of(root):
+    """The record branch of the checkout at `root`: lint/layout.py record_branch, else "roadmap" when the
+    layout cannot be read."""
+    try:
+        layout = _layout_module()
+        return layout.record_branch(root)
+    except Exception:
+        return DEFAULT_RECORD_BRANCH
+
+
 def role_model_table(pointer_root):
     """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
     record is missing, not text, or holds no row. The one reader of the table."""
     if not pointer_root:
         return None
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
+    layout = _layout_module()
     try:
         folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
         with open(os.path.join(pointer_root, *folder.split("/"), ROLE_TABLE_FILE), encoding="utf-8") as handle:
@@ -2030,12 +2348,31 @@ def role_model_table(pointer_root):
     return table or None
 
 
+def role_model_rank(model):
+    """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
+    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+
+
+def frontmatter_keys(lines):
+    """The top-level keys of frontmatter lines (the text between the two `---` lines): {key: raw value}, the first of
+    a key wins. An indented line is a continuation of the key above it (a block scalar), never a key. Values stay raw:
+    the caller strips comments and quotes. The one parser of agent frontmatter keys."""
+    keys = {}
+    for line in lines:
+        if line[:1].isspace():
+            continue
+        key, _, value = line.partition(":")
+        keys.setdefault(key.strip(), value.strip())
+    return keys
+
+
 def role_agent_keys(pointer_root):
     """Yield the frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with
     frontmatter, in file order, one file read at a time. Raises OSError when the folder or a file cannot be read, so
     a caller that stops early never reads the files after its match. The reader of agent frontmatter for the role
-    rules. In lint/check_agent_models.py, main() reads the same files and frontmatter() parses their text for its
-    own model check."""
+    rules. In lint/check_agent_models.py, main() reads the same files and passes their frontmatter to frontmatter_keys
+    for its pin check."""
     folder = os.path.join(pointer_root, "agents")
     for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
         try:
@@ -2045,13 +2382,8 @@ def role_agent_keys(pointer_root):
             raise OSError("agent file is not text: %s" % name) from exc
         if not lines or lines[0].strip() != "---":
             continue
-        keys = {}
-        for line in lines[1:]:
-            if line.strip() == "---":
-                break
-            key, _, value = line.partition(":")
-            keys.setdefault(key.strip(), value.strip())
-        yield keys
+        end = next((n for n, line in enumerate(lines[1:], 1) if line.strip() == "---"), len(lines))
+        yield frontmatter_keys(lines[1:end])
 
 
 def role_has_model_pin(pointer_root, role):
@@ -2088,8 +2420,8 @@ def role_list_drift(pointer_root):
     import override
     real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
     on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
-    # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137 (which model a search agent may run). Remove it then.
-    standing_want = on["opus"] | {EXPLORE_ROLE}
+    standing_want = on["opus"]
+    # No scoped `opus explore` override form: an Explore on Opus without the marker is lifted by `opus 2h` or `override` (item 137 pick a, option b not picked).
     override_want = {role for role in table if role in real} - on["opus"] - {EXPLORE_ROLE}
     lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
              ("OPUS_STANDING_ROLES", "hooks/guard.py", set(OPUS_STANDING_ROLES), standing_want, "an opus row"),
@@ -2103,20 +2435,73 @@ def role_list_drift(pointer_root):
     return lines
 
 
+def role_key(subagent_type) -> str:
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
+    normaliser in this file: role_name and opus_spawn_hit's Explore grant both read the role through it.
+    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
+    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
+
+
 def role_name(table, subagent_type) -> str:
     """The role a spawn names, as the table spells it: matched without case and without surrounding space.
     A role the table lacks keeps its own spelling, stripped. An empty role is the default role."""
     role = str(subagent_type or "").strip() or ROLE_DEFAULT
-    return next((name for name in table if name.lower() == role.lower()), role)
+    return next((name for name in table if role_key(name) == role_key(role)), role)
+
+
+# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
+# The remedy stays lowercase mid-sentence, so both refusals carry the same words.
+BRIEF_UNREAD = "brief_unread"
+BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
+
+
+def spawn_inputs(tool: str, tool_input):
+    """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
+    call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
+    and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
+    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
+    BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
+    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
+    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
+    a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
+    has no round to check. Other tools yield nothing."""
+    if tool in SPAWN_TOOLS:
+        yield tool_input
+    elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        for prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if unseen & {"model", "agentType"} or not keys.get("model"):
+                continue
+            if "..." in unseen and "agentType" not in keys:
+                continue
+            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",
+                   BRIEF_UNREAD: prompt is None}
 
 
 def role_model_check(tool: str, tool_input):
-    """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
+    """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
+    first refusal, else the first unread. Cost: one table read per spawn."""
+    unread = ("", "", False)
+    for spawn in spawn_inputs(tool, tool_input):
+        verdict = role_model_one(spawn)
+        if verdict[0]:
+            return verdict
+        if verdict[2] and not unread[2]:
+            unread = verdict
+    return unread
+
+
+def role_model_one(tool_input):
+    """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
     opus_spawn_hit. An Explore on an audit brief
-    (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too."""
-    if tool not in SPAWN_TOOLS:
-        return "", "", False
+    (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too.
+    An above-row refusal is liftable by the general override (decision agent-model-cap); the
+    no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
     pointer = pointer_checkout()
     if not pointer:
         return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
@@ -2127,15 +2512,14 @@ def role_model_check(tool: str, tool_input):
     model = str(tool_input.get("model") or "").strip()
     if model:
         top = len(ROLE_MODEL_RANK) - 1
-        named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
+        named = role_model_rank(model)
         row = table.get(role)
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
             return "", "", False
-        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
-                                                              brief_first_line(tool_input.get("prompt"))):
+        if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
@@ -2147,6 +2531,8 @@ def role_model_check(tool: str, tool_input):
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+            if tool_input.get(BRIEF_UNREAD):
+                extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
@@ -2158,7 +2544,7 @@ def role_model_check(tool: str, tool_input):
         return "", "", False
     row = table.get(role, "sonnet")
     # A remedy never names Haiku: a role on a Haiku row has an agent file that pins it, so it rarely gets here.
-    return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), "no model, role " + role, False
+    return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
@@ -2168,17 +2554,20 @@ def role_model_check(tool: str, tool_input):
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below).
+# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
+# "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_BUSY_REASON = "the machine is busy (%s). %s"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry."
+LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2242,8 +2631,8 @@ def _load_value(reading: dict, key: str):
 
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
-    read of the call: a failed read or an unread value counts as normal."""
-    if tool not in LANE_TOOLS:
+    read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
+    if tool not in LANE_TOOLS or is_cloud():
         return "", ""
     try:
         reading = read_load()
@@ -2285,14 +2674,14 @@ def load_hit(tool: str, tool_input) -> tuple:
 # so the session that frees the disk is never braked by the full disk.
 RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop.")
+                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
 def running_lane_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
     per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if is_cloud() or tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
     try:
         reading = read_load()
@@ -2315,31 +2704,45 @@ def load_full(reading) -> list:
 
 
 OPUS_SPAWN_REASON = (
-    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for an agent; Opus runs "
-    "only on the owner's grant for this spawn, except Plan, Explore, the designer, the design "
-    "reviewer and a builder's Round 3 of 3 "
-    "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
-)
+    "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
+    "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
+    "reviewer, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
+    "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
+    "Round 3 brief names sonnet."
+) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
     "any line. The marker applies only to a builder's third try, after review round 2 failed."
 )
-OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
+OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
 
 
-def opus_spawn_hit(tool: str, tool_input) -> str:
-    """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
-    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker (the same marker
-    step_up_hit reads). A reviewer's spawn is no standing grant, so a reviewer on Opus asks. The spawn ask is liftable by an
-    override, so never_lifted does not read it."""
-    if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
-        return ""
+def opus_spawn_hit(tool: str, tool_input) -> tuple:
+    """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
+    else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    A standing grant
+    is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
+    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    for spawn in spawn_inputs(tool, tool_input):
+        if opus_without_grant(spawn):
+            return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
+    return "", "", False
+
+
+def opus_without_grant(tool_input) -> bool:
+    if "opus" not in str(tool_input.get("model") or "").lower():
+        return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
-        return ""
+        return False
     if role == "builder" and builder_third_round(brief):
-        return ""
-    return str(tool_input.get("model"))
+        return False
+    # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles and the
+    # builder stay exact-case, as they were.
+    if role_key(role) == role_key(EXPLORE_ROLE) and ("audit", None) in marker_hits(brief):
+        return False
+    return True
 
 
 # ASK ALONE (ruling ask-commands-run-alone). A command that would ASK is held, not printed, while the other rules run, so a
@@ -2350,7 +2753,8 @@ def opus_spawn_hit(tool: str, tool_input) -> str:
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
-                    "other commands. Run that command alone, in its own call, or drop it.")
+                    "other commands. Run that command alone, in its own call, or drop it. "
+                    "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
 def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
@@ -2625,6 +3029,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
     previous = None
+    call_tokens = []
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -2632,6 +3037,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if tokens is None:
             previous = None
             continue
+        call_tokens.append(tokens)
         matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
         previous = tokens
         if matched:
@@ -2640,6 +3046,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
+    matched = lsof_pids_reach_kill(call_tokens)
+    if matched:
+        refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
@@ -2759,6 +3169,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
+    # 6a2. A push to the record branch from a session its own record does not prove triage (rule
+    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
+    # transcript read only when the push reaches the record branch.
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    if matched:
+        refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
@@ -2779,6 +3196,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         record(tool, "noted", "config-edit", matched)
 
+    # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
+    # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
+    # role is judged, the same gate as the Edit tools.
+    if role == BUILDER_ROLE:
+        matched = builder_shell_test_hit(raw, stripped, cwd)
+        if matched:
+            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
@@ -2821,13 +3245,23 @@ def data_tool_hit(tool_input, cwd=""):
 # code is not main's skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py
 # `matches`, the one home of "current" (the designData, roadmap block and title text are ignored, so a
 # page the writer's --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
+# Known limit: a live page that is itself untouched (placeholder title, empty blocks) is refused too; the guard cannot read the live page.
 # A read, a list, an asset upload, a publish of another page, an unreadable file or an unreadable main
-# is not judged: unknown allows and logs one line. A current page writes the stamp
+# is not judged: unknown allows and logs one line. A republish of main's untouched template, with its title
+# and its designData and roadmap blocks all equal to main's own (stale_pages.carries_data), is refused too:
+# it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
-                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
+PAGE_EMPTY_REASON = ("this file's designData and roadmap blocks are the empty ones, so a republish would drop the live page's "
+                     "data. Read the live page (Artifact action read), run the waiting-page skill's stale_pages.py "
+                     "with `--page <saved live page> --write <out>`, and publish <out> to the same url. If <out> is "
+                     "refused again, the live page is itself untouched: set the `<title>` of <out> to \"<repo> Cockpit\" "
+                     "and publish it to the same url. "
+                     "(decision page-stale-publish, a waiting page behind main is not published)")
 
 
 def _waiting_page_folder(name):
@@ -2889,6 +3323,8 @@ def page_stale_hit(tool_input, cwd):
         return None
     if not stale_pages.matches(text, live):
         return PAGE_STALE_REASON, path
+    if not stale_pages.carries_data(text, live):
+        return PAGE_EMPTY_REASON, path
     if blob and not stale_pages.write_stamp(root, blob):
         record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
     # The file an item write's picture check loads (rule page-item-design): the absolute path of this publish.
@@ -2908,7 +3344,7 @@ CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
-PAGE_ITEM_DESIGN_FIX = " Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
+PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
 def _run_check_designs(page_file, item):
@@ -3010,7 +3446,14 @@ IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review o
                      "screens; make any change to the design by hand.")
 IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
 IMPECCABLE_REVIEWS = ("audit", "critique")
-IMPECCABLE_CHAIN = re.compile(r"[;|\n]|&&")
+# The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
+# SKILL.md, Routing); it asks once when two commands fit. So a `;` starts no second command, and a part
+# after it is refused only when it opens with a command verb other than a review: the Commands table
+# of that SKILL.md is the list, read when a review carries a `;`. `|`, `&&` and a newline always chain.
+IMPECCABLE_CHAIN = re.compile(r"[|\n]|&&")
+IMPECCABLE_JOINERS = ("then", "and")
+IMPECCABLE_SKILL_FILE = os.path.join(_HERE, "..", "skills", "impeccable", "SKILL.md")
+IMPECCABLE_VERB_ROW = re.compile(r"^\| `([a-z]+)[^`]*` \| [A-Z][a-z]+ \|", re.M)
 RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
 PACKAGE_FLAGS = ("-p", "--package")
 
@@ -3021,13 +3464,32 @@ def impeccable_name(token: str) -> str:
     return name.rsplit(".", 1)[0]
 
 
+def impeccable_command_verbs():
+    """The command verbs in the Commands table of the impeccable SKILL.md, or None when the file or
+    the table cannot be read. Unread, every part after a `;` is refused, as it was before the table."""
+    try:
+        with open(IMPECCABLE_SKILL_FILE, encoding="utf-8") as handle:
+            table = re.split(r"(?m)^## ", handle.read().split("\n## Commands", 1)[1], 1)[0]
+    except (OSError, IndexError, UnicodeDecodeError):
+        return None
+    return set(IMPECCABLE_VERB_ROW.findall(table)) or None
+
+
 def impeccable_skill_hit(tool_input) -> str:
     skill, args = tool_input.get("skill"), tool_input.get("args") or ""
     if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
         return ""
-    words = args.split() if isinstance(args, str) else []
-    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(args.strip()):
-        return ""
+    words = args.split(";")[0].split() if isinstance(args, str) else []
+    text = args.strip() if isinstance(args, str) else ""
+    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(text):
+        parts = [part.split() for part in text.split(";")[1:]]
+        for part in parts:   # "then polish" opens with polish: read past a joining word
+            while part and part[0] in IMPECCABLE_JOINERS:
+                part.pop(0)
+        verbs = impeccable_command_verbs() if any(parts) else set()
+        if verbs is not None and not any(part[0] in verbs - set(IMPECCABLE_REVIEWS)
+                                         for part in parts if part):
+            return ""
     return ("skill %s %s" % (skill, args))[:100]
 
 
@@ -3091,16 +3553,28 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# Decision sweep-shuts-down-idle-simulators, rulings 3 and 4. A boot is an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
+# A raw `simctl boot` and a Simulator.app open are refused first, on the text alone, by
+# `simulator-boot-bypass` (decision sim-test-is-the-one-boot-path, ruling 4).
 SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
+def _simctl_boot_args(word: str, rest: list):
+    """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
+    command is no `simctl boot`. The list is empty when xargs feeds the device."""
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
+        if after[:1] == ["boot"]:
+            return after[1:]
+    return None
+
+
 def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots, by the command word. Empty when it boots none."""
+    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -3116,11 +3590,46 @@ def _sim_boot_names(segment: str) -> list:
                 os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
                 found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
         return found
-    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
-        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"] and len(after) > 1:
-            return [after[1]]
     return []
+
+
+def _simulator_app_open(rest: list) -> bool:
+    """True when the arguments of an `open` name Simulator.app: `-a Simulator[.app]`, a path that ends in
+    Simulator.app, or `-b com.apple.iphonesimulator`. macOS reads these names without case."""
+    for i, arg in enumerate(rest):
+        low = arg.lower().rstrip("/")
+        if re.fullmatch(r"-[A-Za-z]*[ab][A-Za-z]*", arg) and i + 1 < len(rest):  # a cluster (`-ga`, `-an`) with a or b takes the next word
+            value = basename(rest[i + 1].rstrip("/"))
+            if ("a" in arg and re.sub(r"\.app$", "", value) == "simulator") or (
+                    "b" in arg and value == "com.apple.iphonesimulator"):
+                return True
+        elif low.endswith("/simulator.app") or low == "simulator.app":
+            return True
+    return False
+
+
+def sim_bypass_hit(segment: str) -> str:
+    """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
+    command word, at each command of the segment and in each command a wrapper hands on
+    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for start in command_indexes(tokens):
+        word, rest = basename(tokens[start]), tokens[start + 1:]
+        if word == "open" and _simulator_app_open(rest):
+            return ("open " + " ".join(rest))[:100]
+        if _simctl_boot_args(word, rest) is not None:
+            return " ".join([tokens[start]] + rest)[:100]
+    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
+                 if (hit := sim_bypass_hit(part))), "")
+
+
+SIM_BYPASS_REASON = (
+    "a simulator is booted through `sim-test` alone: it takes the one lock per Mac, boots, runs the "
+    "tests and shuts down. Run `sim-test -scheme <scheme>` instead. "
+    "(decision sim-test-is-the-one-boot-path)"
+)
 
 
 def sim_boot_refusal(tool: str, names: list) -> None:
@@ -3168,11 +3677,11 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (decision an-agent-outside-its-home-tree-must-stop)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
-    home_cwd = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    home_cwd = drive_form_cwd(cwd)
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""
@@ -3209,24 +3718,111 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
+def _checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def _cd_targets(tool: str, command: str, where: str):
+    """The folder each real `cd`, `pushd` or `Set-Location` segment of COMMAND moves into, as a
+    realpath. Read the way `_run_dir` reads the shell: heredoc bodies dropped first, one segment at a
+    time, so a `cd` in a quote, a comment or a heredoc body is text. A target that holds a variable,
+    a bare `cd`, `cd -`, a bare `pushd` or `pushd +N`, and a folder that does not exist are not read."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    command = _strip_heredoc_bodies_unconditionally(command)
+    if not re.search(r"\bcd\b|set-location|\bpushd\b", command, re.IGNORECASE):
+        return []
+    found, ends = [], []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        named = _segment_cd_target(tokens, ("cd", "set-location", "pushd")) if tokens else None
+        if named is None or _unexpanded(named):
+            continue
+        # An absolute target needs no known folder.
+        at = dir_before_segment(segments, number, where, ends)
+        folder = shell_abs(named, at)
+        if folder and os.path.isdir(folder):
+            found.append(os.path.realpath(folder))
+    return found
+
+
+def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
+    """True when a `cd` into TARGET goes into the caller's recorded agent home (the recovery step
+    worktree-home allows) or, for a call with no `agent_id`, the session's recorded home. It skips
+    the `cd` act only; the write scan still judges every write in the same command. File reads,
+    no git."""
+    status, home, _ = agent_worktree_home(payload, cwd)
+    if status == "home" and path_is_inside(target, home) is True:
+        return True
+    if isinstance(payload, dict) and payload.get("agent_id"):
+        return False
+    primary, _lane = session_home_place(cwd)
+    record = session_home_record(payload, primary) if primary else ""
+    try:
+        with open(record, encoding="utf-8") as handle:
+            held = handle.read().strip()
+    except OSError:
+        return False
+    return bool(held) and path_is_inside(target, held) is True
+
+
+def _cd_red_run(payload, roots, owner: str) -> bool:
+    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
+    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
+    whole, so a sibling whose id only starts with this one does not pass."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not agent_id or not owner:
+        return False
+    folder = os.path.dirname(owner)
+    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
+            and os.path.basename(folder) == "worktrees"
+            and os.path.basename(os.path.dirname(folder)) == ".claude"
+            and os.path.dirname(os.path.dirname(folder)) in roots)
+
+
+def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
+                       payload=None,
+                       has_agent: bool = True) -> str:
     """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
-    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
-    unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
-    that can write. Liftable by an owner override, unlike `worktree_home_hit`
-    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. A
+    linked checkout in this session's own scratchpad passes for a call with no `agent_id` and a
+    valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
+    state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
+    A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
+    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    under another `.git` entry spends the git read.
+    Liftable by an owner override, unlike `worktree_home_hit`
+    (decision an-agent-outside-its-home-tree-must-stop)."""
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    moves = []
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
+        writes = bool(targets)
     elif tool in SHELL_TOOLS:
         targets = None
-        command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):
-            return ""
+        raw = str(tool_input.get("command", "") or "")
+        command = strip_heredoc_bodies(raw)
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        moves = _cd_targets(tool, raw, where) if where else []
     else:
         return ""
-    if targets == []:
+    if moves:
+        # A `cd` stays in its own checkout when the nearest `.git` above its target is the one above
+        # the cwd. Stat alone tells, so only a move toward another `.git` entry spends the git read.
+        own_root = _checkout_root_by_stat(os.path.realpath(where))
+        moves = [m for m in moves
+                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]
+    if not moves and not writes:
         return ""
-    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     roots = clone_checkouts(where) if where else None
     own = _owning_checkout(where, roots) if roots else ""
     if not own:
@@ -3238,12 +3834,19 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
             owner = _owning_checkout(resolved, roots)
         except Exception:
             return False
+        # An agent shares its session's id, and worktree-home judges no shell target, so only a
+        # top-level call may write into the session's own scratchpad worktree.
+        if not has_agent and under_session_scratchpad(resolved, session_id):
+            return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
                 and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
 
+    for move in moves:
+        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+            return OTHER_CHECKOUT_CD_DETAIL + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
         return "shell write into another checkout: " + hit if hit else ""
     for target in targets:
         if elsewhere(target, where):
@@ -3262,9 +3865,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
-# is left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -3316,7 +3919,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
-        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
+        # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
@@ -3374,6 +3977,8 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
             continue
         for verb, args in verbs:
             if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if verb == "clean" and not clean_deletes_files(args):
                 continue
             if in_primary(folder, folder):
                 return verb
@@ -3439,7 +4044,9 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input) or role_model_check(tool, tool_input)[0]
+    # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+            or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
     if tool in SHELL_TOOLS:
@@ -3447,7 +4054,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw)))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
@@ -3465,8 +4073,8 @@ def judge(payload) -> None:
     if not isinstance(tool_input, dict):
         return
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
-    # worktree-home never judged them, the settings deny list owns Read(.env) and Read(.env.*),
-    # and a frozen path stays readable.
+    # worktree-home never judged them, the settings deny list owns the env files (Read and Edit of
+    # `.env*` at any depth, `.env.example` carved out), and a frozen path stays readable.
     if tool in READ_ONLY_TOOLS:
         return
     cwd = payload.get("cwd", "") or os.getcwd() or ""
@@ -3489,9 +4097,13 @@ def judge(payload) -> None:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
-    other_hit = other_checkout_hit(tool, tool_input, cwd)
+    other_hit = other_checkout_hit(tool, tool_input, cwd, session_id_of(payload),
+                                   payload,
+                                   bool(payload.get("agent_id")))
     if other_hit:
-        refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
+        refuse(tool, "deny", "other-checkout",
+               OTHER_CHECKOUT_CD_REASON if other_hit.startswith(OTHER_CHECKOUT_CD_DETAIL)
+               else OTHER_CHECKOUT_REASON, other_hit)
     # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
     # override lifts it, and it is not in never_lifted: the owner may mean the write.
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
@@ -3504,7 +4116,8 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, its third on Sonnet or Opus, a builder's third on Opus.
+    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
+    # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
@@ -3515,7 +4128,14 @@ def judge(payload) -> None:
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
-    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
+    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
+    lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if lane_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
+
+    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
+    # The override lifts the above-row refusal and never the no-model one (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:
@@ -3524,21 +4144,23 @@ def judge(payload) -> None:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
     # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
-    # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
+    # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
         load_reason, load_matched = running_lane_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
-    # 9d. The Opus ceiling: a spawn on Opus with no standing grant asks. An override, an Opus
-    # pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
-    opus_model = opus_spawn_hit(tool, tool_input)
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
+    # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
+    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
-        refuse(tool, "ask", "agent-model-cap",
-               OPUS_BUILDER_REASON if tool_input.get("subagent_type") == "builder" else OPUS_SPAWN_REASON,
+        refuse(tool, "deny", "agent-model-cap",
+               (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+               + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
+                  if opus_unread else ""),
                opus_model,
-               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
+               spawn_role=opus_role or "general-purpose")
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
@@ -3620,8 +4242,11 @@ def judge(payload) -> None:
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
                         tool_input.get("description") or "")
-            names = [n for seg in split_segments(strip_heredoc_bodies(command))
-                     for n in _sim_boot_names(seg)]
+            segments = split_segments(strip_heredoc_bodies(command))
+            matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
+            if matched:
+                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
+            names = [n for seg in segments for n in _sim_boot_names(seg)]
             if names:
                 sim_boot_refusal(tool, names)
         return
@@ -3653,9 +4278,10 @@ def judge(payload) -> None:
                     role, ("builder-test-edit", BUILDER_TEST_REASON))
                 refuse(tool, "deny", code, why, matched)
 
-        # 5. The environment file. Every writing tool is refused. A read is not judged here: the
-        # settings deny list blocks Read(.env) and Read(.env.*). The reason names no file, and the log
-        # holds the path the tool asked for.
+        # 5. The environment file. Every writing tool is refused. A read is not judged here: no hook
+        # runs for Read, so settings.json denies Read and Edit of `.env*` at any depth, with `!`
+        # carve-outs for `.env.example`. That deny list is the one layer that holds when the guard
+        # cannot run. The reason names no file, and the log holds the path the tool asked for.
         if is_env(target):
             refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)
 

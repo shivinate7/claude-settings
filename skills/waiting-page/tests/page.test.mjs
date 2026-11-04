@@ -90,6 +90,12 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
+// The page name, PAGE_NAME in skills/waiting-page/splice.py. Read from that file, never copied here.
+function pageName() {
+  const m = /^PAGE_NAME = "([^"]*)"/m.exec(fs.readFileSync(path.join(HERE, "..", "splice.py"), "utf8"));
+  assert.ok(m, "splice.py has no PAGE_NAME line");
+  return m[1];
+}
 after(async () => { if (browser) await browser.close(); });
 
 async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
@@ -458,8 +464,9 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    // The title is "<repo> Queue" on Questions (shiv ruling, Oct 30 14:33 CDT).
-    assert.equal(await page.title(), "Agent Q Queue");
+    // The title is "<repo> <page name>" on Questions.
+    assert.notEqual(await page.title(), "Agent Q Queue", "the title still names the old page name Queue");
+    assert.equal(await page.title(), "Agent Q " + pageName());
   });
 }
 
@@ -3583,30 +3590,40 @@ test("a note typed on an item survives a press of Status and back, because Statu
   assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
 });
 
-// The title is "<repo> Queue" on Questions and "<repo> Queue · Status" (a middle dot, a space each side) on Status
-// (shiv ruling, Oct 30 14:33 CDT).
-test("the document title names the repo and the open tab: <repo> Queue, then <repo> Queue · Status", async (t) => {
+// The title is "<repo> <page name>" on Questions and on Status. Status adds no suffix.
+test("the document title names the repo and is the same on both tabs: <repo> <page name>", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
-  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+  const want = "Compass " + pageName();
+  assert.equal(await titleOf(page, want), want);
   await openStatus(page);
-  assert.equal(await titleOf(page, "Compass Queue · Status"), "Compass Queue · Status");
+  assert.equal(await titleOf(page, want), want, "the Status tab adds a suffix to the title");
   await page.click("#tabQ");
-  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+  assert.equal(await titleOf(page, want), want);
 });
 
-// With no identity name the title is the page name alone, "Queue" (shiv ruling, Oct 30 14:33 CDT).
-test("with no identity name the document title is Queue, then Queue · Status", async (t) => {
+// With no identity name the title is the page name alone, on both tabs.
+test("with no identity name the document title is the page name alone, on both tabs", async (t) => {
   const page = await open(t); if (!page) return;
-  assert.equal(await titleOf(page, "Queue"), "Queue");
+  const want = pageName();
+  assert.equal(await titleOf(page, want), want);
   await openStatus(page);
-  assert.equal(await titleOf(page, "Queue · Status"), "Queue · Status");
+  assert.equal(await titleOf(page, want), want, "the Status tab adds a suffix to the title");
 });
 
-// The static <title> in page.html is the page name, "Queue"; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
-test("page.html's static title is Queue", () => {
+// setTitle cuts the repo name to 40 characters, so a longer name shows its first 40.
+test("a repo name over 40 characters is cut to 40 in the title", async (t) => {
+  const name = "Repo-" + "x".repeat(60);
+  const page = await open(t, { meta: { identity: { name } } }); if (!page) return;
+  const want = name.slice(0, 40) + " " + pageName();
+  assert.equal(await titleOf(page, want), want);
+});
+
+// The static <title> in page.html is the page name. setTitle adds the repo name at run time.
+test("page.html's static title is the page name, read from splice.py", () => {
   const staticTitle = html.match(/<title>([^<]*)<\/title>/);
   assert.ok(staticTitle, "page.html has no static <title>");
-  assert.equal(staticTitle[1], "Queue");
+  assert.notEqual(staticTitle[1], "Queue", "page.html's static title is still the old name Queue");
+  assert.equal(staticTitle[1], pageName());
 });
 
 // ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
@@ -4738,4 +4755,228 @@ test("Withdraw of a sent overturn removes the answer and the ruling card is back
   assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
   assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
   assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
+});
+
+// ---------------------------------------------------------------- parked lines: Unpark and Drop
+
+// A parked line is a .pk in .parked .pk-list, with two .btn.pkb acts. A meta/page.parked entry is { id, ref, note }.
+// An entry with no id has no store key, so its acts stay off. A press stages an act; Send writes answers/park.<id>.
+const PARK_A = { id: "ci-cap-raise", ref: "Step ci-cap-raise, a 20-minute cap for one CI job", note: "Wait until the mutation job is split." };
+const PARK_B = { id: "rail-filed-count", ref: "D41, a count of filed answers on the rail", note: "Wait for a month of use first." };
+const PARK_NOID = { ref: "Debt label-once-js, the label check reads script text", note: "Low harm. Look again in December." };
+const PARK_META = { writer: "triage", parked: [PARK_A, PARK_B] };
+// A dot is in no item slug, so a park key never meets an item's key.
+const parkKey = (p) => "park." + p.id;
+const parkLine = (page, p) => page.locator(".parked .pk-list .pk", { hasText: p.ref });
+const parkBtn = (page, p, act) => parkLine(page, p).locator(".btn.pkb", { hasText: act === "unpark" ? "Unpark" : "Drop" });
+// The meta doc and the answers arrive after the items. Wait until the page holds them, then read the DOM.
+const parkLoaded = (page, key = null) => page.waitForFunction((k) => !!(state.meta && state.meta.parked) && (k === null || !!state.answers[k]), key, { timeout: 3000 }).catch(() => {});
+// Off is aria-disabled (the line stays focusable) or the disabled attribute.
+const parkOff = async (b) => (await b.getAttribute("aria-disabled")) === "true" || (await b.isDisabled());
+// Each write as [kind, collection, id]: the body of a set is left out, so a case compares the write, not its content.
+const parkWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" || l[0] === "delete").map((l) => l.slice(0, 3)));
+// The sent badge on a line ("Unpark sent", "Drop sent"). It renders after the write, so wait for it, then return it.
+const parkBadge = async (page, p, text) => { await parkLine(page, p).locator(".ans", { hasText: text }).waitFor({ timeout: 3000 }).catch(() => {}); return parkLine(page, p).locator(".ans", { hasText: text }); };
+
+test("Unpark then Send writes the parked act as an unpark record and no other write", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  const dialogs = []; page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  assert.deepEqual(dialogs, [], "a press opened a dialog");
+  assert.deepEqual(await parkWrites(page), [], "a press wrote before Send");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Unpark");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  const rec = (await answers(page))[parkKey(PARK_A)];
+  assert.deepEqual(Object.keys(rec).sort(), ["act", "at", "id", "note", "parked", "ref"], "the park record has the wrong fields");
+  assert.deepEqual([rec.parked, rec.id, rec.act, rec.ref, rec.note], [true, PARK_A.id, "unpark", PARK_A.ref, PARK_A.note]);
+  assert.ok(!Number.isNaN(Date.parse(rec.at)), "at is not an ISO time");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge after Send");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", parkKey(PARK_A)]], "Send wrote more than the one park record");
+});
+
+test("Drop then Send writes the parked act as a drop record, and the line strikes at once", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "drop"), "the parked line has no Drop button");
+  await parkBtn(page, PARK_A, "drop").click();
+  assert.match((await parkLine(page, PARK_A).getAttribute("class")) || "", /\bdrop\b/, "the staged Drop does not strike the line");
+  assert.deepEqual(await parkWrites(page), [], "a Drop press wrote before Send");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Drop");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  const rec = (await answers(page))[parkKey(PARK_A)];
+  assert.deepEqual([rec.parked, rec.id, rec.act, rec.ref, rec.note], [true, PARK_A.id, "drop", PARK_A.ref, PARK_A.note]);
+  await need(await parkBadge(page, PARK_A, "Drop sent"), "the line shows no Drop sent badge after Send");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", parkKey(PARK_A)]], "Send wrote more than the one park record");
+});
+
+test("Undo after a parked Send deletes the park record and hands the press back as a draft", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  await page.locator("#undoBtn").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(page.locator("#undoBtn"), "Send shows no Undo after a parked act");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((k) => !(k in window.__answers()), parkKey(PARK_A));
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[0] === "delete"), [["delete", "answers", parkKey(PARK_A)]], "Undo did not delete answers/park.<id> once");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "Undo did not hand the Unpark back as a draft");
+});
+
+test("a parked line with no id has both acts off, a press on it stages nothing, and a line with an id stays live", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_NOID] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_NOID), "the line with no id is not a .pk in .parked .pk-list");
+  for (const act of ["unpark", "drop"]) {
+    const b = parkBtn(page, PARK_NOID, act);
+    await need(b, "the line with no id has no " + act + " button");
+    assert.equal(await parkOff(b), true, act + " is on for a line with no id");
+    await b.click({ force: true });
+  }
+  assert.equal(await page.locator("#send").isDisabled(), true, "a press on a line with no id staged an act");
+  assert.deepEqual(await parkWrites(page), [], "a press on a line with no id wrote to the store");
+  assert.equal(await parkOff(parkBtn(page, PARK_A, "unpark")), false, "the Unpark on a line with an id is off");
+});
+
+test("an existing park answer shows Unpark sent on its line at load, and counts toward no item", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(parkLine(page, PARK_A), "the parked line is not a .pk in .parked .pk-list");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a saved park answer counts as a ready act");
+  const bar = await page.locator("#barStatus").innerText();
+  assert.match(bar, /\b1 stay open/, "the bar does not count the open item: " + bar);
+  assert.doesNotMatch(bar, /All answered/, "a park answer counts as the answer to an item: " + bar);
+});
+
+// Park keys are park.<id>. These cases read a park line only through its own key and its own id: never through an item's
+// key, an Object.prototype name, or a DOM id that another element already holds.
+const PARK_X = { id: "x", ref: "Line x, a parked line whose id shares a prefix with an item", note: "Hold it." };
+const PARK_C = { id: "constructor", ref: "Line constructor, a parked line whose id is an Object.prototype name", note: "Keep it." };
+const PARK_H = { id: "h", ref: "Line h, a parked line with the id h", note: "Keep it." };
+
+test("a park line never reads an item's answer, and Unpark then Send leaves that answer alone", async (t) => {
+  const itemAnswer = { item: "park-x", n: 1, at: "2026-11-01T17:00:00.000Z", choice: "a", note: "" };
+  const page = await open(t, { items: [mk("park-x", 1)], meta: { writer: "triage", parked: [PARK_X] }, answers: { "park-x": itemAnswer } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_X), "the parked line is not a .pk in .parked .pk-list");
+  assert.equal(await parkLine(page, PARK_X).locator(".ans").count(), 0, "line x shows a sent badge it never sent, read from the item park-x");
+  await need(parkBtn(page, PARK_X, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_X, "unpark").click();
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_X));
+  assert.deepEqual((await answers(page))["park-x"], itemAnswer, "Unpark and Send changed the item's answer under park-x");
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[2] === "park-x"), [], "Send wrote under the item's key park-x");
+});
+
+test("every DOM id on the page is unique, with two parked entries that have no id and one with the id h", async (t) => {
+  const noA = { ref: "No id line A, a line the writer has not prepared", note: "A." };
+  const noB = { ref: "No id line B, a line the writer has not prepared", note: "B." };
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [noA, noB, PARK_H] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_H), "the line with the id h is not a .pk in .parked .pk-list");
+  await need(parkLine(page, noB), "the second line with no id is not a .pk in .parked .pk-list");
+  const dupes = await page.evaluate(() => { const seen = new Set(), out = []; document.querySelectorAll("[id]").forEach((el) => { if (seen.has(el.id)) out.push(el.id); seen.add(el.id); }); return out; });
+  assert.deepEqual(dupes, [], "duplicate DOM ids: " + dupes.join(", "));
+});
+
+test("a parked entry with the id constructor has both acts on, and Unpark stages and sends it", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_C] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_C), "the line with the id constructor is not a .pk in .parked .pk-list");
+  for (const act of ["unpark", "drop"]) {
+    const b = parkBtn(page, PARK_C, act);
+    await need(b, "the line with the id constructor has no " + act + " button");
+    assert.equal(await parkOff(b), false, act + " is off for the id constructor");
+  }
+  await parkBtn(page, PARK_C, "unpark").click();
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the staged Unpark on the id constructor is not counted");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_C));
+});
+
+test("a failed Send with a staged park act: the Copy text carries the park act", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META, failSet: true }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  const copied = await page.evaluate(() => window.__copied);
+  assert.ok(typeof copied === "string" && copied.includes(PARK_A.ref), "the Copy text leaves out the staged park act: " + copied);
+});
+
+test("Change then clear on a sent park line, then Send, deletes answers/park.<id>", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  const change = parkLine(page, PARK_A).locator("button", { hasText: "Change" });
+  await need(change, "the sent park line has no Change button");
+  await change.click();
+  const unpark = parkBtn(page, PARK_A, "unpark");
+  if ((await unpark.getAttribute("aria-pressed")) === "true") await unpark.click();
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer", "Send does not offer to withdraw the cleared park line");
+  await send(page);
+  await page.waitForFunction((k) => !(k in window.__answers()), parkKey(PARK_A));
+  assert.deepEqual(await parkWrites(page), [["delete", "answers", parkKey(PARK_A)]], "Withdraw did not delete answers/park.<id> once");
+});
+
+test("at 1280 wide, sending a park act does not move the parked lines below it", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_A, PARK_B, PARK_X] }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  const rows = () => page.evaluate(() => [...document.querySelectorAll(".parked .pk-list .pk")].map((el) => ({ text: el.textContent, top: el.getBoundingClientRect().top })));
+  const before = await rows();
+  await send(page);
+  await page.locator("#sent").waitFor({ state: "visible", timeout: 3000 }).catch(() => {}); // the Sent panel shows after any Send, whatever the key
+  const after = await rows();
+  const acted = before.findIndex((r) => r.text.includes(PARK_A.ref));
+  assert.ok(acted >= 0 && before.length === 3 && after.length === 3, "expected three parked lines, got " + before.length + " before and " + after.length + " after");
+  for (let i = acted + 1; i < before.length; i++) {
+    assert.ok(after[i].text.includes(before[i].text.slice(0, 20)), "parked lines changed order on Send");
+    assert.ok(Math.abs(after[i].top - before[i].top) <= 0.5, "the line below the sent park act moved by " + (after[i].top - before[i].top).toFixed(2) + "px: " + before[i].text.slice(0, 40));
+  }
+});
+
+// The meta listener runs keepRouted(was, now) and then renders. These cases make the same two calls, so the list change
+// goes through the same code the writer's update does.
+const changeMeta = (page, parked) => page.evaluate((list) => { const was = state.meta; state.meta = { writer: "triage", parked: list }; keepRouted(was, state.meta); render(); }, parked);
+
+test("a sent park line whose entry leaves the list while in view shows the filled badge and keeps its height", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [DECISION], meta: PARK_META, answers: saved, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the line shows no Unpark sent badge on load");
+  const line = parkLine(page, PARK_A);
+  await line.scrollIntoViewIfNeeded();
+  const sentBox = await line.boundingBox();
+  assert.ok(sentBox && sentBox.y >= 0 && sentBox.y < 900, "the line is not in view before its entry leaves");
+  await changeMeta(page, [PARK_B]); // the writer drops PARK_A while its line is in view
+  await need(line, "the line left the page when its entry left the list");
+  await need(line.locator(".ans.filed", { hasText: "Unparked" }), "the line shows no filled Unparked badge");
+  const routedBox = await line.boundingBox();
+  assert.ok(Math.abs(routedBox.height - sentBox.height) <= 0.5, "the line changed height from " + sentBox.height + " to " + routedBox.height);
+});
+
+test("a stored park draft whose entry is gone is pruned on load, and a later entry with the same id is not pre-staged", async (t) => {
+  const storage = { "waiting.draft": JSON.stringify({ [parkKey(PARK_A)]: { act: "unpark" } }) };
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_B] }, storage }); if (!page) return;
+  await parkLoaded(page);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("waiting.draft") || "{}"));
+  assert.equal(parkKey(PARK_A) in stored, false, "the draft of a gone entry is still in waiting.draft: " + JSON.stringify(stored));
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on the draft of a gone entry");
+  await changeMeta(page, [PARK_A, PARK_B]); // a later entry with the same id
+  await need(parkLine(page, PARK_A), "the later entry with the same id is not on the page");
+  assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
 });

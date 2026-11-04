@@ -7,7 +7,10 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file or starts a process.
+page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+
+    past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
+    key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 
@@ -24,7 +27,9 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
-PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
+PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
+Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
+text passes). A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
 or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
@@ -71,6 +76,26 @@ BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | 
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
 BASED_MAX = 3
+# A side or a line's text that is only an angle-bracket placeholder is the template copied verbatim. The one
+# home of that check: the Goal, Problem and Based on lines and both sides of a Departs from line call it.
+PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The text after the label on each form line, for the placeholder check. Real text that holds angle
+# brackets, such as `<Button>`, is no placeholder: only the whole text must be one.
+FORM_LINE_TEXT = (("Goal", re.compile(r"^[ \t]*Goal:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Problem", re.compile(r"^[ \t]*Problem(?:[ \t]*\([^()\n]*\))?:[ \t]*([^\n]*)", re.I | re.M)),
+                  ("Based on", re.compile(r"^[ \t]*Based on[ \t]*\([^()\n]*\):[ \t]*([^\n]*)", re.I | re.M)))
+
+
+def is_placeholder(text) -> bool:
+    return bool(PLACEHOLDER_SIDE.fullmatch(str(text).strip()))
+
+
+def placeholder_form_hit(text):
+    """(rule, matched) for the first Goal, Problem or Based on line whose text is only a placeholder."""
+    for label, rx in FORM_LINE_TEXT:
+        if any(is_placeholder(value) for value in rx.findall(text)):
+            return FORM_RULE, "%s line that is only a placeholder: write the real text" % label
+    return PASS
 
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
@@ -85,7 +110,8 @@ CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the ques
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                 "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
-                "stands: true." % ", ".join(OWNER_STAKES))
+                "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
+                % ", ".join(OWNER_STAKES))
 
 
 def _lines_hit(text, stands=False):
@@ -104,7 +130,7 @@ def _lines_hit(text, stands=False):
     goal, problem, based = (rx.search(text).start() for rx in (GOAL_LINE, PROBLEM_LABEL, BASED_LABEL))
     if not goal < problem < based:
         return FORM_RULE, "lines out of order: Goal, then Problem, then Based on"
-    return PASS
+    return placeholder_form_hit(text)
 
 
 def _problem_state(text, stands):
@@ -154,13 +180,21 @@ DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
                        r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
-# A side that is only an angle-bracket placeholder is the template copied verbatim.
-PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+# The new-thing change side, "adds <X>": group 1 is X.
+PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
                   "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+
+
+def departs_sides(rest):
+    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
+    if len(parts) < 2:
+        return rest.strip(), "", False
+    return parts[0].strip(), parts[1].strip(), True
 
 
 def departs_hit(text) -> str:
@@ -173,13 +207,13 @@ def departs_hit(text) -> str:
     if not lines:
         return "no Departs from line"
     for rest in lines:
-        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-        if len(parts) < 2:
+        main, change, split = departs_sides(rest)
+        if not split:
             return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
-        main, change = parts[0].strip(), parts[1].strip()
         if not main or not change:
             return "Departs from line with an empty side"
-        if PLACEHOLDER_SIDE.fullmatch(main) or PLACEHOLDER_SIDE.fullmatch(change):
+        added = PORT_NEW_THING.fullmatch(change)
+        if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
@@ -197,8 +231,34 @@ PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|red
                        r"|rewrite\s+of|rebuild\s+of)\b", re.I)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
                "departs from the app, and it never holds work. Add a line to context that starts "
-               "\"Departs from: <file>:<symbol> — <what changes>\", leave out holds, or set "
-               "port to false if this is not a port.")
+               "\"Departs from: <file>:<symbol> — <what changes>\" (or \"Departs from: main — adds <X>\" "
+               "for a new thing), leave out holds, or set port to false if this is not a port.")
+
+
+# A port's Departs from line names the place on main as "<file>:<symbol>" (backticks around it are read, and
+# a path may hold [id], (group) and @ for a Next.js or alias path), or says "main" for a new thing and then
+# "adds <X>".
+PORT_MAIN_SIDE = re.compile(r"[\w./@\[\]()-]+:(?!//)[\w.$-]+(?:\(\))?")
+
+
+def port_departs_miss(text) -> str:
+    """The miss reason when a port's Departs from line, any of them, is not a valid Departs from line (the
+    one predicate, departs_hit: no placeholder or no-change side) or does not name `<file>:<symbol>` on main
+    (or `main` with `adds <X>`). "" when each does. A text with no such line is judged elsewhere."""
+    text = str(text or "")
+    miss = departs_hit(text)
+    if miss:
+        return miss
+    for rest in DEPARTS_LINE.findall(text):
+        main, change, _ = departs_sides(rest)
+        main = main.strip("`").strip()
+        if main.lower() == "main":
+            if PORT_NEW_THING.fullmatch(change):
+                continue
+        elif PORT_MAIN_SIDE.fullmatch(main):
+            continue
+        return "port item whose Departs from line names no <file>:<symbol> on main"
+    return ""
 
 
 def _item_text(data) -> str:
@@ -221,6 +281,8 @@ def port_item_hit(op: str, data) -> str:
         return "port item with holds"
     if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
         return "port item with no Departs from line"
+    if op == "set" or "context" in data:
+        return port_departs_miss(data.get("context"))
     return ""
 
 
@@ -303,9 +365,11 @@ COMMAND_REASON = ("A step never sends the owner to a file for a command, and nev
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
-# is not a press, and neither is a press of the waiting page's own buttons: it needs no link.
-_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
-_PAGE_BUTTON = r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b)"
+# is not a press, and neither is a press of the waiting page's own buttons or of this item on the
+# page: it needs no link. "this item's" link may lead off the page, so it stays a press.
+_CLAUSE = r"(?:^\s*|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
+_PAGE_BUTTON = (r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b"
+                r"|\s+this\s+item\b(?!['’]s))")
 # An item or step number on the page, "item #47" or "step #2", is not a PR ref.
 _REF = r"(?<!\bitem\s)(?<!\bstep\s)(?<!\bitem)(?<!\bstep)#\s*(\d+)"
 PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
@@ -337,19 +401,26 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
-# A shell line in a step's backtick span or fence: it chains with an operator, its first word is a
-# Verb-Noun cmdlet, or its first word is a program the owner would run with an argument after it. A
-# program alone (`git`) names the tool in prose, and any other backticked word (`main`) or a file name
-# is not a shell line. A path that starts ./ or ../ is a shell line when an argument follows it, when
-# its name has no extension (`./build`), or when it ends in a script extension and a run verb comes
-# before the span in its sentence, or the span is a fence. `./docs/a.md` and an edited
-# `./hooks/guard.py` are files.
+# A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
+# with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
+# its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
+# is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
+# x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
+# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
+# any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
+# a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
+# in a script extension and a run verb comes before the span in its sentence, or the span is a fence.
+# `./docs/a.md` and an edited `./hooks/guard.py` are files.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
                             "gcloud", "bq", "winget"))
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
-SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
+# In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
+CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
+CHAIN_COMMAND = re.compile(r"[a-z][a-z0-9._-]*")
+ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
@@ -366,11 +437,58 @@ def _flat_text(value) -> str:
     return ""
 
 
-def _press_field_ok(text, links, context="") -> bool:
+# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
+# that press, so the owner presses nothing. Only that clause is excused. A press in another clause
+# stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
+# act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
+# press of the page's own button ("after he hits Send") ask the owner for nothing.
+SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+# The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
+# "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
+_CLAUSE_JOIN = "; "
+OWNER_YOU = re.compile(r"\byou\b", re.I)
+OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
+# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
+# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
+OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+                       r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+_PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
+
+
+def _owner_acts(clause) -> bool:
+    """True when an owner's name in `clause` is the subject of a present or future press or act."""
+    return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
+
+
+def _owner_press_text(label, how) -> tuple:
+    """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
+    text. `press_text` is the label and the how without each clause of the how that the session
+    presses (SESSION_PRESS). The label stays a press when it asks for one, unless every press verb in
+    it is a verb that such a clause also holds: "Merge it" beside "The session merges it
+    after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
+    text = label + ". " + how
+    clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
+    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
+               and not _owner_acts(c)]
+    if not session:
+        return text, text
+    done = " ".join(session).lower()
+    verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
+             for m in PRESS_VERB.finditer(label)]
+    label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
+    rest = _CLAUSE_JOIN.join(c for c in clauses if c not in session)
+    return text, ("" if label_ok else label + ".\n") + rest
+
+
+def _press_field_ok(text, links, context="", press_text=None) -> bool:
     """True when this field asks for no web press, or `links` holds a link to the exact page. The
-    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
+    press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
+    session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text):
+    if not PRESS_VERB.search(text if press_text is None else press_text):
         return True
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
@@ -394,8 +512,8 @@ def press_link_hit(op, data) -> str:
             if not isinstance(o, dict):
                 continue
             # label and how are one text: the ref may sit in one and the press in the other
-            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
-            if not _press_field_ok(text, o.get("links")):
+            text, press_text = _owner_press_text(_flat_text(o.get("label")), _flat_text(o.get("how")))
+            if not _press_field_ok(text, o.get("links"), press_text=press_text):
                 return "option presses in a web app with no link to the page"
     if isinstance(steps, list) and (op == "set" or "links" in data):
         # the steps are one text, as command-in-item reads them: the page may sit in one step and
@@ -456,19 +574,42 @@ def _relative_run(words, run) -> bool:
     return len(words) >= 2 or "." not in name or (run and name.lower().endswith(SHELL_SCRIPT_EXT))
 
 
+def _chain_command(word, args) -> bool:
+    """True when the command `word`, with `args` words after it, plainly runs a command in a chain."""
+    return (word in SHELL_PROGRAMS or bool(CHAIN_CMDLET.fullmatch(word))
+            or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
+
+
 def _shell_line(span, run) -> bool:
-    """True when a line of this code span is a shell line (see SHELL_PROGRAMS). `run` is as for
-    _relative_run."""
-    for line in span.splitlines():
-        words = line.split()
-        if SHELL_OPERATOR.search(line):
-            return True
+    """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
+    _relative_run. The segments, their prefixes and their command words come from guard_core, the one
+    quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
+    starts with `|` (a table row) or `//` is text and is left out."""
+    import guard_core   # loads only for a step that holds a code span
+    kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
+    segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
+    spaced = bool(re.search(r"\s", "\n".join(kept).strip()))   # `foo|bar` is an alternation, not a pipe
+    chained = len(segments) >= 2 and spaced
+    for segment in segments:
+        tokens = guard_core.segment_tokens(segment)
+        if tokens is not None:
+            found = guard_core.command_indexes(tokens)
+            words = list(tokens[found[0]:]) if found else []
+        else:   # unparseable text: its first word after any VAR=value is the command
+            words = segment.split()
+            while words and ENV_ASSIGNMENT.match(words[0]):
+                words.pop(0)
         if not words:
             continue
+        word = guard_core.basename(words[0])
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0]) or (len(words) >= 2 and words[0] in SHELL_PROGRAMS):
+        elif SHELL_CMDLET.fullmatch(words[0]):
+            return True
+        elif chained and _chain_command(word, len(words) - 1):
+            return True
+        elif word in SHELL_PROGRAMS and len(words) >= 2:
             return True
     return False
 
@@ -510,6 +651,7 @@ GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login 
                    "Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
                    "Switch to %s instead only for a repo %s cannot reach."
                    % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
+GH_NO_SWITCH = "gh command with no gh auth switch before it"
 GH_WORD = re.compile(r"(?<![\w-])gh(?![\w-])")
 
 
@@ -528,6 +670,19 @@ def _shell_reading(guard_core, script):
     return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
 
 
+def _gh_calls(guard_core, reading):
+    """Each gh command of one shell's `reading`, in order, as its tokens from the word gh on. A segment
+    the reader cannot parse that names gh yields None: a gh command, never a switch."""
+    for segment, tokens in reading:
+        if tokens is None:
+            if GH_WORD.search(segment):
+                yield None
+            continue
+        for i in guard_core.command_indexes(tokens):
+            if guard_core.basename(tokens[i]) in ("gh", "gh.exe"):
+                yield tokens[i:]
+
+
 def _gh_script_hit(guard_core, reading, command) -> str:
     """The matched text when one shell's `reading` of `command` runs a gh command other than
     `gh auth ...` with no switch to a login in GH_LOGINS before it, or runs one as GH_FALLBACK_LOGIN
@@ -535,25 +690,65 @@ def _gh_script_hit(guard_core, reading, command) -> str:
     command when the word gh is in it, and never as a switch: the check fails closed there."""
     names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
     login = ""
-    for segment, tokens in reading:
-        if tokens is None:
-            if not GH_WORD.search(segment):
-                continue
-            calls = [None]   # unreadable text that names gh: a gh command, never a switch
+    for call in _gh_calls(guard_core, reading):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            if list(call[2:3]) == ["switch"]:
+                login = _switch_login(list(call[3:]))
+            continue
+        if login not in GH_LOGINS:
+            if login:
+                return "gh command after a switch to %s, a login outside the pair" % login
+            return GH_NO_SWITCH
+        if login == GH_FALLBACK_LOGIN and names_default_repo:
+            return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+    return ""
+
+
+def _command_reading(guard_core, shell, text):
+    """One shell's reading of `text`. The script type picks the rules, never the tool this call came
+    from. A `shell` of "" is a str_replace string: bash's rules read it, or PowerShell's when bash
+    cannot read some segment and PowerShell reads every one."""
+    if shell == "powershell":
+        return _shell_reading(guard_core, guard_core.PowerShellScript(text))
+    reading = _shell_reading(guard_core, guard_core.PosixScript(text))
+    if not shell and any(tokens is None for _, tokens in reading):
+        powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
+        if all(tokens is not None for _, tokens in powershell):
+            return powershell
+    return reading
+
+
+def _gh_counts(text):
+    """(gh commands other than `gh auth ...`, `gh auth switch` commands) in a command string."""
+    if not GH_WORD.search(text):
+        return 0, 0
+    import guard_core
+    commands = switches = 0
+    for call in _gh_calls(guard_core, _command_reading(guard_core, "", text)):
+        if call is not None and list(call[1:2]) == ["auth"]:
+            switches += list(call[2:3]) == ["switch"]
         else:
-            calls = [tokens[i:] for i in guard_core.command_indexes(tokens)
-                     if guard_core.basename(tokens[i]) in ("gh", "gh.exe")]
-        for call in calls:
-            if call is not None and list(call[1:2]) == ["auth"]:
-                if list(call[2:3]) == ["switch"]:
-                    login = _switch_login(list(call[3:]))
-                continue
-            if login not in GH_LOGINS:
-                if login:
-                    return "gh command after a switch to %s, a login outside the pair" % login
-                return "gh command with no gh auth switch before it"
-            if login == GH_FALLBACK_LOGIN and names_default_repo:
-                return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+            commands += 1
+    return commands, switches
+
+
+def gh_edit_hit(old, new) -> str:
+    """The matched text when a str_replace on `command` turns `old` into `new` and leaves a gh command
+    that gh_login_hit refuses. The stored command is unseen, so `new` is judged alone, except that the
+    one reason GH_NO_SWITCH is excused for an edit that only changes gh commands `old` already held: it
+    adds no gh command, and it holds no switch in `old` or `new` for the edit to remove or move, so the
+    switch the stored command keeps still stands. Every other reason stands. So does an edit that adds
+    a GH_DEFAULT_LOGIN repo name, since the stored login may be GH_FALLBACK_LOGIN."""
+    hit = gh_login_hit({"command": new})
+    if hit != GH_NO_SWITCH:
+        return hit
+    old_gh, old_switch = _gh_counts(old)
+    new_gh, new_switch = _gh_counts(new)
+    if not old_gh or new_gh > old_gh or old_switch or new_switch:
+        return hit
+    repo = GH_DEFAULT_LOGIN + "/"
+    if new.lower().count(repo) > old.lower().count(repo):
+        return "gh edit that names a %s/ repo, and the stored login is unseen" % GH_DEFAULT_LOGIN
     return ""
 
 
@@ -576,16 +771,7 @@ def gh_login_hit(data) -> str:
         if not isinstance(text, str) or not GH_WORD.search(text):
             continue
         import guard_core
-        # The script type picks the rules, never the tool this call came from.
-        if shell == "powershell":
-            reading = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-        else:
-            reading = _shell_reading(guard_core, guard_core.PosixScript(text))
-            if not shell and any(tokens is None for _, tokens in reading):
-                powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
-                if all(tokens is not None for _, tokens in powershell):
-                    reading = powershell
-        hit = _gh_script_hit(guard_core, reading, text)
+        hit = _gh_script_hit(guard_core, _command_reading(guard_core, shell, text), text)
         if hit:
             return "%s: %s" % (shell, hit) if shell else hit
     return ""
@@ -682,6 +868,9 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    hit = placeholder_form_hit(new)
+    if hit[0]:
+        return hit
     # A context edit that holds a Departs from line in old_str or new_str keeps a valid one: dropping it, or
     # writing one that restates main, is refused. An edit with no such line in either is not judged.
     if DEPARTS_LINE.search(old) or DEPARTS_LINE.search(new):
@@ -702,8 +891,9 @@ def item_hit(op, entry):
         if hit:
             return "task-names-check", hit
         if entry.get("field") == "command":
-            # The stored command is unseen, so new_str is judged as the whole command.
-            hit = gh_login_hit({"command": entry.get("new_str")})
+            # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
+            # a gh command old_str held.
+            hit = gh_edit_hit(str(entry.get("old_str") or ""), entry.get("new_str"))
             if hit:
                 return "gh-login-switch", hit
         hit = form_str_replace_hit(entry)
@@ -976,7 +1166,8 @@ ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
-                     "with {\"__delete__\": true}.")
+                     "with {\"__delete__\": true}. "
+                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
 def _item_fields(path):
@@ -1060,7 +1251,8 @@ def _chat_question_hit(question, options):
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
-        if not _press_field_ok(label + ". " + EFFECT_TEXT.sub("", desc), links):
+        text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
+        if not _press_field_ok(text, links, press_text=press_text):
             return "press-link", "option presses in a web app with no url to the page"
     text = str(question.get("question") or "")
     hit = _lines_hit(text)
@@ -1084,7 +1276,359 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
-                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
+                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
+                     "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}
+
+
+# ------------------------------------------------------------------ past rulings: the owner is never asked twice
+#
+# Decision question-form holds the ruling. `past_rulings` gathers what the owner already decided, so the one
+# question judge (hooks/call_judge.py, and lint/report_guard.py for a relayed question) can refuse a question a
+# standing record settles. Sources: docs/decisions and docs/debts (every record, one index line each), and the
+# ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Closed page items are
+# always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
+# Cost: one git process, only when the caller already makes a model call; no file written.
+PAST_RULING_RULE = "past-ruling"
+UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
+UNREADABLE = "unreadable"
+CLOSED_ITEMS = "closed page items"
+INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
+RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
+RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WORD = re.compile(r"[a-z]{4,}")
+STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
+                       "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
+                       "your", "also", "only", "does", "each", "more", "most", "must", "never", "other", "some",
+                       "such", "same", "after", "before", "because", "owner", "ruling", "rulings"))
+# An id a refusal may cite: `decisions/<stem>` or `debts/<stem>`.
+RECORD_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/[\w.-]*\w")
+
+
+def has_unvetted(text) -> bool:
+    """True when the text carries an `Unvetted: <reason>` line: the question was sent knowingly unchecked."""
+    return bool(UNVETTED_LINE.search(text or ""))
+
+
+def _words(text) -> set:
+    return set(WORD.findall(str(text).lower())) - STOPWORDS
+
+
+def _ruling_text(body) -> str:
+    """The whole `## The ruling` section (to the next `## `), else the body after the title line, white space
+    collapsed and capped."""
+    match = RULING_HEADING.search(body)
+    if match:
+        section = body[match.end():]
+        nxt = re.search(r"^##[ \t]", section, re.M)
+        text = " ".join((section[:nxt.start()] if nxt else section).split())
+        if text:
+            return text[:INDEX_CAP]
+    lines = body.splitlines()
+    if lines and lines[0].startswith("#"):
+        lines = lines[1:]
+    return " ".join(" ".join(lines).split())[:INDEX_CAP]
+
+
+def _record_index(root, folder, unknown, label, seen):
+    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record
+    or folder that cannot be read adds an unreadable source to `unknown`."""
+    path = os.path.join(root, "docs", folder)
+    if not os.path.isdir(path):
+        return False, []
+    lines = []
+    try:
+        names = sorted(n for n in os.listdir(path) if n.endswith(".md") and n.lower() != "readme.md"
+                       and not (folder == "debts" and n.lower() == "notes.md"))  # the notes file holds no ruling
+    except OSError as exc:
+        unknown.append("%s (%s: %s)" % (label, UNREADABLE, type(exc).__name__))
+        return True, lines
+    for name in names:
+        record_id = "%s/%s" % (folder, name[:-3])
+        if record_id in seen:
+            continue
+        try:
+            with open(os.path.join(path, name), encoding="utf-8") as handle:
+                body = handle.read()
+        except (OSError, UnicodeDecodeError):
+            unknown.append("%s (%s: %s)" % (label, UNREADABLE, name))
+            continue
+        seen.add(record_id)
+        lines.append("%s: %s" % (record_id, _ruling_text(body)))
+    return True, lines
+
+
+def _tree_names(body, hash_size):
+    """(name, hex sha) for each file entry of a raw git tree object."""
+    out, pos = [], 0
+    while pos < len(body):
+        end = body.index(b"\0", pos)
+        mode, _, name = body[pos:end].partition(b" ")
+        sha = body[end + 1:end + 1 + hash_size]
+        pos = end + 1 + hash_size
+        if mode != b"40000":
+            out.append((name.decode("utf-8", "replace"), sha.hex()))
+    return out
+
+
+def _read_steps(root):
+    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
+    through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
+    "unreadable: <why>" (git failed, odd answer, bad JSON). Never fetches."""
+    if _git_root_of(root) is None:
+        return {}, "absent"
+    import subprocess
+    import _nowindow  # the one home of a no-window child start
+    try:
+        proc = _nowindow.Popen(["git", "-C", root, "cat-file", "--batch"], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
+        return {}, UNREADABLE + ": git did not start"
+    try:
+        entries = None
+        for ref in ("roadmap", "origin/roadmap"):
+            try:
+                proc.stdin.write(("%s:roadmap/data/steps\n" % ref).encode())
+                proc.stdin.flush()
+            except BrokenPipeError:
+                # git exited before it read the request; its stderr says why. The wait is bounded, and the
+                # `finally` below kills and reaps the process on every path.
+                proc.wait(timeout=STEP_GIT_TIMEOUT)
+                if b"not a git repository" in proc.stderr.read(4096):
+                    return {}, "absent"
+                return {}, UNREADABLE + ": git exited early"
+            head = proc.stdout.readline().split()
+            if len(head) == 2 and head[1] == b"missing":
+                continue
+            if not head and b"not a git repository" in proc.stderr.read():
+                return {}, "absent"  # a folder with a .git entry that is no repository holds no roadmap
+            if len(head) != 3 or head[1] != b"tree":
+                return {}, UNREADABLE + ": git gave no tree"
+            body = proc.stdout.read(int(head[2]))
+            proc.stdout.read(1)
+            entries = [(n, s) for n, s in _tree_names(body, len(head[0]) // 2) if n.endswith(".json")]
+            break
+        if entries is None:
+            return {}, "absent"
+        out, _ = proc.communicate("".join(s + "\n" for _, s in entries).encode(), timeout=STEP_GIT_TIMEOUT)
+        steps, pos = {}, 0
+        for name, _sha in entries:
+            nl = out.index(b"\n", pos)
+            head = out[pos:nl].split()
+            if len(head) != 3 or head[1] != b"blob":
+                return {}, UNREADABLE + ": git gave no blob for " + name
+            size = int(head[2])
+            data = json.loads(out[nl + 1:nl + 1 + size].decode("utf-8"))
+            pos = nl + 1 + size + 1
+            if not isinstance(data, dict):
+                return {}, UNREADABLE + ": bad JSON in " + name
+            steps[name[:-5]] = (data.get("note"), data.get("why"))
+        return steps, "ok"
+    except Exception as exc:
+        return {}, "%s: %s" % (UNREADABLE, type(exc).__name__)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+
+def _step_rulings(steps, words):
+    """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
+    lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
+    often sits there). Overlap 0 never counts."""
+    scored = []
+    for step_id, fields in sorted(steps.items()):
+        sentences = [s for f in fields if isinstance(f, str) for s in SENTENCE_SPLIT.split(f.strip()) if s]
+        for i, sentence in enumerate(sentences):
+            if not RULING_WORDS.search(sentence):
+                continue
+            tail = sentences[i + 1] if i + 1 < len(sentences) and not RULING_WORDS.search(sentences[i + 1]) else ""
+            unit = (sentence + " " + tail).strip()
+            overlap = len(_words(unit) & words)
+            if overlap:
+                scored.append((-overlap, len(scored), "%s: %s" % (step_id, unit)))
+    return [line for _, _, line in sorted(scored)[:STEP_TOP]]
+
+
+def past_rulings(question_text, repo_root):
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
+    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
+    candidates, unknown, seen = [], [], set()
+    roots = [repo_root]
+    try:
+        import guard_pointer  # the claude-settings checkout: the one home of the pointer line
+        other = guard_pointer.pointer_checkout()
+    except Exception:
+        other = ""
+    if not other:
+        unknown.append("claude-settings decision records (absent)")
+    elif os.path.realpath(other) != os.path.realpath(repo_root):
+        roots.append(other)
+    for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
+        found = False
+        for root in roots if folder == "decisions" else roots[:1]:
+            exists, lines = _record_index(root, folder, unknown, label, seen)
+            found = found or exists
+            candidates += lines
+        if not found:
+            unknown.append("%s (absent)" % label)
+    steps, state = _read_steps(repo_root)
+    if state == "ok":
+        candidates += _step_rulings(steps, _words(question_text))
+    elif state == "absent":
+        unknown.append("roadmap step notes (absent)")
+    else:
+        unknown.append("roadmap step notes (%s)" % state)
+    unknown.append(CLOSED_ITEMS)
+    return candidates, unknown
+
+
+def unreadable_sources(unknown) -> list:
+    """The unknown sources that exist and failed to read: they refuse as Unvetted. Absent ones and the closed page
+    items never do."""
+    return [u for u in unknown if "(%s" % UNREADABLE in u]
+
+
+def unknown_line(unknown) -> str:
+    """The one stderr line for the sources not searched."""
+    return "past-ruling search unknown: " + ", ".join(unknown)
+
+
+def candidate_ids(candidates) -> list:
+    return [c.split(": ", 1)[0] for c in candidates]
+
+
+def candidates_block(candidates, unknown) -> str:
+    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched."""
+    text = "\n\nPast rulings (item 8), one per line as `<id>: <text>`:\n" + (
+        "\n".join(candidates) if candidates else "(none found)")
+    if unknown:
+        text += ("\nNot searched: %s. A source not searched never means the question is clear."
+                 % ", ".join(unknown))
+    return text
+
+
+def ruling_cite(reason, ids, strict=False) -> str:
+    """Classify a refusal reason against the ids the model was shown. "bogus" when the reason opens with a
+    `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
+    "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
+    bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
+    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
+    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
+
+    def names(i):
+        return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
+    shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
+    opening = RECORD_REF.match(reason.lstrip(" \t\n*_`'\"([>"))
+    if opening and opening.group(0) not in ids:
+        return "bogus"
+    if strict and [r for r in RECORD_REF.findall(reason) if r not in ids]:
+        return "bogus"
+    if shown:
+        return "cited"
+    return "bogus" if strict else ""
+
+
+def _all_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _all_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _all_strings(v)
+
+
+def chat_units(tool_input) -> list:
+    """(marker text, words text) for each question of a box with 2+ options: the question text that may carry the
+    Unvetted line, and every string of the question, for the word overlap."""
+    questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
+    units = []
+    for q in questions if isinstance(questions, list) else []:
+        options = q.get("options") if isinstance(q, dict) else None
+        if isinstance(options, list) and len([o for o in options if isinstance(o, dict)]) >= 2:
+            units.append((str(q.get("question") or ""), " ".join(_all_strings(q))))
+    return units
+
+
+def page_units(judged) -> list:
+    """(marker text, words text) for each write of `judged_item_writes`, a task too (every question is vetted).
+    The marker text is the item's `context`, or a str_replace's new_str."""
+    units = []
+    for write in judged:
+        data = write.get("data")
+        if "new_str" in write:
+            units.append((write["new_str"], write["new_str"]))
+        elif isinstance(data, dict):
+            units.append((str(data.get("context") or ""), " ".join(_all_strings(data))))
+    return units
+
+
+# ------------------------------------------------------------------ option keys: one letter, one question
+
+# The key of an option line: `a)`, `(a)`, `a.`, `a:`, `**a**`, `**a)**`, with a bullet and a digit prefix (`1a`)
+# allowed. The line must go on with text, so a sentence that opens with a one-letter word is no key. A bullet with
+# a colon (`- a: 3 files`) is a list item, never a key.
+OPTION_KEY = re.compile(r"^[ \t]*(?P<bullet>[-*+][ \t]+)?(?:\*\*|\()?(?P<key>\d*[A-Za-z])(?P<close>\)|\.|:|\*\*)"
+                        r"(?:\*\*)?[ \t]+\S", re.M)
+
+
+def _option_keys(reply) -> list:
+    """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
+    is the last non-option line with a `?` before the option, else the item's first line. The option text is the
+    line after its key. Both are lowercased with spaces folded."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    from report_guard import input_needed_section  # the one reader of the Input Needed item
+    found, asked, first = [], "", ""
+    for line in input_needed_section(reply).splitlines():
+        match = OPTION_KEY.match(line)
+        if match and not (match.group("bullet") and match.group("close") == ":"):
+            option = " ".join(line[match.end() - 1:].lower().split())
+            found.append((match.group("key").lower(), asked or first, option))
+            continue
+        plain = " ".join(line.lower().split())
+        if plain:
+            first = first or plain
+            asked = plain if "?" in plain else asked
+    return found
+
+
+def _same_question(one, other) -> bool:
+    """True when two (question line, option text) pairs are one question sent again: the option texts are equal,
+    and the question lines, reworded or not, share at least half of their words (lowercase words of 4+ letters,
+    minus the stop words). Lines with no such word compare as text."""
+    (one_q, one_option), (other_q, other_option) = one, other
+    if one_option != other_option:
+        return False
+    a, b = _words(one_q), _words(other_q)
+    return one_q == other_q or (bool(a | b) and len(a & b) * 2 >= len(a | b))
+
+
+def key_overlap(reply, earlier_replies) -> str:
+    """The option keys, comma joined, that two questions share. A key used twice in the Input Needed of `reply` is
+    a clash. So is a key that an assistant reply since the last human message also uses under a different question
+    line or option text. The same key, option text and question, reworded or not, is a question sent again, never a
+    clash. '' when none clash."""
+    seen, clash = {}, set()
+    for key, question, option in _option_keys(reply):
+        if key in seen:
+            clash.add(key)
+        seen.setdefault(key, (question, option))
+    for earlier in earlier_replies:
+        for key, question, option in _option_keys(earlier):
+            if key in seen and not _same_question(seen[key], (question, option)):
+                clash.add(key)
+    return ", ".join(sorted(clash))

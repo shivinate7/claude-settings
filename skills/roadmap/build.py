@@ -40,6 +40,19 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
+The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
+steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
+STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
+that far before the live file's readAt, when no live session step equals the pull's branch). A draft row with no
+usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when its branch equals the step id or
+its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
+unlaned's: the branch equals a live session step exactly.
+
+The build goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
+"todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
+needed) it prints one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
+printed line tells them apart.
+
 The upkeep list also names each closed waiting-page item whose home is an open step that never cites
 the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
 of the repo's waiting page: {"n": int, "status": str, "home": str}. An item is listed when its status
@@ -69,6 +82,9 @@ fields (id, session_status, tags) per session in the live file it already writes
 one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
+The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
+build already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
+already makes.
 """
 import argparse
 import datetime
@@ -83,8 +99,9 @@ NOTE_WORDS = 250
 STALE_DAYS = 5
 # A live file older than this counts a dead lane as live, so the stale-step row reads unknown.
 STALE_LIVE_MINUTES = 60
-STEP_TAG = "cs-step:"
-REPO_TAG = "cs-repo:"
+STALE_DRAFT_HOURS = 12
+PAIR_LINE = "todo step with an open PR"
+READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
@@ -109,7 +126,6 @@ NEWEST = 5
 # The extras: {"map": "<path of the repo map>", "github": "<owner>/<repo>"}. The rolled-out layout
 # extras file holds them under "roadmap"; else the record branch holds them in EXTRAS.
 EXTRAS = "roadmap/extras.json"
-GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
 COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
 BOARD_WHY = ("unknown (session-board's store lives on one machine, so a cloud build cannot read it; "
              "Live work reads project threads and GitHub instead)")
@@ -122,6 +138,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
+from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
 def git(repo, *args, stdin=None):
@@ -380,11 +398,8 @@ def extras(repo, source):
 
 
 def github_slug(repo, extra):
-    if isinstance(extra.get("github"), str):
-        return extra["github"]
-    url = (git(repo, "remote", "get-url", "origin") or "").strip()
-    hit = GITHUB.search(url)
-    return (hit.group(1) or hit.group(2)) if hit else None
+    """The repo's `owner/name`: the extras' "github" key, else the origin (git_reads.github_repo, shared with the guard)."""
+    return git_reads.github_repo(repo, extra)
 
 
 def shallow_edge(repo):
@@ -490,13 +505,14 @@ def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
+    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`. The session rows feed only the stale-step upkeep row:
     `sessionSteps` holds the step ids of sessions that are not archived, carrying this repo's cs-repo tag, and `staleWhy`
-    says why that row reads unknown, or None.
+    says why that row reads unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
+    unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
     "items" (optional, the waiting page's rows `{"n", "status", "home"}`) feeds only the page-ruling upkeep row:
     `pageItems` holds the rows, or None with `itemsWhy` saying why that row reads unknown.
@@ -558,6 +574,7 @@ def live_work(path, steps, slug=None):
         elif minutes < -FUTURE_MINUTES:
             why.append("unknown (the live file's readAt is in the future)")
     read_why = why[0] if why else None  # the page-ruling row takes the readAt reasons only, never the sessions ones
+    pull_why = read_why  # the red pair line reads readAt and pulls only, never sessions
     if not isinstance(raw.get("sessions"), list):
         why.append("unknown (the live file has no sessions list)")
     elif not slug:
@@ -569,7 +586,7 @@ def live_work(path, steps, slug=None):
                         and (r.get("tags") is None or isinstance(r["tags"], list)))
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
-        ours = lambda t: isinstance(t, str) and t.startswith(REPO_TAG) and t[len(REPO_TAG):].lower() == slug.lower()
+        ours = lambda t: repo_tag_names(t, slug)
         session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED_SESSION
                                 and any(map(ours, r.get("tags") or []))
                                 for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})
@@ -577,6 +594,7 @@ def live_work(path, steps, slug=None):
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
     if pulls_skipped:
         why.append("unknown (%d pull rows skipped)" % pulls_skipped)
+        pull_why = pull_why or why[-1]
     stale_why = why[0] if why else None
     page_items, items_why = None, None
     if read_why:
@@ -590,7 +608,7 @@ def live_work(path, steps, slug=None):
         page_items = [{"n": r["n"], "status": r["status"], "home": r["home"]} for r in raw["items"]]
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
-            "sessionSteps": session_steps, "staleWhy": stale_why,
+            "sessionSteps": session_steps, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why}
 
 
@@ -731,9 +749,17 @@ def main(argv=None):
     out.write_text(render_block(data, info) if args.block else render(data, info), encoding="utf-8")
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
+        print("%s: unknown (steps unknown)" % PAIR_LINE)
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
+    pairs = todo_pairs(data["steps"], info["live"])
+    if pairs is None:
+        print("%s: %s" % (PAIR_LINE, pair_why(info["live"])))
+    for k, number in pairs or []:
+        print("%s: %s (#%d)" % (PAIR_LINE, k, number))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
+    if pairs:
+        raise SystemExit(1)
 
 
 def added_at(source):
@@ -770,10 +796,69 @@ def device_check(d):
     return "valid" if zoned else "bad"
 
 
+def names_step(pull, sid):
+    """True when the pull's branch is the step id, or its title holds the id as a whole token, ignoring case.
+    An empty id names nothing."""
+    if not sid:
+        return False
+    if pull.get("branch") == sid:
+        return True
+    edge = "[A-Za-z0-9_-]"
+    return re.search("(?<!%s)%s(?!%s)" % (edge, re.escape(sid), edge), pull["title"], re.I) is not None
+
+
+def live_why(work):
+    """Why the live read is unknown (no file, unreadable, stale, no sessions list), or None when it can be used."""
+    work = work or {"read": "unknown (no --live file)"}
+    return work["staleWhy"] if "staleWhy" in work else work["read"]
+
+
+def pair_why(work):
+    """Why the red pair line is unknown, or None. It reads readAt and pulls only: a missing sessions list or a bad
+    session row must not mute it."""
+    work = work or {"read": "unknown (no --live file)"}
+    return work["pullWhy"] if "pullWhy" in work else work["read"]
+
+
+def todo_pairs(steps, work):
+    """(id, pull number) for each todo step that an open pull names, or None when the pulls read is unknown."""
+    if pair_why(work):
+        return None
+    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") == "todo"
+            for p in work["pulls"] if names_step(p, k)]
+
+
+def created_at(pull):
+    """The pull's createdAt as an aware datetime, or None when missing, not a string, or not ISO with a zone."""
+    try:
+        at = datetime.datetime.fromisoformat(pull["createdAt"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, ValueError):
+        return None
+    return at if at.tzinfo else None
+
+
+def stale_drafts(work):
+    """Entries for each draft pull older than STALE_DRAFT_HOURS at the live read with no live lane, or one unknown entry."""
+    why = live_why(work)
+    if why:
+        return [why]
+    read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+    out = []
+    for p in work["pulls"]:
+        # A lane is a live session step equal to the branch, the same rule as unlaned.
+        if p.get("draft") is not True or (p.get("branch") and p["branch"] in work["sessionSteps"]):
+            continue
+        at = created_at(p)
+        if at is None:
+            out.append("unknown (#%d has no createdAt)" % p["number"])
+        elif (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600:
+            out.append("#%d (%s)" % (p["number"], p.get("branch") or p["title"]))
+    return out
+
+
 def unlaned(open_, marks, work):
     """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
-    work = work or {"read": "unknown (no --live file)"}
-    why = work["staleWhy"] if "staleWhy" in work else work["read"]
+    why = live_why(work)
     if why:
         return [why]
     live = set(work["sessionSteps"]) | {p["branch"] for p in work["pulls"] if isinstance(p.get("branch"), str)}
@@ -884,9 +969,12 @@ def upkeep(steps, added, marks, strays, work=None):
             closing.append("%s (%s; open a try-it item)" % (k, got))
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
+    ready = [k for k, d in open_ if d.get("status") == "todo" and READY_SENTENCE.search(d.get("note") or "")]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
+            ("ready todo steps", ready),
+            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
             ("landed, waiting for a device trial", waiting),

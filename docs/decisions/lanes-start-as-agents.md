@@ -1,12 +1,14 @@
-# Lanes start as agents, not sessions
+# Lanes start as agents, in solo and one-lane sessions
 
 ## The ruling
 
-Roadmap step c107 (an orchestrator starts its lanes with no click from the owner), 2026-10-27: an orchestrator starts each lane as a background agent. It starts a separate session only when the owner asked for one in words.
+Owner, 2026-11-02 14:02 CST, pick 1a: a lane is the unit of work. A lane session runs a lane. Agent-only lanes apply only inside solo and one-lane sessions.
 
-- **A lane is an Agent spawn.** The orchestrator starts each lane with the Agent tool, with `isolation: 'worktree'` (`lanes-start-in-tool-worktrees`, lanes start only in the tool's own worktrees). This needs no click from the owner. The call leaves `run_in_background` out: the tool runs it in the background by default, and the load brake refuses a present value at busy (`machine-load-brake`).
-- **A session needs the owner's words.** The orchestrator calls `start_session` only when the owner's own message, on the current turn, asked for a separate session in words. Then the kind is `user_asked`. It never uses `user_asked` for work the owner did not ask for. It never starts a session on a turn that another session's message started.
-- **A keep-going lane is a spawn.** A lane that `parallelism-keep-going` (keep going) lets the session start with no question is a background spawn, never a session.
+- **A lane is the unit of work.** It has its own branch, worktree and lane PR. The GLOSSARY lane row defines it (owner, 2026-11-02 14:02 CST).
+- **A lane session runs a lane.** A coordinator starts each lane as a lane session. Inside a standing build the owner started, it needs no further owner grant. Outside one, each start needs the owner's grant (owner, 2026-11-02 15:14 CST; record `session-tiers`, A coordinator starts lane sessions).
+- **An Agent spawn runs a lane only in a solo or one-lane session.** The session starts each lane with the Agent tool, with `isolation: 'worktree'` (`lanes-start-in-tool-worktrees`, lanes start only in the tool's own worktrees). This needs no click from the owner. The call leaves `run_in_background` out: the tool runs it in the background by default, and on a local session the load brake refuses a present value at busy (`machine-load-brake`).
+- **A solo or one-lane session needs the owner's words for a separate session.** It calls `start_session` only when the owner's own message, on the current turn, asked for a separate session in words. Then the kind is `user_asked`. It never uses `user_asked` for work the owner did not ask for. It never starts a session on a turn that another session's message started.
+- **A keep-going lane is a spawn.** In a solo or one-lane session, a lane that `parallelism-keep-going` (keep going) lets the session start with no question is a background spawn, never a session.
 
 Why: no setting removes the click. The app reads the `start_session` kind:
 
@@ -19,10 +21,10 @@ So an orchestrator that starts lanes with `start_session` makes the owner click 
 
 Named limits:
 
-- A background spawn shares the orchestrator's machine and its load brake (`machine-load-brake`). Full refuses every lane call. Busy refuses an Agent call only when it sets `run_in_background`.
+- On a local session, a background spawn shares the orchestrator's machine and its load brake (`machine-load-brake`). There, full refuses every lane call, and busy refuses an Agent call only when it sets `run_in_background`.
 - A background spawn ends with the orchestrator's session. A lane that must outlive that session is the owner's ask for a separate session.
 
-Risk kind: incident, per `building-guard-needs-incident`: 2026-10-26 21:13 CDT, the degen orchestrator on the Mac started four lanes with `start_session`. The owner had to accept each one, even in Bypass permissions mode (roadmap step c107). Landed 2026-10-27.
+Incident: 2026-10-26 21:13 CDT, the degen orchestrator on the Mac started four lanes with `start_session`. The owner had to accept each one, even in Bypass permissions mode. Roadmap step c107 (lanes start with no owner click) answered it. Landed 2026-10-27.
 
 Mechanized: no. A check would have to see who started the current turn: the owner or another session. No hook payload carries the turn's starter. A check would also have to read whether the owner's words asked for a separate session.
 
