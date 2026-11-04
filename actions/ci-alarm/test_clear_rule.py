@@ -28,10 +28,19 @@ def workflow(*jobs):
     return "\n".join(lines) + "\n"
 
 
+def extra_workflow(*body):
+    """A workflow text with `checks` and one job `extra`, whose body lines (the job's own if:, name: and comments) come first."""
+    return workflow(("checks", [RUNS_ON, *STEPS]), ("extra", [RUNS_ON, *body, *STEPS]))
+
+
+def runs(extra_name="extra"):
+    """The red run and the newer push run as (R, N). The red run is a schedule run that failed on `checks`. The job `extra_name` was skipped
+    there, and the newer push run skipped it too."""
+    return [job("checks", "failure"), job(extra_name, "skipped")], [job("checks", "success"), job(extra_name, "skipped")]
+
+
 class ClearRuleJobs(unittest.TestCase):
-    # The red run is a schedule run that failed on `checks`. `extra` was skipped there, and the newer push run skipped it too.
-    R = [job("checks", "failure"), job("extra", "skipped")]
-    N = [job("checks", "success"), job("extra", "skipped")]
+    R, N = runs()
 
     def test_a_multi_line_if_whose_continuation_names_the_push_event_keeps_the_job_needed(self):
         # The if: is one plain scalar over two lines, `... == 'pull_request'` then `|| ... == 'push'`, so it may run in a push run and stays
@@ -67,6 +76,116 @@ class ClearRuleJobs(unittest.TestCase):
                         ("pq", [RUNS_ON, "if: ${{ github.event_name == 'pull_request' }}", *STEPS]))
         self.assertTrue(clear_rule.clears(r, n, PUSH, text),
                         "a key match with a pull_request-only if: leaves the job out, so the skip does not block the clear")
+
+
+class ClearRuleScanner(unittest.TestCase):
+    """The job-level if: and name: reads of clear_rule.parse_jobs, and the rule that uses them. Each case asserts the read first, then the
+    rule, so a red names the read that broke."""
+    R, N = runs()
+
+    def assert_read(self, text, want_if, want_name=None):
+        got = clear_rule.parse_jobs(text)["extra"]
+        self.assertEqual(got["if"], want_if, "the job-level if: of extra is read wrong")
+        if want_name is not None:
+            self.assertEqual(got["name"], want_name, "the name: of extra is read wrong")
+
+    def test_an_opener_inside_a_quoted_string_does_not_cut_a_real_pull_request_test(self):
+        # `#`, `//` and `/*` sit inside quotes. The if: is one && chain with a real pull_request test, so the job is left out.
+        # Named failure: a comment cut at the opener truncates the if:, the read fails, and the job reads as needed.
+        for opener in ("#", "//", "/*"):
+            with self.subTest(opener=opener):
+                want = f"github.head_ref != 'a {opener} b' && github.event_name == 'pull_request'"
+                text = extra_workflow(f"if: {want}")
+                self.assert_read(text, want)
+                self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                                "a real && pull_request test leaves the job out, so its skip in the push run does not block the clear")
+
+    def test_an_opener_inside_a_quoted_string_keeps_the_job_when_a_real_or_follows(self):
+        # The || after the quoted opener is a real OR, so the job may run in a push run and stays needed.
+        # Named failure: a comment cut at the opener truncates the if:, the read fails, and the || is lost.
+        for opener in ("#", "//", "/*"):
+            with self.subTest(opener=opener):
+                want = f"github.event_name == 'pull_request' && github.head_ref != 'a {opener} b' || github.event_name == 'push'"
+                text = extra_workflow(f"if: {want}")
+                self.assert_read(text, want)
+                self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                                 "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
+
+    def test_an_event_test_inside_a_quoted_literal_is_not_the_test(self):
+        # The literal reads `github.event_name == 'pull_request'` but is only text inside a string, so the if: has no test and the job is kept.
+        # Named failure: an event test searched for anywhere in the if: finds the literal, so the job is left out.
+        for want in ("github.head_ref == 'github.event_name == ''pull_request'''",
+                     "github.head_ref == 'x && github.event_name == ''pull_request'''"):
+            with self.subTest(want=want):
+                text = extra_workflow(f"if: {want}")
+                self.assert_read(text, want)
+                self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                                 "an event test inside a quoted literal is not a test, so the job stays needed")
+
+    def test_a_real_pull_request_test_beside_a_quoted_push_literal_leaves_the_job_out(self):
+        # Control for the case above: the real pull_request test leaves the job out, whatever the literal says.
+        want = "github.event_name == 'pull_request' && github.head_ref == 'github.event_name == ''push'''"
+        text = extra_workflow(f"if: {want}")
+        self.assert_read(text, want)
+        self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                        "a real && pull_request test leaves the job out, so its skip in the push run does not block the clear")
+
+    def test_a_lone_quote_in_a_name_maps_the_job_and_leaves_it_out_on_its_test(self):
+        # `Don't` is the job's name:, and its if: names pull_request only, so the job maps by name and is left out.
+        # Named failure: a name with an unbalanced quote reads as no name, the job maps to nothing, and it stays needed.
+        R, N = runs("Don't")
+        want = "github.event_name == 'pull_request'"
+        text = extra_workflow("name: Don't", f"if: {want}")
+        self.assert_read(text, want, want_name="Don't")
+        self.assertTrue(clear_rule.clears(R, N, PUSH, text),
+                        "a job named Don't with a pull_request-only if: is left out, so its skip does not block the clear")
+
+    def test_a_lone_quote_in_a_name_keeps_the_job_when_its_if_has_a_real_or(self):
+        R, N = runs("Don't")
+        want = "github.event_name == 'pull_request' || github.event_name == 'push'"
+        text = extra_workflow("name: Don't", f"if: {want}")
+        self.assert_read(text, want, want_name="Don't")
+        self.assertFalse(clear_rule.clears(R, N, PUSH, text),
+                         "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
+
+    def test_a_lone_quote_in_plain_text_does_not_change_the_if_read(self):
+        # A comment line and a trailing comment, each with a lone quote, around a pull_request-only if:. Both are text, so the if: reads as the test.
+        # Named failure: a comment read as part of the if: makes it unreadable, so the job stays needed.
+        want = "github.event_name == 'pull_request'"
+        for body in (["# Don't run this on push", f"if: {want}"],
+                     [f"if: {want} # Don't"]):
+            with self.subTest(body=body[-1]):
+                text = extra_workflow(*body)
+                self.assert_read(text, want)
+                self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                                "a pull_request-only if: leaves the job out, so its skip does not block the clear")
+
+    def test_a_block_scalar_if_whose_lines_join_to_a_real_or_keeps_the_job(self):
+        # `>-` folds the body lines into one expression, so the || on the second line is a real OR and the job stays needed.
+        # Named failure: only the first body line is read, so the job reads as pull_request-only and is left out.
+        want = "github.event_name == 'pull_request' || github.event_name == 'push'"
+        text = extra_workflow("if: >-", "  github.event_name == 'pull_request'", "  || github.event_name == 'push'")
+        self.assert_read(text, want)
+        self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                         "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
+
+    def test_a_block_scalar_if_whose_pull_request_test_is_on_a_later_line_leaves_the_job_out(self):
+        # The real pull_request test is the second line's && conjunct, so the job is left out.
+        # Named failure: only the first body line is read, so the test is missed and the job stays needed.
+        want = "github.ref != 'x' && github.event_name == 'pull_request'"
+        text = extra_workflow("if: >-", "  github.ref != 'x'", "  && github.event_name == 'pull_request'")
+        self.assert_read(text, want)
+        self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                        "a real && pull_request test leaves the job out, so its skip in the push run does not block the clear")
+
+    def test_a_block_scalar_keeps_a_quoted_opener_before_a_real_or(self):
+        # In a block scalar `#` is text, and the || after the quoted opener is a real OR, so the job stays needed.
+        # Named failure: only the first body line is read, so the || is missed and the job reads as pull_request-only.
+        want = "github.event_name == 'pull_request' && github.head_ref != ' #' || github.event_name == 'push'"
+        text = extra_workflow("if: >-", "  github.event_name == 'pull_request' && github.head_ref != ' #'", "  || github.event_name == 'push'")
+        self.assert_read(text, want)
+        self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                         "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
 
 
 if __name__ == "__main__":
