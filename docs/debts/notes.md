@@ -1171,3 +1171,5 @@
 - launch-checkout-read-as-pr: `python3 merge/launch.py <checkout> N --confirm` parses the checkout as the PR number (merge/launch.py). Decision: merge-confirm-repo
 - job-workflow-unreadable-skipped: `job_workflow` (lint/workflow_steps.py) skips an unreadable workflow file with no log. Decision: merge-confirm-repo
 - ci-job-discovery-no-case: lint/test_ci_job.py has no case for default workflow discovery with 0 or 2 files. Decision: merge-confirm-repo
+- redirect-strip-ignores-quotes: the guard drops redirections with `REDIRECTION.sub` before it parses a merge (hooks/guard_merge.py). That strip ignores quotes. So `merge N --confirm --base-red-ok "fix -> lane"` is denied with a reason about the record. Decision: merge-confirm-repo
+- cd-subst-relative-repo-dir: after `cd $(…)`, a relative `-C` resolves against the folder before the cd. Decision: merge-confirm-repo
