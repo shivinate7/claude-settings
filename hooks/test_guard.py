@@ -10832,8 +10832,9 @@ sh("frozen: a leftover token is not a key to the push rule",
 # THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
 # shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes, and they guard
 # a future regression of the data reading.
-# The commit message is the allow shape that reading made data. A heredoc body fed to an interpreter
-# is code, not data: it stays in view, so a shell write it names denies.
+# The commit message is the allow shape that reading made data. A quoted heredoc body fed to a non-shell
+# interpreter is read only at its shell spots, the calls that hand text to a shell (`os.system`, `shell=True`).
+# A body with no shell spot is data, not a write; a shell write named at a spot denies.
 sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
    "[regression pin: passes on main and d7fb2f1]",
    'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
@@ -10844,9 +10845,13 @@ sh("frozen shell: an iex of a Set-Content onto the config settings denies "
 sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
    "[new allow: red on main, passes on d7fb2f1]",
    VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
-sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fed to python, denies "
-   "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
-   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
+   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
+   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+sh("frozen shell: a python heredoc that os.system-runs a cat-write onto the config settings denies "
+   "[regression pin: passes on main]",
+   "python3 - <<'DOC'\nimport os; os.system('cat > " + CFG_SETTINGS + "')\nDOC", "deny", "frozen-path", cwd=NOGIT)
 
 # The narrowing reads a quoted word as data, a plain word as code. Each shape below is a real write, so each DENIES.
 for _n, _c in (
@@ -11342,8 +11347,9 @@ sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
-# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
-# piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
+# a pure printer. A quoted heredoc body fed to an interpreter is read only at its shell spots (see the
+# shell-spot rule above), so a body with none allows. Text piped into an interpreter is not a heredoc: the
+# interpreter may run it, so a pipe into one fails closed. Incident
 # 2026-10-14: a reviewer's probe piped a JSON tool-call sample holding a cap write into
 # `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing. Whether that
 # friction is acceptable is the owner's call, not the test's. Each case names the write the way a
@@ -11366,11 +11372,21 @@ chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to p
    "command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
    carries=("agent-model-cap",))
-sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
+sh("cap data: a heredoc body fed to python stdin naming a cat-write allows "
+   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
+   "agent-model-cap-string-false-alarm, Queue item 162]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
-   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
-sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
-   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+   + CAP_KEY + "\"}}\nPAYLOAD", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc that subprocess-runs a cat-write with shell=True asks "
+   "[regression pin: passes on main]",
+   "python3 - <<'PY'\nimport subprocess; subprocess.run('cat > " + PROJ_LOCAL + " " + CAP_KEY
+   + "', shell=True)\nPY", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc that only prints a cat-write allows "
+   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
+   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc that os.system-runs a cat-write asks [regression pin: passes on main]",
+   "python3 - <<'PY'\nimport os; os.system('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask command "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
