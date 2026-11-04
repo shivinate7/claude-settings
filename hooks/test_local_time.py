@@ -907,9 +907,8 @@ def case_opus_ask_length_and_role_from_the_words():
 
 
 def case_opus_ask_two_roles_grant_both():
-    # Owner ruling 226 b (Cockpit item 226 b, 2026-11-04 08:03 CST) overturns the old rule that two roles grant nothing:
-    # the two roles the ask names are both granted, as a sorted list. A negated role still grants nothing (the negation
-    # case holds `use opus for reviewers, not builders 30m`).
+    # The two roles the ask names are both granted, as a sorted list (decision owner-override). A negated role still
+    # grants nothing: the negation case holds `use opus for reviewers, not builders 30m`.
     cfg, calls, _, _ = opus_type("send opus for reviewers and builders", answer={"ok": True})
     got = opus_override(cfg)
     check("opus ask: `send opus for reviewers and builders` reaches the judge once", len(calls) == 1,
@@ -1530,11 +1529,11 @@ def case_opus_ask_source_keyword_forms_are_untouched():
           and abs((got[1] - (OV_NOW + timedelta(minutes=15))).total_seconds()) <= 1, "got %r" % (got,))
 
 
-# PLAIN ASK SCOPE. Owner ruling 226 b (Cockpit item 226 b, 2026-11-04 08:03 CST): "Scope from context, fall back to every
-# role." A plain ask that names no role takes its roles from the owner's nearby typed prompts, read by scope_judge. When
-# those name none, it grants every role for 2h, and it never asks. These cases call grant_opus_ask directly, with the
-# yes/no judge and the scope read stood in. A case about excluded records checks first that the read runs on the plain
-# prompt, and only then checks the excluded words, so an empty read cannot pass that check by accident.
+# PLAIN ASK SCOPE (decision owner-override). A plain ask that names no role takes its roles from the owner's nearby typed
+# prompts, read by scope_judge. When those name none, it grants every role for 2h, and it never asks. These cases call
+# grant_opus_ask directly, with the yes/no judge and the scope read stood in. A case about excluded records checks first
+# that the read runs on the plain prompt, and only then checks the excluded words, so an empty read cannot pass that
+# check by accident.
 SCOPE_WORDS = {"builder": "builders", "reviewer": "reviewers"}  # the word the scope stand-in finds for each role
 EVERY_ROLE_2H = b'{"kind": "opus", "until": "2026-10-18T20:00:00+00:00", "role": null}'  # OV_NOW + 2h, role null
 BUILDER_2H = b'{"kind": "opus", "until": "2026-10-18T20:00:00+00:00", "role": "builder"}'
@@ -1590,6 +1589,21 @@ class ScopeStub:
         return self.answer
 
 
+class FileReadingScope:
+    """Stands in for the scope read. During its own call it reads the session's Opus override file and keeps what it saw
+    in `seen`, so a case can check the file the read finds. It answers `answer`, or raises `error` when one is given."""
+
+    def __init__(self, cfg, answer=None, error=None):
+        self.cfg, self.answer, self.error, self.seen, self.calls = cfg, answer, error, None, []
+
+    def __call__(self, ask_text, context):
+        self.calls.append((ask_text, list(context)))
+        self.seen = opus_override(self.cfg)
+        if self.error is not None:
+            raise self.error
+        return self.answer
+
+
 def grant_direct(cfg, prompt, transcript, judge, scope):
     """grant_opus_ask for `prompt` in the config dir `cfg` at OV_NOW, with the judge and the scope read stood in. The scope
     read is passed only when grant_opus_ask takes it: a build without it runs the plain path, and the case fails on the
@@ -1602,15 +1616,16 @@ def grant_direct(cfg, prompt, transcript, judge, scope):
         return override.grant_opus_ask(OV_SESSION, prompt, OV_NOW, **kwargs)
 
 
-def scope_grant(prompt, lines, scope, judge_answer=True):
+def scope_grant(prompt, lines, scope, judge_answer=True, cfg=None):
     """The plain ask `prompt` after the transcript `lines`, which the harness writes with the ask as its last record.
-    `lines` None means no transcript_path. Returns (config dir, judge, scope, exception or None): a raise is returned,
-    so the case names it instead of crashing."""
-    cfg, judge = ov_cfg(), JudgeRecorder(judge_answer)
+    `lines` None means no transcript_path, and `cfg` names the config dir (a new one when None). Returns (config dir,
+    judge, scope, exception or None): a raise is returned, so the case names it instead of crashing. A kill is returned
+    too: KeyboardInterrupt and SystemExit pass through every `except Exception`, so the case reads what the kill left."""
+    cfg, judge = cfg or ov_cfg(), JudgeRecorder(judge_answer)
     path = transcript_file(lines + [owner_turn(prompt)]) if lines is not None else None
     try:
         grant_direct(cfg, prompt, path, judge, scope)
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt, SystemExit) as exc:
         return cfg, judge, scope, exc
     return cfg, judge, scope, None
 
@@ -1864,6 +1879,52 @@ def case_opus_keyword_files_keep_their_bytes():
     check("opus keyword: `opus off` removes the file", opus_bytes(cfg) is None, "bytes %r" % (opus_bytes(cfg),))
 
 
+# THE EVERY-ROLE FILE FIRST (decision owner-override). The prompt hook can be killed while the scope read runs: its timeout
+# is 30 s in settings.json. With no scope the grant is every role, so the every-role file is written before the read, and
+# a valid answer then narrows it. A kill during the read leaves the every-role file.
+def case_opus_scope_read_sees_every_role_before_it_runs():
+    cfg = ov_cfg()
+    stub = FileReadingScope(cfg, answer=["builder"])
+    scope_grant("send opus now", [owner_turn("builders should do the refactor next")], stub, cfg=cfg)
+    ran = len(stub.calls) == 1
+    check("opus scope: a plain ask after an earlier builders prompt calls the read once", ran,
+          "read calls %d" % len(stub.calls))
+    if ran:
+        seen = stub.seen
+        check("opus scope: during the read the Opus override file exists with role null",
+              seen is not None and seen[0] == "opus" and seen[2] is None, "file during the read %r" % (seen,))
+        check("opus scope: during the read the file ends two hours after the grant",
+              seen is not None and abs((seen[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+              "file during the read %r" % (seen,))
+
+
+def case_opus_scope_a_kill_during_the_read_leaves_every_role():
+    # A kill during the read, modelled as the KeyboardInterrupt or SystemExit the interpreter raises, leaves an every-role
+    # override two hours long: no scope means every role.
+    for name, kill in (("a KeyboardInterrupt", KeyboardInterrupt()), ("a SystemExit", SystemExit(1))):
+        cfg = ov_cfg()
+        stub = ScopeStub(error=kill)
+        scope_grant("send opus now", [owner_turn("builders should do the refactor next")], stub, cfg=cfg)
+        ran = len(stub.calls) == 1
+        check("opus scope: %s during the read, the read was reached" % name, ran, "read calls %d" % len(stub.calls))
+        got = opus_override(cfg)
+        check("opus scope: %s during the read leaves an every-role override, two hours long" % name,
+              got is not None and got[0] == "opus" and got[2] is None
+              and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+              "got %r; files %r" % (got, ov_files(cfg)))
+
+
+def case_opus_scope_valid_answer_ends_narrowed():
+    # Guard, passes on the build too: a valid answer still narrows the every-role file, and the two-hour end is kept.
+    cfg = ov_cfg()
+    scope_grant("send opus now", [owner_turn("builders should do the refactor next")], ScopeStub(answer=["builder"]), cfg=cfg)
+    got = opus_override(cfg)
+    check("opus scope: a valid answer ends the file narrowed to builder",
+          got is not None and got[0] == "opus" and got[2] == "builder", "got %r" % (got,))
+    check("opus scope: the narrowed file keeps the two-hour end",
+          got is not None and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1, "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -1943,6 +2004,9 @@ def main():
         case_opus_scope_two_roles_from_the_read_grant_both_sorted()
         case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
         case_opus_keyword_files_keep_their_bytes()
+        case_opus_scope_read_sees_every_role_before_it_runs()
+        case_opus_scope_a_kill_during_the_read_leaves_every_role()
+        case_opus_scope_valid_answer_ends_narrowed()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
