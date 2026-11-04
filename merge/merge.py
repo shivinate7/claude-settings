@@ -2748,12 +2748,13 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    if top and all(v == "PASS" for i, _, _, v in rounds if i == top):
-        if bad:
-            return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
+    passed = top and all(v == "PASS" for i, _, _, v in rounds if i == top)
+    if passed and not bad:
         return "done", f"round {top} passed"
-    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:
+    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note
+    if passed:
+        return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
     if rec["kind"] == "delete-only" and top == 1:
         return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
     if rec["kind"] == "docs-only" and not rounds:
