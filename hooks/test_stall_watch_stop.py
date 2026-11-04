@@ -51,9 +51,11 @@ import time
 from case_runner_test import Skip, run_cases
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
-SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-stop-")
+SCRATCH = _test_temp.run_folder()
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 NOW = int(time.time())  # the clock every case passes as STALL_WATCH_NOW, so no case sleeps
 ADVICE = "stop it or tell the owner"

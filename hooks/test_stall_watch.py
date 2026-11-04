@@ -266,6 +266,15 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     return rc, text, secs, cmd
 
 
+def job_files(cmd):
+    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. The one home of
+    that parse; a path the hook quotes is read by shlex. A missing flag gives None."""
+    def flag_value(flag):
+        tail = cmd.split(" %s " % flag, 1)
+        return shlex.split(tail[1])[0] if len(tail) == 2 else None
+    return flag_value("--log"), flag_value("--beat")
+
+
 def stall_problems(rc, text, secs, sleep_args=None):
     """Checks shared by the stall cases. Return a list of problems."""
     problems = expect(rc == 3, f"exit {rc}, want 3")
@@ -806,7 +815,9 @@ def reap_ends_a_job_that_no_report_names():
 @posix_case
 def log_keeps_growing_after_watcher_exits():
     """7. after the watcher exits 3, the command's later output still reaches the log"""
-    rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second")
+    # The tail sleep keeps the job alive after its last write, so the poll below sees LOG before a
+    # job that removes its own log at exit does so.
+    rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second; sleep 2")
     problems = expect(rc == 3, f"exit {rc}, want 3 (the 4 s gap is a stall)")
     m = LOG_RE.search(text)
     if not m:
@@ -834,10 +845,9 @@ def rewrite_log_lies_under_scratch():
     # A stalled job skips the wrapper's own `rm -f` (case 7), so only the folder's removal clears its
     # log. The check reads the path off the rewrite, never a count of files in the system temp dir.
     cmd, _hso = rewrite("echo hi")
-    tail = cmd.split(" --log ", 1)
-    if len(tail) != 2:
+    log, _beat = job_files(cmd)
+    if log is None:
         return ["the rewrite has no --log"]
-    log = shlex.split(tail[1])[0]
     scratch = os.path.realpath(SCRATCH)
     return expect(os.path.isabs(log) and os.path.realpath(log).startswith(scratch + os.sep),
                   f"--log {log} lies outside {scratch}: the hook took the system temp dir, "
@@ -1038,10 +1048,9 @@ def beat_file_is_removed_when_the_job_ends():
     beat = m.group(1)
     problems += expect("held" in text.splitlines(), "the job could not write to the beat file")
     problems += expect(beat.endswith(".beat"), f"beat path {beat} does not end in .beat")
-    tail = cmd.split(" --log ", 1)
-    if len(tail) != 2:
+    log, _beat = job_files(cmd)
+    if log is None:
         return problems + ["the rewrite has no --log"]
-    log = shlex.split(tail[1])[0]
     problems += expect(os.path.realpath(os.path.dirname(beat)) == os.path.realpath(os.path.dirname(log)),
                        f"beat {beat} is not in the folder of LOG {log}")
     problems += expect(not os.path.exists(beat), f"beat file {beat} is still there after the job ended")
