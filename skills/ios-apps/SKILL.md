@@ -1,6 +1,6 @@
 ---
 name: ios-apps
-description: Use in any repo that ships an iPhone app, before you draw or brief an iPhone mockup, before you change its build, tests, CI or shipping, when the owner asks for a new iOS app, or before you fold or unfold an iPhone Duo simulator. Holds the one iOS standard every app follows, its mockup rules, and a starter that writes a new app at that standard.
+description: Use in any repo that ships an iPhone app, before you draw or brief an iPhone mockup, before you change its build, tests, CI or shipping, when the owner asks for a new iOS app, before you fold or unfold an iPhone Duo simulator, or before an Xcode build, a simulator boot or a Mac disk-heavy step. Holds the one iOS standard every app follows, its mockup rules, and a starter that writes a new app at that standard.
 ---
 
 Every iOS app of the owner works the same way: the same build, tests, phone install and TestFlight
