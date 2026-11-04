@@ -3723,7 +3723,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
                     or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
@@ -3749,9 +3750,9 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     for name in shut_down:
         if tool == SIM_MCP:
             refuse(tool, "deny", "simulator-boot-lease",
-                   "A launch of the shut-down simulator %s needs a lease, and no session holds one: the Mac "
-                   "shares one simulator across repos. Run `sim-test`, which leases and boots it under its "
-                   "lock, or launch a simulator that is already booted. "
+                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "which boots it under the lock, or launch a simulator that is already booted. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
