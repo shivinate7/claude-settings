@@ -2309,7 +2309,7 @@ def last_run_line(last, root: str, path: str) -> str:
     try:
         import local_time
         at = datetime.fromtimestamp(int(row["time_ms"]) / 1000, timezone.utc)
-        when = local_time.line(lambda: at).split(None, 2)[2]  # "2026-11-04 07:57 CST (UTC-06:00)"
+        when = local_time.line(lambda: at).split(None, 2)[2]  # the date, time, zone name and offset
         return "last --confirm run: %s, %s worktrees removed, %s branches reaped" % (
             when, row["worktrees_removed"], row["branches_reaped"])
     except (KeyError, TypeError, ValueError, OverflowError, OSError) as err:
