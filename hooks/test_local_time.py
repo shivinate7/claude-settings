@@ -1925,6 +1925,81 @@ def case_opus_scope_valid_answer_ends_narrowed():
           got is not None and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1, "got %r" % (got,))
 
 
+# NEGATION AFTER A ROLE, AND THE MODEL'S ROLE NAMES (decision owner-override). A negation within three words after a role
+# word negates that role, as one within three words before it does, for one role or two. The model's raw role strings
+# reach override.py, which is the one filter: it ignores case and keeps the roles in ASK_ROLES.
+@contextlib.contextmanager
+def model_answers(answer=None, error=None):
+    """decision_watch.invoke_model stood in for the block. It answers (answer, error) and records each call."""
+    _, decision_watch = hooks_modules()
+    stub = JudgeStub(answer, error)
+    real = decision_watch.invoke_model
+    decision_watch.invoke_model = stub
+    try:
+        yield stub
+    finally:
+        decision_watch.invoke_model = real
+
+
+def real_scope_read():
+    """call_judge.opus_scope, the scope read the prompt hook uses when a caller passes none."""
+    hooks_modules()
+    import call_judge
+    return call_judge.opus_scope
+
+
+def case_opus_ask_negation_after_a_role_grants_nothing():
+    for prompt in ("send opus builders, not needed", "send opus builders, don't do the tests",
+                   "send opus builders never", "send opus builders except the tests",
+                   "send opus builders, reviewers are not needed", "send opus reviewers and builders, not tests"):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r has a negation after a role and writes no Opus override" % prompt,
+              opus_override(cfg) is None, "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_far_negation_still_grants():
+    # Guard, passes on the build too: a negation more than three words after the role names no role's negation.
+    cfg, calls, _, _ = opus_type("send opus builders for the sprint review, not the code", answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: `send opus builders for the sprint review, not the code` still names builder",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+    cfg, calls, _, _ = opus_type("send opus builders and reviewers today and then review the notes, not the code",
+                                 answer={"ok": True})
+    got = opus_override(cfg)
+    check("opus ask: a negation more than three words after both roles still names both",
+          got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
+def case_opus_scope_override_filter_ignores_case():
+    # Guard, passes on the build too: the one filter in override.py takes a role in any case.
+    cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("builders should do the refactor next")],
+                                       ScopeStub(answer=["Builder"]))
+    got = opus_override(cfg)
+    check("opus scope: a read that answers Builder narrows the grant to builder",
+          got is not None and got[2] == "builder", "got %r" % (got,))
+
+
+def case_opus_scope_model_roles_narrow_case_insensitively():
+    # The prompt hook's scope read gets the model's answer Builder. The read passes the role strings on, and override.py
+    # narrows the grant to builder. Today the read's own filter drops Builder, so the grant is every role.
+    cfg = ov_cfg()
+    with model_answers({"ok": True, "roles": ["Builder"]}) as model:
+        scope_grant("send opus now", [owner_turn("builders should do the refactor next")], real_scope_read(), cfg=cfg)
+    check("opus scope: the model is asked for the roles once", len(model.calls) == 1, "model calls %d" % len(model.calls))
+    got = opus_override(cfg)
+    check("opus scope: a model answer of Builder narrows the grant to builder",
+          got is not None and got[2] == "builder", "got %r; files %r" % (got, ov_files(cfg)))
+
+
+def case_opus_scope_returns_the_models_raw_role_strings():
+    # The read returns the model's role strings as it was given them, unknown ones too: the filter is override.py's alone.
+    with model_answers({"ok": True, "roles": ["Builder", "wizard"]}):
+        got = real_scope_read()("send opus now", ["builders should do the refactor next"])
+    check("opus scope: the read returns the model's role strings as given, for override.py to filter",
+          got == ["Builder", "wizard"], "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2007,6 +2082,11 @@ def main():
         case_opus_scope_read_sees_every_role_before_it_runs()
         case_opus_scope_a_kill_during_the_read_leaves_every_role()
         case_opus_scope_valid_answer_ends_narrowed()
+        case_opus_ask_negation_after_a_role_grants_nothing()
+        case_opus_ask_far_negation_still_grants()
+        case_opus_scope_override_filter_ignores_case()
+        case_opus_scope_model_roles_narrow_case_insensitively()
+        case_opus_scope_returns_the_models_raw_role_strings()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
