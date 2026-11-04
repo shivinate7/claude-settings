@@ -10011,8 +10011,8 @@ class RedMainBrake(Env):
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
 
-    # The way out of a red main is a one-time re-run of each red run (the owner's ruling of 2026-11-03 18:16 CST, item 166): no cap, and no run
-    # reads red or green differently. A run id is named only for a red run; an UNKNOWN verdict from a failed read has no run to re-run.
+    # A red main's way out is one re-run of each red run, named by its id (decision no-merge-onto-red-main): `--failed` re-runs the red jobs.
+    # A run id is named only for a red run; an UNKNOWN verdict has no red run to name.
     RERUN = re.compile(r"gh run rerun (\d+) --failed")
 
     def reruns(self, text):
@@ -10051,6 +10051,14 @@ class RedMainBrake(Env):
         line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
         self.assertEqual(len(line), 1, out)
         self.assertEqual(self.reruns(line[0]), ["901"], "the preview's main run line does not name `gh run rerun 901 --failed` once\n" + out)
+
+    def test_a_red_run_with_no_red_job_names_a_whole_rerun_without_failed(self):
+        # a run that ended startup_failure has no job for `--failed` to re-run, so the refusal names the run's plain re-run
+        rc, out, before = self.go([main_run(913, "startup_failure")], {913: []})
+        self.refused(rc, out, before)
+        self.assertIn("run 913", out)
+        self.assertEqual(re.findall(r"gh run rerun (\d+)( --failed)?", out), [("913", "")],
+                         "the refusal does not name the plain `gh run rerun 913` once, without --failed\n" + out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
