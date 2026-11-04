@@ -133,7 +133,7 @@ FAMILIES = {
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -24561,7 +24561,7 @@ FAMILY = "load-brake"
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 LB_PROBE = r"""
-import importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
+import builtins, importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
@@ -24687,8 +24687,21 @@ try:
                 setattr(m, name, fn)
 
     before = listing()
+    if spec.get("spy"):
+        # The spy counts each open of the transcript path, through builtins.open and io.open, the two names a guard
+        # reads a file by. The path is compared by its real path, so a link to the same file counts too.
+        real_open, target = open, os.path.realpath(spec["spy"])
+
+        def spy_open(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)) and os.path.realpath(os.fsdecode(file)) == target:
+                out["opened"] = out.get("opened", 0) + 1
+            return real_open(file, *args, **kwargs)
+        builtins.open = spy_open
+        io.open = spy_open
     if spec["mode"] == "selfcheck_child":
         subprocess.run([sys.executable, "-c", "pass"])
+    elif spec["mode"] == "selfcheck_open":
+        open(spec["spy"], encoding="utf-8").close()
     elif spec["mode"] == "reader":
         if not holders:
             out["missing"] = True
@@ -24721,6 +24734,11 @@ try:
                 body = json.loads(sys.stdin.read())
                 out["hit"] = list(g.load_hit(body.get("tool_name"), body.get("tool_input")))
                 out["running"] = list(g.running_lane_hit(body, body.get("tool_name")))
+            elif spec["mode"] == "lane":
+                # lane_session_hit, called direct on the call's payload. A guard with no such name leaves the pair None.
+                body = json.loads(sys.stdin.read())
+                direct = getattr(g, "lane_session_hit", None)
+                out["lane"] = None if direct is None else list(direct(body, body.get("tool_name")))
             else:
                 g.main()
         except SystemExit:
@@ -24789,12 +24807,20 @@ def lb_spawn_input(tool, value):
     return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
-def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None):
+LB_MISSING = "missing"   # a transcript sentinel: the payload names a path that is not there
+LB_FOLDER = "folder"     # a transcript sentinel: the payload names a folder, so the guard's open() fails
+
+
+def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None, own_env=None, transcript=None,
+           spy=False):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
-    and what the probe saw (reads, children, files, had_reader, reading...). `agent` is the payload's
+    and what the probe saw (reads, children, files, had_reader, reading, opened, lane...). `agent` is the payload's
     agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call). `remote` is the
     value of CLAUDE_CODE_REMOTE; None leaves it unset. The runner's own value never reaches a case, so
-    every case judges a local machine unless it names `remote`."""
+    every case judges a local machine unless it names `remote`. `own_env` is a dict of env values that name the
+    session's own id (CLAUDE_CODE_REMOTE_SESSION_ID); None leaves it unset, as the runner's value is never kept.
+    `transcript` is the payload's transcript_path: a list of JSONL lines written to the run folder, or LB_MISSING or
+    LB_FOLDER. `spy` counts the opens of that transcript path, into side["opened"]."""
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -24814,12 +24840,29 @@ def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None):
         body["session_id"] = "lb-" + os.path.basename(run)
         if agent is not None:
             body["agent_id"], body["agent_type"] = agent, "general-purpose"
+        if transcript is not None:
+            # The transcript sits in the run folder, outside cfg and tmp, so the file listing never counts it.
+            if transcript == LB_FOLDER:
+                path = os.path.join(run, "folder.jsonl")
+                os.makedirs(path)
+            elif transcript == LB_MISSING:
+                path = os.path.join(run, "missing.jsonl")
+            else:
+                path = os.path.join(run, "transcript.jsonl")
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("".join(line + "\n" for line in transcript))
+            body["transcript_path"] = path
+            if spy:
+                spec = dict(spec, spy=path)
         env = dict(os.environ)
         for name in ("TMPDIR", "TEMP", "TMP"):
             env[name] = dirs["tmp"]
         env["CLAUDE_CONFIG_DIR"] = dirs["cfg"]
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env.pop("CLAUDE_CODE_REMOTE", None)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)   # this container sets one: only a case that names it has one
+        if own_env:
+            env.update(own_env)
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
@@ -24848,14 +24891,16 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None, agent=None, remote=None):
+                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False):
     """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
-    None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run)."""
+    None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run),
+    and `own_env`, `transcript` and `spy` are lb_run's."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
         spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
-        got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote)
+        got, reason, side = lb_run(tool, spec, given, agent=agent, remote=remote, own_env=own_env,
+                                   transcript=transcript, spy=spy)
         if got == "error":
             return False, reason
         called = side.get("reads")
@@ -25507,6 +25552,218 @@ for _short, _tool in LB_TOOLS:
     lb_add("%s on the live judge makes no sleep, so no 200 ms CPU wait" % _short,
            lb_live_waits_check(_tool), real=True)
 lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
+
+
+# A LANE SESSION (decision machine-load-brake). A lane session's own shell or file write is refused at a full machine,
+# as an agent's is, so a lane its orchestrator leaves waiting stops writing. The session's own id is
+# CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x>). Its own get_session record in the transcript must tag
+# cs-build:lane, with no other cs-build: tier tag, and no set_session_tags naming it may follow that record. Any other
+# session, a cloud session, a session with no own id, and any read error passes. A session with an own id reads the
+# load once, and opens its transcript only when the reading is full.
+LB_LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+LB_LANE = role_call("g1", LB_LANE_TAGS)   # the lane's own record, as its transcript holds it
+LB_OWN = ROLE_ENV                          # the env that names it: CLAUDE_CODE_REMOTE_SESSION_ID=cse_ROLEOWN01
+# The refusal tells the lane to end its turn and send the reading to its parent.
+LB_LANE_REMEDY = (re.compile(r"end your turn", re.I), re.compile(r"send_message", re.I),
+                  re.compile(re.escape("@parent")))
+LB_LANE_BASH = {"command": "echo hi"}
+LB_LANE_EDIT = {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}
+LB_BUSY = lb_reading(memory_pct=91.7)                             # busy on memory: over 85%, not over 95%
+LB_BUSY_EDIT = lb_reading(disk_free_gb=9.4, disk_total_gb=926.0)  # busy on disk: under 15 GB of 926
+LB_LONG = [line for n in range(200)                               # a 400-line transcript of other calls
+           for line in (role_use("f%d" % n, "Bash", {"command": "ls"}), role_result("f%d" % n, "a.txt"))]
+
+
+def lb_lane_direct_check(tool, tool_input, reading, names):
+    """lane_session_hit, called direct on the lane's own call under `reading`: its pair is a refusal that names each
+    of `names`, and the reader ran once."""
+    def check():
+        got, reason, side = lb_run(tool, {"mode": "lane", "reading": reading}, tool_input, own_env=LB_OWN,
+                                   transcript=LB_LANE)
+        if got == "error":
+            return False, reason
+        pair = side.get("lane")
+        if pair is None:
+            return False, "the guard has no lane_session_hit"
+        if not isinstance(pair, list) or len(pair) != 2 or not pair[0]:
+            return False, "lane_session_hit returned %r, want a refusal" % (pair,)
+        for pattern in names:
+            if not pattern.search(pair[0]):
+                return False, "lane_session_hit's refusal does not name %r: %s" % (pattern.pattern[:30], pair[0][:100])
+        if side.get("reads") != 1:
+            return False, "lane_session_hit ran the reader %s time(s), want 1" % side.get("reads")
+        return True, "lane_session_hit refuses, names the reading and the remedy, and the reader ran once"
+    return check
+
+
+def lb_lane_refusal_check(tool, tool_input, reading, names):
+    """A lane session's call under `reading` is refused, names each of `names`, and tells the lane to end its turn and
+    report to @parent. The reader runs once. The full run is checked first, so the direct call is judged only once the
+    run refuses. The direct call must refuse the same way."""
+    full = tuple(names) + LB_LANE_REMEDY
+    judge = lb_decision_check(tool, reading, "deny", full, tool_input=tool_input, own_env=LB_OWN, transcript=LB_LANE)
+    direct = lb_lane_direct_check(tool, tool_input, reading, full)
+
+    def check():
+        ok, note = judge()
+        return direct() if ok else (ok, note)
+    return check
+
+
+def lb_lane_refusal_quiet_check():
+    """A lane session's shell on a full machine starts no child process, and writes no file but the refusal's guard.log
+    line."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_FULL_READING}, LB_LANE_BASH,
+                                   own_env=LB_OWN, transcript=LB_LANE)
+        if got == "error":
+            return False, reason
+        if got != "deny":
+            return False, "%s, want deny: %s" % (got, reason[:90])
+        if side["children"]:
+            return False, "%d child process(es) started: %s" % (len(side["children"]), side["children"][:3])
+        written = sorted(os.path.basename(path) for path in side["files"])
+        if written != ["guard.log"]:
+            return False, "the refusal wrote %s, want only guard.log" % (written,)
+        return True, "deny, no child process, and guard.log is the only file written"
+    return check
+
+
+def lb_lane_quiet_check(own_env=None, remote=None):
+    """A call that no lane check reaches, at a full reading: it is allowed, the reader runs no time, the transcript is
+    not opened, and no file is written."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_ALL_HIGH}, LB_LANE_BASH, own_env=own_env,
+                                   transcript=LB_LANE, spy=True, remote=remote)
+        if got == "error":
+            return False, reason
+        if got != "allow":
+            return False, "%s, want allow: %s" % (got, reason[:90])
+        if side.get("reads"):
+            return False, "the reader ran %s time(s), want none" % side["reads"]
+        if side.get("opened"):
+            return False, "the transcript was opened %d time(s), want none" % side["opened"]
+        if side["files"]:
+            return False, "an allowed call wrote %d file(s)" % len(side["files"])
+        return True, "allow, no read, the transcript is not opened"
+    return check
+
+
+def lb_transcript_read_check(reading, opened_wanted):
+    """A lane session's own call: at a full reading its transcript is opened, since the lane check reads it; at a normal
+    reading it is not. The reader runs once either way."""
+    def check():
+        got, reason, side = lb_run("Bash", {"mode": "judge", "reading": reading}, LB_LANE_BASH, own_env=LB_OWN,
+                                   transcript=LB_LANE, spy=True)
+        if got == "error":
+            return False, reason
+        opened = side.get("opened", 0)
+        if opened_wanted and not opened:
+            return False, "the transcript was not opened at a full reading, so no lane check reads it"
+        if not opened_wanted and opened:
+            return False, "the transcript was opened %d time(s) at a normal reading, want none" % opened
+        if side.get("reads") != 1:
+            return False, "the reader ran %s time(s), want 1" % side.get("reads")
+        return True, "the transcript opened %d time(s), and the reader ran once" % opened
+    return check
+
+
+def lb_spy_control_check():
+    """The spy counts one open of the transcript path, so the transcript checks above see a read when one happens."""
+    def check():
+        got, reason, side = lb_run(None, {"mode": "selfcheck_open"}, tool_input={}, transcript=LB_LANE, spy=True)
+        if got == "error":
+            return False, reason
+        if side.get("opened") != 1:
+            return False, "the spy counted %s open(s) of the transcript, want 1" % side.get("opened")
+        return True, "the spy counts one open"
+    return check
+
+
+# The refusal at a full machine: each write tool, a disk reading, and the shell's quiet refusal.
+for _tool, _given in LB_WRITES:
+    lb_add("a lane session's %s, memory 97.2%%: full, refused, names the memory, tells the lane to end its turn "
+           "and report to @parent" % _tool,
+           lb_lane_refusal_check(_tool, _given, LB_FULL_READING, LB_MEM_FULL))
+lb_add("a lane session's Bash, 3.1 GB free of 926 GB: full, refused, names the disk, tells the lane to end its turn",
+       lb_lane_refusal_check("Bash", LB_LANE_BASH, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), (lb_gb(3.1, 926),)))
+lb_add("a lane session's Bash, memory 97.2%: full, starts no child process and writes only the guard.log line",
+       lb_lane_refusal_quiet_check())
+
+# The busy reading lets a lane run, and the lane's one read is the reader's.
+lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=LB_LANE))
+lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
+       lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
+# A subagent of a lane is an agent's call, so it reads the load once, as an agent's write does, and the lane check never
+# reads it again. Both are green on main: they pin the cost of the new check on an agent's call.
+lb_add("a lane session's subagent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
+                         transcript=LB_LANE))
+lb_add("a lane session's subagent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
+       "the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_LANE,), tool_input=LB_LANE_BASH,
+                         agent=LB_AGENT, own_env=LB_OWN, transcript=LB_LANE))
+
+# A record that is no lane's: another tier tag, or a parent with no tier tag. At a full machine it is allowed.
+for _say, _lines in (
+        ("a coordinator record", role_call("g1", ["cs-build:coordinator", "cs-repo:o/r"])),
+        ("a triage record, with its parent", role_call("g1", ["cs-build:triage", "cs-repo:o/r"])),
+        ("a batch-runner record, with its parent", role_call("g1", ["cs-build:batch-runner", "cs-repo:o/r"])),
+        ("a record with cs-build:lane and cs-build:coordinator", role_call(
+            "g1", ["cs-build:lane", "cs-build:coordinator", "cs-repo:o/r"])),
+        ("a record with a parent and no cs-build tag", role_call("g1", ["cs-repo:o/r"]))):
+    lb_add("own record is %s, memory 97.2%%: full, allowed, the reader runs once" % _say,
+           lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                             transcript=_lines))
+
+# set_session_tags: a lane that tags its own record after it is no longer a lane. Tagging another session leaves it one.
+lb_add("a lane session that tags its own record after it, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_LANE + role_tag_call("t1")))
+lb_add("a lane session whose record is tagged on another session after it, memory 97.2%: full, refused",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=LB_LANE + role_tag_call("t1", session=ROLE_OTHER)))
+
+# No own record, or a transcript that cannot be read, is no lane: allowed at full, and the reader still runs once.
+lb_add("a lane record for another session only, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=role_call("g1", LB_LANE_TAGS, session=ROLE_OTHER)))
+lb_add("the transcript file is missing, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_MISSING))
+lb_add("the transcript is a folder, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_FOLDER))
+lb_add("an empty transcript, memory 97.2%: full, allowed, the reader runs once",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=[]))
+
+# The newest own record decides: a lane that later becomes a coordinator is allowed, and the reverse is refused.
+lb_add("a lane record, then a coordinator record, memory 97.2%: full, allowed, the newest record decides",
+       lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                         transcript=LB_LANE + role_call("g2", ["cs-build:coordinator", "cs-repo:o/r"])))
+lb_add("a coordinator record, then a lane record, memory 97.2%: full, refused, the newest record decides",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=role_call("g1", ["cs-build:coordinator", "cs-repo:o/r"])
+                         + role_call("g2", LB_LANE_TAGS)))
+lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, refused, names the memory",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=LB_LONG + LB_LANE))
+
+# No lane check reaches these calls: a cloud session, a session with no own id, and an own id in another shape.
+lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 99%: allowed, the reader runs 0 times, transcript not opened",
+       lb_lane_quiet_check(own_env=LB_OWN, remote="true"))
+lb_add("a lane record and no own id, memory 99%: allowed, the reader runs 0 times, transcript not opened",
+       lb_lane_quiet_check(own_env=None))
+lb_add("a lane record and an own id in another shape (xyz), memory 99%: allowed, the reader runs 0 times, "
+       "transcript not opened", lb_lane_quiet_check(own_env={"CLAUDE_CODE_REMOTE_SESSION_ID": "xyz"}))
+
+# The transcript is opened only at a full reading. The spy control shows that one open is counted.
+lb_add("probe control: the transcript spy counts one open of the transcript", lb_spy_control_check())
+lb_add("a lane session's transcript is opened at a full reading, so the lane check reads it",
+       lb_transcript_read_check(LB_FULL_READING, True))
+lb_add("a lane session's transcript is not opened at a normal reading, and the reader runs once",
+       lb_transcript_read_check(LB_NORMAL, False))
 
 
 def shard_split_check():
