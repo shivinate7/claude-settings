@@ -6,9 +6,10 @@ Two rules:
 - A reply that names a refused tool on a line with "refusal was right" or "refusal is right" clears that
   tool's row, in any part of the reply. Without the phrase, or without the full tool name, the row stays.
   A tool named under Input Needed clears as before.
-- A row for a subagent's call is dropped: its row carries agent_id, or its tool_use_id is not a tool_use
-  in the session's main transcript (it is only in a sidechain, or absent). A row with no tool_use_id (an
-  old file) stays. A transcript that cannot be read keeps the row.
+- A row for an agent's call is dropped when it carries agent_id, or when its tool_use_id is only in a
+  sidechain record of the transcript. A tool_use_id found in no transcript keeps the row, so an unflushed
+  refusal is never lost (lane ruling, 17:38 CST). A row with no tool_use_id (an old file) stays. A
+  transcript that cannot be read keeps the row.
 
 Calls pending_refusals directly. Each case works in its own folder under this run's folder (test-temp-standard).
 Run it from the repository root:
@@ -199,7 +200,7 @@ class SettleTests(unittest.TestCase):
             left = self.settle(reply("Done", "Bash output was empty; the refusal was right."))
             self.assertEqual(left, [BASH], "a bare Bash, an English word, cleared the row")
 
-    # ---- the subagent's row: agent_id, or a tool_use_id that is not in the main transcript
+    # ---- an agent's row: agent_id, or a tool_use_id that is only in a sidechain
 
     def test_r1_a_row_with_an_agent_id_is_dropped_even_when_its_tool_use_is_in_the_main_transcript(self):
         transcript = self.transcript([HUMAN, tool_use("toolu_main_r1", CREATE), tool_use("toolu_main_ctl", INTERRUPT)])
@@ -231,14 +232,15 @@ class SettleTests(unittest.TestCase):
         left = self.settle(NEUTRAL)
         self.assertEqual(left, [CREATE], "an old row with no tool_use_id was dropped")
 
-    def test_r5_a_tool_use_id_absent_from_the_main_transcript_is_dropped(self):
+    def test_r5_a_tool_use_id_found_in_no_transcript_keeps_the_row(self):
+        # Lane ruling, 17:38 CST: a tool_use_id found in no transcript keeps its row.
         transcript = self.transcript([HUMAN, tool_use("toolu_main_ctl", INTERRUPT)])
         self.write_rows([{"tool_name": CREATE, "tool_use_id": "toolu_gone_r5"},
                          {"tool_name": INTERRUPT, "tool_use_id": "toolu_main_ctl"}])
         self.assertEqual(self.pending_tools(), [CREATE, INTERRUPT], "scope: the fixture file does not hold the rows")
         left = self.settle(NEUTRAL, transcript)
-        self.assertEqual(left, [INTERRUPT],
-                         "a row whose tool_use is absent from the main transcript still blocked the Stop")
+        self.assertEqual(left, [CREATE, INTERRUPT],
+                         "a row whose tool_use_id is in no transcript was dropped, so an unflushed refusal is lost")
 
     def test_r6_an_unreadable_transcript_keeps_the_block(self):
         self.write_rows([{"tool_name": CREATE, "tool_use_id": "toolu_main_r6"}])
