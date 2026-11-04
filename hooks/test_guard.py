@@ -25828,9 +25828,9 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
        "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
 
-    # Review round 1. The route reads an xcodebuild only as the command word of its own segment, so a wrapper
-    # hides the boot, a `)` glued to the destination makes the id a different name, and an option with a
-    # colon (`-only-testing:X`) reads as taking the next word, so the action `test` after it is not seen.
+    # The route rule judges an xcodebuild boot wherever it sits: inside a wrapper (bash -c, sh -lc), with a `)`
+    # glued to the destination, or after an option with a colon (`-only-testing:X`). Each case pins that the boot
+    # is refused with its remedy, since a boot the route misses skips the lock.
     sh("route: a test of a shut-down simulator inside bash -c names sim-test",
        "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
