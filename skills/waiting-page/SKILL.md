@@ -186,6 +186,11 @@ into `meta/page`. The writer watches the page ("Read the answers").
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
 
+## Rotate the writer
+
+A rotation moves the writer role to a new session, and the page and its open asks must follow it.
+The steps are in project-ops `templates/operating-model.md`, "Rotation of standing sessions", steps 1 and 5.
+
 ## Chat first
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
@@ -507,8 +512,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
-holds its subject:
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that holds its subject. An
+ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the writer"):
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
