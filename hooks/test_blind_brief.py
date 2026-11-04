@@ -603,6 +603,17 @@ class Hook(unittest.TestCase):
     def test_informed_kind_after_a_preamble_is_judged(self):
         self.assertRefused(self.spawn("You are the designer.\nDesigner kind: informed\n\nDraw it."))
 
+    def test_old_blind_kind_line_is_refused_and_names_the_designer_header(self):
+        # The old `Lane kind:` form is refused, never read as a kind. The reason names the new header.
+        out = self.spawn("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF)
+        self.assertRefused(out)
+        self.assertIn("Designer kind:", reason_of(out))
+
+    def test_old_informed_kind_line_is_refused_and_names_the_designer_header(self):
+        out = self.spawn("Lane kind: informed\nBlind lanes: 2\n\n" + DUO_BRIEF)
+        self.assertRefused(out)
+        self.assertIn("Designer kind:", reason_of(out))
+
     def test_designer_spawn_with_no_kind_passes(self):
         # A small change to one screen skips design-explore and names no kind.
         self.assertEqual(self.spawn(DUO_BRIEF), "")

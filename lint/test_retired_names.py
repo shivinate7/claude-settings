@@ -7,7 +7,8 @@ Each name below is an exact old file name, record slug, rule anchor, identifier,
 message of groups 1 and 5 to 9 of the plan: guard and check, grant and override, record, finding and
 safety hole, refuse, round.
 Each is distinctive, so a whole-word match in a tracked file is the old name coming back. This
-file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A retired word in plain
+file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions, with the per-name
+HISTORY files below, each with its reason. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
@@ -50,6 +51,17 @@ RETIRED = {
     "ux-claims-are-true": "ux-statements-are-true",
     "measured-claims-no-home": "measured-statements-no-home",
     "roles-sonnet-is-the-default": "roles-model-per-role-table",
+    "running_lane_hit": "running_agent_hit",
+    "RUNNING_LANE_TOOLS": "RUNNING_AGENT_TOOLS",
+    "Lane kind:": "Designer kind:",
+}
+
+# old name -> the tracked files that may keep it: the debt record that retires it, and the test that quotes the
+# old header to refuse it. Any other file that holds a retired name is a hit. Each entry needs its reason here.
+HISTORY = {
+    "running_lane_hit": ("docs/debts/lane-word-means-agent.md",),  # the debt lists the old names it retires
+    "Lane kind:": ("docs/debts/lane-word-means-agent.md",  # the debt lists the old header it retires
+                   "hooks/test_blind_brief.py"),  # the fixtures quote the old header to refuse it
 }
 
 
@@ -57,7 +69,7 @@ def hits(repo, name):
     """Tracked files that hold name as a whole word, any case, less the exceptions. None when git
     cannot run."""
     run = subprocess.run(["git", "-C", repo, "grep", "-l", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
-                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE],
+                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE] + [":!" + p for p in HISTORY.get(name, ())],
                          capture_output=True, encoding="utf-8", errors="replace")
     if run.returncode not in (0, 1):  # 1 means no match; anything else is no reading
         return None
