@@ -46,8 +46,7 @@ REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `art
 artifact id, each laid out as in a single export; a waiting-page entry with `<id>/page.html` also exports its
 designData block. Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting
 page: the waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export.
-An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
-counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+Each artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
 
@@ -285,9 +284,6 @@ def export_all(root, fetched, worktree, allow_empty):
     worst = 0
     for entry in entries:
         name = entry["id"]
-        if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
-            print("%s: skipped - no export" % name)
-            continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, "page.html")
         try:

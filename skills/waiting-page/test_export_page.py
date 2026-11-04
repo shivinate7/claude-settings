@@ -750,6 +750,15 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 2, "an export of true must make the run unknown with exit 2. Output:\n" + shown(r))
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed. Output:\n" + shown(r))
 
+    def test_a_waiting_page_entry_with_export_false_is_unknown_not_skipped(self):
+        """The waiting page is never held: export false on its role makes the registry unknown, exit 2, as a refused entry does."""
+        root = self.repo([dict(self.waiting(), export=False)])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 2, "a waiting-page entry with export false must make the run unknown with exit 2. Output:\n" + shown(r))
+        self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
+        self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
+                         "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
 
 if __name__ == "__main__":
     unittest.main()

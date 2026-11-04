@@ -804,6 +804,13 @@ class Registry(Tree):
         self.assertEqual(len(found), 1, "the entry with a path was not read")
         self.assertEqual(found[0]["export"], "artifacts/custom", "an entry's export path was not kept")
 
+    def test_a_waiting_page_entry_with_export_false_is_refused_and_named(self):
+        """The waiting page is always exported to the waiting-data folder, so export false on its role is refused, not held."""
+        self.registry([self.page_entry(export=False)])
+        with self.assertRaises(self.layout.LayoutError, msg="a waiting-page entry with export false was accepted") as caught:
+            self.artifacts()
+        self.assertIn("page01", str(caught.exception), "the refusal of a waiting-page entry with export false does not name its entry")
+
 
 class WaitingPageBranding(Tree):
     """A repo states its waiting page's colour and icon in its own extras file (roadmap step c132)."""

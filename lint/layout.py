@@ -243,8 +243,7 @@ def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
-    `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` is held and never exported: it needs
-    no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
+    `collections` and exports to `artifacts/<id>/`. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
     found = _repo_keys(root).get(ARTIFACTS)
     if found is None:
@@ -271,21 +270,16 @@ def artifacts(root):
         account = item.get("account")
         if not isinstance(account, str) or not account.strip() or account != account.strip() or "@" in account:
             raise LayoutError("%s: %s (id %s) account is not a plain label, and never an email" % (where, label, entry_id))
-        no_export = item.get("export") is False  # the repo holds the page and never exports it: no collections, no path
         if "collections" in item:
             names = item["collections"]
             if not isinstance(names, list) or not names or len(set(names)) != len(names) \
                     or not all(isinstance(n, str) and COLLECTION.fullmatch(n) for n in names):
                 raise LayoutError("%s: %s (id %s) collections is not a list of distinct collection names" % (where, label, entry_id))
-        elif no_export:
-            names = []
         elif role == WAITING_ROLE:
             names = list(WAITING_COLLECTIONS)
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
-        if no_export:
-            target = False
-        elif "export" in item:
+        if "export" in item:
             target = item["export"]
             if not isinstance(target, str) or not target.strip("/") or target != target.strip():
                 raise LayoutError("%s: %s (id %s) export is not a path" % (where, label, entry_id))
