@@ -4,8 +4,9 @@
     python3 lint/test_stale_cites.py
 
 The merge check refuses stale prose. A tracked Markdown line that names a repo path the range deleted
-or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when the name was a def or
-class in that file at base and is not one at head. Each finding is one line, `path:line: CODE message`.
+or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when the name was bound at module
+level in that file at base (a def, class, assignment or import) and is not bound there at head. Each finding
+is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
 
 Each case makes a temp git repo: the base commit on `main`, the head commit on `topic`. The check runs
@@ -150,6 +151,21 @@ def repo_modules_imported(path):
             rel = "%s/%s.py" % (folder, name)
             if os.path.isfile(os.path.join(ROOT, *rel.split("/"))):
                 found.append(rel)
+    return found
+
+
+def binding_kind(source, name):
+    """How a Python source binds `name` at module level: "def" for a def or class, "assign", "import", or None.
+    Read with ast, never imported. A case asserts this on its fixtures before it probes the check on the name."""
+    found = None
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            found = "def"
+        elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            found = "assign"
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                (alias.asname or alias.name.split(".")[0]) == name for alias in node.names):
+            found = "import"
     return found
 
 
@@ -469,6 +485,44 @@ class SymbolTests(StaleCase):
         self.assert_flags(self.make_range(base_files("", extra={"hooks/a.py": base_a}), change),
                           [(NOTES, n, "STALE002") for n in lines])
 
+    def test_a_removed_module_level_constant_cited_in_backticks_is_flagged(self):
+        base_config = "LIMIT = 3\n\n\ndef keep():\n    return 1\n"
+        head_config = "def keep():\n    return 1\n"
+        notes = "# Notes\n\n- `hooks/config.py` `LIMIT`\n"
+        self.assertEqual(binding_kind(base_config, "LIMIT"), "assign")  # scope: base binds LIMIT as a constant
+        self.assertIsNone(binding_kind(head_config, "LIMIT"))  # scope: head no longer binds LIMIT
+
+        def change(repo):
+            write(repo, "hooks/config.py", head_config)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={"hooks/config.py": base_config}), change),
+                          [(NOTES, 3, "STALE002")])
+
+    def test_a_def_replaced_by_an_assignment_that_still_binds_the_name_is_not_flagged(self):
+        base_lib = "def f():\n    return 1\n"
+        head_lib = "def h():\n    return 2\n\n\nf = h\n"
+        notes = "# Notes\n\n- `lib.py` `f`\n"
+        self.assertEqual(binding_kind(base_lib, "f"), "def")  # scope: base defines f
+        self.assertEqual(binding_kind(head_lib, "f"), "assign")  # scope: head binds f by assignment, no def
+
+        def change(repo):
+            write(repo, "lib.py", head_lib)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"lib.py": base_lib}), change))
+
+    def test_a_name_moved_away_but_re_imported_into_the_file_is_not_flagged(self):
+        head_guard = "from hooks.git_reads import _process_start_ms\n\n\ndef keep():\n    return 1\n"
+        head_reads = "def _process_start_ms(path):\n    return 0\n"
+        notes = "# Notes\n\n- (hooks/guard.py _process_start_ms)\n"
+        self.assertEqual(binding_kind(GUARD, "_process_start_ms"), "def")  # scope: base defines it in guard.py
+        self.assertEqual(binding_kind(head_guard, "_process_start_ms"), "import")  # scope: head re-imports it
+
+        def change(repo):
+            write(repo, "hooks/guard.py", head_guard)
+            write(repo, "hooks/git_reads.py", head_reads)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes), change))
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
@@ -582,6 +636,17 @@ class CostTests(StaleCase):
         self.assertEqual(rc, 0, out)
         self.assertLessEqual(len(subs), 3, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff"}, subs)
+
+    def test_a_touched_py_that_removes_nothing_starts_four_git_processes_and_lists_no_tree(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        # ls-tree lists the tracked Markdown, so a run without it reads no .md.
+        self.assertNotIn("ls-tree", subs, subs)
 
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
