@@ -6,14 +6,29 @@
 Refuses a range that leaves a tracked Markdown line naming a name the range removed.
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
-  STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was a
-            def or class in that file at base (read with `ast`) and is not one at head. A name counts
-            when it is module-level (also under a module-level if or try) or a def directly in a
-            module-level class.
+  STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
+            in that file at base (read with `ast`) and is not bound at head. A name counts when a module-level
+            def, class, assignment or import binds it, also under a module-level if or try, or when it is a
+            def directly in a module-level class. A name that moved but is still bound in the file is not
+            removed.
+  STALE004  the line holds a value cite, `file.py: NAME = literal` in one backtick span, and the range changed that
+            value, or removed NAME from the file, while the cite still equals the base value; or the range added the
+            line and the cite is not the value at head. A second copy of a line that was already wrong at base is an
+            added line. The value is the module-level literal py-facts `answer` reads: a value `ast.literal_eval`
+            accepts and JSON can hold. A line already wrong at base and left alone never fires.
+  Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, or a value cite of
+            such a file or of a .json file, and the range touched that file. Those names and values are not read,
+            so the line prints `stale-cites: unknown, <path>:<line> ...` and never fails the run. Only a run that
+            already reads Markdown prints it; touching such a file never starts that read. A pair cite's unknown
+            has code STALE002 and a value cite's has STALE004, so the mark for that code leaves it out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
-Each Markdown file is read as committed at head, never from the working tree.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE004). Fenced blocks count as prose.
+Each Markdown file is read as committed at head, never from the working tree. Which files: every tracked one when
+the range removed a path or name, or changed a literal; else only the Markdown the range touched, which is where
+a new wrong value cite can sit. A changed literal is a module-level name of a touched .py that holds a literal at
+base and, at head, holds a different literal or is gone. A change to or from a call, or any value that is no
+literal, is no literal change.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
@@ -21,13 +36,17 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
-A touched .py adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file
---batch`, so 5 at most. Each tracked .md is read once, only when something was removed. It writes no file
-(no .pyc either) and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py or .md.
+A touched .py or .md adds one `git cat-file --batch`. A removed path or name, or a changed literal, adds
+`ls-tree`, so 5 at most. Each Markdown file is read once. A touched .py also loads the py-facts script once,
+in-process (no start, no .pyc). A lone touched .json starts nothing more. It writes no file and leaves no
+process running.
 """
 import argparse
 import ast
+import collections
+import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -41,10 +60,20 @@ RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
-PAIR_RES = (  # "`file.py` `name`" and "(file.py name)"
-    re.compile(NOT_BEFORE + r"`?(%s\.py)`?\s+`([A-Za-z_]\w*)`" % RUN),
-    re.compile(r"\(`?(%s\.py)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % RUN),
-)
+FOREIGN_EXT = r"(?:mjs|cjs|js|ts|sh)"  # code files whose names this check does not read: a cite of one is unknown
+
+
+def pair_res(ext):
+    """"`file.<ext>` `name`" and "(file.<ext> name)"."""
+    return (
+        re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)`" % (RUN, ext)),
+        re.compile(r"\(`?(%s\.%s)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % (RUN, ext)),
+    )
+
+
+PAIR_RES = pair_res("py")
+FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
+FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 
@@ -139,9 +168,9 @@ def parse_range(text):
 
 
 def changed_paths(diff_args):
-    """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
+    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, and new paths."""
     tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
-    removed, renamed, modified = [], {}, []
+    removed, renamed, modified, added = [], {}, [], []
     i = 0
     while i < len(tokens) and tokens[i]:
         status = tokens[i][0]
@@ -154,35 +183,153 @@ def changed_paths(diff_args):
             removed.append(tokens[i + 1])
         elif status == "M":
             modified.append(tokens[i + 1])
+        elif status == "A":
+            added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified
+    return removed, renamed, modified, added
 
 
-def defs_in(source):
-    """Names a prose line can cite: each module-level def and class (also under a module-level if or try),
-    and each def directly in a module-level class. A def nested in a function is no public name. Read with
-    `ast`; None when it does not parse."""
+PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
+                        "scripts", "lib", "py-facts.py")
+_py_facts = []
+
+
+def py_facts():
+    """The py-facts module, the one home of a Python file's module-level names. Its file name has a hyphen, so
+    importlib loads it by path; `sys.dont_write_bytecode` keeps the load from writing a .pyc."""
+    if not _py_facts:
+        spec = importlib.util.spec_from_file_location("py_facts", PY_FACTS)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _py_facts.append(module)
+    return _py_facts[0]
+
+
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def module_statements(body):
+    """Each statement that runs at module level: the body itself and, inside any statement that is no def or
+    class, its if, try, with, loop and match bodies. A def or class is kept whole; its inside is not module level."""
+    for node in body:
+        yield node
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            yield from module_statements(getattr(node, field, None) or [])
+        for part in (getattr(node, "handlers", None) or []) + (getattr(node, "cases", None) or []):
+            yield from module_statements(part.body)
+
+
+def parse_python(source):
+    """The `ast` of a Python source, or None when it does not parse."""
     try:
-        tree = ast.parse(source)
+        return ast.parse(source)
     except (SyntaxError, ValueError):
         return None
-    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    names = set()
 
-    def collect(body, into_classes):
-        for node in body:
-            if isinstance(node, kinds):
-                names.add(node.name)
-                if isinstance(node, ast.ClassDef) and into_classes:
-                    collect(node.body, False)
-            else:
-                for field in ("body", "orelse", "finalbody"):
-                    collect(getattr(node, field, None) or [], into_classes)
-                for handler in getattr(node, "handlers", None) or []:
-                    collect(handler.body, into_classes)
 
-    collect(tree.body, True)
+def names_in(source):
+    """Names a prose line can cite: each name py-facts `defined_names` finds in the module-level statements
+    (def, class, assignment, import; also under a module-level if or try), plus each def directly in a
+    module-level class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
+    tree = parse_python(source)
+    if tree is None:
+        return None
+    flat = list(module_statements(tree.body))
+    names = py_facts().defined_names(ast.Module(body=flat, type_ignores=[]))  # defined_names reads `.body` only
+    for node in flat:
+        if isinstance(node, ast.ClassDef):
+            names.update(m.name for m in module_statements(node.body) if isinstance(m, FUNCTIONS))
     return names
+
+
+# The value cite grammar, `[FILE: ]SYMBOL = LITERAL` in one backtick span. This is a Python copy of
+# `VALUE_CITE_RE`, `parseLiteral` and `sameValue` in skills/plain-english-map/scripts/map-check.mjs (the MAP9
+# check). The copy has a reason: the ste-lint action runs Python only, with no Node, so it cannot call MAP9's
+# reader. skills/plain-english-map/tests/value-cite-parity.json holds the two copies together: both suites read
+# its rows, so a change to one grammar that the other lacks goes red. Two differences by design: a cite with no
+# FILE reads its file from the map line above in MAP9, and here it is no cite; MAP9 skips fenced blocks, and
+# here a fenced block counts as prose, as for every other code.
+VALUE_CITE_RE = re.compile(r"(?:(\S+?):\s+)?(\S+)\s+=\s+(.+)")
+SPAN_RE = re.compile(r"`([^`]+)`")
+
+
+def value_cites(line):
+    """(file, symbol, literal text) for each backtick span of the line that holds a value cite with a file."""
+    found = []
+    for span in SPAN_RE.finditer(line):
+        match = VALUE_CITE_RE.fullmatch(span.group(1))
+        if match and match.group(1):
+            found.append((match.group(1), match.group(2), match.group(3)))
+    return found
+
+
+def _no_constant(name):
+    raise ValueError(name)  # JSON.parse refuses NaN and Infinity, so this does too
+
+
+def _loads(text):
+    return json.loads(text, parse_constant=_no_constant)
+
+
+def parse_literal(text):
+    """(value, is_set) for the literal a cite says: JSON, or a `{...}` set of JSON items. None when it is neither."""
+    t = text.strip()
+    try:
+        return _loads(t), False
+    except ValueError:
+        pass
+    if t.startswith("{") and t.endswith("}"):
+        try:
+            return _loads("[" + t[1:-1] + "]"), True
+        except ValueError:
+            pass
+    return None
+
+
+def strict_equal(a, b):
+    """Deep equality as JavaScript's isDeepStrictEqual reads JSON: a boolean is no number, 1 and 1.0 are one number."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(strict_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(strict_equal(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
+def _by_text(items):
+    return sorted(items, key=lambda v: json.dumps(v, separators=(",", ":"), ensure_ascii=False))
+
+
+def same_value(lit, actual):
+    """True when the parsed cite `lit` (from `parse_literal`) says `actual`. A set cite ignores order against a list."""
+    value, is_set = lit
+    if is_set and isinstance(actual, list):
+        return strict_equal(_by_text(value), _by_text(actual))
+    return strict_equal(value, actual)
+
+
+GONE = "gone"  # `file_value` answer: the file parses and binds no such module-level name
+
+
+def tree_value(tree, symbol):
+    """`(value,)` the module-level literal `symbol` holds in a parsed .py file, read through py-facts `answer`, the
+    same reader MAP9 uses: a value `ast.literal_eval` accepts and JSON can hold. GONE when the module assigns no such
+    name. None when the value is no literal, such as a call, or the name has no value."""
+    found = py_facts().answer({"file": "", "symbol": symbol}, tree, [])
+    if found["ok"]:
+        return (found["value"],)
+    return GONE if found.get("gone") else None
+
+
+def file_value(blob, symbol):
+    """`tree_value` of the bytes of a .py file. None when there is no file or it does not parse."""
+    tree = parse_python(blob) if blob is not None else None
+    return None if tree is None else tree_value(tree, symbol)
 
 
 def disabled(line):
@@ -206,43 +353,258 @@ def path_cites(line, gone, exotic):
     return hits
 
 
+class Range:
+    """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
+
+    def __init__(self, base, head, removed, renamed, modified, added, batch):
+        self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
+        self.unknowns = []
+        self.py_files = {p: p for p in modified if p.endswith(".py")}
+        self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+        self.json_files = {p for p in modified if p.endswith(".json")}
+        self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
+        # The Markdown the range touched, as {path at head: path at base, or None for a new file}.
+        self.touched_md = {p: p for p in modified if p.endswith(".md")}
+        self.touched_md.update({new: old for old, new in renamed.items() if new.endswith(".md")})
+        self.touched_md.update({p: None for p in added if p.endswith(".md")})
+        self.blobs = {}
+
+    def blob(self, spec):
+        """One blob by `rev:path`, read once."""
+        if spec not in self.blobs:
+            self.blobs[spec] = self.batch.get(spec)
+        return self.blobs[spec]
+
+
+class Reader:
+    """What `scan()` asks of a reader beyond `code`, `prepare` and `line`. The defaults suit a reader that judges
+    every tracked Markdown file."""
+
+    def all_markdown(self, state):
+        """True when the reader needs every tracked Markdown file, not only the ones the range touched."""
+        return True
+
+    def begin(self, state, md, rng):
+        """Called before the lines of each Markdown file `md`."""
+
+
+class PathReader(Reader):
+    """STALE001: a line that names a path the range deleted or renamed."""
+    code = "STALE001"
+
+    def prepare(self, rng):
+        """None when the range removes no path, else the state `line` reads."""
+        gone = {}  # path -> new home or None
+        for path in rng.removed + list(rng.renamed):
+            if rng.batch.get("%s:%s" % (rng.head, path)) is None:
+                gone[path] = rng.renamed.get(path)
+        if not gone:
+            return None
+        simple = {p for p in gone if SIMPLE_PATH.match(p)}
+        return gone, simple, [p for p in gone if p not in simple]
+
+    def line(self, state, text, claimed):
+        gone, simple, exotic = state
+        messages = []
+        for path in path_cites(text, simple, exotic):
+            claimed.add(path)
+            home = gone[path]
+            messages.append("%s was renamed to %s in this range; name the new home" % (path, home) if home
+                            else "%s was deleted in this range" % path)
+        return messages
+
+
+class NameReader(Reader):
+    """STALE002: a line that cites `file.py name` for a name the range unbound in that file."""
+    code = "STALE002"
+
+    def prepare(self, rng):
+        removed_names = {}  # file at base -> names the range removed
+        for path in sorted(rng.py_files):
+            old_src = rng.batch.get("%s:%s" % (rng.base, path))
+            new_src = rng.batch.get("%s:%s" % (rng.head, rng.py_files[path]))
+            before = names_in(old_src) if old_src is not None else None
+            after = names_in(new_src) if new_src is not None else None
+            bad = [side for side, names in (("base", before), ("head", after)) if names is None]
+            if bad:
+                rng.unknowns.append("%s does not parse at %s; the names it removed were not checked"
+                                    % (path, " and ".join(bad)))
+            elif before - after:
+                removed_names[path] = before - after
+        return removed_names or None
+
+    def line(self, state, text, claimed):
+        if ".py" not in text:
+            return []
+        messages = []
+        for pair in PAIR_RES:
+            for match in pair.finditer(text):
+                path, name = match.group(1), match.group(2)
+                if path not in claimed and name in state.get(path, ()):
+                    messages.append("%s no longer defines %s at head; find its new home" % (path, name))
+        return messages
+
+
+class ForeignReader(Reader):
+    """STALE002 unknown: a line that cites `file.mjs name` of a JavaScript or shell file the range touched. Those
+    names are not read, so the line is reported as unknown, never as a pass. Reports through `unknown`."""
+    code = "STALE002"
+    unknown = True
+
+    def prepare(self, rng):
+        return rng.foreign_files or None
+
+    def line(self, state, text, claimed):
+        messages = []
+        for pair in FOREIGN_PAIR_RES:
+            for match in pair.finditer(text):
+                path, name = match.group(1), match.group(2)
+                text_ = "%s %s: JavaScript and shell names are not checked" % (path, name)
+                if path in state and path not in claimed and text_ not in messages:
+                    messages.append(text_)
+        return messages
+
+
+class ForeignValueReader(Reader):
+    """STALE004 unknown: a value cite of a JavaScript, shell or JSON file the range touched. Those values are not
+    read, so the line is reported as unknown. Its code is STALE004, so the STALE004 mark leaves the line out."""
+    code = "STALE004"
+    unknown = True
+
+    def prepare(self, rng):
+        return rng.foreign_files | rng.json_files or None
+
+    def line(self, state, text, claimed):
+        messages = []
+        for path, symbol, _ in value_cites(text):
+            text_ = "%s %s: JavaScript, shell and JSON values are not checked" % (path, symbol)
+            if path in state and text_ not in messages:
+                messages.append(text_)
+        return messages
+
+
+class ValueReader(Reader):
+    """STALE004: a value cite `file.py: NAME = literal` that quotes what the range changed or removed, or that the
+    range added wrong. A cite of a value the range did not change, on a line the range did not add, is left alone."""
+    code = "STALE004"
+
+    class State:
+        def __init__(self, rng, changed):
+            self.rng, self.changed = rng, changed
+            self.fresh = None  # how often each line holds at base in the Markdown file being read; None: not touched
+            self.seen = None  # how often each line has come up so far at head
+            self.values = {}
+
+    def prepare(self, rng):
+        """None when the range changed no literal and touched no Markdown. `changed` is true when a touched .py has
+        a changed literal: every Markdown file is then read, since any line may cite it. A touched .json never
+        counts: a JSON value is read by no reader."""
+        changed = False
+        for path, new in sorted(rng.py_files.items()):
+            if path != new or changed:
+                continue
+            # A source that does not parse is reported by NameReader, so it is skipped here.
+            trees = [parse_python(src) if src is not None else None
+                     for src in (rng.blob("%s:%s" % (rev, path)) for rev in (rng.base, rng.head))]
+            changed = None not in trees and self._literal_changed(*trees)
+        return self.State(rng, changed) if changed or rng.touched_md else None
+
+    @staticmethod
+    def _literal_changed(before, after):
+        """True when a module-level name holds a literal at base, as `tree_value` reads it, and at head holds a
+        different literal or is gone. A literal is what py-facts `answer` reads: a value `ast.literal_eval` accepts
+        and JSON can hold. A change to or from a call, or any other value that is no literal, is no literal change:
+        a cite of it is never judged. A gone name counts: a cite of it is judged here, not by STALE002."""
+        for name in py_facts().assigned(before):
+            was = tree_value(before, name)
+            if was in (None, GONE):
+                continue
+            now = tree_value(after, name)
+            if now == GONE or (now is not None and not strict_equal(was[0], now[0])):
+                return True
+        return False
+
+    def all_markdown(self, state):
+        return state.changed
+
+    def begin(self, state, md, rng):
+        state.seen = collections.Counter()
+        if md not in rng.touched_md:
+            state.fresh = None
+            return
+        old = rng.touched_md[md]
+        blob = rng.blob("%s:%s" % (rng.base, old)) if old else None
+        state.fresh = collections.Counter() if blob is None else collections.Counter(
+            l.strip() for l in blob.decode("utf-8", "replace").replace("\r\n", "\n").split("\n"))
+
+    def value(self, state, side, path, symbol):
+        """What `file_value` says of the cite's symbol in the file at base or head."""
+        key = (side, path, symbol)
+        if key not in state.values:
+            rev = state.rng.base if side == "base" else state.rng.head
+            state.values[key] = file_value(state.rng.blob("%s:%s" % (rev, path)), symbol)
+        return state.values[key]
+
+    def line(self, state, text, claimed):
+        messages = []
+        key = text.strip()
+        state.seen[key] += 1
+        # The nth copy of a line is added when base holds fewer than n copies, so a second copy of an old line counts.
+        added = state.fresh is not None and state.seen[key] > state.fresh[key]
+        for path, symbol, literal in value_cites(text):
+            if not path.endswith(".py"):
+                continue
+            lit = parse_literal(literal)
+            head = self.value(state, "head", path, symbol) if lit else None
+            if head is None:
+                continue  # no JSON literal, or the file is gone or unreadable at head: STALE001 judges a gone file
+            touched = path in state.rng.py_files
+            base = self.value(state, "base", path, symbol) if touched else head
+            quotes_base = base not in (None, GONE) and same_value(lit, base[0])
+            if head == GONE:
+                # A gone name: a value cite is no pair cite, so STALE002 never reads it, and this reader owns it.
+                if touched and base != GONE and (quotes_base or added):
+                    messages.append("%s no longer defines %s at head; this range removed it" % (path, symbol))
+                elif added:
+                    messages.append("%s assigns no module-level %s at head" % (path, symbol))
+            elif quotes_base and not strict_equal(base[0], head[0]):
+                messages.append("%s says %s = %s, the value at base; this range changed it to %s"
+                                % (path, symbol, literal, json.dumps(head[0])))
+            elif added and not same_value(lit, head[0]):
+                messages.append("%s says %s = %s, and the file has %s" % (path, symbol, literal, json.dumps(head[0])))
+        return messages
+
+
+# One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
+# check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
+# reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
+# A code may have one judging reader and one unknown reader, so its mark leaves out both.
+# `Reader` holds the optional hooks: `all_markdown(state)` and `begin(state, md, rng)`. A new check adds one entry.
+READERS = (PathReader(), NameReader(), ForeignReader(), ForeignValueReader(), ValueReader())
+
+
 def scan(range_text):
     """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified = changed_paths(diff_args)
-    found, unknowns = {}, []
-    py_files = {p: p for p in modified if p.endswith(".py")}
-    py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
-    if not removed and not renamed and not py_files:
-        return found, unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
+    removed, renamed, modified, added = changed_paths(diff_args)
+    found = {}
     batch = BlobReader()
+    rng = Range(base, head, removed, renamed, modified, added, batch)
+    if not removed and not renamed and not rng.py_files and not rng.touched_md:
+        return found, rng.unknowns  # the cost contract: nothing removed or changed, so no blob, tree or Markdown read
     try:
-        gone = {}  # path -> new home or None
-        for path in removed + list(renamed):
-            if batch.get("%s:%s" % (head, path)) is None:
-                gone[path] = renamed.get(path)
-        simple = {p for p in gone if SIMPLE_PATH.match(p)}
-        exotic = [p for p in gone if p not in simple]
-
-        removed_names = {}  # file at base -> names the range removed
-        for path in sorted(py_files):
-            old_src = batch.get("%s:%s" % (base, path))
-            new_src = batch.get("%s:%s" % (head, py_files[path]))
-            before = defs_in(old_src) if old_src is not None else None
-            after = defs_in(new_src) if new_src is not None else None
-            bad = [side for side, names in (("base", before), ("head", after)) if names is None]
-            if bad:
-                unknowns.append("%s does not parse at %s; the defs it removed were not checked"
-                                % (path, " and ".join(bad)))
-            elif before - after:
-                removed_names[path] = before - after
-        if not gone and not removed_names:
-            return found, unknowns
+        active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
+        judges = [(r, state) for r, state in active if not getattr(r, "unknown", False)]
+        if not judges:
+            return found, rng.unknowns  # an unknown line never starts the Markdown read
 
         excludes = exclude_patterns(".")
-        tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
-        tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
-        tracked = [t for t in tracked if t.endswith(".md")]
+        if any(r.all_markdown(state) for r, state in judges):
+            tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
+            tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
+            tracked = [t for t in tracked if t.endswith(".md")]
+        else:
+            tracked = sorted(rng.touched_md)  # a reader that needs only its own new lines reads the touched files
 
         for md in tracked:
             if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
@@ -251,24 +613,21 @@ def scan(range_text):
             if blob is None:
                 raise Unknown("%s is in the tree at %s but cannot be read" % (md, head))
             text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
+            for reader, state in active:
+                reader.begin(state, md, rng)
             for number, line in enumerate(text.split("\n"), 1):
                 off = disabled(line) if "ste-disable-line" in line else set()
-                cited = path_cites(line, simple, exotic) if gone and "STALE001" not in off else []
-                for path in cited:
-                    home = gone[path]
-                    text = ("%s was renamed to %s in this range; name the new home" % (path, home) if home
-                            else "%s was deleted in this range" % path)
-                    found.setdefault((md, number, "STALE001"), []).append(text)
-                if removed_names and ".py" in line and "STALE002" not in off:
-                    for pair in PAIR_RES:
-                        for match in pair.finditer(line):
-                            path, name = match.group(1), match.group(2)
-                            if path not in cited and name in removed_names.get(path, ()):
-                                found.setdefault((md, number, "STALE002"), []).append(
-                                    "%s no longer defines %s at head; find its new home" % (path, name))
+                claimed = set()
+                for reader, state in active:
+                    if reader.code not in off:
+                        for message in reader.line(state, line, claimed):
+                            if getattr(reader, "unknown", False):
+                                rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                            else:
+                                found.setdefault((md, number, reader.code), []).append(message)
     finally:
         batch.close()
-    return found, unknowns
+    return found, rng.unknowns
 
 
 def main(argv):

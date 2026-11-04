@@ -42,7 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURE, SKILL, cleanEnv, expected, gitIn, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
+import { FIXTURE, HERE, SKILL, cleanEnv, expected, gitIn, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
 const READERS = join(SKILL, 'scripts', 'lib', 'fact-readers.mjs');
@@ -218,6 +218,20 @@ test('F2d. a fact prose holds a lone quote and a comment mark in text, and the c
   assert.deepEqual(factLines(text), [
     { kind: 'value', line: 2, parent: 'src/notes.ts', prose: "Each note's text keeps the // and # marks.", file: 'src/notes.ts', symbol: 'MARK', literal: '"#"' },
   ]);
+});
+
+// F2f. The grammar reads each parity row of the fixture that the Python check reads too (value-cite-parity.json, beside this file).
+test('F2f. factLines reads each parity row the fixture names as a value cite, and no other row', async () => {
+  const { factLines } = await checkExports('factLines');
+  const rows = JSON.parse(readFileSync(join(HERE, 'value-cite-parity.json'), 'utf8')).rows;
+  assert.ok(rows.some((r) => r.match) && rows.some((r) => !r.match), 'the parity fixture must hold rows that match and rows that do not');
+  for (const row of rows) {
+    const text = ['- `hooks/parity-host.py` — Holds the cited value.', `  - The value is cited. — \`${row.cite}\``, ''].join('\n');
+    const want = row.match
+      ? [{ kind: 'value', line: 2, parent: 'hooks/parity-host.py', prose: 'The value is cited.', file: row.match.file, symbol: row.match.symbol, literal: row.match.literal }]
+      : [];
+    assert.deepEqual(factLines(text), want, `factLines must read the cite ${JSON.stringify(row.cite)} as the fixture says`);
+  }
 });
 
 test('F2e. homeLines reads the lines under a Homes heading only, as capability, file and symbol', async () => {
