@@ -8,10 +8,10 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 
 ## The design
 
-- Rule `git-integration-branch-merge`: a CI lint red that `bin/ste-changed` passes, while it blames an old ste-lint pin, is not a strike. The session moves that pin to claude-settings main in a lane of its own, with no question. Its reviewer checks only that the lane changes pin lines alone, to a main commit that descends from the old pin. claude-settings main already reviewed the lint change. Other action pins keep the normal rule, because they are checks with no local twin.
+- Rule `git-integration-branch-merge`: a CI lint red that `bin/ste-changed` passes, while it blames an old ste-lint pin, is not a strike. The session moves that pin to claude-settings main in a lane of its own, with no question. Its reviewer checks only that the lane changes pin lines alone, to a main commit that descends from the old pin. claude-settings main already reviewed the lint change. Other action pins keep the normal rule, because they are checks with no local twin. The zizmor action has a twin now: `bin/ci-job --lint` runs its run.sh in place, so zizmor pins follow sessions too.
 - A commented-out pin is not a pin.
 - `bin/ste-changed` lints and reads pins from one checkout: the one beside its real path when that holds `actions/ste-lint`, else the one the global CLAUDE.md points at (hooks/guard_pointer.py `pointer_checkout`). A copy install has no `actions/` and is no git repo.
-- `bin/ste-changed` reads each `claude-settings/actions/ste-lint@<sha>` pin in the linted repo's `.github/workflows`. It compares the files the step runs (`LINT_FILES`) at the pin with this copy's. On a difference it prints the pin, its date, its line and the remedy, and exits 3 even when the lint passed. An equal pin prints one line and changes nothing. A pin this clone does not hold is unknown and changes no exit code.
+- `bin/ste-changed` reads each `claude-settings/actions/ste-lint@<sha>` and `claude-settings/actions/zizmor@<sha>` pin in the linted repo's `.github/workflows`. For each action it compares the files CI runs for it (the table `PINNED`: `LINT_FILES` for ste-lint, `actions/zizmor/action.yml` and `run.sh` for zizmor) at the pin with this copy's. One pin gets one verdict line, named for its action. On a difference it prints the pin, its date, its line and the remedy, and exits 3 even when the lint passed. An equal pin prints one line and changes nothing. A pin this clone does not hold is unknown and changes no exit code.
 - Pins stay current on demand: the session that runs the tool sees the drift and moves the pin. No bot and no schedule. Rule `outcomes-mechanize-rules` allows on-demand reads, never a timer.
 
 ## Why not a bot
@@ -22,7 +22,7 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 
 ## Safety holes, named
 
-- (a) Only `ste-lint` is checked. `stamp`, `readme-links`, `all-jobs-passed`, `ci-alarm` and `ruling-kind` pins can drift unseen. `ste-lint` is the one with a local twin that a session runs.
+- (a) Only `ste-lint` and `zizmor` are checked. `stamp`, `readme-links`, `all-jobs-passed`, `ci-alarm` and `ruling-kind` pins can drift unseen. Those two are the ones with a local twin that a session runs.
 - (b) A session that never runs `bin/ste-changed` before a push still meets the old pin in CI. The rule covers that red.
 - (c) Moving each child repo's pins waits for the owner's plan for each repo (step c76, child-repo part).
 - (d) Any byte change in `LINT_FILES` is drift, a comment edit too. The line says a line can pass here and fail CI, not that one will.
