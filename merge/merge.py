@@ -1136,7 +1136,7 @@ class Host:
             def cleared(r, cancelled=False):
                 """True when a newer, newest-of-its-group, successful run of another group of r's file passed what r needs. Call it only for an r with a red job,
                 or, with `cancelled`, for an r cancelled with no red job: the run must then also be on another head than r's, pass every job r ran
-                (not skipped) and contain every job r skipped. A failed r is judged by clear_rule.clears, with the workflow file at n's head."""
+                (not skipped) and contain every job r skipped. A failed r is judged by clear_rule: red_stays first (no file read), then clears, with the workflow file at n's head."""
                 names = {j["name"] for j in jobs_of(r)}
                 need = {j["name"] for j in jobs_of(r) if j.get("conclusion") != "skipped"} if cancelled else names
                 for n in newest.values():
@@ -1145,6 +1145,8 @@ class Host:
                             or (cancelled and (not r.get("head_sha") or n.get("head_sha") == r["head_sha"]))):
                         continue
                     if not cancelled:
+                        if clear_rule.red_stays(jobs_of(r), jobs_of(n)):
+                            continue  # a certain red: no workflow read, so a failed read cannot turn it into unknown
                         if clear_rule.clears(jobs_of(r), jobs_of(n), n["event"], text_of(n)):
                             return True
                         continue

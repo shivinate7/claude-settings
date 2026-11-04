@@ -8,7 +8,7 @@
 # `github.event_name == 'X'` with X not N's event (all-jobs-passed and ci-done run on pull_request only, so a push or schedule run
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. Cost, only for a failed group that has
-# such an N: one jobs read for R, and for each N one jobs read and one contents read of N's workflow file at N's head (headSha), each once;
+# such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
 # a failed read is unknown. The same failed-run rule as Host.base_state. Needs python3 (stdlib only) and
 # clear_rule.py beside this file; no checkout. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
@@ -72,6 +72,9 @@ while IFS= read -r r; do
     if jq -e 'any(.[]; .status == "completed" and (.conclusion | IN("success", "skipped", "neutral", "cancelled") | not))' >/dev/null <<<"$rjobs"; then
       while IFS= read -r n; do
         jobs_of "$n" >/dev/null || unknown "gh api jobs failed"
+        # Step one reads no workflow: a red job of R that N lacks or did not pass is a certain red, so N clears nothing.
+        python3 "$here/clear_rule.py" --red-stays "$cache/$rid" "$cache/$n"
+        case $? in 0) continue ;; 1) ;; *) unknown "clear_rule.py failed" ;; esac
         workflow_of "$n" || unknown "gh api contents failed"
         python3 "$here/clear_rule.py" --event "$(jq -r --argjson n "$n" '.[] | select(.databaseId == $n) | .event' <<<"$newest")" \
           --workflow "$cache/wf-$n" "$cache/$rid" "$cache/$n"
