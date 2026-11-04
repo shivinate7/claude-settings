@@ -1710,12 +1710,17 @@ def _project_ancestor(path: str):
         probe = parent
 
 
-def find_dead_rooted():
+def find_dead_rooted(checkout_paths=None):
     """Return one decision dict per process whose argv names a script file
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
     missing, and whose nearest existing ancestor carries `.git` or `.claude` (a deleted
     checkout or worktree). `None` when the machine pid enumeration failed.
     Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}.
+
+    CHECKOUT_PATHS limits the read to the checkouts of one repository run: a process stays only
+    when its MISSING SCRIPT path sits under one of them (`_matching_checkout`). `home` is never
+    the test, because `_project_ancestor` can answer a folder above the checkout, such as `~`.
+    An empty list keeps nothing. `None` is the machine-wide read.
     Reap only when `is_orphan` and `is_current_user_process` both answer a confirmed yes;
     `None` from either is `unreadable-subject`, keep.
 
@@ -1735,7 +1740,8 @@ def find_dead_rooted():
         for raw in _ARGV_PATH_RE.findall(command):
             if raw.lower().endswith(DEAD_ROOTED_EXTENSIONS) and not os.path.exists(raw):
                 home = _project_ancestor(raw)
-                if home:
+                if home and (checkout_paths is None
+                             or _matching_checkout(raw, checkout_paths) is not None):
                     hit = (raw, home)
                     break
         if hit is None:
@@ -3252,6 +3258,11 @@ def main(argv=None) -> int:
     parser.add_argument("--root", metavar="PATH",
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
+    parser.add_argument("--session-end", action="store_true", dest="session_end",
+                         help="the SessionEnd run only: stops the dead-rooted servers that "
+                              "this run's own repository left (its checkouts and worktrees) "
+                              "and scans no loose processes. The scheduled job and a person's "
+                              "run read the whole machine")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3353,9 +3364,16 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print("\njanitor: past the time budget; dead-rooted, loose-process and simulator "
               "reads not run (the next run does them)")
         return 0
-    dead = find_dead_rooted()
+    # SessionEnd reads only this repository's checkouts, the worktrees this run judged (removed
+    # ones too: their folders are gone but their servers are not), and no loose processes.
+    # Machine-wide reads belong to the daily job.
+    session_end = getattr(args, "session_end", False)
+    scope = None
+    if session_end:
+        scope = list(roots) + [w["path"] for r in results for w in r["worktrees"]]
+    dead = find_dead_rooted(scope)
     print_dead_rooted_report(dead)
-    if not _past_deadline():
+    if not session_end and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
