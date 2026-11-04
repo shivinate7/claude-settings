@@ -1168,3 +1168,4 @@
 - option-key-gap-str-replace-other-page: a `str_replace` to another page's item is not judged, since it carries no `options`. The cwd's own page judges its new text (hooks/question_form.py keyed_options_hit; decision option-keys-are-letters)
 - option-key-gap-closed-reopened: a closed item with a key none, reopened by a later update, passes both writes, since each is judged alone (hooks/question_form.py _open_decision; decision option-keys-are-letters)
 - option-key-gap-kind-case: an item with `kind` "Decision" (capital) and a key none passes, since the kind is compared as written (hooks/question_form.py _open_decision; decision option-keys-are-letters)
+- option-key-gap-kind-unpinned-off-page: the gap suite pins a closed item off the cwd page but not a task or note item, so a mutant that drops the kind check in keyed_options_hit alone survives (hooks/test_question_form_option_gap.py). Decision: option-keys-are-letters

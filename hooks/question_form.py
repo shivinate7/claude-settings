@@ -960,7 +960,7 @@ def _git_root_of(cwd):
 
 def waiting_page_root(tool_input, cwd):
     """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown, and its calls are not judged."""
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
