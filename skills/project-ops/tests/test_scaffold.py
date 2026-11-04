@@ -575,7 +575,16 @@ class Protect(unittest.TestCase):
                 self.assertEqual(patches[0][1], {"checks": [{"context": self.required(), "app_id": app_id}]},
                                  f"the PATCH must pin the required check to app id {app_id}, the one the held rule names")
 
-    def test_a_held_rule_with_no_single_app_id_patches_the_check_unpinned(self):
+    def test_the_required_checks_own_app_id_wins_over_another_held_id(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm",
+                                            held_checks=[{"context": self.required(), "app_id": 15368}, {"context": "ci", "app_id": 4242}])
+        self.assertEqual(code, 0, out)
+        patches = [c for c in calls if "PATCH" in c[0]]
+        self.assertEqual(len(patches), 1, calls)  # the scope first: one PATCH, then its body
+        self.assertEqual(patches[0][1], {"checks": [{"context": self.required(), "app_id": 15368}]},
+                         "the required check's own held app id (15368) must win over the other held id (4242)")
+
+    def test_a_held_rule_with_no_single_app_id_patches_the_check_with_no_app_id(self):
         rules = {  # no one app id the check could be pinned to
             "two different app ids": {"held_checks": [{"context": "ci", "app_id": 15368}, {"context": "lint", "app_id": 4242}]},
             "app id null": {"held_checks": [{"context": "ci", "app_id": None}]},
@@ -591,7 +600,8 @@ class Protect(unittest.TestCase):
                 self.assertEqual(len(patches), 1, calls)  # the scope first: one PATCH, then its body
                 self.assertEqual(patches[0][1], {"checks": [{"context": self.required()}]},
                                  f"{name}: the PATCH must send the check with no app id")
-                self.assertRegex(out, r"(?i)\bunpinned\b", f"{name}: the printed line must say the check is unpinned\n{out}")
+                self.assertRegex(out, r"(?i)\bno app id\b", f"{name}: the printed line must name the state, no app id\n{out}")
+                self.assertNotRegex(out, r"(?i)unpinned", f"{name}: the printed line must not say unpinned, since GitHub picks the app when the id is omitted")
 
     def test_the_preview_names_the_app_id_it_would_pin(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(),
@@ -607,6 +617,23 @@ class Protect(unittest.TestCase):
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
         self.assertIn("Nothing to set", out)
 
+    def test_a_held_rule_already_requiring_the_check_names_the_missing_app_id(self):
+        rules = {  # the check is already named; only its app id is missing
+            "app id null": {"held_checks": [{"context": self.required(), "app_id": None}]},
+            "app id -1": {"held_checks": [{"context": self.required(), "app_id": -1}]},
+            "no checks key": {"existing": [self.required()]},
+        }
+        for name, held in rules.items():
+            with self.subTest(rule=name):
+                code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", **held)
+                self.assertEqual(code, 0, out)
+                self.assertFalse([c for c in calls if "GET" not in c[0]], calls)  # the scope first: no write call
+                named = re.search(r"(?i)\bno app id\b", out)
+                self.assertIsNotNone(named, f"{name}: the printed line must name the state, no app id, before Nothing to set.\n{out}")
+                settled = out.find("Nothing to set.")
+                self.assertGreaterEqual(settled, 0, f"{name}: the printed line must end with Nothing to set.\n{out}")
+                self.assertLess(named.start(), settled, f"{name}: no app id must come before Nothing to set.\n{out}")
+
     def test_a_new_protection_keeps_todays_body(self):  # a green control: the PUT path does not take the app id
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
         self.assertEqual(code, 0, out)
@@ -615,16 +642,18 @@ class Protect(unittest.TestCase):
         self.assertEqual(puts[0][1]["required_status_checks"], {"strict": False, "contexts": [self.required()]},
                          "the PUT path keeps today's body: contexts, strict off")
 
-    def test_a_new_protection_says_its_check_is_unpinned(self):
+    def test_a_new_protection_says_it_has_no_app_id(self):
         code, out, _ = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
         self.assertEqual(code, 0, out)
-        self.assertRegex(out, r"(?i)\bunpinned\b", "the PUT path sends no app id, so its printed line must say the check is unpinned\n" + out)
+        self.assertRegex(out, r"(?i)\bno app id\b", "the PUT path sends no app id, so its printed line must say no app id\n" + out)
+        self.assertNotRegex(out, r"(?i)unpinned", "the printed line must not say unpinned, since GitHub picks the app when the id is omitted")
 
-    def test_a_new_protection_preview_says_its_check_is_unpinned(self):
+    def test_a_new_protection_preview_says_it_has_no_app_id(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required())
         self.assertEqual(code, 0, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)  # the scope first: a preview makes no write call
-        self.assertRegex(out, r"(?i)\bunpinned\b", "the preview of a new protection must say the check is unpinned\n" + out)
+        self.assertRegex(out, r"(?i)\bno app id\b", "the preview of a new protection must say no app id\n" + out)
+        self.assertNotRegex(out, r"(?i)unpinned", "the preview must not say unpinned, since GitHub picks the app when the id is omitted")
 
     def test_a_branch_protected_without_a_check_rule_is_refused_not_replaced(self):  # a PUT would drop its review rule and restrictions
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", other_rules=True)
