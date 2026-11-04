@@ -12003,6 +12003,24 @@ chained_ask("cap script: a body written to x.py that runs a cap write with os as
    "cat > x.py <<'PY'\nimport os as o\ncmd='" + CAP_ECHO_LOCAL + "'\no.system(cmd)\nPY\npython3 x.py",
    cwd=PROJ, carries=("agent-model-cap",))
 
+# Pins for the from-import forms, the interpolated shell calls in perl and node, and a data print that allows.
+sh("frozen python: a heredoc importing copy from shutil, copying onto the hook path, denies [pin]",
+   "python3 - <<'PY'\nfrom shutil import copy; copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc importing chmod from os, changing the mode of the hook path, denies [pin]",
+   "python3 - <<'PY'\nfrom os import chmod; chmod('" + CFG_HOOK + "', 0o755)\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("cap perl: a perl heredoc whose system runs a cap write held in a variable, asks [pin]",
+   "perl <<'PL'\nmy $c = 'echo " + CAP_KEY + "=" + OPUS + " > .claude/settings.local.json'; system(\"$c\");\nPL",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling execSync on a cap write in a template literal, asks [pin]",
+   "node - <<'J'\nconst c='" + CAP_ECHO_LOCAL + "'; require('child_process').execSync(`${c}`)\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling execSync on a cap write joined by concatenation, asks [pin]",
+   "node - <<'J'\nconst c='" + CAP_ECHO_LOCAL + "'; require('child_process').execSync('' + c)\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap data: a python heredoc printing a path join beside a cap write as text, allows [pin]",
+   "python3 - <<'PY'\nimport os; print(os.path.join('a','b'), '" + CAP_ECHO_LOCAL + "')\nPY",
+   "allow", cwd=PROJ)
+
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
 sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
