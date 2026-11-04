@@ -209,4 +209,69 @@ else
   bad=1; echo "FAIL installer installs over no existing pre-commit: no installer at githooks/pre-commit/install.sh"
 fi
 
+# --check through the shared pre-commit: a repo that holds githooks/main-ref/install.sh is held to main.
+# Each fixture commits a copy of that installer and hook on main before any hook is armed, then commits
+# on feat. The armed reference-transaction is a neutral copy that exits 0, except in the current case.
+neutral="$run/neutral-hook"; printf '#!/bin/sh\n# an older copy\nexit 0\n' >"$neutral"; chmod +x "$neutral"
+fresh_mr() { # name branch: a repo on branch that holds githooks/main-ref, then a feature branch to commit on
+  cd "$run" && mkdir "$1" && cd "$1" && git init -q -b "$2" . || { bad=1; echo "FAIL setup: cannot make $1"; return 1; }
+  mkdir -p githooks/main-ref && cp "$repo/githooks/main-ref/install.sh" "$repo/githooks/main-ref/reference-transaction" githooks/main-ref/
+  git add -A && git commit -q -m "main-ref fixture" && git switch -q -c feat
+}
+arm_hook() { # file: the armed reference-transaction for the repo in the working directory
+  mkdir -p .git/hooks && cp "$1" .git/hooks/reference-transaction && chmod +x .git/hooks/reference-transaction
+}
+commit_err() { # cmd...: runs cmd; landed is 1 when HEAD moved; stdout to last.out, stderr to last.err
+  before="$(git rev-parse -q --verify HEAD)"
+  "$@" >"$run/last.out" 2>"$run/last.err"; got=$?
+  if [ "$(git rev-parse -q --verify HEAD)" != "$before" ]; then landed=1; else landed=0; fi
+}
+refused_naming() { # pattern label cmd...: the commit does not land, the hook does not crash, stderr names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -eq 1 ]; then bad=1; echo "FAIL $label: the commit landed, wanted refused"; return 1; fi
+  if grep -q Traceback "$run/last.err"; then bad=1; echo "FAIL $label: the hook crashed, which is not a refusal"; return 1; fi
+  if ! grep -qF -- "$pat" "$run/last.err"; then bad=1; echo "FAIL $label: stderr lacks '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+lands_with() { # pattern label cmd...: the commit lands and stderr names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -ne 1 ]; then bad=1; echo "FAIL $label: the commit did not land (exit $got), wanted allowed"; return 1; fi
+  if ! grep -qF -- "$pat" "$run/last.err"; then bad=1; echo "FAIL $label: stderr lacks '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+lands_without() { # pattern label cmd...: the commit lands and no output names pattern
+  pat="$1"; label="$2"; shift 2
+  commit_err "$@"
+  if [ "$landed" -ne 1 ]; then bad=1; echo "FAIL $label: the commit did not land (exit $got), wanted allowed"; return 1; fi
+  if grep -qF -- "$pat" "$run/last.out" "$run/last.err"; then bad=1; echo "FAIL $label: output names '$pat'"; return 1; fi
+  echo "ok   $label"
+}
+
+# stale: the armed copy is behind main, so the commit is refused and the refusal names the re-arm command
+fresh_mr mr-stale main; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && refused_naming "sh githooks/main-ref/install.sh" "refused: armed copy behind main names the re-arm command" git commit -q -m c
+
+# current: the armed copy equals main, so the commit lands
+fresh_mr mr-current main; arm_hook "$repo/githooks/main-ref/reference-transaction"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands "ok: armed copy equal to main, the commit lands" git commit -q -m c
+
+# no githooks/main-ref in the repo: the commit lands and no main-ref output appears
+fresh mr-none; git switch -q -c feat; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands_without "main-ref" "ok: no githooks/main-ref, the commit lands with no main-ref output" git commit -q -m c
+
+# unknown: the repo has no main ref. The commit is allowed, because unknown is never clear and never broken, and stderr says so
+fresh_mr mr-unknown trunk; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands_with "unknown" "ok: no main ref, the commit lands and stderr says unknown" git commit -q -m c
+
+# the escape hatch lets a stale copy through
+fresh_mr mr-hatch main; arm_hook "$neutral"; arm
+printf 'x\n' >f.txt; git add -- f.txt
+must_staged f.txt && lands "ok: PRE_COMMIT_GUARD=off lets a stale copy through" env PRE_COMMIT_GUARD=off git commit -q -m c
+
 exit "$bad"
