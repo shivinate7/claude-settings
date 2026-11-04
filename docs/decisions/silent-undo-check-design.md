@@ -12,12 +12,28 @@
   later. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
-  commit added on the branch alone is the branch's.
+  commit added on the branch alone is the branch's, except to the lane undo read.
+- **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
+  and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
+  flags two shapes. One is a whole file put back to its text before E, whatever the file held just
+  before, when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
+  non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
+  The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
+  the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
+  A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
+  A line that head holds again in any file, as often as before, is moved, not lost. A merge of main that drops the branch's own lines counts too: a
+  conflict fix keeps both sides. A branch of one commit has nothing to read. Reason for two shapes: on
+  the 31 batches merged 2026-10-31 to 2026-11-02, they go red on 9, with 4 real undos in 10 findings
+  (coordinator, 2026-11-02 11:26 CST; owner's grant pending). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
+  2026-11-02, such as 3297d8fa, which undid 091c8708, and df25a68d, which dropped 49 test lines. Each
+  cost a review round. Builders now edit in place, and a round 2 or 3 brief has a `Keep:` line
+  (`agents/builder.md`, `roles-brief-contents`).
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
-reason. No switch turns the check off.
+reason. No switch turns the check off. The lane undo read takes the same line: one excuse line, and
+no second name (owner, 2026-11-02 10:52 CST, page item 165, pick a).
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
