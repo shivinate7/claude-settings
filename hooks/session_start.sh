@@ -8,13 +8,15 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
-# tier_line: cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes), tell the session how
-# to find its tier (decision session-tiers). One call runs per run: at the no-git or no-toplevel exit,
+# tier_line: a cloud session (the CLAUDE_CODE_REMOTE read install.sh makes) or a session with a
+# CLAUDE_CODE_REMOTE_SESSION_ID tells the session how to find its tier (decision session-tiers). A local
+# session with a remote session id also reads its own record, so lane_session_hit (decision
+# machine-load-brake) can find its tags. One call runs per run: at the no-git or no-toplevel exit,
 # or right after the checkout line, so a cloud session gets it in any folder. The hook cannot read the
 # tier itself: get_session and list_sessions are MCP tools only, and a hook never calls the sessions API
-# with a token. Cost: one env read, no network, no new process, no timer, no file written.
+# with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
-  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
     printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
