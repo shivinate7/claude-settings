@@ -38,14 +38,13 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
+- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
 - The batch runner still builds the batches. It runs every merge under the coordinator's grant. It holds no grant of its own.
 - While another owner repo's own sessions are not working, the claude-settings coordinator works there only as decision `session-tiers` (the session tiers) allows (bullet "A coordinator in another repo"; owner, 2026-10-30 13:22 and 13:25 CDT). A repo is not working when the session list shows no live session for it. The coordinator uses the agents it starts in its own session to build, review and batch. A batch runner merges under the same grant and the same checks. It never widens what that repo's tools accept, because a shared tool never grows a second form (decision `uniform-over-variants`: a repo matches a shared format).
 - The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
-  - A diff that touches a rule's behaviour, a guard's or check's verdict, or program logic merges only after a
-    fresh reviewer approves it.
+  - A change merges once its review rounds end, on green checks (rule `roles-review-cap-three`: round 3 counts whatever its verdict). A change that changes no guard or check merges on green then. A change that changes a guard or check also needs the net-value test after round 3 (coordinator, 23:14, process-only).
   - After review round 3, a change that changes a guard or check gets the net-value test (`hold-unsafe-after-round-3`: the net-value hold after round 3). A held lane stays parked until the owner decides.
   - Batch lanes into one integration PR, the only PR that goes ready and runs CI
     (`git-integration-branch-merge`: how lanes join a batch).

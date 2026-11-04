@@ -10183,32 +10183,44 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads."""
-    return {"number": number, "draft": draft, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z"):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
+    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
 
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
     return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
 
 class PullsHost(merge.Host):
-    """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, and the check runs and statuses of each head.
+    """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, the check runs and statuses of each head, and the
+    repo-wide issue comments. `list_calls` keeps (path, fields) of every list read, in order. Any other read is a failed case.
+    `count_gh` runs the real Host.pages and Host.api over a scripted `gh` instead, which answers each REST route with the shape `gh api` gives
+    and keeps the route of every call in `gh_calls`: the cost of one read, counted at the one seam every call goes through.
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
     `base_compare_error` answers only the base branch's read."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
+        self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.reads = []
+        self.list_calls = []
+        self.count_gh, self.gh_calls = count_gh, []
+        if count_gh:  # the branch protection names the required checks, as a real repo does
+            self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
+        if self.count_gh and args[0] == "api":
+            rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+            self.gh_calls.append(rel)
+            return 0, self.answer(rel)
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
@@ -10225,12 +10237,34 @@ class PullsHost(merge.Host):
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
+    def answer(self, rel):
+        """The reply of one REST route, in the shape `gh api --paginate --slurp` gives it (one page), or the --jq value of the protection."""
+        m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
+        if rel == "pulls":
+            return json.dumps([self.pulls])
+        if rel == "issues/comments":
+            return json.dumps([self.comments])
+        if rel == f"branches/{self.base}/protection/required_status_checks":
+            return json.dumps(self.protection)
+        if m and m.group(2) == "check-runs":
+            return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
+        if m:
+            return json.dumps([{"statuses": []}])
+        raise AssertionError("unexpected route: " + rel)
+
     def pages(self, rel, key=None, fields=None):
+        if self.count_gh:
+            return merge.Host.pages(self, rel, key, fields)
         self.reads.append(rel)
+        self.list_calls.append((rel, dict(fields or {})))
         if rel == "pulls":
             if self.pulls_error:
                 raise merge.Stop(self.pulls_error)
             return self.pulls
+        if rel == "issues/comments":
+            if self.comments_error:
+                raise merge.Stop(self.comments_error)
+            return self.comments
         m = re.fullmatch(r"commits/([^/]+)/check-runs", rel)
         if m:
             return self.check_rows.get(m.group(1), [])
@@ -10507,6 +10541,7 @@ class MergeRoleCheck(CloudSession):
         self.assertTrue(err.strip(), "the refusal said nothing on stderr")
         self.assertNotIn("--confirm", err)
         self.assertNotIn("Traceback", err)
+        return err
 
     def assert_reaches_host(self, *argv, **env):
         """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
@@ -10528,6 +10563,7 @@ class MergeRoleCheck(CloudSession):
         for old in OLD_PARSER_ERRORS:  # the failure must come from the writer, not from a parser that has never heard of --role
             self.assertNotIn(old, err)
         self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
+        return err
 
     # ---- the constants and the reader
     # decision session-tiers: only a batch runner merges
@@ -10618,18 +10654,24 @@ class MergeRoleCheck(CloudSession):
                 self.assert_refused(CLAUDE_CODE_REMOTE_SESSION_ID=session)
 
     def test_the_refusal_goes_to_stderr_and_hands_the_pr_to_the_batch_runner(self):
+        # The review record lives on the PR, and the batch runner finds PRs itself. So the refusal
+        # names the review record and says the batch runner finds the PR. It does not hand over the number and the head.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
-        self.assertRegex(err, r"(?i)batch[ -]runner")
-        self.assertRegex(err, r"(?i)\bnumber\b")
-        self.assertRegex(err, r"(?i)\bhead\b")
+        # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
+        self.assertRegex(err, r"(?i)review record")
+        self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
         # git-remedy-never-names-target: the text never names the command it refused
         self.assertNotIn("--confirm", err)
         self.assertNotRegex(err, r"\bmerge\s+[<\d]")
-        # A session without a role must not learn which role to claim: the text names the batch runner only as the one to hand the PR to.
+        # A session without a role must not learn which role to claim: the text names the batch runner only as the one that finds the PR.
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
+
+    def test_the_confirm_refusal_names_the_lane_lint_step(self):
+        err = self.assert_refused()
+        self.assertIn("merge --lane-lint", err, "the --confirm refusal does not name merge --lane-lint")
 
     # ---- the role check lets through
     # decision session-tiers: the coordinator never merges, so a recorded coordinator role is refused (was: merges)
@@ -10718,6 +10760,10 @@ class MergeRoleCheck(CloudSession):
                 self.assertTrue(err.strip(), "the refusal said nothing on stderr")
                 for named in ("coordinator", "batch-runner"):
                     self.assertNotIn(named, err)
+
+    def test_the_role_refusal_names_the_lane_lint_step(self):
+        err = self.assert_writer_refused("--role", "lane")
+        self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
@@ -11065,6 +11111,466 @@ class CloudAllow(unittest.TestCase):
                 for needle in ("merge.py", "bin/merge", "--confirm"):
                     self.assertNotIn(needle, rule)
                 self.assertFalse(rule.startswith("Bash(merge"), rule)
+
+# ------------------------------------------------------------------ the review record
+# The review record is a comment on the pull request. `merge <pr> --review-record` prints it, a lane posts it, and `merge --reviewed` reads
+# the records of the open pull requests. Every case builds its record with record_text(), the one literal copy of the form. A case reaches
+# the new names of merge.py through review_fn, so each case fails on its own while a name is missing.
+
+REVIEW_MARKER = "<!-- review-record -->"
+REVIEW_CI_LINE = "CI: read live by merge --reviewed"
+REVIEW_HEAD = "a1b2c3d4" * 5  # 40 hex characters
+REVIEW_OLD_HEAD = "0f" * 20
+REVIEW_PASS = ("Round 1: reviewer, sonnet, PASS",)
+REVIEW_FAILED_THREE = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+REVIEW_FLAGS = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS")
+REVIEW_FOOTER = "\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"  # the footer a GitHub post carries, a lane's or the server's
+
+def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER):
+    """The record line by line, in the order the form gives. A keyword replaces one field, so a case changes only what it tests."""
+    return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
+                      *rounds, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+
+def review_fn(test, name):
+    """The merge.py function `name`, or a failed case that says it is missing."""
+    fn = getattr(merge, name, None)
+    if fn is None:
+        test.fail(f"merge.{name} is not defined")
+    return fn
+
+def parse_text(test, text):
+    rec = review_fn(test, "parse_review")(text)
+    test.assertIsNotNone(rec, "parse_review refused a well-formed record:\n" + text)
+    return rec
+
+def record_state(test, text, head=REVIEW_HEAD):
+    state, _why = review_fn(test, "review_state")(parse_text(test, text), head)
+    return state
+
+def posted_body(test, out):
+    """The record printed in `out`, from its marker line through its CI line: the text a lane posts."""
+    lines = out.splitlines()
+    test.assertIn(REVIEW_MARKER, lines, "no review record in the output:\n" + out)
+    start = lines.index(REVIEW_MARKER)
+    ends = [i for i in range(start, len(lines)) if lines[i].startswith("CI:")]
+    test.assertTrue(ends, "the printed record has no CI line:\n" + out)
+    return "\n".join(lines[start:ends[0] + 1]) + "\n"
+
+def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
+    """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
+    return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+
+def list_line(test, out, n):
+    """The one `merge --reviewed` line for pull request n."""
+    lines = [l for l in out.splitlines() if l.startswith(f"#{n} ")]
+    test.assertEqual(len(lines), 1, f"want one line for #{n}:\n" + out)
+    return lines[0]
+
+def no_record_numbers(out):
+    """The pull request numbers named on the `no record:` line."""
+    return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
+
+class ReviewRecordForm(unittest.TestCase):
+    """The form: review_body prints a record and parse_review reads it back. The parser accepts the form and refuses what it does not allow."""
+
+    def test_the_form_round_trips_through_the_parser(self):
+        text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS"),
+                           guard="yes", net="zero")
+        rec = parse_text(self, text)
+        self.assertEqual((rec["n"], rec["head"], rec["kind"], rec["guard"], rec["net"]), (7, REVIEW_HEAD, "normal", "yes", "zero"))
+        self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
+
+    def test_the_lines_follow_the_contract_order(self):
+        body = review_fn(self, "review_body")(**parse_text(self, record_text()))
+        self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
+                                             "Round 1: reviewer, sonnet, PASS", "Net value: not owed", REVIEW_CI_LINE])
+
+    def test_the_ci_line_holds_no_ci_value(self):
+        body = review_fn(self, "review_body")(**parse_text(self, record_text()))
+        self.assertEqual([l for l in body.splitlines() if l.startswith("CI")], [REVIEW_CI_LINE])
+
+    def test_the_parser_accepts_the_form(self):
+        cases = ((REVIEW_PASS, "normal"),
+                 (("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS"), "normal"),
+                 ((), "docs-only"))
+        for rounds, kind in cases:
+            with self.subTest(rounds=rounds, kind=kind):
+                parse_text(self, record_text(rounds=rounds, kind=kind))
+
+    def test_the_parser_refuses_a_round_gap(self):
+        text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS"))
+        self.assertIsNone(review_fn(self, "parse_review")(text))
+
+    def test_the_parser_refuses_a_round_above_three(self):
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, PASS",))))
+
+    def test_the_parser_refuses_an_unknown_verdict(self):
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",))))
+
+    def test_the_parser_refuses_an_unknown_role(self):
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: qa-reviewer, sonnet, PASS",))))
+
+    def test_the_parser_refuses_docs_only_with_guard_yes(self):
+        # a docs-only change has no guard or check (decision docs-only-prs-skip-review)
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(), kind="docs-only", guard="yes")))
+
+    def test_the_parser_refuses_a_short_head(self):
+        for head in (REVIEW_HEAD[:39], REVIEW_HEAD[:7]):
+            with self.subTest(head=head):
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(head=head)))
+
+    def test_the_parser_refuses_a_marker_that_is_not_the_exact_first_line(self):
+        for text in (record_text(marker="<!-- ci-done -->"), record_text(marker=REVIEW_MARKER + " extra"),
+                     record_text(marker="  " + REVIEW_MARKER), record_text(marker=""), "some words\n" + record_text()):
+            with self.subTest(first=text.splitlines()[0]):
+                self.assertIsNone(review_fn(self, "parse_review")(text))
+
+    def test_a_body_with_the_attribution_footer_parses_to_the_same_fields(self):
+        # A lane posts the record with the footer every GitHub post carries. The footer comes after the CI line, so the fields do not change.
+        cases = ((REVIEW_PASS, "normal", "no", "not owed"), (REVIEW_FAILED_THREE, "normal", "yes", "zero"), ((), "docs-only", "no", "not owed"))
+        for rounds, kind, guard, net in cases:
+            with self.subTest(rounds=rounds, kind=kind, guard=guard, net=net):
+                body = record_text(rounds=rounds, kind=kind, guard=guard, net=net)
+                self.assertEqual(parse_text(self, body.rstrip("\n") + REVIEW_FOOTER), parse_text(self, body))
+
+    def test_any_trailing_text_after_a_line_that_is_exactly_a_rule_parses(self):
+        # The record ends at the line that is exactly `---`. Whatever follows that line is trailing text, a footer or a server's own.
+        body = record_text(rounds=REVIEW_PASS).rstrip("\n")
+        plain = parse_text(self, record_text(rounds=REVIEW_PASS))
+        for trailer in ("_Generated by [Claude Code](https://claude.ai/code)_", "Posted by a bot.\nSee the run log.",
+                        "Posted by a bot.\n---\nSee the run log."):
+            with self.subTest(trailer=trailer):
+                self.assertEqual(parse_text(self, body + "\n\n---\n" + trailer), plain)
+
+    def test_a_field_after_the_ci_line_and_before_the_rule_is_still_refused(self):
+        # The record ends at its CI line. A field written below that line is not part of the record, and the footer does not make it one.
+        body = record_text(rounds=REVIEW_PASS).rstrip("\n")
+        for field in ("Net value: positive", "Round 2: reviewer, sonnet, PASS"):
+            with self.subTest(field=field):
+                self.assertIsNone(review_fn(self, "parse_review")(body + "\n" + field + REVIEW_FOOTER))
+        with self.subTest(field="a malformed field above the CI line"):  # the footer does not rescue a malformed record part
+            self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
+
+class ReviewRecordRules(unittest.TestCase):
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
+    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
+    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
+    The verdicts are PASS, FAIL and PARTIAL."""
+
+    def test_a_pass_in_the_last_round_is_done(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
+
+    def test_round_three_is_done_whatever_its_verdict_when_guard_is_no(self):
+        for verdict in ("PASS", "FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rounds = REVIEW_FAILED_THREE[:2] + (f"Round 3: reviewer, opus, {verdict}",)
+                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
+
+    def test_round_three_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
+        # The third round is FAIL here. A PASS would also meet the last-round-PASS rule, which says done for any net value.
+        for net in ("zero", "positive"):
+            with self.subTest(net=net):
+                self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net=net)), "done")
+
+    def test_round_three_with_guard_yes_is_held_when_net_value_is_negative(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative")), "held")
+
+    def test_round_three_with_guard_yes_is_open_when_net_value_is_not_written(self):
+        # "not owed" does not close a net-value test that the guard change owes. The third round is FAIL, so no done rule applies.
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")), "open")
+
+    def test_round_one_fail_on_a_normal_change_is_open(self):
+        self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), "open")
+
+    def test_a_design_reviewer_fail_in_round_one_is_open(self):
+        self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
+
+    def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
+        # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
+
+    def test_a_delete_only_change_passed_in_round_one_is_done(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
+
+    def test_a_delete_only_change_with_guard_no_is_done_after_round_one_whatever_its_verdict(self):
+        for verdict in ("PASS", "FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
+                self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
+        # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="yes")
+                self.assertEqual(record_state(self, rec), "open")
+
+    def test_a_delete_only_change_with_guard_yes_and_a_round_one_pass_is_done(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only", guard="yes")), "done")
+
+    def test_a_pass_in_round_three_with_guard_yes_owes_the_net_value_test(self):
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
+            with self.subTest(net=net):
+                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), want)
+
+    def test_a_pass_in_round_two_with_guard_yes_owes_no_net_value(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="not owed")), "done")
+
+    def test_a_docs_only_change_with_no_round_is_done(self):
+        self.assertEqual(record_state(self, record_text(rounds=(), kind="docs-only")), "done")
+
+    def test_a_record_for_an_older_head_is_stale(self):
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
+
+class ReviewEnv(Env):
+    """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
+    its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+
+    def flags(self, *extra):
+        """The review flags, with --head set to the live head of the feature branch, then `extra`."""
+        return (*REVIEW_FLAGS, "--head", self.head(), *extra)
+
+    def run_args(self, *argv, host=None):
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge(*argv, host=host, stdout=out, stderr=err)[0]
+        except SystemExit as e:
+            rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def assert_usage_error(self, *argv):
+        """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
+        rc, out, err = self.run_args(*argv)
+        self.assertEqual(rc, 2, out + err)
+        for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
+            self.assertNotIn(old, err)
+        self.assertNotIn("Traceback", err)
+        return out, err
+
+class ReviewArgs(ReviewEnv):
+    """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
+    --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
+
+    def test_reviewed_stands_alone(self):
+        for argv in (("--reviewed", "--confirm"), ("--reviewed", "7"), ("--role", "coordinator", "--reviewed")):
+            with self.subTest(argv=argv):
+                self.assert_usage_error(*argv)
+        rc, out, err = self.run_args("--reviewed", host=PullsHost([], {}))
+        self.assertEqual(rc, 0, out + err)
+
+    def test_review_record_needs_a_pr_number(self):
+        self.assert_usage_error("--review-record", *self.flags())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_review_record_takes_no_confirm_or_unlock(self):
+        for extra in (("--confirm",), ("--unlock",)):
+            with self.subTest(extra=extra):
+                self.assert_usage_error("7", "--review-record", *self.flags(), *extra)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_review_record_needs_a_head(self):
+        _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS)
+        self.assertIn("needs --head", err)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_head_must_be_a_full_lowercase_sha(self):
+        for head in (REVIEW_HEAD[:39], REVIEW_HEAD.upper(), REVIEW_HEAD + "0"):
+            with self.subTest(head=head):
+                _out, err = self.assert_usage_error("7", "--review-record", *REVIEW_FLAGS, "--head", head)
+                self.assertIn("40-hex", err)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+
+    def test_head_needs_review_record(self):
+        _out, err = self.assert_usage_error("7", "--head", REVIEW_HEAD)
+        self.assertIn("go with --review-record", err)
+        rc, out, err = self.run_args("7")
+        self.assertEqual(rc, 0, out + err)
+
+    def test_docs_only_takes_no_guard_or_check(self):
+        # a docs-only change has no guard or check, so --guard yes is a usage error; --guard no is the control
+        _out, err = self.assert_usage_error("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "yes")
+        self.assertIn("so --guard must be no", err)
+        rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "docs-only", "--guard", "no")
+        self.assertEqual(rc, 0, out + err)
+
+    def test_preview_and_confirm_take_no_review_record(self):
+        # Q1 a, pinned: the review flags add no refusal to the preview or the confirm, so a pull request with no record runs as before.
+        # This case passes on main. It guards against a refusal added later.
+        rc, out, err = self.run_args("7")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+class ReviewRecordWrite(ReviewEnv):
+    """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
+
+    def test_the_record_is_printed_and_nothing_is_pushed(self):
+        before, locked = self.refs(), self.lock_ref()
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        body = posted_body(self, out)
+        rec = parse_text(self, body)
+        self.assertEqual((rec["n"], rec["head"], rec["kind"], rec["guard"], rec["net"]), (7, self.head(), "normal", "no", "not owed"))
+        self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), body.splitlines())
+        self.assertEqual(self.refs(), before, "the write pushed")
+        self.assertEqual(self.lock_ref(), locked, "the write took the lock")
+
+    def test_the_printed_head_is_the_reviewed_head_when_the_live_head_matches(self):
+        self.host.head_override = "f" * 40
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
+
+    def test_a_push_after_the_review_stops_with_exit_one(self):
+        # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
+        old = self.head()
+        self.host.head_override = "f" * 40
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", old)
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn(REVIEW_MARKER, out)
+        self.assertIn("f" * 9, err)
+        self.assertIn(old[:9], err)
+
+    def test_the_net_value_is_the_one_given(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--net-value", "negative")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["net"], "negative")
+
+    def test_a_bad_round_exits_two_and_prints_no_record(self):
+        for rnd in ("1:reviewer:sonnet:MAYBE", "4:reviewer:sonnet:PASS", "1:reviewer:PASS", "x:reviewer:sonnet:PASS", "1:qa:sonnet:PASS"):
+            with self.subTest(round=rnd):
+                out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
+                self.assertNotIn(REVIEW_MARKER, out)
+
+class ReviewedList(ReviewEnv):
+    """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
+    record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
+    then one `no record:` line for the rest."""
+
+    def listing(self, pulls, comments=(), check_rows=None, **reads):
+        host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        return host, rc, out, err
+
+    def test_the_newest_record_decides_the_line(self):
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_a_record_for_an_older_head_is_stale(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
+
+    def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(8, no_record_numbers(out), out)
+        self.assertFalse([l for l in out.splitlines() if l.startswith("#8 ")], out)
+        list_line(self, out, 7)
+
+    def test_a_comment_without_the_marker_is_not_a_record(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 7, "LGTM")]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"done: ")
+
+    def test_a_record_on_a_pr_that_is_not_open_is_not_listed(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 99, record_text(n=99, rounds=REVIEW_PASS))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("99", out)
+        self.assertEqual(no_record_numbers(out), {7}, out)
+
+    def test_a_draft_is_listed_with_no_ci_read(self):
+        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
+        self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
+
+    def test_a_ready_pr_gets_its_live_ci_state(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        runs = ((batch_run("checks", "completed", "success"), "CI green$"),
+                (batch_run("checks", "in_progress"), "CI pending"),
+                (batch_run("checks", "completed", "failure"), "CI red"))
+        for run, want in runs:
+            with self.subTest(want=want):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [run]})
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), want)
+                self.assertIn(f"commits/{REVIEW_HEAD}/check-runs", [rel for rel, _ in host.list_calls])
+
+    def test_the_list_reads_are_the_open_pulls_then_the_comments_once(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at="2026-10-01T00:00:00Z"),
+                 batch_pull(9, REVIEW_OLD_HEAD, draft=True, created_at="2026-10-05T00:00:00Z")]
+        host, rc, out, err = self.listing(pulls, [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          {REVIEW_HEAD: [batch_run("checks", "completed", "success")]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual([rel for rel, _ in host.list_calls if not rel.startswith("commits/")], ["pulls", "issues/comments"])
+        reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
+        self.assertEqual(len(reads), 1)
+        self.assertEqual((reads[0].get("since"), reads[0].get("sort"), reads[0].get("direction")),
+                         ("2026-10-01T00:00:00Z", "created", "asc"), "since the oldest open pull request, oldest first")
+
+    def test_a_failed_pulls_read_exits_one_and_lists_nothing(self):
+        host, rc, out, err = self.listing([], pulls_error="reading pulls from GitHub failed")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(out.strip(), "", out)
+
+    def test_a_failed_comments_read_exits_one_and_lists_nothing(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments_error="reading issue comments from GitHub failed")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(out.strip(), "", out)
+
+    def test_review_comments_reads_one_list_from_since_oldest_first(self):
+        if getattr(merge.Host, "review_comments", None) is None:
+            self.fail("merge.Host.review_comments is not defined")
+        a, b, c = record_text(rounds=REVIEW_PASS), record_text(n=8, rounds=REVIEW_PASS), record_text(rounds=REVIEW_FAILED_THREE)
+        host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {},
+                         comments=[review_comment(1, 7, a), review_comment(2, 8, b), review_comment(3, 7, c)])
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [a, c], 8: [b]})
+        reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
+
+    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"CI green$")
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         "branches/main/protection/required_status_checks"])
+
+    def test_a_draft_with_a_record_reads_no_head_checks(self):
+        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+
+    def test_a_ready_pr_with_no_record_reads_no_head_checks(self):
+        host, rc, out, err = self.listing([batch_pull(8, REVIEW_HEAD)], [], count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+
+    def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
+        # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
+        older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
+        newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":

@@ -39,9 +39,9 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
-  runs names `frozen at <sha>`. It prints the merge output on the terminal, never
-  to a log only. It dispatches no deferred step.
+  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
+  integration PR on green. It asks the owner for no merge. It prints the merge output on the
+  terminal, never to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
@@ -102,13 +102,16 @@ parent, or miss a message while busy.
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
-  The lane first runs `merge --lane-lint <pr>`. The batch runner runs it again on each lane head
-  before the join, and refuses a red lane (claude-settings record `lanes-run-no-full-ci-job`).
-  A lane never rebases onto main and never merges.
-- Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
-  standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
-  runs the merge tool on it. The owner is not asked.
+- A lane posts its review record on its PR after each round (claude-settings record
+  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
+- Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
+  result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
+  `delete-only` change with Guard or check `no`, which reads done (claude-settings record
+  `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
+  new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
+  not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
