@@ -958,7 +958,7 @@ def _git_root_of(cwd):
 
 
 def _layout():
-    """lint/layout.py, the one home of the layout and the mockup homes."""
+    """lint/layout.py, the one home of the layout and the mockup home."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -977,8 +977,8 @@ def waiting_page_root(tool_input, cwd):
 def design_file_problems(writes, root):
     """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
     `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
-    the homes and the field, never the refused path. An entry that is no dict has no file. Reads only the git
-    config of `root` and HOME; starts no process (rule mockup-home)."""
+    the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
+    only: it does not ask origin, and starts no process (rule mockup-home)."""
     layout = _layout()
     found = []
     for _op, doc_id, data in design_writes(writes):

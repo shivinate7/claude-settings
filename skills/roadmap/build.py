@@ -56,11 +56,11 @@ printed line tells them apart.
 The build goes red (decision mockup-home) when a step's note, why or ask cites a mockup by its id (`item<N>-<letter>`,
 a whole token) and the step's `mockups` field, {"<id>": "<path>"}, holds no file for it. It prints
 "mockup with no file: <step id> <mockup id>" per miss, writes the page, then exits 1. An entry is a miss when its
-path is outside both mockup homes (lint/layout.py mockup_homes: ~/Developer/<repo name>-imports/<item folder>/ and the
-repo's design folder), is a link, or names a file that is not there while its home's folder is. It reads unknown, never
-a miss, and prints "mockup file unread: <step id> <mockup id> (<why>)" with exit 0, when this machine has no
-<repo name>-imports folder (a cloud build) or the path is a machine-home path of another computer (a Windows drive path
-to the item folder, read on Linux). Cost: one stat per entry, no process, file or log.
+path is outside the design folder (lint/layout.py mockup_homes; a machine-home path is outside it), is a link, or
+names a file that origin does not hold (mockup_on_origin below: the remote-tracking ref of the default branch
+or of the record branch, not the checkout). It reads unknown, never a miss, and prints "mockup file unread:
+<step id> <mockup id> (<why>)" with exit 0, when origin cannot be shown: no default-branch ref, or a shallow
+checkout. Cost: up to five short git reads per entry, no file or log.
 
 The upkeep list also names each closed waiting-page item whose home is an open step that never cites
 the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
@@ -792,20 +792,44 @@ def mockup_cites(step):
     return found
 
 
-def mockup_state(repo, layout, file):
-    """(state, why): "ok", "miss" or "unknown" for one `mockups` entry. A path in neither home, or a design-folder
-    file that is not in the checkout, or a machine-home file that is not there while the machine home's folder is, is
-    a miss. No folder for the machine home here (a cloud build), or the machine-home path of another computer, is
-    unknown (decision mockup-home)."""
-    kind, found, _ = layout.mockup_file(str(repo), file)
-    if kind is None:
-        return ("unknown", "a machine-home path of another computer") if layout.mockup_elsewhere(str(repo), file) \
-            else ("miss", "")
-    if os.path.isfile(found):
-        return "ok", ""
-    if kind == "machine" and not os.path.isdir(layout.mockup_homes(str(repo))[0] or ""):
-        return "unknown", "no %s folder on this machine" % os.path.basename(layout.mockup_homes(str(repo))[0] or "imports")
+DEFAULT_BRANCH = "main"  # the default branch when origin/HEAD is not in the checkout
+
+
+def mockup_on_origin(repo, layout, found):
+    """(state, why) for a design-folder file `found` (lint/layout.py mockup_file's path): "ok" when origin holds it,
+    "miss" when origin is readable and does not, "unknown" with the reason when git cannot tell. Origin is the
+    remote-tracking ref of the default branch (origin/HEAD, else origin/main) and of the record branch, as a fetch
+    leaves them; the checkout's own files do not count. With no default-branch ref, or a shallow checkout, it is
+    unknown, never a miss or a pass. The one home of the origin check (decision mockup-home)."""
+    rel = os.path.relpath(found, str(repo)).replace(os.sep, "/")
+    if rel == ".." or rel.startswith("../"):
+        return "unknown", "the file is outside the checkout"
+    refs = git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
+    shallow = git(repo, "rev-parse", "--is-shallow-repository")
+    if refs is None or shallow is None:
+        return "unknown", "the checkout could not be read"
+    if shallow.strip() == "true":
+        return "unknown", "a shallow checkout cannot show origin's files"
+    present = set(refs.split())
+    head = (git(repo, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or "").strip()
+    default = head if head in present else "refs/remotes/origin/" + DEFAULT_BRANCH
+    try:
+        record = "refs/remotes/origin/" + layout.record_branch(str(repo))
+    except layout.LayoutError:
+        record = None
+    for ref in [r for r in (default, record) if r in present]:
+        if git(repo, "cat-file", "-e", "%s:%s" % (ref, rel)) is not None:
+            return "ok", ""
+    if default not in present:
+        return "unknown", "no origin ref for the default branch"
     return "miss", ""
+
+
+def mockup_state(repo, layout, file):
+    """(state, why): "ok", "miss" or "unknown" for one `mockups` entry. A path outside the design folder (a
+    machine-home path, a link) is a miss. A design-folder file is judged by origin, not the checkout."""
+    found, _ = layout.mockup_file(str(repo), file)
+    return mockup_on_origin(repo, layout, found) if found else ("miss", "")
 
 
 def mockup_misses(repo, steps):

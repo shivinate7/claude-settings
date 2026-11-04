@@ -3387,11 +3387,11 @@ def _run_check_designs(page_file, item):
 # ------------------------------------------------------------------ a design names its file, in a mockup home
 #
 # Rule `mockup-home` (decision mockup-home). An ArtifactData set or update of a waiting item whose data carries `designs`
-# is denied when a design has no `file`, or a `file` that is in neither mockup home (lint/layout.py mockup_home_problem:
-# ~/Developer/<repo name>-imports/<item folder>/, or the repo's design folder). It judges the path's shape only, on this
-# machine's home, so it reads no file and starts no node. It runs before `page-item-design`. An item that is closed or has
-# no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
-MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept where an account switch can lose it is gone with the switch)"
+# is denied when a design has no `file`, or a `file` outside the repo's design folder (lint/layout.py mockup_home_problem;
+# a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
+# node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
+# has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
+MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
 
 
 def mockup_home_hit(writes, tool_input, cwd):

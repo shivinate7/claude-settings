@@ -125,17 +125,15 @@ exits 1. The printed line tells the two apart.
 ## Mockups
 
 A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a whole token (`item48-a`). The step then
-carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a file in a mockup home: the
-machine home `~/Developer/<repo name>-imports/<item folder>/<file>`, or the repo's design folder (decision `mockup-home`).
+carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a repo path under the design folder
+(`docs/design/<item folder>/<file>`), and the file is on origin: the default branch or the record branch (decision `mockup-home`).
 
-The build prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. That means no entry, a path outside both
-homes (a link too), or a design-folder file that is not in the checkout. It also means a machine-home file that is not there while the
-`<repo name>-imports` folder is. The build writes the page, then exits 1. The fix is to keep the file in a home and
-name it in `mockups`.
+The build prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. That means no entry, a path outside the
+design folder (a machine-home path or a link too), or a file that origin does not hold, even when the checkout does. The build writes the
+page, then exits 1. The fix is to commit the file, push it, and name it in `mockups`.
 
-A cloud build has no `<repo name>-imports` folder, and a path from another computer (a Windows
-`C:\Users\x\Developer\<repo name>-imports\item48\a.html`) is not this machine's. Both read unknown, never a miss. The build
-prints `mockup file unread: <step id> <mockup id> (<why>)` and exits 0.
+A checkout with no origin ref for the default branch, or a shallow one, cannot show origin. The entry reads unknown, never a miss or a
+pass: the build prints `mockup file unread: <step id> <mockup id> (<why>)` and exits 0.
 
 ## Upkeep list
 
@@ -214,7 +212,7 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file the build already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
-The mockup check reads one stat per cited id and adds no process, file, timer or log.
+The mockup check starts up to five short git reads per cited id and adds no file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
