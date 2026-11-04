@@ -85,6 +85,7 @@ read -r DUO1 DUO2 PRO <<UDIDS
 $(python3 -I -c "$UDID_READ" "$sim_lease" 2>/dev/null)
 UDIDS
 [[ -n $DUO1 && -n $DUO2 && -n $PRO ]] || { echo "sim-test suite: cannot read SLOT_UDID from $sim_lease" >&2; exit 1; }
+export STUB_PRO_UDID=$PRO # the boot stub names the 18 Pro by this UDID, and a Duo by any other
 DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination platform=iOS Simulator,id="
 crashdir=$work/crash
 lockdir=$work/home/.claude/state/sim-test.lock
@@ -136,7 +137,7 @@ case "$1" in
     *--json*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
-  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; echo "    iPhone 18 Pro ($2) (Booted) " > "$RUN/booted" ;;
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -711,7 +712,7 @@ need "no boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
 need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
 need "waited: the load was read at least twice" load_polls_at_least 2
 need "exit code is 1" rc_is 1
-need "stderr names the load" grep -Fq 100 "$work/run.err"
+need "stderr names the load" grep -Fq "5-min 100.00" "$work/run.err"
 end_case "48 own boot over a 5-minute load of 100: waits, exits 1, no boot, no xcodebuild"
 
 sig_case TERM
