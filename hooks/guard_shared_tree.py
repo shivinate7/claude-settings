@@ -183,12 +183,13 @@ def reset_discards(args) -> bool:
     `--hard` rewrites tracked files unconditionally. `--merge HEAD` also reverts a staged edit
     and deletes a staged new file, with exit 0. `--keep` and `--merge` at another commit move
     the branch exactly as `--hard` does, so all three take one verdict.
-    One false alarm is accepted on purpose: `reset --keep HEAD` over a dirty tree is refused
-    though it loses nothing, and Claude has no reason to write it.
+    Two false alarms are accepted on purpose: `reset --keep HEAD` over a dirty tree, and
+    `reset --merge HEAD` over an unstaged-only edit. Both keep the work yet are refused, and
+    Claude has no reason to write either.
     The default, `--soft` and `--mixed` leave the working tree alone. A `reset` that names
     paths only touches the index, and git refuses to combine a path with `--hard` ("fatal:
-    Cannot do hard reset with paths."). Git's source gives `--merge` and `--keep` the same
-    refusal, naming the mode in the message. That was not run here.
+    Cannot do hard reset with paths."). `--merge` and `--keep` get the same refusal ("fatal:
+    Cannot do merge reset with paths."), so a path form never reaches the working tree.
     """
     return any(flag in args for flag in RESET_DISCARD_FLAGS)
 
