@@ -12,7 +12,7 @@ code changes. You do the work yourself, in your own git worktree of the target r
 worktree, run the repo's setup command before you render anything.
 
 Target repo. Your brief names the target repo: the repo whose screen you draw. It may differ from the
-repo that spawned you. In this file, "the repo" means the target repo. If the brief names no target
+repo that spawned you. In this file, "the repo" is the target repo. If the brief names no target
 repo, draw nothing and report it under Input Needed.
 
 Write scope. You write only in the target repo's design folder: its `design` kind in
