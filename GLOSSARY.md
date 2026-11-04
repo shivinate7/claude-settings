@@ -50,9 +50,10 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | `oversight session`, `primary orchestrator` |
 | triage | The standing session that a coordinator starts first, with the batch runner. It is the only writer of the roadmap. It writes the waiting page where it runs. | `docs/decisions/session-tiers.md` | `gatekeeper` |
 | page writer | The session that writes the waiting page. Triage writes it where triage runs. Elsewhere the coordinator does. | `docs/decisions/session-tiers.md`, `skills/waiting-page/SKILL.md` | waiting-page writer |
-| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager`, `point guard` |
+| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving lanes whose topic has no queued step, after the integration PR merges. | `docs/decisions/session-tiers.md` | `branch manager`, `point guard` |
 | arbiter | A standing session that holds a repo's ruling voice, below the owner. Any repo may have one, for long-running work. A coordinator starts one only on the owner's grant, such as "spawn arbiter". Batch checks go to the batch runner, not to it. | `docs/decisions/session-tiers.md` | — |
-| lane session | A one-lane session that a coordinator starts to run one lane. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
+| lane session | A one-lane session that a coordinator starts to run one lane. The lane holds one topic and may take several steps on it. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
+| topic | The one subject a lane holds. The lane's `cs-topic` tag names it, and the brief's first line names it as `Topic:`. Unrelated work starts a new lane. | `docs/decisions/session-tiers.md` | — |
 | shape | The pick a new session makes from the ask: solo, one lane or coordinator. A session may grow to a larger shape. A solo session has no tier. | `rule:roles-pick-mode-from-request`, `docs/decisions/session-tiers.md` | — |
 | tier | A session's role in a build: coordinator, triage, batch runner, arbiter or lane session. Sessions only. | `docs/decisions/session-tiers.md` | — |
 | standing session | A session that lives across many lanes until autocompact. Triage, batch runner and arbiter rotate. A coordinator has no successor. | `docs/decisions/session-tiers.md` | — |
@@ -73,8 +74,8 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | step | One item of planned work on the roadmap. | `rule:speak-cite-id-plus-gloss` | — |
 | CI step | One `- name:` entry in a CI job. Always say "CI step", never a bare "step". | `lint/rule_audit.py` | — |
 | command | One command in a shell chain. One shell call holds one or more commands. | `docs/decisions/ask-commands-run-alone.md` | `command step` |
-| designer | An agent that draws an HTML mockup of each changed screen before the builder starts. It writes only in the design folder. | `agents/designer.md` | — |
-| design reviewer | An agent that judges built screens against the mockup and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
+| designer | An agent that draws an HTML mockup of each changed screen before the builder starts, except on a text-only change (decision `design-agents`). It writes only in the design folder. | `agents/designer.md` | — |
+| design reviewer | An agent that judges built screens against the mockup (or, for a text-only change, main's screenshots) and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
 | mockup | One HTML page in the design folder that draws a screen at every size and theme, with a notes file beside it. | `agents/designer.md` | — |
 | blind lane | A designer lane whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | — |
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
