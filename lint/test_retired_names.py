@@ -49,6 +49,7 @@ RETIRED = {
     "outcomes-tests-are-claims": "outcomes-tests-are-statements",
     "ux-claims-are-true": "ux-statements-are-true",
     "measured-claims-no-home": "measured-statements-no-home",
+    "roles-sonnet-is-the-default": "roles-model-per-role-table",
 }
 
 
