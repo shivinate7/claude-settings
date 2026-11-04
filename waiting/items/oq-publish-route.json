@@ -1,31 +1,38 @@
 {
-  "added": "2026-11-03T22:00:00Z",
-  "context": "Goal: No price change reaches buyers without a live read first.\nProblem (money): D273 (one press sends listings live) says the one press is the only route that publishes. Two older routes, /push and /publish, still move an upload live with only a confirm and no live reconcile. A price change can go live through them, so it needs your word.\nBased on (read): banchi server/capture_server.py:780-781 route both paths; pipeline_routes.py do_markdown_publish calls move_to_live (main 0657163).\nBased on (notes): Whether any script still calls them is unmeasured; the web app no longer calls publishMarkdown.\nDeparts from: D273 says one route publishes and the code has three \u2014 both old routes are deleted, or recorded as a second door with a live reconcile.",
+  "added": "2026-11-04T00:32:00Z",
+  "context": "Goal: No price change reaches buyers without a live read first.\nProblem (money): /push and /publish are not slash commands. They are two web addresses on banchi's server that move a price upload live with only a confirm and no live read. Nothing in the repo calls them now, but they still answer, so a stray request could change a live price.\nBased on (read): banchi server/capture_server.py still routes both (_MARKDOWN_PUSH_RE, _MARKDOWN_PUBLISH_RE). The app's pushMarkdown and publishMarkdown in app/src/server.ts have no caller. No script, CLI, Makefile or workflow calls either address. Only harness test t7/send_markdown.py calls the two handlers directly (main 0657163, read 2026-11-03 18:25 CST).\nBased on (read): the one press, POST .../send in server/send_routes.py, reads what is live, then pushes and publishes.\nBased on (notes): A caller outside the repo, such as a hand-typed request, is unmeasured.\nDeparts from: D273 says the one press is the only route that publishes, and the server answers three \u2014 the two unused addresses are deleted, or kept with a live read.",
   "group": "audit-1102-children",
   "home": "banchi D273 (one press sends listings live)",
   "id": "oq-publish-route",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "none",
+    "note": "are /push /publish no longer used"
+  },
   "n": 185,
   "options": [
     {
-      "gain": "One door to the live price; D273 is true.",
-      "how": "Remove /push and /publish and their handlers in a lane.",
+      "gain": "One door to the live price, and it reads live first; D273 is true.",
+      "how": "A lane removes the two routes, their handlers (do_markdown_push, do_markdown_publish), the two uncalled app functions, their rows in scripts/screen-freshness.mjs, the t7 cases that call the handlers, and the lines in docs/specs/stale-listings.md.",
       "key": "a",
-      "label": "Delete both routes",
-      "lose": "Any script that uses them breaks; unmeasured."
+      "label": "Delete both addresses",
+      "lose": "A hand-typed request to either address stops working; none was found in the repo."
     },
     {
-      "gain": "No caller breaks.",
-      "how": "Record them in D273 and add the live reconcile to each.",
+      "gain": "An outside caller, if one exists, keeps working.",
+      "how": "Record both addresses in D273 and add the live read to each handler.",
       "key": "b",
-      "label": "Keep as second door",
-      "lose": "Two doors to guard; more code to keep right."
+      "label": "Keep as a second door",
+      "lose": "Two doors to guard and keep right, for callers nobody found."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "a",
   "rank": 11,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-publish-route",
-  "short": "Listing publish routes",
-  "status": "open",
-  "title": "banchi: Delete the old publish routes or record them?"
+  "short": "Unused publish addresses",
+  "status": "closed",
+  "title": "banchi: Delete the two unused publish addresses, or keep them with a live read?",
+  "why": "Landed: banchi #1041 merged 22:33 CST (https://github.com/shivinate7/banchi/pull/1041)."
 }

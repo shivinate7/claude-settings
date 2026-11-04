@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-04T01:06:00Z",
+  "at": "2026-11-04T01:03:19.820Z",
+  "filed": "2026-11-04T01:06:00Z",
+  "home": "step:roadmap-blank-pages",
+  "id": "ask-mw1exqmkne",
+  "reply": "The Status tab shows only roadmap steps, which live on each repo's roadmap record branch. Plans in docs/plans are not steps. They show only as a count in the Records view. So a repo with plans but no roadmap branch, or no steps on it, shows a blank Status tab. A second cause: a page republished from the plain template loses its roadmap block. I have not checked which repos hit which cause. New step roadmap-blank-pages checks each repo's page, then fixes it by building the block or making steps from the plans. It went to the coordinator at 19:06 CST.",
+  "text": "ive noticed some repos leave their roadmaps blank in the artifact but they do have plans so whats the disconnect from"
+}

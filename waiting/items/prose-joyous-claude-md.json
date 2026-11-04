@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-04T04:07:00Z",
+  "context": "Goal: joyous's rules say who decides, and never let a price reach a public page.\nProblem (rule): each fix changes a rule's words or adds one, so it needs your word.\nBased on (read): the Opus judges' report (22:05 CST); an archive page shows $1,000/month, and no test stops a price.\nBased on (read): CLAUDE.md calls you \"the builder\", but the glossary says a builder is an agent.\nDeparts from: joyous CLAUDE.md \u2014 deletes lines 58-59 (every lane follows compliance-check and ci-hygiene); \"builder\" becomes \"owner\" and the school's \"owner(s)\" becomes \"school owner(s)\"; adds a rule: no public page shows tuition.",
+  "home": "joyous CLAUDE.md",
+  "id": "prose-joyous-claude-md",
+  "kind": "decision",
+  "n": 228,
+  "options": [
+    {
+      "gain": "Clear names, and no price can go live by mistake.",
+      "how": "One joyous lane edits CLAUDE.md and adds a red test for any price on a public page.",
+      "key": "a",
+      "label": "Apply all 3",
+      "lose": "The skills line goes; those skills still start on their own triggers."
+    },
+    {
+      "gain": "Nothing to review.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Leave as is",
+      "lose": "A ported page can still publish a price."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 28,
+  "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "short": "joyous CLAUDE.md: 3 fixes",
+  "status": "open",
+  "title": "joyous: drop the skills line, say \"owner\" not \"builder\", and add a no-public-tuition rule?",
+  "why": "Recommended: a. An old page in the archive shows $1,000/month, and nothing stops a ported page from publishing it."
+}

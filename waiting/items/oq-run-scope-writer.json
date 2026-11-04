@@ -5,6 +5,11 @@
   "home": "banchi D39 (run scope is the handed selection)",
   "id": "oq-run-scope-writer",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "b",
+    "note": "Filed: banchi D39 retired (D291 replaced it), draft PR https://github.com/shivinate7/banchi/pull/1034; closes when it merges."
+  },
   "n": 188,
   "options": [
     {
@@ -22,10 +27,12 @@
       "lose": "Any ticked-card run path that does exist loses its rule."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "b",
   "rank": 14,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-run-scope-writer",
   "short": "Run scope writer",
-  "status": "open",
-  "title": "banchi: Reopen D39 or retire it?"
+  "status": "closed",
+  "title": "banchi: Reopen D39 or retire it?",
+  "why": "Landed: banchi #1041 merged 22:33 CST (https://github.com/shivinate7/banchi/pull/1041)."
 }

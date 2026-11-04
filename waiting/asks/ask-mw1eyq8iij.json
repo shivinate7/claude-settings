@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-04T01:08:00Z",
+  "at": "2026-11-04T01:04:05.970Z",
+  "filed": "2026-11-04T01:08:00Z",
+  "home": "step:parked-line-id-guard",
+  "id": "ask-mw1eyq8iij",
+  "reply": "My fault. The page turns off Unpark and Drop on a parked line that has no id, so it cannot record your press. Both parked lines here had no id. I added one to each at 19:08 CST, so these buttons work now. Rewritten 19:31 CST, after your note that this happens on every repo's page: the cause is that any writer can save a parked line with no id. The shared page check (hooks/question_form.py) will refuse a parked line with a missing, malformed or duplicate id when it is written. It is filed as roadmap step parked-line-id-guard (commit 09605b63), and the coordinator starts its lane.",
+  "text": "why are some park unpark items striked througb and unselectsble"
+}

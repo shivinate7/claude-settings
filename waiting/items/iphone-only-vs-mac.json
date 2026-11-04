@@ -5,6 +5,11 @@
   "home": "mailaudit docs/decisions/native-swift-rebuild.md",
   "id": "iphone-only-vs-mac",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "a",
+    "note": "Filed in mailaudit native-swift-rebuild + debt mac-target-unbuilt; PR #188 merged as 17d26a636 at 19:04 CST."
+  },
   "n": 192,
   "options": [
     {
@@ -22,12 +27,12 @@
       "lose": "More native work; the records stay wrong until it lands."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 18,
   "ref": "deep audit 1102, mailaudit homes; coordinator handoff/audit-child-questions 9d97c9b, iphone-only-vs-mac",
   "short": "iPhone only or Mac too",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: Keep the app iPhone-only and open a Mac debt?",
   "why": "Recommended in the audit report: only the iPhone app ships today."
 }

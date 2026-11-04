@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-04T04:07:00Z",
+  "context": "Goal: the CLAUDE.md every repo loads holds each rule once, in the fewest words.\nProblem (rule): these lines change the wording of your rules, so they need your word.\nBased on (read): the prose-governance Opus judges' report (22:05 CST) on claude-settings main.\nDeparts from: CLAUDE.md on main \u2014 (1) line 25-26 adds the Explore `Audit:` Opus exception; (2) line 38 drops review-cap sentences its decision already holds; (3) line 58 batch-merge rule shortens to a pointer at skill ci-hygiene step 8; (4) line 99 page-answer and advisor sentences become pointers; (5) line 47 \"Give one checkout to each concurrent agent\" is deleted, since line 42 says it; (6) line 11 machine-load sentence moves to .claude/rules/hooks.md; (7) shiv-stylisms line 33 \"read by meaning\" cites speak-one-name-per-thing.",
+  "home": "claude-settings CLAUDE.md and output-styles/shiv-stylisms.md",
+  "id": "prose-cs-claude-md",
+  "kind": "decision",
+  "n": 227,
+  "options": [
+    {
+      "gain": "A shorter file every session loads, with no repeats.",
+      "how": "One lane edits the lines; the rule anchors stay.",
+      "key": "a",
+      "label": "Apply all 7",
+      "lose": "The detail now sits one click away in its decision or skill."
+    },
+    {
+      "gain": "Nothing to review.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Leave as is",
+      "lose": "The repeats and the missing Audit: exception stay."
+    }
+  ],
+  "owner": "lane prose-cs-claude-md (session_013NEJL37YxZQHNvkAvYcuL7)",
+  "rank": 27,
+  "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "short": "claude-settings CLAUDE.md: 7 wording fixes",
+  "status": "open",
+  "title": "claude-settings: apply the judges' 7 wording fixes to CLAUDE.md and the output style?",
+  "why": "Recommended: a. Each fix removes a copy or adds a missing exception; no rule's meaning changes."
+}

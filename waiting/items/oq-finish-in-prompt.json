@@ -5,6 +5,11 @@
   "home": "banchi D186 (per-card cost by submitted)",
   "id": "oq-finish-in-prompt",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "a",
+    "note": "Filed in banchi D186, draft PR https://github.com/shivinate7/banchi/pull/1034; closes when it merges."
+  },
   "n": 190,
   "options": [
     {
@@ -22,10 +27,12 @@
       "lose": "Per-card cost stays higher by an unmeasured amount."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "a",
   "rank": 16,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-finish-in-prompt",
   "short": "Finish field in prompt",
-  "status": "open",
-  "title": "banchi: Drop finish from the model prompt or rewrite D186?"
+  "status": "closed",
+  "title": "banchi: Drop finish from the model prompt or rewrite D186?",
+  "why": "Landed: banchi #1041 merged 22:33 CST (https://github.com/shivinate7/banchi/pull/1041)."
 }

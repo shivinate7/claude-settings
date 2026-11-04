@@ -1,25 +1,37 @@
 {
-  "added": "2026-11-03T22:40:00Z",
-  "context": "Goal: filing your rulings never waits on a reviewer for no gain.\nProblem (rule): docs-only-prs-skip-review skips review for a PR that 'touches no rule', but a record that files your ruling may count as touching one, and degen's own merge rule asks a reviewer for every lane, so degen records PRs 370 and 378 waited.\nBased on (ruling): docs-only-prs-skip-review (owner, 2026-09-26): a PR that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. Asked again only because it does not say whether a record that files one of your rulings counts as touching a rule.\nBased on (incident): degen PRs 370 and 378 (degen page item 83).\nDeparts from: docs-only-prs-skip-review, unclear on ruling records \u2014 states when one counts as docs only.",
+  "added": "2026-11-04T04:24:00Z",
+  "context": "Goal: filing your rulings never waits on a reviewer for no gain, and a new ruling never silently contradicts an old one.\nProblem (risk): \"skip review\" means no reviewer agent reads the record before it merges; only the automatic checks run. Today no check compares a newly filed ruling against older rulings, so a ruling given in haste that contradicts one from months ago would merge with no flag to you.\nBased on (ruling): docs-only-prs-skip-review (owner, 2026-09-26): a PR that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass.\nBased on (read): the past-ruling check already flags a new question that repeats or contradicts a past ruling, but it reads questions and reports, not records.\nBased on (incident): degen PRs 370 and 378 waited on a reviewer for ruling records (degen page item 83).\nDeparts from: docs-only-prs-skip-review, unclear on ruling records \u2014 c skips the reviewer and adds a contradiction check on each ruling record.",
   "group": "late-review-fixes",
   "home": "late-review-fixes",
   "id": "docs-only-ruling-records",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:23:29Z",
+    "choice": "none",
+    "note": "Asked: \"what does it mean by skip review, im imagining a concern where a ruling i say in haste contradicts a ruling from so long ago, with no review ... then i dont get that flag?\". Rewritten 22:24 CST: explains skip review; adds c, a contradiction check."
+  },
   "n": 205,
   "options": [
     {
-      "gain": "Ruling records merge on green; a record that changes a rule still gets a reviewer.",
-      "how": "A record that files your ruling counts as docs only when it changes no rule text, guard, check or code. A repo rule may still ask for a reviewer.",
-      "key": "a",
-      "label": "Docs only unless it changes rule text",
-      "lose": "A misfiled ruling in a record merges unread."
+      "gain": "Records merge fast, and no new ruling quietly overrides an old one.",
+      "how": "A ruling record merges on green checks. A check flags any new ruling record whose question already has a record (rule one record per question), so you see the old ruling before the new one lands.",
+      "key": "c",
+      "label": "Skip the reviewer, flag a clash",
+      "lose": "One more check to build; it finds a clash by question, so a clash filed under a different question still needs your eye."
     },
     {
-      "gain": "Every filed ruling is checked against your words.",
-      "how": "Each ruling record gets a fix-check-size read that compares the filed text with your quote.",
+      "gain": "A reader checks every filed ruling.",
+      "how": "Each ruling record gets a short read against your quote and the older records.",
       "key": "b",
-      "label": "A short read of the quote",
-      "lose": "Each ruling record waits on one more read."
+      "label": "A short reviewer read of each record",
+      "lose": "Each ruling record waits on one more read, as degen's did."
+    },
+    {
+      "gain": "Nothing to build.",
+      "how": "A ruling record counts as docs only when it changes no rule text, guard, check or code; no new check.",
+      "key": "a",
+      "label": "As today",
+      "lose": "A ruling that contradicts an old one merges with no flag."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
@@ -28,6 +40,6 @@
   "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
   "short": "Docs-only and ruling records",
   "status": "open",
-  "title": "Does a record that files one of your rulings count as docs only, and skip review?",
-  "why": "The record only files your words; rule text, guards and code still get review."
+  "title": "A record that files your ruling: skip the reviewer, but have a check flag it when it contradicts an older ruling?",
+  "why": "Recommended: c. Your worry is a hasty ruling quietly overriding an old one; a contradiction check catches that without making every record wait for a reviewer."
 }

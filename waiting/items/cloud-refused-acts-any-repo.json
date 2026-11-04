@@ -1,24 +1,36 @@
 {
-  "added": "2026-11-04T00:19:00Z",
-  "context": "Goal: coordinators of child repos can get the acts the cloud refuses done.\nProblem (rule): the standing grant \"Acts the cloud refuses\" in .claude/CLAUDE.md names only the claude-settings coordinator, so a child repo's coordinator must ask you for each act.\nBased on (read): .claude/CLAUDE.md, Standing grants: a local session may set branch protection to the shared form, delete merged branches, and close PRs the coordinator names as replaced or empty (owner, 2026-10-30 16:20 CDT).\nBased on (read): raised by lane one-lane-one-step (PR #1136).\nDeparts from: that grant, which names the claude-settings coordinator only \u2014 any repo's coordinator may ask, for the same three acts.",
+  "added": "2026-11-04T04:18:00Z",
+  "context": "Goal: merged branches and branch protection get handled without you doing each one.\nProblem (rule): a cloud session cannot delete a branch or set branch protection, so a session on your computer does them under your grant, and the grant names claude-settings only.\nBased on (measured): the refusals come from the cloud, not from our rules. At 20:55 CST the cloud's safety check refused triage's delete of a copied banchi branch, and at 22:18 CST the cloud's git proxy dropped the coordinator's branch delete. Branch protection needs GitHub admin rights the cloud lacks.\nBased on (measured): closing a PR is not refused: a cloud session closed claude-settings #1162 through the GitHub tools at 22:16 CST. So the grant's third act, PR closes, is no longer needed.\nBased on (read): your grant \"Acts the cloud refuses\" (2026-10-30 16:20 CDT) in .claude/CLAUDE.md. We wrote the grant; the cloud makes the refusals.\nDeparts from: that grant, which covers three acts for the claude-settings coordinator \u2014 it drops PR closes, and (a) lets any repo's coordinator ask, or (c) goes away.",
   "home": "one-lane-one-step",
   "id": "cloud-refused-acts-any-repo",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:16:42Z",
+    "choice": "none",
+    "note": "Asked: \"theres three acts the cloud refuses and that was made by us, not by the cloud? why? should we remove it\". Rewritten 22:18 CST: the refusals are the cloud's; the grant is ours; c added."
+  },
   "n": 219,
   "options": [
     {
-      "gain": "Child repos clean up merged branches and replaced PRs without asking you each time.",
-      "how": "The grant names each repo's coordinator; the three acts stay the same.",
+      "gain": "Child repos clean up without asking you each time.",
+      "how": "The grant names each repo's coordinator, for branch deletes and branch protection; PR closes leave it.",
       "key": "a",
-      "label": "Widen to each repo's coordinator",
+      "label": "Two acts, any repo's coordinator",
       "lose": "More sessions can ask a session on your computer for these acts."
     },
     {
-      "gain": "Only claude-settings' coordinator can ask.",
-      "how": "No change.",
+      "gain": "Only one coordinator can ask.",
+      "how": "PR closes leave the grant; nothing else changes.",
       "key": "b",
-      "label": "Keep it",
-      "lose": "Each child-repo cleanup waits on your word."
+      "label": "Two acts, claude-settings only",
+      "lose": "Each child-repo branch delete waits on your word."
+    },
+    {
+      "gain": "No session on your computer acts on a coordinator's ask.",
+      "how": "Delete the grant from .claude/CLAUDE.md.",
+      "key": "c",
+      "label": "Remove the grant",
+      "lose": "Every merged-branch delete and protection change in every repo comes to you."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
@@ -27,6 +39,6 @@
   "ref": "lane one-lane-one-step (PR #1136); .claude/CLAUDE.md, Standing grants",
   "short": "Cloud-refused acts, any repo",
   "status": "open",
-  "title": "Should any repo's coordinator be able to ask a session on your computer for the three acts the cloud refuses?",
-  "why": "The three acts are narrow and undoable or low-harm, and the same rule applies in every repo."
+  "title": "The cloud itself refuses two cleanup acts; should a session on your computer do them for claude-settings only, for every repo, or not at all?",
+  "why": "Recommended: a. The refusals are real and still happen, so removing the grant sends every cleanup back to you."
 }

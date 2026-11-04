@@ -5,6 +5,11 @@
   "home": "child-guard-promotion",
   "id": "banchi-armed-hook-copy",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:23:24Z",
+    "choice": "a",
+    "note": "Owner pick a, 22:23 CST. Lane hook-installer-armed-copy builds it (coordinator 22:24 CST)."
+  },
   "n": 208,
   "options": [
     {
@@ -27,7 +32,7 @@
   "rank": 8,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 21",
   "short": "Stale armed hook copy",
-  "status": "open",
+  "status": "closed",
   "title": "Should the shared main-ref hook installer refuse an armed hook copy that is behind main?",
   "why": "The incident cost 4 days unguarded and every repo installs the same hooks."
 }

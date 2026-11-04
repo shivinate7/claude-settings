@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T00:33:00Z",
+  "context": "Goal: a grant typed in one session reaches the session it names.\nProblem (risk): build step 1 (you signed it off as item 152 a) must show whether a hook's allow gets past the auto-mode safety classifier. To prove it, a throwaway session tries acts the classifier refuses today, with a probe hook that allows them. It writes permission rules, so it needs your word. The lane waits on this and does nothing else meanwhile.\nBased on (read): the Plan agent design, 2026-11-03 18:30 CST, plan section \"The gate\", step 1.\nDeparts from: main \u2014 adds a throwaway probe session on branch archive/hook-allow-probe.",
+  "home": "grant-reaches-lanes",
+  "id": "hook-allow-probe",
+  "kind": "decision",
+  "n": 222,
+  "options": [
+    {
+      "gain": "The probe shows whether Design A can work.",
+      "how": "(1) Push branch archive/hook-allow-probe with a project-scope probe hook. (2) Start a child session on it, in auto mode. (3) In the child, arm 1: write a Bash(true) allow rule into the child's own .claude/settings.local.json three times (hook off, on, off). Arm 2: git switch --detach on the child's main mirror, which the pointer guard denies and the hook allows, then git switch main to put it back. (4) A record-only relay that names a merge of a PR that does not exist. Every write ends with the child's container. Cleanup: the child session is archived; the branch stays as an archive.",
+      "key": "a",
+      "label": "Yes, run these acts as written",
+      "lose": "One throwaway session; a refusal may need one grant from you."
+    },
+    {
+      "gain": "No probe acts.",
+      "how": "No probe; the lane reads the Claude Code docs.",
+      "key": "b",
+      "label": "No, read the docs only",
+      "lose": "Whether a hook can skip the classifier stays unmeasured, and the gate build stays blocked."
+    }
+  ],
+  "owner": "lane grant-reaches-lanes (session_013NEJL4NCJj2aZuG9tmNnUA)",
+  "pick": "a",
+  "rank": 22,
+  "ref": "decision grant-reaches-lanes (PR #1049); plan section \"The gate\", step 1; page item 152",
+  "short": "Hook-allow probe",
+  "status": "open",
+  "title": "Run the hook-allow probe for grant-reaches-lanes?",
+  "why": "Every write ends with the child's container, and it is the only way to measure the gate."
+}

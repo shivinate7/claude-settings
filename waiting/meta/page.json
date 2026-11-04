@@ -7,10 +7,12 @@
   },
   "parked": [
     {
+      "id": "banchi-phone-build",
       "note": "parked until you ask for a Banchi build; Banchi feature work, not a claude-settings lane (step d4)",
       "ref": "Banchi phone build (items 14 to 21, 63 to 66)"
     },
     {
+      "id": "windows-live-checks",
       "note": "a session on your Windows PC runs the two checks; step c29 closes when Windows passes",
       "ref": "10 windows-live-checks"
     }

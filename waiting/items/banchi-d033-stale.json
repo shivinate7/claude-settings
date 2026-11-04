@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T05:12:00Z",
+  "context": "Goal: each banchi record governs what the app does today.\nProblem (rule): D33's ruling sentence, \"The four pipeline commands are reachable from a screen\", was written for the four-command pipeline. After #1043 it opens with pricing on #/pricing and with the decisions.json refusal, so it is unclear whether it still governs anything. Whether every step is still reachable is unmeasured.\nBased on (read): lane prose-cuts-banchi, banchi #1043 (review round 3 PASS).\nBased on (read): the outcome D33 protected: no step that spends money or changes data is reachable only from a shell.\nDeparts from: banchi D33 on main \u2014 a rewrites it to today's screens; b retires it.",
+  "home": "banchi D33 (every pipeline step is reachable from a screen)",
+  "id": "banchi-d033-stale",
+  "kind": "decision",
+  "n": 236,
+  "options": [
+    {
+      "gain": "The \"no shell-only step\" outcome keeps a live record, with a measured list.",
+      "how": "A banchi lane lists today's steps, checks each is reachable from a screen, and rewrites D33's opening sentence to that list.",
+      "key": "a",
+      "label": "Rewrite D33 to today's screens",
+      "lose": "One lane."
+    },
+    {
+      "gain": "One less record to keep true.",
+      "how": "A banchi lane deletes D33 and moves any sentence still in force to the record that now owns it.",
+      "key": "b",
+      "label": "Retire D33",
+      "lose": "No record says a money step must have a screen."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "withdrawn",
+  "rank": 3,
+  "ref": "lane prose-cuts-banchi, banchi #1043",
+  "short": "banchi D33: still governs?",
+  "status": "closed",
+  "title": "banchi D33 says every pipeline step is reachable from a screen, but its opening now speaks of today's pricing screen. Rewrite it to today's screens, or retire it?",
+  "why": "Withdrawn 23:13 CST: the #1043 lane found D33 already rules this (runner 9, 23:10 CST). No answer needed."
+}

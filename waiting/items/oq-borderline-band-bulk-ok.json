@@ -5,6 +5,11 @@
   "home": "q_max docs/decisions/a-band-around-eighty-outside-the-tier.md",
   "id": "oq-borderline-band-bulk-ok",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T01:10:47Z",
+    "choice": "b",
+    "note": "this threshold shoild be ocnfigurable not set in stone. Filed in q_max PR #1018 (on #1014); the cut becomes a setting you change. Closes when #1018 merges."
+  },
   "n": 198,
   "options": [
     {
@@ -22,7 +27,7 @@
       "lose": "A row at 80 to 83 batches with no look."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 24,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-borderline-band-bulk-ok",

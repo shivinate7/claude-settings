@@ -1,76 +1,44 @@
 {
-  "added": "2026-11-02T17:57:00Z",
-  "context": "Goal: one page answer starts the lane it approves, with no second click, on the right branch.\nProblem (rule): two records disagree on what a lane is, and the Mac path cost you three clicks and two lanes on the wrong branch.\nBased on (record): lanes-start-as-agents says a lane is an agent the coordinator starts, which needs no click from you.\nBased on (read): in a cloud session, a coordinator starts a lane session on any turn with no card; this coordinator has started more than 30 since Nov 1.\nDeparts from: main lets the two records disagree \u2014 the place a run happens decides: on the Mac a lane is an agent started from the coordinator's own checkout; in the cloud it is a session.",
-  "holds": "Any lane started from a page answer; no lane starts until you pick. A debt record for the second click is filed meanwhile.",
+  "added": "2026-11-04T04:27:00Z",
+  "context": "Goal: the same team of sessions (coordinator, triage, batch runner, lanes) runs all on your Mac or all in the cloud, as one concept.\nProblem (rule): you are right that the shape need not differ. The one real difference measured so far: in the cloud, a coordinator starts a lane session with no card; on the Mac, starting one session from another shows a card you must press, and the card drops the lane's branch. Our records answered that by making a Mac lane an agent instead of a session, which split the meaning of \"lane\".\nBased on (ruling): lanes-start-as-agents (the Mac card cannot be turned off by any setting; the card drops the branch).\nBased on (read): in the cloud this coordinator has started more than 30 lane sessions since Nov 1 with no card.\nDeparts from: lanes-start-as-agents and session-tiers, where a Mac lane is an agent \u2014 a lane is a session everywhere, local and cloud alike.",
   "home": "session-tiers",
   "id": "page-answer-starts-lane",
   "kind": "decision",
-  "links": [
-    {
-      "label": "Coordinator session",
-      "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
-    }
-  ],
+  "lastAnswer": {
+    "at": "2026-11-04T04:26:11Z",
+    "choice": "none",
+    "note": "Asked: \"why do you think i cant have an all local run of coordinator triage batch merger and lane sessions and an all cloud variant of the same concept?\". Rewritten 22:27 CST: one shape everywhere; the only measured difference is the Mac start card."
+  },
   "n": 168,
   "options": [
     {
-      "gain": "No card and the right branch, on the Mac and in the cloud.",
-      "how": "On the Mac, a page answer starts its lane as an agent with its own worktree, cut from the coordinator's checkout, so the coordinator's branch stays the base. In the cloud, a lane session. Every lane brief also opens by creating its branch from the named base.",
+      "gain": "One shape on the Mac and in the cloud; the branch is right even if the card stays.",
+      "how": "A lane is always a session. A lane probe measures whether the Mac card still shows and still drops the branch on today's Claude version; until then, each Mac lane start is one press, and the lane brief sets its own branch first thing.",
       "key": "a",
-      "label": "Agent on the Mac, session in the cloud",
-      "links": [
-        {
-          "label": "Coordinator session",
-          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
-        }
-      ],
-      "lose": "On the Mac a lane ends when the coordinator's session ends, and it shares the Mac's load brake."
+      "label": "Sessions everywhere; probe the Mac card first",
+      "lose": "One press per Mac lane until the card goes."
     },
     {
-      "gain": "Lanes outlive the coordinator.",
-      "how": "At the start of a run, on your word in chat, the coordinator starts idle lane sessions; later page answers reach them by message.",
+      "gain": "No card anywhere.",
+      "how": "The session that reads the page answer starts each lane as a background agent in its own worktree, local and cloud alike.",
       "key": "b",
-      "label": "Idle lane sessions at run start",
-      "links": [
-        {
-          "label": "Coordinator session",
-          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
-        }
-      ],
-      "lose": "The coordinator must guess how many lanes to start; idle sessions wait; a card still drops the branch unless each brief creates its branch."
+      "label": "Agents everywhere",
+      "lose": "A lane ends with the session that started it; cloud lane sessions retire."
     },
     {
-      "gain": "No new tool.",
-      "how": "The coordinator asks for the lane start in chat in the same turn it files the page item.",
+      "gain": "Nothing to change.",
+      "how": "No change: Mac lanes are agents, cloud lanes are sessions.",
       "key": "c",
-      "label": "Ask for the start in chat",
-      "links": [
-        {
-          "label": "Coordinator session",
-          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
-        }
-      ],
-      "lose": "It works only when you answer in chat, not on the page."
-    },
-    {
-      "gain": "No relay of answers.",
-      "how": "Let a session in another account read page answers directly, so no relay is needed.",
-      "key": "d",
-      "label": "Fix the page read across accounts only",
-      "links": [
-        {
-          "label": "Coordinator session",
-          "url": "https://claude.ai/code/session_013NEJL2pASwRjgJDnsvnpNe"
-        }
-      ],
-      "lose": "The account limit is outside the repo; the waiting-data copy in each repo already lets the owning session read answers from git; it does not remove the click."
+      "label": "Keep two meanings",
+      "lose": "\"Lane\" keeps two meanings, which you asked to end."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "a",
   "rank": 1,
   "ref": "decisions session-tiers and lanes-start-as-agents; debt page-answer-second-click",
-  "short": "page answer starts its lane",
+  "short": "What a lane is",
   "status": "open",
-  "title": "How should one page answer start the lane it approves, with no second click and on the right branch?",
-  "why": "Two records disagree. session-tiers (the session shapes) says the coordinator starts lane sessions. lanes-start-as-agents says a lane is a background agent, and a new session starts only on your own words. On the Mac, a session started by another session needs you to press a card, and the card drops the branch. The apartment coordinator took the session path: you pressed three cards, and two lanes started from main instead of the apartment-tv branch."
+  "title": "One shape everywhere: coordinator, triage, batch runner and lane sessions, all local or all cloud. How does a local run start its lane sessions?",
+  "why": "Recommended: a. It gives you the same shape on the Mac as in the cloud today; only the start press differs, and a probe may remove it. The probe must run in a session on your Mac: a cloud lane cannot see the Mac card (lane audit-owner-answers, 22:27 CST)."
 }

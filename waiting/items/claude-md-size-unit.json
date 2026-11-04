@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-04T01:26:00Z",
+  "context": "Goal: every repo's CLAUDE.md holds only what each session there needs, with no fixed number you have to defend.\nProblem (rule): lint/check_claude_md_size.py warns past a copied 200 lines. Lines are the wrong unit: our own CLAUDE.md is 108 lines but 25,354 bytes, because 19 lines run past 300 characters; banchi is 411 lines at about 37.8 KB. A file passes by writing longer lines.\nBased on (read): Claude Code's memory docs today (read 19:24 CST): \"target under 200 lines per CLAUDE.md file. Longer files consume more context and reduce adherence.\" So the number is current, not stale; it is Anthropic's guide, copied into our check.\nBased on (measured): wc on claude-settings CLAUDE.md at main 88266e82: 108 lines, 25,354 bytes, 19 lines over 300 characters.\nDeparts from: lint/check_claude_md_size.py, which warns on a fixed 200-line count \u2014 the check judges content (a line that restates a parent rule, or matters only under one folder) and cites the docs' figure as a pointer, not a gate.",
+  "home": "claude-md-shrink",
+  "id": "claude-md-size-unit",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T01:25:00Z",
+    "choice": "a",
+    "note": "Owner in chat 19:25 CST: \"yeah approved\". Built by workflow claude-md-content-check; ruling lands in decision claude-md-shrink on that branch."
+  },
+  "n": 224,
+  "options": [
+    {
+      "gain": "No number of yours to defend; long lines cannot hide bloat.",
+      "how": "The coordinator's planned check flags a child CLAUDE.md line that restates a parent rule or names only one folder; the size warning stays warn-only, counts bytes too, and links the docs' figure instead of owning a number.",
+      "key": "a",
+      "label": "Judge content, cite the docs' figure",
+      "lose": "A content check is harder to build than a line count."
+    },
+    {
+      "gain": "Simple, and matches Anthropic's stated target.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Keep the 200-line warning",
+      "lose": "Long lines pass it; our own file already does."
+    }
+  ],
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "pick": "a",
+  "rank": 24,
+  "ref": "lint/check_claude_md_size.py; https://code.claude.com/docs/en/memory",
+  "short": "CLAUDE.md size: lines or content",
+  "status": "closed",
+  "title": "Should the CLAUDE.md size check stop counting lines and judge what each line is for?",
+  "why": "The waste is restated and folder-only rules, which a line count cannot see."
+}

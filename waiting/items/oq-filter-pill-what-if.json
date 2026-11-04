@@ -5,6 +5,11 @@
   "home": "q_max docs/decisions/a-filter-shows-only-where-it-changes-something.md",
   "id": "oq-filter-pill-what-if",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:21:00Z",
+    "choice": "a",
+    "note": "Filed in q_max D-675 + debt precon-filters-slot-no-check, draft PR https://github.com/shivinate7/q_max/pull/1014 (code: follow-up lane whatif-drop-price-pill); closes when it merges."
+  },
   "n": 194,
   "options": [
     {
@@ -22,7 +27,7 @@
       "lose": "Your ruling is reversed."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 20,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-filter-pill-what-if",

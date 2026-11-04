@@ -5,6 +5,11 @@
   "home": "grant-reaches-lanes",
   "id": "grant-plan-signoff",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:21:00Z",
+    "choice": "a",
+    "note": "Lane grant-reaches-lanes (PR #1049) files it; closes when it lands."
+  },
   "links": [
     {
       "label": "Draft PR #1049",
@@ -40,7 +45,7 @@
       "lose": "Building waits for the revision."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane grant-reaches-lanes (session_013NEJL4NCJj2aZuG9tmNnUA)",
   "rank": 2,
   "ref": "draft PR #1049, docs/plans/grant-reaches-lanes.md, section 6; roadmap step grant-reaches-lanes",
   "short": "grant plan sign-off",

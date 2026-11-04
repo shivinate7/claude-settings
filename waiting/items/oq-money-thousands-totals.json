@@ -1,34 +1,38 @@
 {
-  "added": "2026-11-03T22:05:00Z",
-  "context": "Goal: No screen shows all digits while another shows thousands.\nProblem (rule): The arbiter ruled that a total band shows in thousands and that every amount code renders does. Several screens draw whole dollars for totals and bands, and the helper's own comment states the whole-dollar rule. No check catches it.\nBased on (read): q_max docs/decisions/money-shows-in-thousands.md:27, :44; src/utils/money.ts:108-109 (main 5bbf10e).\nBased on (read): Dashboard.tsx:2639-2645 and ComparisonScreen.tsx:799 draw whole dollars.\nDeparts from: The ruling says totals show in thousands and the screens show whole dollars \u2014 a lane converts totals and bands, with a check.",
+  "added": "2026-11-04T01:13:00Z",
+  "context": "Goal: Every q_max screen shows money the same way.\nProblem (rule): You ruled that money shows in thousands. Most screens follow it, but the dashboard and the comparison screen show totals to the dollar.\nBased on (read): Dashboard.tsx:2639-2645, ComparisonScreen.tsx:799 (main 5bbf10e).\nBased on (ruling): money-shows-in-thousands.\nDeparts from: the dashboard and comparison totals show whole dollars \u2014 they show thousands, like the rest.",
   "group": "audit-1102-children",
-  "holds": "One conversion lane waits on this answer.",
   "home": "q_max docs/decisions/money-shows-in-thousands.md",
   "id": "oq-money-thousands-totals",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T01:10:48Z",
+    "choice": "none",
+    "note": "i"
+  },
   "n": 195,
   "options": [
     {
-      "gain": "One precision on every screen.",
-      "how": "A lane converts totals and bands to thousands and adds a check.",
+      "gain": "One look on every screen.",
+      "how": "The dashboard and comparison totals switch to thousands.",
       "key": "a",
-      "label": "Build the ruling",
-      "lose": "Totals lose their exact digits on screen."
+      "label": "Thousands everywhere ($1,235K)",
+      "lose": "Totals lose their last three digits on screen."
     },
     {
-      "gain": "No screen work; exact totals.",
-      "how": "Rewrite the record to say totals show whole dollars.",
+      "gain": "Exact totals.",
+      "how": "Totals keep whole dollars; the ruling gains an exception for totals.",
       "key": "b",
-      "label": "Whole dollars stand",
-      "lose": "The ruling you stamped is reversed; the screens differ from a table."
+      "label": "Whole dollars for totals ($1,234,567)",
+      "lose": "Your ruling changes, and totals look different from the rows above them."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "rank": 21,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-money-thousands-totals",
-  "short": "Totals in thousands",
+  "short": "Totals: $1,235K or $1,234,567?",
   "status": "open",
-  "title": "q_max: Build the thousands rule for totals?",
-  "why": "Recommended in the audit report (A)."
+  "title": "q_max: Show totals as $1,235K or as $1,234,567?",
+  "why": "It follows your ruling on every screen."
 }

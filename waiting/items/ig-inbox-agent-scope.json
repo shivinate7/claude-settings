@@ -5,6 +5,11 @@
   "home": "degen docs/decisions/instagram-reader.md",
   "id": "ig-inbox-agent-scope",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:21:00Z",
+    "choice": "a",
+    "note": "Filed in degen instagram-reader, draft PR https://github.com/shivinate7/degen/pull/422; closes when it merges."
+  },
   "n": 201,
   "options": [
     {
@@ -22,7 +27,7 @@
       "lose": "The inbox read may break."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 27,
   "ref": "deep audit 1102, degen homes; coordinator message 2026-11-03 15:55 CST, ig-inbox-agent-scope",

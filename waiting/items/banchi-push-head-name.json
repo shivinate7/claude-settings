@@ -5,6 +5,11 @@
   "home": "child-guard-promotion",
   "id": "banchi-push-head-name",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:23:24Z",
+    "choice": "a",
+    "note": "Owner pick a, 22:23 CST. Lane push-guard-asks builds it (coordinator 22:24 CST)."
+  },
   "n": 206,
   "options": [
     {
@@ -27,7 +32,7 @@
   "rank": 6,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 5; step push-head-upstream-name",
   "short": "Push HEAD to another name",
-  "status": "open",
+  "status": "closed",
   "title": "Should the shared push guard ask when git push origin HEAD lands on a branch other than the upstream?",
   "why": "The incident is real and the mistake is not banchi-specific."
 }

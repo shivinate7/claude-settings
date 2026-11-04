@@ -26,7 +26,7 @@
   "rank": 16,
   "ref": "ios-adblock CI-hygiene lane session_013NEJL485VByFJqzsMRBr5M; ios-adblock project.yml (XcodeGen device family 1,2)",
   "short": "ios-adblock on iPad?",
-  "status": "open",
+  "status": "closed",
   "title": "ios-adblock: does the app ship for iPad?",
-  "why": "No iPad test runs today, and the ios-apps standard tests what ships; dropping iPad closes the gap with no CI cost."
+  "why": "Landed: ios-adblock #145 merged 22:44 CST (https://github.com/shivinate7/ios-adblock/pull/145)."
 }

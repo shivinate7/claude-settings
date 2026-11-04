@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-04T00:27:00Z",
+  "context": "Goal: a grant you type in one session reaches the session it names.\nProblem (rule): the gate allows only owner messages from clients whose fields it has measured; only the desktop app is measured, so a grant typed on the web or phone does nothing. Only you can type from your own clients.\nBased on (read): plan section 3, Design A step 5 (PR #1049).\nDeparts from: main \u2014 adds a gate that reads the client fields of your message.",
+  "home": "grant-reaches-lanes",
+  "id": "grant-client-fields-test",
+  "kind": "decision",
+  "n": 221,
+  "options": [
+    {
+      "gain": "Grants work from every client.",
+      "how": "When lane grant-reaches-lanes asks, type the one line it gives you in its session from the claude.ai web app, then from the phone app.",
+      "key": "a",
+      "label": "Type two test lines",
+      "links": [
+        {
+          "label": "claude.ai/code (web app)",
+          "url": "https://claude.ai/code"
+        }
+      ],
+      "lose": "Two typed lines."
+    },
+    {
+      "gain": "Nothing to do.",
+      "how": "The gate stays measured on the desktop app only.",
+      "key": "b",
+      "label": "Desktop only for now",
+      "lose": "Grants typed on the web or phone do nothing."
+    }
+  ],
+  "owner": "lane grant-reaches-lanes (session_013NEJL4NCJj2aZuG9tmNnUA)",
+  "pick": "a",
+  "rank": 21,
+  "ref": "decision grant-reaches-lanes (PR #1049), plan section 3, Design A step 5; page item 152",
+  "short": "Grant test: web and phone",
+  "status": "open",
+  "title": "Type two test lines, one from the claude.ai web app and one from the phone app, so grants work from every client?",
+  "why": "Two lines once, and grants then work wherever you type them."
+}

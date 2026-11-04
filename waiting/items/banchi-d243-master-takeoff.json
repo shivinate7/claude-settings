@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-04T05:12:00Z",
+  "context": "Goal: you can always answer \"what have I asked for this card over time\" (D243's outcome).\nProblem (rule): D243 says \"There is no fourth writer\" of a price. server/send_routes.py's `_master_take_off` writes a live price and records no posting, so those prices drop out of the history. How many prices it has posted is unmeasured. After #1043, D243 says so, and no debt holds it.\nBased on (read): lane prose-cuts-banchi, banchi #1043 (review round 3 PASS).\nDeparts from: banchi main, where the master take-off records no posting \u2014 a records it; b narrows D243; c logs a debt only.",
+  "home": "banchi D243 (every posted price is recorded once)",
+  "id": "banchi-d243-master-takeoff",
+  "kind": "decision",
+  "n": 237,
+  "options": [
+    {
+      "gain": "Every posted price is in the history, as D243 promised.",
+      "how": "A banchi lane makes `_master_take_off` call `Postings.record()` at the point it writes the price, with a red test first.",
+      "key": "a",
+      "label": "Fix the code: record the posting",
+      "lose": "One code lane."
+    },
+    {
+      "gain": "No code change.",
+      "how": "D243 says the master take-off is outside the history.",
+      "key": "b",
+      "label": "Narrow D243",
+      "lose": "Prices posted by the master take-off are lost from the history for good."
+    },
+    {
+      "gain": "No work now.",
+      "how": "Write a debt record; fix later.",
+      "key": "c",
+      "label": "A debt only",
+      "lose": "Each day's master take-off prices are lost meanwhile; D243 calls this history perishable."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "lane prose-cuts-banchi, banchi #1043; server/send_routes.py _master_take_off",
+  "short": "banchi D243: a 4th price writer",
+  "status": "open",
+  "title": "banchi: the master take-off writes a live price and records no posting, against D243. Fix the code, narrow D243, or log a debt?",
+  "why": "Recommended: a. D243 says each unrecorded posting is lost for good, so a later fix cannot get them back."
+}

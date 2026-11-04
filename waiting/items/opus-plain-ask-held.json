@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-04T03:58:00Z",
+  "context": "Goal: your plain \"use Opus\" message lifts the model cap with no override words (your pick at 19:47 CST).\nProblem (risk): the third review found the build lets text you did not type grant Opus to every role for 2 hours. A message that starts a new session, or a scheduled reminder, counts as your turn, and the judge said yes to 3 of 10 Claude-written texts. The cause: the override code counts `/effort` command records as your turns. The change is parked until you decide.\nBased on (measured): third review of the build, at its latest commit 2954de20 (21:56 CST).\nBased on (ruling): roles-review-cap-three: a change held after its third review waits for your word.\nDeparts from: main, where Opus is lifted only by `opus 2h` or `override` \u2014 your plain ask also lifts it.",
+  "home": "decision owner-override",
+  "id": "opus-plain-ask-held",
+  "kind": "decision",
+  "n": 225,
+  "options": [
+    {
+      "gain": "The plain ask ships with no hole.",
+      "how": "A fix lane makes the override code count only messages you typed, not session starts, reminders or command records. Then one fresh review.",
+      "key": "a",
+      "label": "Fix the hole, then one more review",
+      "lose": "One more lane before it works."
+    },
+    {
+      "gain": "The plain ask works tonight.",
+      "how": "The batch runner merges the build now.",
+      "key": "b",
+      "label": "Merge as it is",
+      "lose": "A new session's first message or a reminder can raise every role to Opus for 2 hours."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "The lane closes; main keeps the keyword forms only.",
+      "key": "c",
+      "label": "Drop it",
+      "lose": "You keep typing `opus 2h` when your plain words already said it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 25,
+  "ref": "lane opus-plain-ask (session_013NEJL3hjX4qVEjikwaYF5b), branch opus-plain-ask head 2954de20",
+  "short": "Plain Opus ask held",
+  "status": "open",
+  "title": "Your plain \"use Opus\" message: fix the hole first, merge as it is, or drop it?",
+  "why": "Recommended: a. The plain ask still ships, without letting non-owner text raise every role to Opus."
+}

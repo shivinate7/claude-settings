@@ -1,25 +1,37 @@
 {
-  "added": "2026-11-03T22:47:00Z",
-  "context": "Goal: a triage session on your Mac does triage's work, roadmap pushes included, as cloud triage does.\nProblem (rule): only a cloud session's tags prove its tier today, so a Mac session cannot prove it is triage and the guards refuse its roadmap pushes.\nBased on (read): coordinator asked you in chat at 16:34 CST; no answer by 16:46 CST.\nBased on (read): owner words today are override and opus, typed by you, which Claude cannot write.\nDeparts from: main, where only cloud tags prove a tier \u2014 adds a third owner word, tier triage.",
+  "added": "2026-11-04T04:22:00Z",
+  "context": "Goal: a triage session on your Mac does triage's work, roadmap pushes included, as cloud triage does.\nProblem (rule): it is not a feature we chose for the cloud. A guard proves a session's tier from that session's own service record, and only cloud sessions carry tags there; the coordinator sets them, and Claude inside the session cannot change them. A Mac session you start has no tag store, so nothing can prove its tier, and the guard refuses its roadmap push.\nBased on (read): the guard reads tags from get_session; only owner-typed words such as override and opus are proof Claude cannot forge.\nDeparts from: main, where only cloud tags prove a tier \u2014 a adds an owner word; b adds a tier file only your computer writes.",
   "group": "local-triage-tier-proof",
   "home": "local-triage-tier-proof",
   "id": "local-triage-tier-word",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:20:46Z",
+    "choice": "none",
+    "note": "Asked: \"why is this a cloud exclusive feature?\". Rewritten 22:22 CST: explains why only the cloud tag is proof."
+  },
   "n": 213,
   "options": [
     {
-      "gain": "Mac triage works like cloud triage, and only you can grant the tier.",
+      "gain": "Mac triage pushes the roadmap like cloud triage.",
       "how": "You type 'tier triage' in a Mac session to mark it triage; 'tier off' ends it. It is stored in a state folder Claude cannot write.",
       "key": "a",
       "label": "Owner word 'tier triage'",
-      "lose": "One more word to remember and type."
+      "lose": "One more word to remember."
     },
     {
-      "gain": "No new owner word.",
-      "how": "Mac triage hands each roadmap push to cloud triage.",
+      "gain": "No word to type each time.",
+      "how": "The Mac session reads its tier from a file that only your computer's setup writes, never Claude.",
       "key": "b",
+      "label": "A tier file your computer writes",
+      "lose": "A setup step on each Mac, and a file to keep current."
+    },
+    {
+      "gain": "Nothing to build.",
+      "how": "Mac triage hands each roadmap push to cloud triage.",
+      "key": "c",
       "label": "No fix",
-      "lose": "Mac triage waits on a cloud session for every push."
+      "lose": "Mac triage depends on a cloud triage being up."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
@@ -28,6 +40,6 @@
   "ref": "step local-triage-tier-proof; lane session_013NEJL14PQN4dF1YxDt4yEQ",
   "short": "Mac triage tier word",
   "status": "open",
-  "title": "Should you type 'tier triage' to mark a session on your Mac as triage, so it can push the roadmap?",
-  "why": "It keeps the tier in your hands, the same way override and opus are."
+  "title": "A Mac session cannot prove it is triage, because only the cloud attaches a tag Claude cannot fake: add your 'tier triage' word, or keep roadmap pushes in the cloud?",
+  "why": "Recommended: a. It gives a Mac session the same proof the cloud's tag gives, from words only you can type."
 }

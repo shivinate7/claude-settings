@@ -2,9 +2,14 @@
   "added": "2026-11-02T19:45:00Z",
   "context": "Goal: one writing standard in every repo.\nProblem (rule): the child repos still require STE, and work in another repo needs your word.\nBased on (ruling): your 13:22 CST pick b, \"drop STE everywhere\".\nBased on (read): q_max CLAUDE.md \"Language standard\" section; degen CLAUDE.md rule prose-is-ste.\nDeparts from: each child CLAUDE.md that requires STE \u2014 points at rule output-write-in-ste instead.",
   "holds": "Only the child repos' STE lines; #1105 goes ahead without it.",
-  "home": "ste-child-repos",
+  "home": "child-claude-md-dedupe",
   "id": "ste-child-repos",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "a",
+    "note": "more importantly why do those repos have their own claude md thst holds a lot of repetition? Lane child-claude-md-dedupe surveys that first."
+  },
   "links": [
     {
       "label": "Draft PR #1105",
@@ -40,7 +45,7 @@
       "lose": "The child repos keep a rule the parent dropped."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane child-claude-md-dedupe (session_013NEJL3kSVHoSKgF2rJbbB4)",
   "rank": 3,
   "ref": "decision plain-prose-lint; draft PR #1105; child repos q_max, banchi, degen, joyous",
   "short": "STE in child repos",

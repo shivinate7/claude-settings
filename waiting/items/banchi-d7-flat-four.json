@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-04T04:36:00Z",
+  "context": "Goal: banchi's decisions argue from facts that are true today.\nProblem (rule): your pick 230 b keeps D7's value-band argument as an open question, and the lane kept the line \"So the flat 4 stands\" with it, but you retired the standing cap of 4, so that line states a dead fact.\nBased on (ruling): 230 b (22:29 CST).\nBased on (read): the lane's note on banchi draft PR #1044 (head b2a27b0).\nDeparts from: banchi D7 \u2014 option a deletes \"So the flat 4 stands\".",
+  "home": "banchi D7",
+  "id": "banchi-d7-flat-four",
+  "kind": "decision",
+  "n": 234,
+  "options": [
+    {
+      "gain": "D7 states no retired cap.",
+      "how": "A small banchi lane deletes \"So the flat 4 stands\"; the value-band question stays open.",
+      "key": "a",
+      "label": "Drop the line",
+      "lose": "One small lane."
+    },
+    {
+      "gain": "No more edits.",
+      "how": "No change; #1044 is already on main.",
+      "key": "b",
+      "label": "Keep it inside the open question",
+      "lose": "D7 still reads as if the cap of 4 stands."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 230 b; banchi #1045 merged #1044 at 22:56 CST with the line kept",
+  "short": "banchi D7: flat 4 line",
+  "status": "open",
+  "title": "banchi D7 still says \"So the flat 4 stands\": drop that line too?",
+  "why": "Recommended: a. An open question may stay open, but it should not state a cap you retired as current."
+}

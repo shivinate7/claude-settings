@@ -5,6 +5,11 @@
   "home": "q_max docs/decisions/d-017-review-style-targeted-invariant-regression-not-generic.md",
   "id": "oq-d017-review-style",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T01:10:47Z",
+    "choice": "a",
+    "note": "Filed in q_max PR #1018; closes when it merges."
+  },
   "n": 199,
   "options": [
     {
@@ -22,7 +27,7 @@
       "lose": "Time spent on a measurement."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 25,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-d017-review-style",

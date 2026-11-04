@@ -1,14 +1,14 @@
 {
-  "added": "2026-11-02T05:33:00Z",
-  "context": "Goal: banchi's CLAUDE.md under its size target, and Codex still reads every rule Claude reads.\nProblem (rule): Codex does not read the folder rule files, and the fix now in PR #1005 is a generated file, which your ruling that Codex reads the same rules forbids (\"the fix is not a sync script\"), so only you can choose.\nBased on (read): main's CLAUDE.md is 37,613 bytes; on PR #1005 it is 28,752. The generated file for Codex is 39,285 bytes, over Codex's default 32 KB limit.\nBased on (read): Codex reads AGENTS.md files from the repo root down to the folder it runs in, so a folder's own AGENTS.md is read there.\nDeparts from: main, where Codex's AGENTS.md is a link to CLAUDE.md with every rule in one file \u2014 the rules split by folder, and Codex reads them through links placed in each folder.\nAnswer to your note \"why is CLAUDE.md splitting\" (coordinator, 2026-11-03 15:50 CST): banchi #1005 moves the CLAUDE.md sections that matter under one folder into path-scoped rules (rule tokens-folder-rules-load-by-path), so each session loads only what it needs. The pick is how Codex sessions still see those rules: option A, a per-folder AGENTS.md link (recommended); option B, one generated root AGENTS.md; option C, drop the split.",
+  "added": "2026-11-04T01:14:00Z",
+  "context": "Answer to your note \"have we first even reviewed banchi's claude md?\" (19:11 CST): yes. Lane child-claude-md-dedupe reviewed it in banchi #1036, which is reviewed and with the batch runner. It removed only the copies of parent rules, 13 lines (411 down to 398, 37,883 down to 36,852 bytes). The other ~365 lines are banchi's own rules. The shared size check warns past 200 lines (lint/check_claude_md_size.py), so the split is still needed after the review, and #1005 goes on top of #1036.\nBased on (measured): banchi CLAUDE.md is 411 lines on main and 398 on the #1036 head fac669e4 (lane child-claude-md-dedupe, 19:12 CST).\nGoal: banchi's CLAUDE.md under its size target, and Codex still reads every rule Claude reads.\nProblem (rule): Codex does not read the folder rule files, and the fix now in PR #1005 is a generated file, which your ruling that Codex reads the same rules forbids (\"the fix is not a sync script\"), so only you can choose.\nBased on (read): main's CLAUDE.md is 37,613 bytes; on PR #1005 it is 28,752. The generated file for Codex is 39,285 bytes, over Codex's default 32 KB limit.\nBased on (read): Codex reads AGENTS.md files from the repo root down to the folder it runs in, so a folder's own AGENTS.md is read there.\nDeparts from: main, where Codex's AGENTS.md is a link to CLAUDE.md with every rule in one file \u2014 the rules split by folder, and Codex reads them through links placed in each folder.\nAnswer to your note \"why is CLAUDE.md splitting\" (coordinator, 2026-11-03 15:50 CST): banchi #1005 moves the CLAUDE.md sections that matter under one folder into path-scoped rules (rule tokens-folder-rules-load-by-path), so each session loads only what it needs. The pick is how Codex sessions still see those rules: option A, a per-folder AGENTS.md link (recommended); option B, one generated root AGENTS.md; option C, drop the split.",
   "holds": "banchi PR #1005, held at its current commit.",
   "home": "banchi D135",
   "id": "banchi-codex-rules",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-02T06:56:26.205Z",
-    "choice": "none",
-    "note": "why ks claide md splittomg"
+    "at": "2026-11-04T01:16:48Z",
+    "choice": "a",
+    "note": "Taken by the coordinator at 19:16 CST: a link file (AGENTS.md) in each folder, the only option that keeps D135 (no sync script). Undoable; you can reopen it."
   },
   "links": [
     {
@@ -59,11 +59,12 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
   "rank": 2,
   "ref": "banchi PR #1005; banchi decision D135 (Codex reads the same rules as Claude)",
-  "reply": "Why split: Claude Code loads CLAUDE.md whole into every session, so every line costs reading time in every banchi session. The shared size check warns past 200 lines, and banchi's is 37.6 KB. The split moves rules that matter only in one folder (app, server, pipeline, codes) into files Claude loads only when it reads that folder. Still open: pick a, b or c, or say not to split.",
+  "reply": "Yes, reviewed: banchi #1036 removes the 13 lines that copied shared rules (411 to 398 lines). The ~365 left are banchi's own, still past the 200-line check, so the split question stands: pick a, b or c.",
   "short": "banchi Codex rules",
-  "status": "open",
+  "status": "closed",
   "title": "banchi: when CLAUDE.md is split by folder, how should Codex read the moved rules?",
   "why": "banchi's CLAUDE.md is over its size target. PR #1005 moves the rules that matter only in one folder into separate rule files that Claude loads by path. Codex does not read those files, and your earlier ruling says Codex must read the same rules, without a sync script."
 }

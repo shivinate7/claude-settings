@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-04T04:35:00Z",
+  "context": "Goal: your plain \"use Opus\" message does what you meant, with no extra words.\nProblem (goal): you said the scope must come from context: the judge reads your messages before and after the ask, and grants Opus only to the agents that work is for.\nBased on (read): decision owner-override: `opus 2h` lifts the Opus refusal for every role for 2 hours; `opus builders 2h` for one role.\nBased on (ruling): your pick 225 a (22:31 CST): the plain ask ships once its hole is fixed.\nDeparts from: main, where only the keyword sets the scope \u2014 a plain ask gets the scope its context names.",
+  "home": "decision owner-override",
+  "id": "opus-plain-ask-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:30:51Z",
+    "choice": "none",
+    "note": "Said: \"it should just have the context to know what part needs opus agents from the messages before and after\". Rewritten 22:32 CST: the scope comes from context."
+  },
+  "n": 226,
+  "options": [
+    {
+      "gain": "Opus goes only where you meant it, with no keyword.",
+      "how": "The judge reads your ask with your messages before and after it, and names the work it covers, such as \"the prose-governance workflow's judges\". The grant covers spawns for that work only, until it ends. When the context names no work, the session asks you in one line.",
+      "key": "a",
+      "label": "Scope from context, ask when unclear",
+      "lose": "A rare one-line ask when your words name no work."
+    },
+    {
+      "gain": "Never asks.",
+      "how": "As a, but when the context names no work, the ask acts like `opus 2h`.",
+      "key": "b",
+      "label": "Scope from context, fall back to every role",
+      "lose": "A vague ask lifts Opus for every agent for 2 hours."
+    },
+    {
+      "gain": "Never asks, and never grants wider than you meant.",
+      "how": "As a, but when the context names no work, nothing is granted and nothing is asked; the agents run their role's model.",
+      "key": "c",
+      "label": "Scope from context, grant nothing when unclear (coordinator reading)",
+      "lose": "A vague ask quietly does nothing."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 26,
+  "ref": "lane opus-plain-ask (session_013NEJL3hjX4qVEjikwaYF5b)",
+  "short": "Plain Opus ask: which roles",
+  "status": "open",
+  "title": "Your plain Opus ask: the judge reads the messages around it to know which agents run Opus. Build it that way?",
+  "why": "Recommended: a. It does what you said, and a vague ask costs you one line instead of a wide grant. Meanwhile lane opus-plain-ask builds only the 225 a fix and holds the scope until you pick."
+}

@@ -5,6 +5,11 @@
   "home": "banchi D210 (rescue is press in words)",
   "id": "oq-raw-machine-text",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "a",
+    "note": "Filed in banchi D210, draft PR https://github.com/shivinate7/banchi/pull/1034; closes when it merges."
+  },
   "n": 189,
   "options": [
     {
@@ -22,10 +27,12 @@
       "lose": "The disclosure stops helping when something fails."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "a",
   "rank": 15,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-raw-machine-text",
   "short": "Machine text in details",
-  "status": "open",
-  "title": "banchi: Make D269's closed disclosure the rule everywhere?"
+  "status": "closed",
+  "title": "banchi: Make D269's closed disclosure the rule everywhere?",
+  "why": "Landed: banchi #1041 merged 22:33 CST (https://github.com/shivinate7/banchi/pull/1041)."
 }

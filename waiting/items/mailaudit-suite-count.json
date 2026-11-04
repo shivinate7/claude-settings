@@ -5,6 +5,11 @@
   "home": "child-guard-promotion",
   "id": "mailaudit-suite-count",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:20:46Z",
+    "choice": "a",
+    "note": "Owner pick a, 22:20 CST: keep mailaudit's count check. No work needed (coordinator 22:21 CST)."
+  },
   "n": 211,
   "options": [
     {
@@ -27,7 +32,7 @@
   "rank": 11,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 6, mailaudit row 12",
   "short": "mailaudit suite count",
-  "status": "open",
+  "status": "closed",
   "title": "Keep or delete mailaudit's check that its published test count is right?",
   "why": "It already caught real errors and the rule asks for it."
 }

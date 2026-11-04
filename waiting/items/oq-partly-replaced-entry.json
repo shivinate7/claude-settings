@@ -6,6 +6,11 @@
   "home": "q_max docs/decisions/a-retired-decision-is-deleted.md",
   "id": "oq-partly-replaced-entry",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:21:00Z",
+    "choice": "a",
+    "note": "Filed in q_max D-570, draft PR https://github.com/shivinate7/q_max/pull/1014; closes when it merges."
+  },
   "n": 196,
   "options": [
     {
@@ -23,7 +28,7 @@
       "lose": "D-492 and the cull contradict the new rule."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 22,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-partly-replaced-entry",

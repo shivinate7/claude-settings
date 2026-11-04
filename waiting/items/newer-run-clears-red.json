@@ -2,9 +2,14 @@
   "added": "2026-11-02T17:18:00Z",
   "context": "Goal: a newer green run on main clears an older red one, so banchi pull request #1003 can merge.\nProblem (rule): the decision no-merge-onto-red-main (the merge tool refuses a merge while main's latest run is red) says a run of another kind clears a red run only if it passed every job of the red run; banchi's alarm job runs only when another job failed, so no green run ever passes it, and only the next green nightly run clears a red nightly.\nBased on (ruling): no-merge-onto-red-main already lets a newer run of another kind clear a red one, but only when it passed every job of the red run; you are asked again because that one condition blocks banchi pull request #1003.\nBased on (measured): on banchi's commit 471dc268, the nightly run failed the design check and the all-jobs check; the hand-started run passed both. Only the alarm job, which ran in the red run because a job failed, blocks the clear.\nBased on (read): an alarm job that runs only on failure is a shape any repo can have, so b and c change the merge tool for every repo, not for banchi alone; they still carry the widening line because they loosen what the shared tool accepts.\nDeparts from: main requires every job of the red run to pass in the newer run \u2014 (b) and (c) require only the jobs that did not pass.\nNote, Nov 2 12:58 CST: banchi pull request #1003 has no session to merge it now, since the batch runner that held it wound down. The next session merges it once you answer this item and the nightly run passes.",
   "holds": "banchi pull request #1003, held by a batch runner; a work lane drafts the merge-tool change and merges nothing before your word.",
-  "home": "no-merge-onto-red-main",
+  "home": "red-main-same-sha",
   "id": "newer-run-clears-red",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:13:01Z",
+    "choice": "none",
+    "note": "One-time re-run, as you asked. Closed 22:33 CST: banchi push run 41593550249 and nightly run 41623713142 both green on attempt 2 (read on GitHub). banchi main reads green."
+  },
   "links": [
     {
       "label": "Lane handoff",
@@ -55,11 +60,12 @@
       "widens": true
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane red-main-same-sha (session_013NEJL3r8JbyJKhCzBoC6sF)",
+  "pick": "one-time re-run",
   "rank": 1,
   "ref": "decision no-merge-onto-red-main; step red-main-same-sha-green; banchi runs 41436198024 (red nightly) and 41483723188 (green, by hand); lane handoff handoffs/red-main-same-sha-green.md on branch handoff/red-main-same-sha-green at 243f9b62",
   "short": "newer green run clears a red",
-  "status": "open",
+  "status": "closed",
   "title": "Which jobs must a newer green run on main repeat to clear an older red run?",
-  "why": "banchi pull request #1003 is blocked by a nightly run on banchi main that failed one timing test. A run started by hand on the same commit passed every job it ran. The merge tool's rule says the newer run must pass every job of the red run, and a run started by hand never runs banchi's nightly-only alarm job, so it can never clear a nightly red."
+  "why": "Done: both banchi re-runs green (22:33 CST); banchi #1041 merged 22:33 CST."
 }

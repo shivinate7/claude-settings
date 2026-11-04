@@ -1,40 +1,51 @@
 {
-  "added": "2026-11-03T22:52:00Z",
-  "context": "Goal: every guard that runs protects work you actually do, with one home per guard.\nProblem (rule): banchi keeps Codex halves of four guards (shared-tree, silent-write, kill-by-name, and their tokenizer); claude-settings ships no Codex hooks, so these have no shared home and drift from the Claude Code copies.\nBased on (read): plan, banchi rows 1, 7, 8, 9: the Codex half has no cs runner (banchi D135); the tokenizer has drifted from hooks/guard_core.py.\nBased on (incident): banchi 2026-09-06 checkout lost about 240 lines; 2026-09-09 and 09-10 pkill -f hit port 8000 (rows 1, 8), caught today by the Claude Code copies.\nDeparts from: banchi main, which keeps the Codex halves \u2014 option a deletes them, option b adds Codex hooks to claude-settings.",
+  "added": "2026-11-04T04:22:00Z",
+  "context": "Goal: banchi keeps only guards for tools you actually use, with one home per guard.\nProblem (rule): a past banchi session added a setup for OpenAI's Codex coding tool (banchi decision D135, \"Codex reads the same rules\"): a .codex folder of hooks, AGENTS.md and .agents links, and Codex halves of four guards. You never used it, and these copies drift from the Claude Code guards.\nBased on (read): lane banchi-drop-codex-guards, read only, 22:26 CST: deleting all of it loses nothing Claude Code runs. One catch: the reset --merge/--keep check lives only in banchi's guard-shell.py, so it moves to the shared guard first and the delete waits for that.\nBased on (read): the same mistakes are caught today by the claude-settings Claude Code guards.\nDeparts from: banchi main, which keeps a Codex setup \u2014 a deletes it and rewrites D135; d deletes only the Codex-only guard clauses.",
   "group": "child-guard-questions",
   "home": "child-guard-promotion",
   "id": "banchi-codex-guards",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:20:46Z",
+    "choice": "none",
+    "note": "Asked: \"ive never used banchi in codex and had no idea that existed\". Rewritten 22:22 CST. The coordinator's delete lane banchi-drop-codex-guards is paused until you pick (22:24 CST)."
+  },
   "n": 214,
   "options": [
     {
-      "gain": "One home per guard; no drifting copy.",
-      "how": "A banchi lane deletes the Codex-only parts of rows 1, 7, 8 and the tokenizer (row 9); the Claude Code guards stay in claude-settings.",
+      "gain": "No guard or link for a tool you never run; nothing to drift.",
+      "how": "After the reset --merge/--keep check moves to the shared guard, a banchi lane deletes .codex/hooks.json, the AGENTS.md and .agents links, the Codex-only guard clauses with their checks and tests, and rewrites D135.",
       "key": "a",
-      "label": "Delete the Codex halves",
-      "lose": "A Codex session in banchi runs with no guard."
+      "label": "Delete all of banchi's Codex setup",
+      "lose": "If you try Codex later, it starts with no guards or rules link."
     },
     {
-      "gain": "Codex sessions get the same guards in every repo.",
-      "how": "claude-settings ships Codex hooks that call the shared guards; banchi then deletes its copies.",
+      "gain": "Less to delete; Codex could still read the rules.",
+      "how": "The same lane deletes the Codex-only guard clauses and their tests; the AGENTS.md and .agents links stay.",
+      "key": "d",
+      "label": "Delete only the Codex-only guards",
+      "lose": "The links stay for a tool you do not use."
+    },
+    {
+      "gain": "Codex is guarded in every repo.",
+      "how": "claude-settings ships Codex hooks that call the shared guards; banchi deletes its copies.",
       "key": "b",
       "label": "Port to claude-settings",
-      "lose": "A new Codex runner to build and keep."
+      "lose": "Builds and keeps up hooks for a tool you do not use."
     },
     {
-      "gain": "No work now.",
+      "gain": "No work.",
       "how": "No change.",
       "key": "c",
       "label": "Keep in banchi",
-      "lose": "The copies keep drifting from the shared guards."
+      "lose": "The copies keep drifting."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
   "rank": 14,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 1, banchi rows 1, 7, 8, 9",
   "short": "banchi Codex-only guards",
   "status": "open",
-  "title": "banchi's guards that run only under Codex: delete them, or port them to claude-settings?",
-  "why": "Sessions run in Claude Code; a guard copy for a tool you do not use only drifts."
+  "title": "You never use banchi in Codex: delete banchi's Codex setup and its Codex-only guards?",
+  "why": "Recommended: a. Nothing you run uses them, and the Claude Code guards already cover the same mistakes."
 }

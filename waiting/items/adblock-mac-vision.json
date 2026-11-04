@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-04T04:36:00Z",
+  "context": "Goal: the app ships only to the devices you named.\nProblem (goal): your pick 216 a set iPhone only, but Mac and Vision Pro \"Designed for iPhone\" availability stays at Xcode's default (on), and no ruling covers it.\nBased on (ruling): 216 a (22:20 CST): iPhone only.\nBased on (read): lane adblock-iphone-only, ios-adblock #144.\nDeparts from: ios-adblock main, where Mac and Vision Pro may run the iPhone app \u2014 option b turns both off.",
+  "home": "ios-adblock project.yml",
+  "id": "adblock-mac-vision",
+  "kind": "decision",
+  "n": 233,
+  "options": [
+    {
+      "gain": "No work; the app runs on Apple Silicon Macs and Vision Pro.",
+      "how": "No change in #144.",
+      "key": "a",
+      "label": "Leave on (Xcode default)",
+      "lose": "Those devices are untested."
+    },
+    {
+      "gain": "What ships is what CI tests.",
+      "how": "#144 also turns off Mac and Vision Pro availability.",
+      "key": "b",
+      "label": "Turn both off",
+      "lose": "No Mac or Vision Pro install."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 216 a; ios-adblock #144, lane adblock-iphone-only",
+  "short": "adblock: Mac and Vision Pro",
+  "status": "open",
+  "title": "ios-adblock: turn off the iPhone app on Apple Silicon Macs and Vision Pro too?",
+  "why": "Recommended: b. It matches 216's goal: every shipped device is tested. Meanwhile #144 goes on in its batch."
+}

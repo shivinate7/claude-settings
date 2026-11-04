@@ -5,6 +5,11 @@
   "home": "degen CLAUDE.md",
   "id": "native-check-ui-tests",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:21:00Z",
+    "choice": "a",
+    "note": "Filed in degen CLAUDE.md rule tests-once-per-batch, draft PR https://github.com/shivinate7/degen/pull/422 (Makefile change: follow-up lane native-check-ui-tests); closes when it merges."
+  },
   "n": 200,
   "options": [
     {
@@ -22,7 +27,7 @@
       "lose": "The UI goes unchecked at the gate."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
   "pick": "a",
   "rank": 26,
   "ref": "deep audit 1102, degen homes; coordinator message 2026-11-03 15:55 CST, native-check-ui-tests",

@@ -5,6 +5,11 @@
   "home": "banchi D259 (boxes show names only)",
   "id": "oq-box-name-only",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T00:16:06Z",
+    "choice": "b",
+    "note": "Your note: we dont have screen checke on banchi? Answer: banchi has two checks that read every drawn screen (app/tests/text-checks.spec.ts and copy-checks.spec.ts, one sweep in routeSweep.ts), but neither reads box numbers; the box-number check (R2-box-number in scripts/kit-adoption.mjs) reads source only. The fix lane extends the sweep. Filed in banchi D259, draft PR https://github.com/shivinate7/banchi/pull/1034; closes when it merges."
+  },
   "n": 186,
   "options": [
     {
@@ -22,10 +27,12 @@
       "lose": "Four screen changes and a screen check."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane audit-owner-answers (session_013NEJKzSWu5KB6pXe3Spj2Q)",
+  "pick": "b",
   "rank": 12,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-box-name-only",
   "short": "Box shown by name only",
-  "status": "open",
-  "title": "banchi: Add numbered-box exceptions or fix the screens?"
+  "status": "closed",
+  "title": "banchi: Add numbered-box exceptions or fix the screens?",
+  "why": "Landed: banchi #1041 merged 22:33 CST (https://github.com/shivinate7/banchi/pull/1041)."
 }

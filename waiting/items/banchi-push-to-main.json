@@ -5,6 +5,11 @@
   "home": "child-guard-promotion",
   "id": "banchi-push-to-main",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:23:24Z",
+    "choice": "a",
+    "note": "Owner pick a, 22:23 CST. Lane push-guard-asks builds it (coordinator 22:24 CST)."
+  },
   "n": 207,
   "options": [
     {
@@ -34,7 +39,7 @@
   "rank": 7,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 17",
   "short": "Refuse a push to main",
-  "status": "open",
+  "status": "closed",
   "title": "Should the shared push guard ask before a plain push to main?",
   "why": "Five incidents in one repo; the check is cheap and does not depend on each repo's protection."
 }

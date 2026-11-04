@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-04T01:19:00Z",
+  "context": "Goal: You change the bulk guard's cut yourself, not set in stone.\nProblem (goal): q_max has no home for a setting you edit. The handbook store is server-owned and keeps who changed what and why, but it holds cost codes only. The two screen-memory files are per browser. So the setting needs a new home, and the home decides who can change it and where.\nBased on (read): q_max src/utils/handbookStore.ts and /api/handbook keep versioned edits with an author and a reason (D-294); src/utils/handbookPreference.ts and breakdownPreference.ts are per-browser (D-565) (main 5bbf10e).\nBased on (read): q_max has no settings table, route or screen today.\nDeparts from: the bulk guard reads the code constant ATTENTION_CONFIDENCE_LIMIT \u2014 it reads a stored value you change.",
+  "home": "q_max D-530 (Grouped review readings, and the segmented meter)",
+  "id": "bulk-guard-setting-home",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T01:21:29Z",
+    "choice": "a",
+    "note": "Taken by the coordinator at 19:18 CST: a server-owned settings store, defaulting to today's value (80). Undoable; you can reopen it."
+  },
+  "n": 223,
+  "options": [
+    {
+      "gain": "You change it where you use it, for every device, with a record of each change.",
+      "how": "A small server-owned settings store, shaped like the handbook's edits (who, why, before and after). The grouped review screen gets one control to change the cut. holdReasonsFor reads it through one getter. Red test first; designer before the builder.",
+      "key": "a",
+      "label": "Server setting, changed on the review screen",
+      "lose": "A new store, route and screen control to build and keep tested."
+    },
+    {
+      "gain": "Small build; no screen work.",
+      "how": "One value in a server config file, read at start, with 80 as its default.",
+      "key": "b",
+      "label": "Server config file, no screen",
+      "lose": "You change it by editing a file on the server and restarting, not on a screen."
+    },
+    {
+      "gain": "Smallest build.",
+      "how": "Store the cut beside the screen memory in the browser.",
+      "key": "c",
+      "label": "Per-browser setting",
+      "lose": "Each device can hold a different cut, and no record says who changed it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 23,
+  "ref": "page item 198 note; lane audit-owner-answers; q_max PR #1018",
+  "short": "Bulk guard setting home",
+  "status": "closed",
+  "title": "q_max: Where does the bulk guard's cut live as a setting you change?",
+  "why": "Recommended: a, it is the only option you change on a screen for every device, with a record."
+}

@@ -1,6 +1,6 @@
 {
-  "added": "2026-11-02T05:30:00Z",
-  "context": "Goal: q_max #1011 merges, as you asked at 00:56 CST.\nProblem (rule): the merge tool refuses a merge onto a main whose state is unknown unless a reason is given, and q_max's browser tests run on CI only when you start them, so either way the merge waits on you.\nBased on (measured): #1011 is green on all 19 checks and includes today's main.\nBased on (read): main's last two browser runs never finished: one hit the 3-hour limit, the other was stopped at 23:01 CST.\nDeparts from: today main's browser state is unknown \u2014 (a) adds one browser run on main before the merge; (b) merges #1011 with main's browser state still unknown.",
+  "added": "2026-11-04T04:32:00Z",
+  "context": "Goal: q_max #1011 (integration PR int-batch-qmax-r5, head b602fd459, CI green) lands, then the q_max batch (#1020, #1019, #1014-#1018).\nProblem (rule): the merge tool refuses a merge onto a main whose state is unknown unless a reason is given, and q_max's browser tests run on CI only when you start them, so either way the merge waits on you.\nBased on (measured): #1011 is green on all 19 checks and includes today's main.\nBased on (read): main's last two browser runs never finished: one hit the 3-hour limit, the other was stopped at 23:01 CST.\nDeparts from: main merges only after a proven browser run on main \u2014 B merges #1011 with main's browser state unproven.",
   "holds": "q_max PRs #1011 and #1008.",
   "home": "git-never-merge-failing-ci",
   "id": "qmax-1011-batch",
@@ -24,9 +24,10 @@
   "options": [
     {
       "gain": "main's browser state is known before #1011 lands.",
-      "how": "Start the browser workflow on q_max main once (Run workflow on its Actions page), then #1011 merges the normal way if it is green.",
+      "how": "Press: https://github.com/shivinate7/q_max/actions/workflows/browser.yml \u2192 Run workflow \u2192 branch main. Then #1011 merges the normal way if it is green.",
       "key": "a",
       "label": "Run main's browser tests once",
+      "link": "https://github.com/shivinate7/q_max/actions/workflows/browser.yml",
       "links": [
         {
           "label": "q_max browser workflow",
@@ -37,7 +38,7 @@
     },
     {
       "gain": "#1011 lands now.",
-      "how": "The merging session merges #1011 with the reason \"owner accepts the cancelled browser run\".",
+      "how": "Type to runner 9: merge q_max #1011 with --base-red-ok \"browser run cancelled, no red job\".",
       "key": "b",
       "label": "Merge now",
       "links": [
@@ -49,12 +50,12 @@
       "lose": "A browser break already on main can hide under the merge."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
   "ref": "q_max PRs #1011 and #1008; q_max browser runs 40740294267 and 41377928751",
   "reply": "01:01 CST: reopened. Your \"merge\" reached the merging session, but the tool still refuses on main's unknown browser state; pick how.",
   "short": "q_max #1011 batch",
   "status": "open",
   "title": "q_max #1011: run main's browser tests once first, or merge now past the unknown result?",
-  "why": "You said merge at 00:56 CST. The merge tool still refuses #1011: main's last browser run was cancelled with no red job, so main's browser state reads unknown. q_max runs its browser tests on CI only when you start them."
+  "why": "Recommended: a. Main is proven before 7 more PRs land on it. Meanwhile runner 9 holds #1011 and the q_max batch; other repos go on."
 }

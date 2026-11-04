@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-04T04:07:00Z",
+  "context": "Goal: banchi's decisions argue from facts that are true today.\nProblem (rule): both changes rewrite your rulings' words, so they need your word.\nBased on (read): the Opus judges (22:05 CST). You retired the standing cap of 4: the tcgplayer-csv skill now says a send asks for a cap with `emit --cap N`. The code default is `None`, and the function is `join_batch`.\nBased on (read): D180 says the three supports D86 leans on are gone: per-run decisions.json is retired and refused.\nDeparts from: banchi D7 line 124 and D86 line 40.\n- D7 today: \"`SkuMatch.live_cap` is a per-match field with `LIVE_QUANTITY_CAP` as its default. `pipeline/join.py:build` takes `live_cap` as an argument.\" It becomes: \"`SkuMatch.live_cap` is a per-match field, `None` (no cap) by default. `pipeline/join.py:join_batch` takes `live_cap` as an argument.\"\n- D86 today: \"D180 ruled that a send is a cart of boxes and that a run is still one box. A run carries a reading, a `--bypass` ruling and a `decisions.json`. ... D180 protects that property.\" It becomes: \"The cart design argued that a run carries a reading, a `--bypass` ruling and a `decisions.json`; D180 records that all three supports are gone.\"\nAlso open: D7's next sentences argue a value-band cap from the retired default, and D86's \"it overturns nothing\" rests on the dead supports.",
+  "home": "banchi decisions D7 and D86",
+  "id": "prose-banchi-decisions",
+  "kind": "decision",
+  "n": 230,
+  "options": [
+    {
+      "gain": "No decision argues from a dead fact.",
+      "how": "One banchi lane writes the two new sentences, deletes D7's value-band argument and D86's \"overturns nothing\" paragraph, and sends you the diff.",
+      "key": "a",
+      "label": "Fix both, drop the dead paragraphs",
+      "lose": "The value-band cap idea leaves the record; git keeps it."
+    },
+    {
+      "gain": "Nothing is lost from the records.",
+      "how": "The same two sentences; D7's value-band cap becomes an open question, and D86's paragraph is re-argued on what protects one-box runs now.",
+      "key": "b",
+      "label": "Fix both, keep the rest as open questions",
+      "lose": "Two open questions stay for a later answer."
+    },
+    {
+      "gain": "Nothing to review.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Leave as is",
+      "lose": "Sessions keep leaning on a retired default and dead reasons."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "rank": 30,
+  "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "short": "banchi D7 and D86",
+  "status": "closed",
+  "title": "banchi: fix D7's cap sentence and D86's dead argument, and drop the paragraphs that rest on them?",
+  "why": "Landed: banchi #1045 merged 22:56 CST, carrying #1044 (https://github.com/shivinate7/banchi/pull/1045). The \"flat 4\" line is item 234."
+}

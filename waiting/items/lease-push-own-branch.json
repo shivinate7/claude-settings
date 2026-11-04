@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T05:33:00Z",
+  "context": "Goal: a lane can fix its own commit on its own branch without stray branches.\nProblem (rule): auto mode's classifier refuses `git push --force-with-lease` to a lane's own branch, yet the force-push guard names that push as the remedy. Two lanes hit it tonight (opus-plain-ask, call-judge-widening); each made a new branch and left a stale one, which the cloud cannot delete.\nBased on (incident): debt note classifier-refuses-lease-push; closed draft #1191; stale branch opus-plain-ask.\nDeparts from: main, where auto mode refuses every force push \u2014 a adds an allow rule for a lease push to the session's own claude/ lane branch only.",
+  "home": "settings.json auto-mode allow rules",
+  "id": "lease-push-own-branch",
+  "kind": "decision",
+  "n": 239,
+  "options": [
+    {
+      "gain": "No stray branches; a commit can be fixed in place.",
+      "how": "Add one auto-mode allow rule: `git push --force-with-lease` to the session's own claude/ lane branch only. The push guard still checks the branch. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Allow a lease push to the session's own claude/ branch",
+      "lose": "A lease push to a wrong branch, made by mistake, passes the classifier; only the push guard stops it.",
+      "widens": true
+    },
+    {
+      "gain": "The shared tool stays as it is.",
+      "how": "No change; each fix goes on a new branch.",
+      "key": "b",
+      "label": "Keep the refusal",
+      "lose": "Each fix leaves a stale branch for your computer to delete."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 2,
+  "ref": "note classifier-refuses-lease-push; closed draft #1191; stale branch opus-plain-ask",
+  "short": "Lease push to own lane branch",
+  "status": "open",
+  "title": "Auto mode refuses a lane's force push to its own branch, so each fix leaves a stale branch. Allow that one form?",
+  "why": "Recommended: b. Option a widens what a shared tool accepts. Meanwhile lanes keep making a new branch for each fix."
+}

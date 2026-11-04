@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T04:32:00Z",
+  "context": "Goal: your pick 203 a lands: a fix after the last review gets one fresh check.\nProblem (rule): auto mode refused the lane's record-writer as self-modification. The edits touch CLAUDE.md rule roles-review-cap-three, decisions hold-unsafe-after-round-3 and standing-merge-grant, agents/reviewer.md and the GLOSSARY \"fix check\" row, and a peer session wrote the brief, not you.\nBased on (ruling): your pick 203 a (22:24 CST).\nDeparts from: main \u2014 adds the fix check to the review cap (203 a).",
+  "home": "CLAUDE.md rule roles-review-cap-three",
+  "id": "review-fix-check-go",
+  "kind": "decision",
+  "n": 231,
+  "options": [
+    {
+      "gain": "203 a lands.",
+      "how": "Type in the lane's chat: go: build the review-fix-check edits as briefed",
+      "key": "a",
+      "label": "Say go in the lane",
+      "link": "https://claude.ai/code/session_013NEJKzRvvmoLf7T9kB4uEe",
+      "lose": "One message."
+    },
+    {
+      "gain": "None.",
+      "how": "The lane stops; nothing changes.",
+      "key": "b",
+      "label": "Leave it unbuilt",
+      "lose": "203 a stays a ruling with no rule."
+    }
+  ],
+  "owner": "lane review-fix-check (session_013NEJKzRvvmoLf7T9kB4uEe)",
+  "rank": 1,
+  "ref": "item 203 a; decisions hold-unsafe-after-round-3, standing-merge-grant",
+  "short": "Fix check: say go",
+  "status": "open",
+  "title": "Your pick 203 a (the fix check) is blocked: auto mode will not let the lane edit the rules a peer session briefed. Say go in the lane?",
+  "why": "Recommended: a. Your ruling stands; only the act needs your typed word."
+}

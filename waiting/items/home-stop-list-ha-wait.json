@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-04T04:37:00Z",
+  "context": "Goal: a home session stops only where it should, including before an HA restart.\nProblem (rule): after 229 a, home CLAUDE.md line 46 reads \"Stop only for a decision that is the owner's, or a test only the owner can run\". That is a closed list, and it no longer names line 11's wait (before an HA restart, wait for a live HA session or ask you). No check holds that wait.\nBased on (ruling): 229 a (22:30 CST) named this cut.\nDeparts from: home #550's line 46 \u2014 b adds \"or a wait or hold this file names\".",
+  "home": "home CLAUDE.md line 46",
+  "id": "home-stop-list-ha-wait",
+  "kind": "decision",
+  "n": 235,
+  "options": [
+    {
+      "gain": "No more edits.",
+      "how": "No change; line 11 stands on its own.",
+      "key": "a",
+      "label": "Keep it as ruled",
+      "lose": "A session reading only line 46 may skip the HA wait."
+    },
+    {
+      "gain": "The list names every wait.",
+      "how": "A follow-up lane adds \"or a wait or hold this file names\" to line 46.",
+      "key": "b",
+      "label": "Add the clause",
+      "lose": "One more small lane."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 229 a; home #550 (head d9b06dd)",
+  "short": "home: stop list and HA wait",
+  "status": "open",
+  "title": "home: after 229 a, the stop list leaves out the wait before an HA restart. Add it back?",
+  "why": "Recommended: a. Line 11 stands on its own, and your ruling named this exact cut. Meanwhile #550 goes on in its batch."
+}

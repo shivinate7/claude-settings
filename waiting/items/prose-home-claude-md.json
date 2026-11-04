@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T04:07:00Z",
+  "context": "Goal: a home session reads one answer for where questions go and when to stop.\nProblem (rule): three pairs of lines in home's CLAUDE.md disagree, and fixing them changes your rulings' words.\nBased on (read): the Opus judges' report (22:05 CST).\nBased on (ruling): questions-go-to-owner: a lane sends its question to its parent, the coordinator.\nDeparts from: home CLAUDE.md \u2014 line 27 (lane questions go to triage) changes to the coordinator, as line 28 says; the roster clause points at the project instructions on claude.ai, not a CLAUDE.md on branch roadmap; line 46 (stop for an HA change) drops that clause to match line 7 (any HA change, no word needed).",
+  "home": "home CLAUDE.md",
+  "id": "prose-home-claude-md",
+  "kind": "decision",
+  "n": 229,
+  "options": [
+    {
+      "gain": "One answer per question; no session stops for an HA change you already granted.",
+      "how": "One home lane edits the three lines.",
+      "key": "a",
+      "label": "Apply all 3",
+      "lose": "Triage stops getting lane questions directly."
+    },
+    {
+      "gain": "Nothing to review.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Leave as is",
+      "lose": "Sessions keep picking between two answers."
+    }
+  ],
+  "owner": "lane prose-home-claude-md (session_013NEJKzUop9FnuhQnc4TKeG)",
+  "pick": "a",
+  "rank": 29,
+  "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "short": "home CLAUDE.md: 3 contradictions",
+  "status": "closed",
+  "title": "home: settle 3 rules that contradict each other in CLAUDE.md?",
+  "why": "Landed: home #550 merged 22:48 CST (https://github.com/shivinate7/home/pull/550)."
+}
