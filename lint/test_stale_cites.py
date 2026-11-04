@@ -806,7 +806,8 @@ class CostTests(StaleCase):
 
 
 class ForeignFileTests(StaleCase):
-    """A cite of a JavaScript or shell name is unknown, never a pass. The unknown line prints once Markdown is read."""
+    """A cite of a JavaScript or shell name prints as unknown, not as a finding, and only when Markdown is already
+    read. A lone touched .mjs passes silently."""
 
     def mjs_and_removal(self, notes):
         def change(repo):
