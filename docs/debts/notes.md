@@ -970,6 +970,7 @@
 - builders-amend-replayed-test: amending a product edit into a replayed test-author commit is refused, because the amended commit's diff holds the test path (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - mcp-launch-before-lock: an MCP `launch` that boots just before a `sim-test` run takes the lock skips the lock rule; both then run on the machine. Decision: sim-test-is-the-one-boot-path.
 - route-unread-wrappers: simulator-boot-route and the cap do not read `xcrun xcodebuild` or `arch -arm64 xcodebuild`, and they judge `ssh mac "xcodebuild ..."` against local devices. Decision: sim-test-is-the-one-boot-path.
+- detached-launch-glued-amp: detached-launch passes a `&` glued to a closing quote (`xcodebuild ... "id=U"&`). Decision: sim-test-is-the-one-boot-path.
 - sim-test-untested-stops: no red test pins the 10 s KILL fallback, the crash window expiring, or the cleanup stop of the child. The HUP trap is pinned by outcome only, since bash 5 runs the EXIT trap on a fatal signal (lint/test_sim_test.sh). Decision: sim-test-stops-a-crash-loop.
 - sim-test-child-signals: a backgrounded xcodebuild ignores INT and QUIT (no job control), so sim-test stops only xcodebuild itself, with TERM then KILL; its children may outlive it. Unmeasured. Decision: sim-test-stops-a-crash-loop.
 - sim-test-late-reports: late reports of an earlier crash loop on the same UDID can stop a healthy run. Unmeasured. Decision: sim-test-stops-a-crash-loop.
