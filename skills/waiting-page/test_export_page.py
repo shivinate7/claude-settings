@@ -55,6 +55,12 @@ TG_TAIL = "aB3" * 11 + "Qz"  # 35 characters, the body of a Telegram bot token
 # A line of base64 in an armored PGP key block, built from parts. A key block's header is what the scan keys on; the body
 # is only the line after it, with no shape of its own.
 PGP_BODY = "mQINBFa3pQ8BEADk7Yq2Rv9Lw1Tn5Hs8" + "Jb4Ke6Fa0Pd3Gu7Mi2Oz5Xr9Ct1Vw8Ny4Qe6Lm"
+# Letters only, built from parts: a credential value with no digit. The length rule counts characters, digits or not.
+LETTERS_11 = "QwErTyUi" + "OpA"  # one short of the credential length
+LETTERS_12 = LETTERS_11 + "s"  # the credential length
+LETTERS_14 = "lkjhgfds" + "amnbvc"  # lower case
+LETTERS_16 = "xKqPzLmR" + "tWbNvYcH"
+CLIENT_LETTERS_16 = "BnMvCxZl" + "KjHgFdSa"
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
@@ -187,6 +193,11 @@ RED = [
     ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
+    ("API_KEY assignment of 12 letters", "API_KEY=" + LETTERS_12, LETTERS_12),
+    ("GITHUB_TOKEN assignment of 16 letters", "GITHUB_TOKEN=" + LETTERS_16, LETTERS_16),
+    ("CLIENT_SECRET with a colon and 16 letters", "CLIENT_SECRET: " + CLIENT_LETTERS_16, CLIENT_LETTERS_16),
+    ("lower-case api_key in quotes of 14 letters", 'api_key = "' + LETTERS_14 + '"', LETTERS_14),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -301,6 +312,12 @@ GREEN = [
     ("Stripe test key with 15 characters", "sk_test_" + "aB3" * 5),
     ("a word that holds the Stripe test prefix", "risk_test_coverage_plan"),
     ("a word that holds the Stripe test prefix before a long body", "risk_test_" + "aB3" * 7),
+    # A credential name below 12 characters, a placeholder, a variable reference, a plain word and prose pass.
+    ("API_KEY with 11 letters", "API_KEY=" + LETTERS_11),
+    ("API_KEY set to a placeholder", "API_KEY=<your-api-key>"),
+    ("API_KEY set to a variable reference", "API_KEY=${API_KEY}"),
+    ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
+    ("prose with the word secret before a name", "the secret santa list"),
 ]
 
 
