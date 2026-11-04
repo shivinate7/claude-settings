@@ -25799,21 +25799,23 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    add("control: the twin booted 10 minutes ago is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
-        config=cfgs["twin_recent"][1])
-    add("control: an unrecorded booted twin is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
-        config=cfgs["twin_unrecorded"][1])
-    add("control: an idle twin on another runtime does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
-        config=cfgs["twin_other_runtime"][1])
-    add("control: an idle twin of another device type does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
-        config=cfgs["twin_other_type"][1])
-    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
-        config=cfgs["twin_rebooted"][1])
+    # Each launch below is refused by the lease, so the twin rule did not fire: the lease is the rule named.
+    add("twin not idle: a twin booted 10 minutes ago does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_recent"), config=cfgs["twin_recent"][1], carries=("sim-test", "lease"))
+    add("twin not idle: an unrecorded booted twin does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_unrecorded"), config=cfgs["twin_unrecorded"][1], carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin on another runtime does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_runtime"), config=cfgs["twin_other_runtime"][1],
+        carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin of another device type does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_type"), config=cfgs["twin_other_type"][1], carries=("sim-test", "lease"))
+    add("twin not idle: a twin booted by hand after its recorded boot does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_rebooted"), config=cfgs["twin_rebooted"][1], carries=("sim-test", "lease"))
 
     # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
     # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
@@ -26004,12 +26006,14 @@ def register_simulator_hold_cases():
         ("a twin is not idle while Xcode.app runs", quiet + [
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
+    # Each launch is refused by the lease, so the twin rule did not fire on the held or unreadable twin.
     for index, (label, rows) in enumerate(holds):
-        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-            env_path=env_for("hold_%d" % index, rows), config=cfg)
-    add("control: a twin is not idle when the process table cannot be read",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add(label + ": the twin rule does not fire; the lease refuses the launch",
+            "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg, carries=("sim-test", "lease"))
+    add("a twin is not idle when the process table cannot be read: the twin rule does not fire; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg, carries=("sim-test", "lease"))
 
 
 def register_simulator_bypass_cases():
