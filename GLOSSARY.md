@@ -80,5 +80,6 @@ The owner may use any word for a thing; a session reads it by meaning and writes
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
 | fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |
+| value cite | One backtick span in prose, `file: NAME = literal`, that says the value a `.py` module-level literal or a `.json` dotted path holds. The MAP9 check reads it in a fact line, and the stale-cites check (STALE004) reads it on any Markdown line a PR leaves wrong. | `docs/decisions/stale-cites-at-merge.md` | — |
 | Red-run trailer | A commit-message line on the commit that adds test lines: `Red-run: <command> -> <N> failed on <sha>`, or `Red-run: none: <reason>`. It records that each new case failed on the old code. | `docs/decisions/red-run-trailer-on-test-commits.md` | — |
 | Unvetted | A question that reaches the owner with no past-ruling check, because the check could not run. Its text carries the line `Unvetted: <reason>`, so he reads it as unchecked. | `docs/decisions/question-form.md` | — |
