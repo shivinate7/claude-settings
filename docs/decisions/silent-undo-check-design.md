@@ -21,7 +21,8 @@
   The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
   the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
   A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
-  A line that head holds again in any file, as often as before, is moved, not lost. A merge of main that drops the branch's own lines counts too: a
+  A line that head holds again in any file, as often as before, is moved, not lost (one reworded line
+  per block of 6 or more, as below). A merge of main that drops the branch's own lines counts too: a
   conflict fix keeps both sides. A branch of one commit has nothing to read. Two shapes, not any line
   a lane added (owner, 2026-11-03 18:16 CST, page item 167, no-undo-check-scope, pick a). Measured on
   the 31 batches merged 2026-10-31 to 2026-11-02: any line goes red on 22, with 84 findings; the two

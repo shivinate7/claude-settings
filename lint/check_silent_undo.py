@@ -606,7 +606,7 @@ def moved(gone, gained):
     if sum(short.values()) > 1 or sum(gone.values()) < BLOCK_LINES:
         return False
     line = next(iter(short))
-    return rewritten(line, [((line,), tuple(gained - gone))], modified=True)
+    return rewritten(line, [((line,), tuple(gained - gone))])  # not `modified`: a number changed is another line, not a reword
 
 
 def healed(cwd, old, path, head, down):
