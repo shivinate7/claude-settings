@@ -23,6 +23,10 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 - A job is stale when its output file has not changed for the quiet age (STALL_WATCH_QUIET,
   default 300 s). A job whose output file is missing, or whose path os.stat rejects (a NUL byte), is
   listed as "unknown", never dropped, and it never drops the other rows.
+- A job is listed only when its stall crossed after the previous Stop: the newest stop_hook_summary record,
+  skipping the run after a blocked Stop (non-empty hookErrors, or preventedContinuation true). No summary, or an
+  unreadable timestamp, lists every quiet job. An unknown job (no output file) is listed when its call is later
+  than that Stop.
 - A listed job shows its note: the text after `until:` in the description of the Bash call that
   started it, to the end of that line. The note sits on the job's own line, and the message asks
   whether it is met. A job whose call holds no `until:` text is still listed, with no note.
@@ -210,6 +214,34 @@ def at(rec, ago):
 def stamped(records, ago):
     """Each record of a list, stamped `ago` seconds before NOW."""
     return [at(rec, ago) for rec in records]
+
+
+def stop_summary(ago, blocked=False):
+    """The stop_hook_summary record the harness writes after each Stop run, with the fields of a real one.
+    blocked gives it hookErrors: a Stop that a hook blocked, whose next run is not a Stop (scan_jobs)."""
+    return at({"type": "system", "subtype": "stop_hook_summary", "hookCount": 2,
+               "hookInfos": [{"command": "command hook 1", "durationMs": 77}, {"command": "command hook 2"}],
+               "hookErrors": ["Stop hook: send the report now."] if blocked else [],
+               "hookAdditionalContext": [], "preventedContinuation": False, "stopReason": "",
+               "hasOutput": blocked, "level": "suggestion"}, ago)
+
+
+def queue_op(operation, ago):
+    """A queue-operation record: a queued prompt that is enqueued or dequeued. It opens no turn."""
+    return at({"type": "queue-operation", "operation": operation, "sessionId": "test-stall-watch-stop",
+               "content": "queued prompt"}, ago)
+
+
+def meta_wake(text, ago):
+    """A user record with isMeta true: a hand-back or a hook's feedback that wakes a turn with no prompt."""
+    return at({"type": "user", "isMeta": True, "message": {"role": "user", "content": text}}, ago)
+
+
+def stop_listing(recs, base, now=None):
+    """Run one Stop over the records. Return (problems, systemMessage), the message '' when none printed."""
+    rc, out, err = run_stop(transcript(recs), base, now=now)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    return problems, system_message(out, problems)
 
 
 def output_file(base, job_id, idle):
@@ -1126,20 +1158,20 @@ def named_log_with_odd_cwd_keeps_the_report():
 
 @case
 def job_listed_at_one_stop_is_silent_at_the_next():
-    """B1. a job started in a prior turn, quiet since 1400 s ago, so its stall crossed 1100 s ago, after that
-    turn's Stop (its last record, 1200 s ago). The first Stop, at the end of the next turn, lists it. The second
-    Stop, with no new output, is silent about it: its stall crossed before the first Stop. A job started in
-    the turn after is listed at the second Stop, the control that shows the second Stop still lists"""
+    """B1. a job started in a prior turn, quiet since 1400 s ago, so its stall crossed 1100 s ago, after the
+    previous Stop (its stop_hook_summary, 1200 s ago). The first Stop, at the end of the next turn, lists it. The
+    second Stop, with no new output, is silent about it: its stall crossed before the first Stop's summary, 900 s
+    ago. A job started in the turn after is listed at the second Stop, the control that shows the second Stop still lists"""
     base = new_dir()
     output_file(base, "bcross", 1400)
-    turn0 = [at(prompt("first"), 1500)] + stamped(moved("bcross"), 1490) + [at(assistant_text("first answer"), 1200)]
+    turn0 = [at(prompt("first"), 1500)] + stamped(moved("bcross"), 1490) + [at(assistant_text("first answer"), 1200), stop_summary(1200)]
     turn1 = [at(prompt("start"), 1000), at(assistant_text("started"), 900)]
     rc1, out1, err1 = run_stop(transcript(turn0 + turn1), base, now=NOW - 900)
     problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
     msg1 = system_message(out1, problems)
     problems += listed_once(msg1, "bcross")
     output_file(base, "bctl1", 600)  # the control: quiet since 600 s ago, so its stall crossed 300 s ago
-    turn2 = [at(prompt("next"), 800)] + stamped(moved("bctl1"), 800) + [at(assistant_text("ok"), 700)]
+    turn2 = [stop_summary(900), at(prompt("next"), 800)] + stamped(moved("bctl1"), 800) + [at(assistant_text("ok"), 700)]
     rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2), base)
     problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
     msg2 = system_message(out2, problems)
@@ -1180,17 +1212,17 @@ def job_that_stalls_again_is_listed_again():
 def unknown_job_is_reported_at_the_first_stop_after_it_starts():
     """B3. a job with no output file, started in turn 1, after the turn 0 Stop 1300 s ago: the first Stop after it
     lists it as unknown, and the next Stop does not. A job started in turn 2 is listed at the next Stop. Its start
-    is 1000 s before NOW. Both readings of its stall crossing (the start, or the start plus the quiet age) fall after
-    the turn 0 Stop and before the first Stop's end, so the case does not pick one"""
+    is 1000 s before NOW, after the turn 0 summary, so the first Stop lists it. The first Stop's summary is 600 s
+    before NOW, so the second Stop does not list it again"""
     base = new_dir()  # empty: every job here is unknown
-    turn0 = [at(prompt("first"), 1500), at(assistant_text("first answer"), 1300)]
+    turn0 = [at(prompt("first"), 1500), at(assistant_text("first answer"), 1300), stop_summary(1300)]
     turn1 = [at(prompt("start"), 1200)] + stamped(moved("bunk1"), 1000) + [at(assistant_text("started"), 600)]
     rc1, out1, err1 = run_stop(transcript(turn0 + turn1), base, now=NOW - 600)
     problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
     msg1 = system_message(out1, problems)
     problems += listed_once(msg1, "bunk1")
     problems += expect("unknown" in line_of(msg1, "bunk1"), f"bunk1 is not listed as unknown: {msg1!r}")
-    turn2 = [at(prompt("next"), 550)] + stamped(moved("bunk2"), 500) + [at(assistant_text("ok"), 400)]
+    turn2 = [stop_summary(600), at(prompt("next"), 550)] + stamped(moved("bunk2"), 500) + [at(assistant_text("ok"), 400)]
     rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2), base)
     problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
     msg2 = system_message(out2, problems)
@@ -1211,6 +1243,101 @@ def first_stop_lists_a_quiet_job_as_before():
     problems += listed_once(msg, "bfirst")
     problems += expect("600s" in msg, f"age 600s is not in the listing: {msg!r}")
     return problems
+
+
+@case
+def C1_stall_in_the_idle_gap_before_a_prompt_is_listed():
+    """C1. a queue-operation enqueue and dequeue sit between the previous Stop and the next prompt. A job whose
+    stall crossed in that gap, after the previous Stop, is listed at the next Stop"""
+    base = new_dir()
+    output_file(base, "bgap", 1800)  # crossed 1500 s ago, after the Stop 2000 s ago
+    recs = ([at(prompt("first"), 2300)] + stamped(moved("bgap"), 2290)
+            + [at(assistant_text("ok"), 2100), stop_summary(2000), queue_op("enqueue", 1010),
+               queue_op("dequeue", 1000), at(prompt("next"), 999), at(assistant_text("ok"), 900)])
+    problems, msg = stop_listing(recs, base)
+    return problems + listed_once(msg, "bgap")
+
+
+@case
+def C2_two_stop_runs_in_one_turn_list_a_job_once():
+    """C2. two Stop runs in one turn, each with its summary. A job whose stall crossed before the first run is
+    listed there and is silent at the second run. A job whose stall crossed after the first run is listed at the second"""
+    base = new_dir()
+    output_file(base, "bdup", 1200)  # crossed 900 s ago
+    output_file(base, "bnew", 600)  # crossed 300 s ago, after the first run 800 s ago
+    turn = ([at(prompt("first"), 1500)] + stamped(moved("bdup"), 1490)
+            + [at(assistant_text("ok"), 1100), stop_summary(1100), at(prompt("start"), 1000)]
+            + stamped(moved("bnew"), 900) + [at(assistant_text("working"), 850)])
+    problems, msg1 = stop_listing(turn, base, now=NOW - 800)
+    problems += listed_once(msg1, "bdup")
+    problems += expect("bnew" not in msg1, f"job bnew is listed before its stall crossed: {msg1!r}")
+    turn += [stop_summary(800), at(assistant_text("again"), 700)]  # the first run's summary, then the second run
+    p2, msg2 = stop_listing(turn, base)
+    problems += p2 + expect("bdup" not in msg2, f"job bdup is listed again at the second Stop of the turn: {msg2!r}")
+    return problems + listed_once(msg2, "bnew")
+
+
+@case
+def C3_isMeta_hand_back_does_not_relist_a_listed_job():
+    """C3. a job listed at the Stop 800 s ago (its summary), then an isMeta hand-back wakes a turn with no prompt
+    record. The Stop at the end of that turn is silent about the job. A job that crossed after that summary is
+    listed there, so the hand-back does not hide it"""
+    base = new_dir()
+    output_file(base, "bhand", 1200)  # crossed 900 s ago, before the summary
+    output_file(base, "bfresh", 800)  # crossed 500 s ago, after the summary
+    recs = ([at(prompt("zero"), 2100), at(assistant_text("ok"), 2000), stop_summary(2000),
+             at(prompt("first"), 1500)] + stamped(moved("bhand"), 1490) + stamped(moved("bfresh"), 1000)
+            + [at(assistant_text("ok"), 850), stop_summary(800), meta_wake("subagent report", 700),
+               at(assistant_text("ok"), 650)])
+    problems, msg = stop_listing(recs, base)
+    problems += expect("bhand" not in msg, f"job bhand is listed again after the isMeta hand-back: {msg!r}")
+    return problems + listed_once(msg, "bfresh")
+
+
+@case
+def C4_queued_notice_after_a_text_record_does_not_hide_a_stall():
+    """C4. a stall that crossed 900 s ago, after the Stop 1200 s ago. Then a text-only assistant record, a queued
+    notice for another job, and no Stop since: the Stop now lists the stall"""
+    base = new_dir()
+    output_file(base, "bearly", 1200)  # crossed 900 s ago
+    recs = ([at(prompt("first"), 1500)] + stamped(moved("bearly"), 1490)
+            + [at(assistant_text("ok"), 1250), stop_summary(1200), at(prompt("next"), 1000),
+               at(assistant_text("working"), 700), at(attachment_notice("bother"), 600),
+               at(assistant_text("ok"), 550)])
+    problems, msg = stop_listing(recs, base)
+    return problems + listed_once(msg, "bearly")
+
+
+@case
+def H1_stall_between_a_blocked_stop_and_its_active_run_is_listed_at_the_next_stop():
+    """H1. a Stop at 800 s ago that a hook blocked, the reply, the run at 600 s ago with stop_hook_active true
+    (it prints nothing), then a new prompt. A stall that crossed 700 s ago, between the blocked run and the active
+    run, is listed at this Stop. A stall that crossed before the blocked run is silent here"""
+    base = new_dir()
+    output_file(base, "bduring", 1000)  # crossed 700 s ago
+    output_file(base, "bbefore", 1300)  # crossed 1000 s ago
+    recs = ([at(prompt("first"), 1500)] + stamped(moved("bduring"), 1490) + stamped(moved("bbefore"), 1480)
+            + [at(assistant_text("ok"), 850), stop_summary(800, blocked=True),
+               meta_wake("Stop hook feedback: send the report now.", 790), at(assistant_text("report"), 650),
+               stop_summary(600), at(prompt("next"), 500), at(assistant_text("ok"), 450)])
+    problems, msg = stop_listing(recs, base)
+    problems += listed_once(msg, "bduring")
+    return problems + expect("bbefore" not in msg, f"job bbefore is listed again: {msg!r}")
+
+
+@case
+def C5_newest_summary_with_a_bad_timestamp_fails_open():
+    """C5. the newest Stop summary has a timestamp that is not ISO text, and an older summary is readable. The job
+    whose stall crossed before the older summary is listed: a bad timestamp lists every quiet job"""
+    base = new_dir()
+    output_file(base, "bbad", 1800)  # crossed 1500 s ago, before the older summary
+    bad = stop_summary(800)
+    bad["timestamp"] = "yesterday"
+    recs = ([at(prompt("first"), 1600)] + stamped(moved("bbad"), 1590)
+            + [at(assistant_text("ok"), 1450), stop_summary(1400), at(assistant_text("ok"), 900), bad,
+               at(prompt("next"), 500), at(assistant_text("ok"), 450)])
+    problems, msg = stop_listing(recs, base)
+    return problems + listed_once(msg, "bbad")
 
 
 if __name__ == "__main__":
