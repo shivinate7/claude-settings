@@ -73,6 +73,18 @@ RED = [
     ("env-style password assignment", "DB_PASSWORD=" + "hunter2", "hunter2"),
     ("password with a colon", "password: " + "hunter2", "hunter2"),
     ("pwd with spaces around the sign", "pwd = " + "hunter2", "hunter2"),
+    # A placeholder or a plain word is no secret only as the whole value. A secret after a placeholder, or a second
+    # keyword after a shell path, is one.
+    ("password with an angle-bracket value", "password: " + "<hunter2>", "hunter2"),
+    ("password with a placeholder before a secret", "password: " + "<x>" + "hunter2", "hunter2"),
+    ("password with a brace placeholder", "password: " + "${hunter2}", "hunter2"),
+    ("password with a dollar name", "password: " + "$Tr0ub4dor", "Tr0ub4dor"),
+    ("password with a percent name", "password: " + "%Hunter2%", "Hunter2"),
+    ("PWD path with a second keyword after a semicolon", "PWD=/home/x;" + "password=" + "hunter2", "hunter2"),
+    ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
+    # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
+    ("password with a plain word and digits", "password: " + "none123", "none123"),
+    ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
     ("phone number with dots", "555" + "." + "010" + "." + "2345", "555.010.2345"),
@@ -128,6 +140,11 @@ GREEN = [
     ("password mask", "password: " + "*" * 8),
     ("password template placeholder", "Password: " + "<your-password>"),
     ("env var from a template", "POSTGRES_" + "PASSWORD=" + "${DB_PASSWORD}"),
+    # A placeholder or a plain word inside quotes, brackets or parentheses, and a quoted shell path, name no secret.
+    ("quoted optional after a password word", "password: " + '"optional"'),
+    ("plain word in parentheses after a password word", "(password: none)"),
+    ("bracketed optional after a password word", "password: " + "[optional]"),
+    ("quoted shell path after PWD", 'PWD="/home/x"'),
 ]
 
 
