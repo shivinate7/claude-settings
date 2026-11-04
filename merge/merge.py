@@ -708,15 +708,26 @@ class Host:
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
-        Windows .cmd shim of gh lets cmd.exe split an argument at '&'."""
+        Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
+        `body` (a dict) goes out as JSON through `--input <tempfile>`, for a value that can hold a newline: the same shim cuts an argument there.
+        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises."""
         route = f"repos/{self.repo}" if self.repo else "repos/{owner}/{repo}"
         args = ["api", f"{route}/{rel}" if rel else route, "-X", method]
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
-        return self.gh([*args, *extra], self.cwd)
+        if body is None:
+            return self.gh([*args, *extra], self.cwd)
+        fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(body, f)
+            return self.gh([*args, "--input", tmp, *extra], self.cwd)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
@@ -1247,7 +1258,7 @@ class Host:
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
-            c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
