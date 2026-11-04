@@ -292,7 +292,7 @@ On its own boot it first takes the pro lease from `bin/sim-lease`, the Mac-wide 
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
 session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
-rotation of the standing sessions by a usage tally, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
+rotation of the standing sessions, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.

@@ -292,7 +292,7 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 </style>
 <!-- build:style -->
 <style>
-/* Panels the roadmap builder adds: read-at stamps and landed marks. */
+/* Panels build.py adds: read-at stamps and landed marks. */
 .stamps{display:flex;flex-wrap:wrap;gap:4px 14px;margin:-4px 2px 12px;font-size:11px;color:var(--muted)}
 .stamps .sk{text-transform:uppercase;letter-spacing:.06em}
 .stamps .unk{color:var(--warn)}
@@ -865,11 +865,11 @@ function unavailable(){
 </script>
 <!-- build:script -->
 <script>
-/* Read-at stamps from window.ROADMAP_BUILD, which the roadmap builder writes. */
+/* Read-at stamps from window.ROADMAP_BUILD, which build.py writes. */
 (() => {
   const b = window.ROADMAP_BUILD, el = document.getElementById('stamps');
   if(!el) return;
-  if(!b || !Array.isArray(b.panels)){ el.innerHTML = '<span class="unk">Read at: unknown. This page was not built by the roadmap builder.</span>'; return; }
+  if(!b || !Array.isArray(b.panels)){ el.innerHTML = '<span class="unk">Read at: unknown. This page was not built by build.py.</span>'; return; }
   const at = new Date(b.builtAt);
   const built = isNaN(at) ? 'unknown' : at.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   el.innerHTML = `<span><span class="sk">Built</span> <span class="num">${esc(built)}</span></span>` + b.panels.map(p=>{
@@ -896,7 +896,7 @@ function unavailable(){
   const when = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
   const link = (url, text) => /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
   if(!Array.isArray(w.threads)){
-    el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by the roadmap builder)')}</span></summary>`;
+    el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by build.py)')}</span></summary>`;
     return;
   }
   const open = w.threads.filter(t => t.state !== 'done'), done = w.threads.length - open.length;
@@ -930,12 +930,12 @@ function unavailable(){
   const recs = Array.isArray(b.records) ? b.records : [];
   el.innerHTML = `<section class="card"><header><h3>Health</h3><span class="lbl">read when built</span></header>
     ${health.length ? `<ul class="hl">${health.map(h => `<li><span class="k">${esc(h.name)}</span><span${unk(h.read)?' class="unk"':''}>${h.home ? link(h.url, `<span class="id">${esc(h.home)}</span>`) + ', changed at ' : ''}<span class="num">${esc(h.read)}</span></span></li>`).join('')}</ul>`
-      : '<p class="lead unk">Health: unknown. This page was not built by the roadmap builder.</p>'}</section>`
+      : '<p class="lead unk">Health: unknown. This page was not built by build.py.</p>'}</section>`
     + (recs.length ? recs.map(r => `<section class="card"><header><h3>${esc(r.name)}</h3><span class="lbl">${r.home ? `<span class="id">${esc(r.home)}</span>` : ''}</span></header>
       ${r.count == null ? `<p class="lead unk">${esc(r.why || 'unknown')}</p>`
         : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map(n => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join('')}</ul>${r.newestWhy ? `<p class="asof">${esc(r.newestWhy)}</p>` : ''}` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(r.newestWhy)}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
       </section>`).join('')
-      : '<section class="card"><p class="lead unk">Records: unknown. This page was not built by the roadmap builder.</p></section>');
+      : '<section class="card"><p class="lead unk">Records: unknown. This page was not built by build.py.</p></section>');
   const inner = setView;
   setView = function(v){ inner(v); view.hidden = v !== 'rec'; };
   try { const r = JSON.parse(localStorage.getItem('rm-view') || 'null'); if(r && r.v === 'rec') ui.view = 'rec'; } catch(e) { /* nothing remembered */ }

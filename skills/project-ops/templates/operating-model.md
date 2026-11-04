@@ -22,7 +22,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft.
-  Triage, as the waiting-page writer, splices it into the repo's one page and
+  Triage, as the page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
@@ -58,18 +58,18 @@ If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
-Count the use of triage and the batch runner. Never wait for the owner to notice.
+Read the use of each standing session: triage, the batch runner and the arbiter. Never wait for the owner to notice.
 
 The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads triage's and the batch runner's use from `get_session`:
+- At each wake, the coordinator reads each standing session's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
-- The limits are `<triage limit>` and `<batch runner limit>`.
-- Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
-  re-asked question, a reply that contradicts the roadmap, or a missed ruling.
+- A standing session runs until autocompact. The coordinator rotates one only when it goes stale
+  or breaks. A session breaks when it slips: a re-asked question, a reply that contradicts the
+  roadmap, or a missed ruling (claude-settings decision `session-tiers`, owner, 2026-11-01 17:56 CST).
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page): `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
@@ -95,7 +95,6 @@ parent, or miss a message while busy.
      (`ArtifactData`). For each ask with no `reply` whose `owner` is the old writer, it reads the
      ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming writer writes
      `writer`, since the outgoing one is archived at step 4.
-- The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
 

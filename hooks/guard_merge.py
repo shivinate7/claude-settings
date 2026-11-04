@@ -662,7 +662,7 @@ TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude
 TRUST_REASON = (
     "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
     "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
-    "the owner or to an untagged bridge session. A session with no record yet: run get_session (no "
+    "the owner or to an untagged session. A session with no record yet: run get_session (no "
     "argument) alone in its own turn, then retry."
 )
 

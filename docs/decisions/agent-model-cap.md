@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
+Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
 Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
 and the owner watches that cost. An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).

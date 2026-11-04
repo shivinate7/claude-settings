@@ -21,7 +21,7 @@ reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each agent is one role: builder, reviewer,
 designer, design reviewer, or Explore, never two. A lane that touches a screen gets a designer before
 the builder and a design reviewer after it. A text-only change on an existing screen skips the designer (decision `design-agents`).<!-- rule:roles-one-role-per-agent --> A workflow agent takes the builder or reviewer role through `agentType`. Each
-agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
+agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.<!-- rule:roles-model-per-role-table --> Sonnet is
 the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
 and a builder's third try (`roles-third-round-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my grant for the spawn I name, or by override: `opus 2h` for a time,
