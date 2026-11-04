@@ -2244,7 +2244,8 @@ def _removed_count(decisions):
 
 
 # The newest lines are the only ones a reader needs (the preview's "last --confirm run" line); at one
-# line per repository per run, 2000 lines is months of daily runs, and the file never grows without bound.
+# line per repository per run, 2000 lines is months of daily runs. A root's newest line outlives the
+# cut, so the file is bounded by the cap plus one line per root.
 MAX_RUN_LOG_LINES = 2000
 _RUN_LOG_LOCK = threading.Lock()  # `_pmap` workers append concurrently; the trim rewrites the file
 
@@ -2275,10 +2276,25 @@ def append_run_log(path: str, results):
             if len(kept) > MAX_RUN_LOG_LINES:
                 temp = "%s.%d.tmp" % (path, os.getpid())
                 with open(temp, "w", encoding="utf-8") as handle:
-                    handle.writelines(kept[-MAX_RUN_LOG_LINES:])
+                    handle.writelines(_trim_run_log(kept))
                 os.replace(temp, path)
     except (OSError, ValueError) as exc:
         print("janitor: run log not written (%s)" % exc)
+
+
+def _trim_run_log(lines):
+    """The last MAX_RUN_LOG_LINES of LINES, plus each root's newest line that falls before the cut and
+    that no kept line replaces, in file order. The preview reads one line per root, so a root that
+    has not run lately keeps its line. The result exceeds the cap by at most the count of roots."""
+    cut = len(lines) - MAX_RUN_LOG_LINES
+    newest = {}
+    for number, text in enumerate(lines):
+        try:
+            newest[json.loads(text)["root"]] = number
+        except (ValueError, KeyError, TypeError):
+            continue
+    keep = {number for root, number in newest.items() if number < cut}
+    return [text for number, text in enumerate(lines) if number >= cut or number in keep]
 
 
 def read_last_runs(path: str):
