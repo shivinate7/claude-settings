@@ -10,7 +10,7 @@ The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see 
 (owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows: an Agent
 or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
-The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`) or by a step grant.
+The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
