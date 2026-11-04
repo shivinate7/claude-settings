@@ -920,7 +920,7 @@ function Resolve-Failures {
     $hooksDest = Join-Path $ClaudeDir 'hooks'
     $hooksSrc  = Join-Path $RepoDir 'hooks'
     $stampRe   = '(?m)^INSTALL_ID = "([^"]*)"'
-    foreach ($delay in 2, 4, 8, 0) {
+    foreach ($delay in 0) {
         foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })) {
             if ($GuardStageFailed) { break }
             $d = Join-Path $hooksDest $f.Name
