@@ -740,7 +740,7 @@ class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
     """Cost of the SessionEnd path (rule outcomes-mechanize-rules: a test proves the cost a hook
     states). One payload with a cwd and no scratchpad, the case every session end takes.
 
-    Measured on origin/main 446f2d3d with `hook_starts(..., every_call=True)`, one fixture
+    Measured on main before the SessionEnd scope change, with `hook_starts(..., every_call=True)`, one fixture
     repository with one commit: 3 process starts in all, 2 git (`git_reads.primary_checkout`) and
     1 sweep subprocess, with 0 `ps` reads (no scratchpad in the payload). The sweep's own pid-list
     reads are measured by SessionEndScopeTests in janitor/test_sweep.py.
