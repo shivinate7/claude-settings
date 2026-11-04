@@ -6150,7 +6150,7 @@ class LockHolder(Env):
 
     def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows stamps are whole seconds, so two reads can straddle a second; cache_clear keeps a cached stamp from hiding that
         reads, now, kernel32 = [], [1000.0], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
-        def clock():  # each read steps 0.2 s: the lock's boot read is the second, this assertion's read the third, and they straddle 1000.5
+        def clock():  # a fake clock: each read steps 0.2 s, and the lock's boot line must still equal a stamp read after it
             now[0] = round(now[0] + 0.2, 1)
             reads.append(now[0])
             return now[0]
@@ -6163,6 +6163,23 @@ class LockHolder(Env):
                 stamp = merge.boot_stamp()
                 self.assertTrue(stamp, "the Windows branch gave no boot stamp")
                 self.assertIn("boot: " + stamp, msg.splitlines(), f"the lock's boot line is not the stamp read after it, {stamp}:\n{msg}")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+
+    def test_the_windows_boot_stamp_is_the_same_on_every_call(self):  # Windows stamps are whole seconds, so a read can land either side of a second; the memo must give every call the first answer
+        now, kernel32 = [1000.2], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # returns 1000.2, 1000.4, 1000.6, ...: the stamp int(t - 0.5) is 999, 999, then 1000
+            t = now[0]
+            now[0] = round(t + 0.2, 1)
+            return t
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                first = merge.boot_stamp()
+                self.assertTrue(first, "the Windows branch of boot_stamp gave no boot stamp")
+                for _ in range(2):  # the clock passes 1000.5 on the third call, so a boot_stamp without a memo fails there
+                    self.assertEqual(merge.boot_stamp(), first, "boot_stamp gave a different stamp on a later call in one process: its memo is missing")
         finally:
             getattr(merge.boot_stamp, "cache_clear", lambda: None)()
 
