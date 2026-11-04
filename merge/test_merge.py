@@ -10026,8 +10026,8 @@ class RedMainBrake(Env):
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
 
-    # A red main's way out is one re-run of each red run, named by its id (decision no-merge-onto-red-main): `--failed` re-runs the red jobs.
-    # A run id is named only for a red run; an UNKNOWN verdict has no red run to name.
+    # RERUN matches a red run's re-run line, with --failed (decision no-merge-onto-red-main). A cancelled UNKNOWN run with a run id names
+    # its plain re-run, and a failed read names none; the tests for those match the command text directly.
     RERUN = re.compile(r"gh run rerun (\d+) --failed")
 
     def reruns(self, text):
@@ -10112,6 +10112,27 @@ class RedMainBrake(Env):
         self.assertEqual(len(clause), 2, "the preview's main run line has no `--confirm refuses it` clause\n" + out)
         self.assertIn("--base-red-ok", clause[1], out)
         self.assertNotIn("gh run rerun", clause[1], "the UNKNOWN preview's refusal clause names a re-run\n" + out)
+
+    def test_the_red_main_refusal_says_the_re_run_must_finish_green(self):
+        # the tool tracks no re-run and lifts only on a green read, so the refusal tells the reader to wait for the re-run to finish green
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        remedy = [l for l in out.splitlines() if l.startswith("No batch merges onto a red")]
+        self.assertEqual(len(remedy), 1, out)
+        self.assertIn("finish", remedy[0], "the refusal's last line does not say the re-run must finish\n" + out)
+        self.assertIn("green", remedy[0], "the refusal's last line does not say the re-run must finish green\n" + out)
+
+    def test_the_red_main_preview_says_the_re_run_must_finish_green(self):
+        # the preview's clause matches the refusal: the tool lifts only on a green read, never on a count of re-runs
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertNotIn("until each red run is re-run once", line[0], "the preview says the stop lifts once each red run is re-run, though the tool tracks no re-run\n" + out)
+        clause = line[0].split("--confirm refuses it", 1)
+        self.assertEqual(len(clause), 2, "the preview's main run line has no `--confirm refuses it` clause\n" + out)
+        self.assertIn("finish", clause[1], "the preview's refusal clause does not say the re-run must finish\n" + out)
+        self.assertIn("green", clause[1], "the preview's refusal clause does not say the re-run must finish green\n" + out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
