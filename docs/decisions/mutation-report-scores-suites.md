@@ -19,7 +19,7 @@ Both engines take a `lines` filter. `changed_lines` lists the lines that a commi
 
 A `REPLAY_PROFILES` entry in `hooks/mutate_guard.py` says how one repository is read. It holds the regex of product files and of suites, and the command that runs one suite. It names the classifier that reads the output (`fail_line`, `node_tap` or `playwright`), the install, and the top folders left out of each checkout. A test file is not product code, where a profile can name one: q_max's `code_not` leaves out `harness/tests/` and every `*.test.*` or `*.spec.*` file. Banchi's Python part leaves out `harness/tests/` (through its `code` regex) and self-test scripts under `scripts/` (through `code_not`). Banchi's TypeScript part has no `code_not`. The two counts above hold in a replay. A suite red on the clean source (a crash, a timeout, a missing dependency) is listed unusable, and a row with no usable suite reads UNKNOWN with its reason. A pull request that changed no product file reads NO_PRODUCT. One that changed product code and no suite reads NO_TESTS. UNKNOWN never reads as a rate or as green. A file that does not parse is listed skipped. A pull request is never dropped from the table.
 
-A batch pull request can change dozens of suites, and a mutant that survives runs all of them. A profile may carry `select`, a command with `{path}` that prints the suites testing one product file (q_max: `harness/tests-for.mjs`). It runs in the checkout at the pull request's commit. A changed suite then runs on the mutants of a file only when `select` lists it. A `select` that fails or is missing runs every changed suite, and a row note says so. `--pr-budget SECONDS` stops the pull request from starting more mutants once its time has passed.
+A batch pull request can change dozens of suites, and a mutant that survives runs all of them. A profile may carry `select`, a command with `{path}` that prints the suites testing one product file (q_max: `harness/tests-for.mjs`; banchi: `scripts/tests-for.py`). It runs in the checkout at the pull request's commit. A script it names that the commit lacks is read from the clone's HEAD with its whole folder, and a row note names it. A changed suite then runs on the mutants of a file only when `select` lists it. A `select` that fails or is missing runs every changed suite, and a row note says so. `--pr-budget SECONDS` stops the pull request from starting more mutants once its time has passed.
 
 A mutant that never ran counts as `not_run`: no changed suite reaches its file, or the budget had passed. It is never a survivor, and a note names each file no changed suite reaches. `format_replay` shows `not_run` when it is above 0. A row where no mutant ran reads UNKNOWN. Each finished mutant prints one progress line, with its pull request and verdict, before that pull request's row.
 
@@ -71,12 +71,12 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
   - q_max (51): `harness/browser/verify.test.mjs` 20, a test file. `src/components/RfpSafetyPanel.tsx`, `src/components/Chat.tsx` and `harness/model-calls-map.mjs` 4 each. `harness/decision-refs.mjs` 3. Three more files with 2 each. 10 files with 1 each.
   - banchi TypeScript (7): `app/src/Slabs.tsx` 5. `app/src/SendCard.tsx` 2.
   - banchi Python (23): `server/pipeline_routes.py` 3. `server/send_routes.py`, `pipeline/join.py` and `cli/cmd_identify.py` 2 each. Seven files with 1 each. The other seven sit in self-test scripts (`scripts/pricearchive-selftest.py` 3, `scripts/slabs-store-selftest.py` 2, `scripts/slabs-routes-selftest.py` 2), so 16 are product survivors. The log does not split not-run mutants by file, so the product row leaves them out.
-- banchi has no per-file `select`. A survivor may sit in code that no changed suite reaches.
+- banchi had no per-file `select` in these scores. A survivor may sit in code that no changed suite reaches.
 - banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
 
 Open items, each a debt:
 
-- `banchi-replay-no-select`: banchi rows do not say that every changed suite ran.
+- `banchi-replay-no-select`: a profile with no `select` runs every changed suite, and its rows do not say so.
 - `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
 
 On 2026-11-02 no CI check reads the replay. The owner rules on one.
