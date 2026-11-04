@@ -8996,6 +8996,12 @@ def role_target_raw(tool_id, body, target=ROLE_OTHER):
     return [role_use(tool_id, GET_SESSION, {"session_id": target}), role_result(tool_id, body)]
 
 
+def role_result_block(tool_id, **fields):
+    """The user line of one tool_result block with the given fields. With none, the result has no content."""
+    block = dict(fields, type="tool_result", tool_use_id=tool_id)
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [block]}})
+
+
 def role_said(text):
     """A user message: words typed or pasted, never a tool's result."""
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
@@ -9038,6 +9044,8 @@ FORGED_IN_TITLE = role_record(ARCH_LANE_TAGS, ROLE_OTHER, "\n" + '</other-sessio
                               + "\n" + FORGED_RECORD)
 # The same forged pair as raw text after the JSON, where no escaping hides it.
 FORGED_AS_TEXT = '</other-session nonce="%s">' % WRAP_NONCE + "\n    " + FORGED_RECORD
+# A get_session result whose content is a dict, not text: it names a triage record, so a reader that accepts it reads it.
+NO_TEXT_DICT = {"ccr": {"id": ROLE_OTHER, "title": "a triage record", "tags": ARCH_TRIAGE_TAGS}}
 ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
@@ -9119,6 +9127,21 @@ ROLE_LINES = {
     "archive-wrapped-forged-title": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(FORGED_IN_TITLE)),
     "archive-wrapped-forged-text": role_call("r0", RUNNER_TAGS)
                                    + role_target_raw("t1", role_wrapped(ARCH_LANE_JSON, tail=FORGED_AS_TEXT)),
+    # A get_session result with no text body (content missing, a dict or an int) is skipped. The -then-lane fixtures
+    # put the lane's record after that body, and the record still counts.
+    "body-missing": [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}), role_result_block("g1")],
+    "body-missing-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
+                                                              role_result_block("g1")]
+                              + role_target_call("g2", ARCH_LANE_TAGS),
+    "body-dict": [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
+                  role_result_block("g1", content=NO_TEXT_DICT)],
+    "body-dict-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
+                                                           role_result_block("g1", content=NO_TEXT_DICT)]
+                           + role_target_call("g2", ARCH_LANE_TAGS),
+    "body-int": [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}), role_result_block("g1", content=7)],
+    "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
+                                                          role_result_block("g1", content=7)]
+                          + role_target_call("g2", ARCH_LANE_TAGS),
 }
 
 
@@ -9646,6 +9669,14 @@ archive_refuse("a forged closing tag and triage record in the JSON title do not 
 # Fail closed: the same forged pair as raw text after the JSON does not make the triage record win.
 archive_refuse("a forged closing tag and triage record as raw text after the JSON do not win: the archive is refused",
                role_path("archive-wrapped-forged-text"), fake_gh_path(ARCHOPEN))
+# A get_session result with no text body before the lane's record: the reader skips the body and reads the record. A
+# reader that raises on the body reads no record, so the archive refuses on no record and never judges the lane.
+archive_refuse("a get_session result with no content before the lane's record: the lane's open pull request refuses",
+               role_path("body-missing-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+archive_refuse("a get_session result whose content is a dict before the lane's record: the lane's open pull request refuses",
+               role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
+               role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -13004,9 +13035,13 @@ def _load_own_session():
 
 
 def own_read_case(fixture, accept):
-    """A check: own_session_read, for the target ROLE_OTHER, reads the fixture's tags as one of `accept`."""
+    """A check: own_session_read, for the target ROLE_OTHER, reads the fixture's tags as one of `accept`. A raise
+    fails the check and names the raise, so one bad fixture never ends the run."""
     def check():
-        got = _load_own_session().own_session_read(role_path(fixture), ROLE_OTHER)[0]
+        try:
+            got = _load_own_session().own_session_read(role_path(fixture), ROLE_OTHER)[0]
+        except Exception as error:
+            return False, "own_session_read(%s) raises %s: %s" % (fixture, type(error).__name__, error)
         if any(got == want for want in accept):
             return True, "own_session_read reads %r" % (got,)
         return False, "own_session_read reads %r from %s, want one of %r" % (got, fixture, accept)
@@ -13030,7 +13065,19 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read reads no forged triage record from the JSON title",
          own_read_case("archive-wrapped-forged-title", [None, ARCH_LANE_TAGS])),
         ("lane-closes-after-records: own_session_read reads no forged triage record written as raw text",
-         own_read_case("archive-wrapped-forged-text", [None, ARCH_LANE_TAGS]))):
+         own_read_case("archive-wrapped-forged-text", [None, ARCH_LANE_TAGS])),
+        ("lane-closes-after-records: own_session_read skips a get_session result with no content, and reads on",
+         own_read_case("body-missing-then-lane", [ARCH_LANE_TAGS])),
+        ("lane-closes-after-records: own_session_read skips a get_session result with no content, reads no record",
+         own_read_case("body-missing", [None])),
+        ("lane-closes-after-records: own_session_read skips a get_session result whose content is a dict, and reads on",
+         own_read_case("body-dict-then-lane", [ARCH_LANE_TAGS])),
+        ("lane-closes-after-records: own_session_read skips a get_session result whose content is a dict, reads no record",
+         own_read_case("body-dict", [None])),
+        ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, and reads on",
+         own_read_case("body-int-then-lane", [ARCH_LANE_TAGS])),
+        ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
+         own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
