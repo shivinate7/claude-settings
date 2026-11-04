@@ -295,15 +295,17 @@
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
 - stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
-- stale-cites-cost-untested-py: no case proves a PR that changes a .py and removes nothing starts 4 git processes and reads no .md; a mutant without that early return passes (lint/test_stale_cites.py CostTests). Decision: stale-cites-at-merge
-- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-l1-test-gaps: mutants survive at lint/stale_cites.py:400 (the all-unknown case, against the not-active case), :377 (path in state), :198 (the nested-def case cites a bare word, so it is vacuous) and :268 (class-method names and starred targets have no case); :377 also holds dead code (path not in claimed) (tests in lint/test_stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-name-call-form: PAIR_RES misses "`f.py` `name()`" (pre-existing on main) (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-nested-class: a class nested in a module-level class no longer counts as bound; main counted it by accident (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-unbound-targets: except-as, match-capture and `type X =` names are not counted as bound (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-tree-exclude-worktree: tree mode reads .ste-lint-exclude from the working tree, not REV, as range mode does (lint/stale_cites.py). Decision: stale-cites-whole-tree
 - stale-cites-tree-local-parity: bin/ste-changed does not read a workflow's tree-cites; an opted-in repo must export TREE_CITES=true to match CI locally (bin/ste-changed). Decision: stale-cites-whole-tree
 - stale-cites-tree-not-adopted: claude-settings does not set tree-cites; its tree run gives 70 STALE003, mostly other-repo and runtime paths (lint/stale_cites.py). Decision: stale-cites-whole-tree
