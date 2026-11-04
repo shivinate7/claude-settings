@@ -12,7 +12,8 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    dir_before_segment, git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, is_cloud, REDIRECTION, resolve_command, resolve_default_base, segment_tokens,
+    split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
@@ -653,17 +654,26 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
     --lane-lint merges nothing and is not judged. Outside the cloud nothing is judged. Cost: none for a call that is no merge confirm;
-    else one parse, one read of the origin and one transcript read."""
+    else one parse, one read of the origin and one transcript read.
+
+    A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
+    (REDIRECTION, the one reader of their shape). When the segment no longer tokenizes once they are gone (a `>` inside a quoted
+    value), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
         rest = merge_tool_args(segment) if segment.strip() else None
-        if rest is None or "--confirm" not in rest:
+        if rest is None:
+            continue
+        bare = merge_tool_args(REDIRECTION.sub(" ", segment))
+        if "--confirm" not in (rest if bare is None else bare):
             continue
         try:
-            flags = _merge_flags(rest)
+            if bare is None:
+                raise _FlagsUnreadable("the segment does not tokenize without its redirections")
+            flags = _merge_flags(bare)
             if flags.lane_lint or not flags.confirm:
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
