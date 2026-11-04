@@ -78,7 +78,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `cite-by-id` | git-cite-by-id | "Ids, not paths. A path breaks when its file moves." | exact | exact | a commit message "see docs/decisions/foo.md" is denied | - |
 | `lane-by-slug` | lane-by-slug | "the guard refuses a session number that names a lane, such as `N20` or `(N16)`" | exact | exact | `N20` in a commit message is denied | - |
 | `draft-pr` | draft-until-reviewed | "refuses `gh pr create` without `--draft` or `-d`." | exact | exact | `gh pr create --fill` is denied | - |
-| `load-brake` | machine-load-brake | "a lane-start call reads the machine's load, and a busy or full machine refuses new lanes" | exact | exact | a busy machine refuses a background Agent | - |
+| `load-brake` | machine-load-brake | "a lane-start call reads the machine's load, and a busy machine refuses new Workflow lanes and background Agent or Task lanes, and a full machine refuses every lane call" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 
 Notes: create_session is not a lane-start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
