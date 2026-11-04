@@ -738,5 +738,79 @@ class All(Base):
                                 "the clean artifact was held back by the refused one")
 
 
+class NoExport(Base):
+    """`"export": false` (decision waiting-data-in-repo): an artifact the repo holds and does not export, such as a page in
+    an account this session cannot read. `--all` prints `<id>: skipped - no export` for it, exits 0 for it and needs no
+    fetched folder for it. The other artifacts export as in class All."""
+    WAIT = "page01"
+    EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
+
+    def waiting(self):
+        return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
+
+    def external(self, entry_id, **changes):
+        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
+                     "account": "other-account", "export": False}, **changes)
+
+    def repo(self, entries):
+        root = os.path.join(self.tmp.name, "repo")
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": entries}))
+        return root
+
+    def fetched_waiting(self):
+        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only."""
+        root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
+        fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
+                             groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
+        os.rename(fetched, os.path.join(root, self.WAIT))
+        return root
+
+    def run_all(self, root, fetched, worktree):
+        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+
+    def test_each_export_false_entry_prints_skipped_and_the_run_exits_0(self):
+        root = self.repo([self.waiting()] + [self.external(i) for i in self.EXTERNAL])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a run whose export false entries are skipped must exit 0. Output:\n" + shown(r))
+        for entry_id in self.EXTERNAL:
+            self.assertIn("%s: skipped - no export" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - no export` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_a_skipped_entry_holds_back_no_other_artifact_and_writes_nothing(self):
+        worktree = self.out("worktree")
+        root = self.repo([self.waiting(), self.external(self.EXTERNAL[0])])
+        r = self.run_all(root, self.fetched_waiting(), worktree)
+        self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
+                      "the waiting page was held back by a skipped entry. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts", self.EXTERNAL[0])),
+                         "a skipped entry wrote its artifacts folder")
+
+    def test_a_registry_of_only_export_false_entries_exits_0(self):
+        fetched = self.out("fetched")
+        os.makedirs(fetched)
+        root = self.repo([self.external(i) for i in self.EXTERNAL[:2]])
+        r = self.run_all(root, fetched, self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a registry of only export false entries must exit 0. Output:\n" + shown(r))
+        for entry_id in self.EXTERNAL[:2]:
+            self.assertIn("%s: skipped - no export" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - no export` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_an_export_that_is_true_stays_unknown_and_the_run_exits_2(self):
+        """Control: an export that is neither false nor a path is refused, so the registry is unknown: exit 2, as today."""
+        root = self.repo([self.waiting(), self.external(self.EXTERNAL[0], export=True, collections=["items"])])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 2, "an export of true must make the run unknown with exit 2. Output:\n" + shown(r))
+        self.assertTrue(says(r, "unknown"), "no unknown verdict printed. Output:\n" + shown(r))
+
+    def test_a_waiting_page_entry_with_export_false_is_unknown_not_skipped(self):
+        """The waiting page is never held: export false on its role makes the registry unknown, exit 2, as a refused entry does."""
+        root = self.repo([dict(self.waiting(), export=False)])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 2, "a waiting-page entry with export false must make the run unknown with exit 2. Output:\n" + shown(r))
+        self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
+        self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
+                         "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
+
 if __name__ == "__main__":
     unittest.main()
