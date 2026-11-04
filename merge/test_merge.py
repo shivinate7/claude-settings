@@ -1016,7 +1016,10 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
-CHECKS_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+CHECKS_YML = ("name: checks\non: pull_request\njobs:\n"  # checks-merge-install comes first: a test that appends steps puts them in `checks`, the last job
+             "  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Merge install suite\n        run: python3 hooks/x.py\n"
+             "  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
              "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
 SLUG_LINT = '''import collections, os, re, sys
@@ -1197,7 +1200,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("exit 3", self.refused())
 
-    def test_the_suites_a_doc_hits_come_from_the_checks_job(self):
+    def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
         lints = merge.lint_steps(root, "origin/main")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
@@ -1209,6 +1212,24 @@ class SmallBaseMove(Env):
         self.assertNotIn("hooks/test_guard.py", new)
         self.assertIn("merge/test_merge.py", new)  # this suite reads the real tree whole, just above, so every path hits it
         self.assertIn("skills/ios-apps/tests/test_new_app.py", hits("skills/ios-apps/templates/" + "new.md"))  # through new_app.py
+
+    def test_a_workflow_without_the_checks_merge_install_job_stops_the_suite_read(self):
+        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that holds `checks` alone stops and names the
+        missing job; the control first shows that both jobs read the suite of `checks`, so the stop is the missing job's."""
+        root = tempfile.mkdtemp(dir=self.run_dir)
+        put(os.path.join(root, "hooks", "test_reads_guide.py"), DOC_SUITE)
+        put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the merge install step's suite: read, names no path
+        checks = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                  "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
+        merge_install = ("  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
+                         "      - name: Merge install suite\n        run: python3 hooks/x.py\n")
+        def hits(workflow):
+            put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow)
+            return [f for f, _ in merge.hit_suites(root, ["docs/guide.md"], set())]
+        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install))
+        with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
+            hits(checks)
+        self.assertIn("checks-merge-install", str(cm.exception))
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
@@ -9562,10 +9583,10 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None):
-    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id."""
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1):
+    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
+            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
 
 
 def main_job(name, conclusion, minutes=1):
@@ -10010,6 +10031,60 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("--base-red-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
+
+    # A re-run keeps its run id and its place in the list. While it goes it is not completed and its attempt is above 1: the group's
+    # older green run must not stand in for it, so the verdict is UNKNOWN until the re-run finishes.
+    def re_run_over_green(self, status, confirm=True):
+        """Main's push run 1301 is a re-run in flight of `status`, above the older green push run 1300 of the same file and group."""
+        return self.go([main_run(1301, None, status=status, run_attempt=2), main_run(1300, "success")], {}, confirm=confirm)
+
+    def assert_unknown_for_re_run(self, rc, out, before, status, run_id):
+        self.assertEqual(rc, 1, f"a re-run {status} at attempt 2 is passed for the green run beneath it\n" + out)
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "the refusal does not say UNKNOWN")
+        self.assertIn(f"run {run_id}", out, "the refusal does not name the re-run")
+        self.assertIn("finish", out.lower(), "the refusal does not say to wait for the re-run to finish")
+        self.assertNotIn("read failed", out, "the runs were read, so the refusal does not say the read failed")
+
+    def test_a_re_run_in_flight_above_an_older_green_run_is_unknown_and_refuses(self):
+        rc, out, before = self.re_run_over_green("in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1301)
+
+    def test_a_queued_re_run_above_an_older_green_run_is_unknown_and_refuses(self):
+        rc, out, before = self.re_run_over_green("queued")
+        self.assert_unknown_for_re_run(rc, out, before, "queued", 1301)
+
+    def test_a_re_run_in_flight_with_no_completed_run_in_its_group_is_unknown_and_refuses(self):
+        rc, out, before = self.go([main_run(1311, None, status="in_progress", run_attempt=2)], {})
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1311)
+
+    def test_the_preview_shows_a_re_run_in_flight_as_unknown_and_presses_nothing(self):
+        rc, out, before = self.re_run_over_green("in_progress", confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unknown", line[0].lower(), "the preview does not show the re-run in flight as UNKNOWN")
+        self.assertIn("run 1301", line[0], "the preview line does not name the re-run")
+        self.assertIn("--confirm refuses it", line[0])
+
+    # Guards, which pass on the current code: the green control beside each red case, and the rules the re-run must leave alone.
+    def test_an_attempt_one_run_still_going_waits_its_turn_under_an_older_green_run(self):
+        # the same shape as the red cases at attempt 1: a newer run still going waits its turn, so the green run beneath it is the verdict
+        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {})
+        self.merged(rc, out)
+        self.assertNotIn("actions/runs/1301/jobs", self.host.reads, "a run in progress is not judged, so it is not read")
+
+    def test_a_run_with_no_run_attempt_field_is_attempt_one(self):
+        running = main_run(1301, None, status="in_progress")
+        del running["run_attempt"]
+        rc, out, _ = self.go([running, main_run(1300, "success")], {})
+        self.merged(rc, out)
+
+    def test_a_re_run_in_flight_older_than_a_completed_green_run_leaves_the_verdict_to_that_run(self):
+        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {})
+        self.merged(rc, out)
+        self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
