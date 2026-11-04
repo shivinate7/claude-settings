@@ -51,7 +51,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-no-merge-during-batch-ci` | While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`). | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-never-discard-output` | Keep command output. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-never-discard-output` | Never silence a git write's output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-slug-then-claim-number` | Never allocate a numbered record on a branch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-cite-by-id` | Ids, not paths. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -329,7 +329,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-send-window-unbounded` | The feedback Stop guard accepts any matching send after the owner's message, in any later turn. | [`docs/debts/inbox-send-window-unbounded.md`](../docs/debts/inbox-send-window-unbounded.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
-| `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`docs/debts/install-set-reads-held-file.md`](../docs/debts/install-set-reads-held-file.md) |
 | `kept-mockup-never-merged` | A kept mockup reaches no main branch. | [`docs/debts/kept-mockup-never-merged.md`](../docs/debts/kept-mockup-never-merged.md) |
 | `lane-ack-skips-every-reply` | In `last_incoming_index`, a send's first reply from its target is its ack, so a new question in that reply passes with no send. | [`docs/debts/lane-ack-skips-every-reply.md`](../docs/debts/lane-ack-skips-every-reply.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`docs/debts/lane-cycle-delete-order.md`](../docs/debts/lane-cycle-delete-order.md) |
@@ -349,6 +348,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `npm-audit-fix-linked` | The rule judges only npm install, i, ci, update, uninstall and their aliases. | [`docs/debts/npm-audit-fix-linked.md`](../docs/debts/npm-audit-fix-linked.md) |
 | `old-merge-tool-refuses-stamp` | A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. | [`docs/debts/old-merge-tool-refuses-stamp.md`](../docs/debts/old-merge-tool-refuses-stamp.md) |
 | `one-shot-grant-label` | A one-shot approval, such as "go ahead and merge PR 12" or "approved, push it", counts as a grant, so the guard asks for a home. | [`docs/debts/one-shot-grant-label.md`](../docs/debts/one-shot-grant-label.md) |
+| `opus-ask-scheduled-text` | The seed check in `grant_opus_ask` skips a prompt with no earlier owner turn in a cloud session. | [`docs/debts/opus-ask-scheduled-text.md`](../docs/debts/opus-ask-scheduled-text.md) |
 | `other-checkout-cwd-outside` | `other_checkout_hit` returns `""` when the call's `cwd` is in no checkout of the clone. | [`docs/debts/other-checkout-cwd-outside.md`](../docs/debts/other-checkout-cwd-outside.md) |
 | `page-answer-second-click` | One waiting-page answer needed a second approval. | [`docs/debts/page-answer-second-click.md`](../docs/debts/page-answer-second-click.md) |
 | `page-only-copy-of-mockup` | A mockup lives only inside the `designData` block of the waiting page. | [`docs/debts/page-only-copy-of-mockup.md`](../docs/debts/page-only-copy-of-mockup.md) |
