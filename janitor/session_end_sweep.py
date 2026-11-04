@@ -6,9 +6,10 @@ working directory). Resolves the git repository that `cwd` sits in -- the PRIMAR
 a linked worktree's own path, see `git_reads.primary_checkout`'s own docstring for why that
 distinction matters -- and runs `janitor/sweep.py <that root> --confirm --session-end` there. The
 sweep covers that repository's branches, worktrees and dead-rooted servers (a server whose script
-sat under one of its checkouts, removed worktrees included), plus the simulator and temp-folder
-tiers. It reads no loose processes and stops no other repository's server: the machine-wide reads
-stay in the daily job. Always exits 0.
+sat under a checkout or under a worktree git listed at the start of this run, removed or pruned
+ones included), plus the simulator and temp-folder tiers. It reads no loose processes and stops no
+other repository's server: the machine-wide reads stay in the scheduled job. A run past its
+deadline stops no dead-rooted server. Always exits 0.
 
 FAILS OPEN, ON PURPOSE. This script's own job is to let the session end; it is never the thing
 that decides whether a branch or a worktree is reapable. Every way this script itself can go

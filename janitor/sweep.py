@@ -2865,7 +2865,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None, "husks": [], "strays": [], "trash": []}
+              "pruned": None, "husks": [], "strays": [], "trash": [], "listed": []}
 
     optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
     sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
@@ -2891,6 +2891,12 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # decision to ask git for itself, except in "fast", which keeps what it cannot prove.
     batch = None if mode == "tier1" else merged_batch(root, base)
 
+    # Read before the prune and the repo reaper, which remove trees from the list: `listed` names
+    # every tree git knew at the start, so a tree they remove still scopes the SessionEnd read of
+    # dead-rooted servers. Empty when git could not answer.
+    start_entries = parse_worktree_list(root)
+    result["listed"] = [e["path"] for e in start_entries or []]
+
     # Before the worktree list is read, so a pruned registration is not judged as a worktree.
     # "branches" and "fast" prune nothing: a stale registration then keeps its branch held.
     if mode not in ("branches", "fast"):
@@ -2914,7 +2920,10 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             else:
                 result["reaper"] = "would run"
 
-    entries = parse_worktree_list(root)
+    # The start read stands unless a real prune or a reaper run may have changed the list.
+    changed = confirm and ((result["pruned"] and result["pruned"]["names"])
+                           or result.get("reaper", "none") != "none")
+    entries = parse_worktree_list(root) if changed or start_entries is None else start_entries
     if entries is None:
         result["refused"] = "unreadable-worktree-list"
         return result
@@ -3260,9 +3269,11 @@ def main(argv=None) -> int:
                               "worktree or a folder inside it); adds to any ROOT given")
     parser.add_argument("--session-end", action="store_true", dest="session_end",
                          help="the SessionEnd run only: stops the dead-rooted servers that "
-                              "this run's own repository left (its checkouts and worktrees) "
-                              "and scans no loose processes. The scheduled job and a person's "
-                              "run read the whole machine")
+                              "this run's own repository left: its checkouts and every "
+                              "worktree git listed at the start of this run, removed or pruned "
+                              "ones included. It scans no loose processes, and a run past its "
+                              "deadline stops no dead-rooted server. The scheduled job and a "
+                              "person's run read the whole machine")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3364,13 +3375,14 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print("\njanitor: past the time budget; dead-rooted, loose-process and simulator "
               "reads not run (the next run does them)")
         return 0
-    # SessionEnd reads only this repository's checkouts, the worktrees this run judged (removed
-    # ones too: their folders are gone but their servers are not), and no loose processes.
-    # Machine-wide reads belong to the daily job.
+    # SessionEnd reads only this repository's checkouts, every worktree git listed at the start of
+    # this run (removed or pruned ones too: their folders are gone but their servers are not),
+    # and no loose processes. Machine-wide reads belong to the scheduled job.
     session_end = getattr(args, "session_end", False)
     scope = None
     if session_end:
-        scope = list(roots) + [w["path"] for r in results for w in r["worktrees"]]
+        scope = list(roots) + [path for r in results for path in r.get("listed", [])
+                               + [w["path"] for w in r["worktrees"]]]
     dead = find_dead_rooted(scope)
     print_dead_rooted_report(dead)
     if not session_end and not _past_deadline():
