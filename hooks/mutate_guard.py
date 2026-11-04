@@ -2397,6 +2397,10 @@ def run_mutant(sources, work: str, entry):
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
             shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
+        # it the role-model table reads as unread and every role-model arm passes unjudged.
+        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -2508,9 +2512,8 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
-    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
-    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint, which
+    # override.py and decision_watch.py read from there. A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 
