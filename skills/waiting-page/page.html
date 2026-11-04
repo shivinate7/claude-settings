@@ -875,6 +875,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
 <script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane"]</script>
 
+<!-- The one pattern of a parked line's id. The page (PARK_ID) takes a line live only when its id fullmatches it, and the guard
+     (rule parked-line-id) refuses a write of a line that does not. Keep it a JSON string that is also a valid JS regex source. -->
+<script type="application/json" id="parkId">"^[a-z0-9-]{1,32}$"</script>
+
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
 <!-- roadmap:data -->
@@ -1171,12 +1175,16 @@ const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
 // A parked line is a meta/page.parked entry. It is live only with a unique id of the slug form; any other line has both acts off.
 // Each live line is modelled as a pseudo item, so staged, Send, Undo, Withdraw and the draft store take it with no second path.
 // Its key is "park.<id>". An item slug holds no dot, so it can never meet an item's key, and no card or count reads it.
-const ACTS = ["unpark", "drop"], PARK_ID = /^[a-z0-9-]{1,32}$/, parkKey = (id) => "park." + id;
+// The pattern is the parkId block (the guard reads the same one). A missing or bad block reads as unknown: no line is live.
+function parkPattern() {
+  try { const t = JSON.parse(document.getElementById("parkId").textContent); return typeof t === "string" && t ? new RegExp(t) : null; } catch (e) { return null; }
+}
+const ACTS = ["unpark", "drop"], PARK_ID = parkPattern(), parkKey = (id) => "park." + id;
 function parkItems() {
   const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = new Map(); // a Map: an id such as "constructor" is no prototype name here
   list.forEach((p) => { count.set(p.id, (count.get(p.id) || 0) + 1); });
   const owner = plain(m && m.writer) || "the page's writer";
-  return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
+  return list.filter((p) => PARK_ID && typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
 }
 function pressPark(it, act) {
   edited();
