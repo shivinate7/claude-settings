@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Tests for bin/sim-lease, the Mac-wide lease that bin/sim-test takes before its own boot.
 
-Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo. A red
-run points it at lint/sim_lease_stub_test.py, the stand-in for a tool that is not built yet.
+Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo.
 No case reads this machine's load or OS: PATH shims for uname and sysctl read files in the case's own folder, and the
 ps shim passes through to the real ps except for a start time that a case sets. CI and GITHUB_ACTIONS are unset for
 each run. A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
