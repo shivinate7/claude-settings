@@ -1545,11 +1545,6 @@ def _build_branch():
     write(os.path.join(BRANCHREPO, "r.txt"), "same patch\n")  # identical content, own commit
     run_vcs(BRANCHREPO, "add", "r.txt")
     run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "add r.txt directly on main")
-    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
-    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
-    run_vcs(BRANCHREPO, "add", "u.txt")
-    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
-    run_vcs(BRANCHREPO, "checkout", "-q", "main")
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "pushed-work")
     write(os.path.join(BRANCHREPO, "p.txt"), "pushed to the remote\n")
     run_vcs(BRANCHREPO, "add", "p.txt")
@@ -1679,6 +1674,13 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: renaming design-merged's file on main "
                  "failed. stderr: %s" % moving.stderr.strip())
     run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "merged.html is renamed on main")
+    # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
+    # swapped ancestor test reads it as merged and allows the only copy; the rule must still deny.
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
+    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
+    run_vcs(BRANCHREPO, "add", "u.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
 
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
@@ -1749,6 +1751,10 @@ def _build_branch():
     if listed("origin/main", merged) or not listed("origin/main", renamed):
         sys.exit("fixture setup failed in build_fixtures: origin/main still holds design-merged's old "
                  "path, or lacks its renamed file, so the file would not be renamed on main")
+    # unmerged-work must sit on origin/main's tip, or the swapped ancestor mutant survives again.
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "origin/main", "unmerged-work").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: origin/main is not an ancestor of "
+                 "unmerged-work, so a swapped ancestor test would not flip the only-copy case")
 
     # design-unseen is pushed, then this clone drops its tracking ref and local branch, as a clone
     # that fetched before the push has none. No ref here names it, so no read can list its tip.
