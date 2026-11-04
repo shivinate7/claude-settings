@@ -1661,7 +1661,8 @@ def _unread_line(when, text, sess, extra=None):
     return "\t".join(fields)
 
 
-# Prints the local wall time of the instant in argv[1], in the child's own zone. It is the scope of a zone case (P7).
+# Prints the local wall time of the instant in argv[1], in the child's own zone. A zone case checks it first, so a
+# zone that never took cannot pass the subject checks.
 ZONE_PROBE = ("import sys\n"
               "from datetime import datetime\n"
               "moment = datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00'))\n"
@@ -1748,10 +1749,11 @@ def case_unread_offset_line_is_collected_when_dw_real_config_dir_is_unset():
 
 
 # --------------------------------------------------------------------------- dw-unread-dst (d)
-# The repeated 01:00-02:00 hour of the US Central fall-back. The turn bound and each guard.log line are
-# both naive local, so a line in the second 01:xx hour sorts against a bound from the first, and the reverse. The
-# reader must compare instants. Each zone is a POSIX TZ string: a tzdata name falls back to UTC silently where
-# tzdata is missing, and then the case would pass with no zone at all.
+# The repeated 01:00-02:00 hour of the US Central fall-back, whose wall-clock digits occur twice. The reader compares
+# the turn bound and each guard.log line as instants, and these cases prove it across that hour. A reader that
+# compared naive local times would put a line from the second 01:xx hour on the wrong side of the bound. Each zone
+# is a POSIX TZ string: a tzdata name falls back to UTC silently where tzdata is missing, and then the case would
+# pass with no zone at all.
 DST_CST = "CST6CDT,M3.2.0,M11.1.0"  # CDT before the 07:00Z change, CST after
 DST_TURN_FWD = "2026-11-01T06:45:00Z"  # 01:45 CDT, before the change
 DST_TURN_REV = "2026-11-01T07:10:00Z"  # 01:10 CST, after the change
@@ -1783,11 +1785,11 @@ def _fallback_zone_run(name, turn, tz, lines):
     write(os.path.join(folder, "guard.log"), "".join(line + "\n" for line in lines))
     saved = {key: os.environ.get(key) for key in ("TZ", "DW_REAL_CONFIG_DIR")}
     saved_reader = sys.modules.get("guard_log_report", _MISSING)
-    os.environ["TZ"] = tz
-    os.environ["DW_REAL_CONFIG_DIR"] = folder
-    sys.modules["guard_log_report"] = None  # the import now raises, so the fallback parser runs
-    time.tzset()
     try:
+        os.environ["TZ"] = tz
+        os.environ["DW_REAL_CONFIG_DIR"] = folder
+        sys.modules["guard_log_report"] = None  # the import now raises, so the fallback parser runs
+        time.tzset()
         zone = datetime.fromisoformat(turn.replace("Z", "+00:00")).astimezone().isoformat(timespec="seconds")
         return zone, dw.collect_unread(turn)
     finally:
@@ -1805,8 +1807,8 @@ def _fallback_zone_run(name, turn, tz, lines):
 
 def _fallback_dst_case(name, label, turn, local_turn, tz, lines, want=None, unwanted=None):
     zone, texts = _fallback_zone_run(name, turn, tz, lines)
-    # Scope first (P7): the zone took, and the fallback ran. Then the fallback cut the seventh field, which only
-    # the reader would keep, so the anchor is in the texts as its bare subject.
+    # Scope first: the zone took, and the fallback ran, before any subject is judged. The fallback cuts the seventh
+    # field, which only the reader would keep, so the anchor is in the texts as its bare subject.
     check(label + ": scope: the process runs in the forced zone", zone == local_turn, zone)
     check(label + ": scope: the fallback parser ran, so the seventh field is cut",
           ANCHOR_SUBJ in texts, repr(texts))
@@ -1890,6 +1892,16 @@ def case_unread_fallback_dst_reverse_line_stays_out_under_utc():
                        unwanted=EARLY_SUBJ)
 
 
+def case_unread_zone_less_line_reads_as_local_under_cst():
+    # A zone-less line is the wall time the guard wrote, which is local time. In CST6CDT, 12:30 is 18:30Z, after the
+    # 18:00Z turn start, so it is in the turn. Read as UTC it would be 12:30Z, before the turn start.
+    if _zone_unavailable("unread zone-less, CST"):
+        return
+    _unread_fallback_case("unread_zoneless_cst", "2026-11-01T12:30:00", "UNREAD-SUBJECT-ZONELESS-CST",
+                          "unread zone-less, CST", turn="2026-11-01T18:00:00Z", tz=DST_CST,
+                          local_turn="2026-11-01T12:00:00-06:00")
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1957,6 +1969,7 @@ def main():
         case_unread_fallback_dst_reverse_line_stays_out_under_cst,
         case_unread_fallback_dst_forward_line_is_collected_under_utc,
         case_unread_fallback_dst_reverse_line_stays_out_under_utc,
+        case_unread_zone_less_line_reads_as_local_under_cst,
     ):
         run_case(case)
 
