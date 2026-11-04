@@ -70,6 +70,10 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
+
+def rerun_once(run_id, failed=True):
+    """The one-time re-run named for a red run (decision no-merge-onto-red-main). `--failed` re-runs the red jobs; a run with no red job has none to name, so it is re-run whole."""
+    return f"re-run it once: gh run rerun {run_id}" + (" --failed" if failed else "")
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -1093,14 +1097,14 @@ class Host:
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
                     if not cleared(r):
-                        red.append(f"{where}: " + "; ".join(jobs))
+                        red.append(f"{where}: " + "; ".join(jobs) + f" ({rerun_once(r['id'])})")
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
                     if not cleared(r, cancelled=True):
                         unknown.append(f"{where} was cancelled with no red job")
                 else:
-                    red.append(f"{where} ended {r['conclusion']} with no red job")
+                    red.append(f"{where} ended {r['conclusion']} with no red job ({rerun_once(r['id'], failed=False)})")
         except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
