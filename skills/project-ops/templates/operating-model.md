@@ -13,7 +13,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
-  A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
+  A lane session also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Where triage runs, only triage writes the waiting page.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -28,7 +28,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
