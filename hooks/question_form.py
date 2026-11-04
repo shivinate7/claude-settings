@@ -4,10 +4,10 @@ chat question box (AskUserQuestion) and a write of a waiting-page item (Artifact
 question-form holds the ruling; rule `style-question-form` holds the text.
 
     chat_hit(tool_input) -> (rule, matched)   an AskUserQuestion input; judges each question with 2+ options
-    item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
+    item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the option-key check, by its shape. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -286,13 +286,14 @@ def port_item_hit(op: str, data) -> str:
     return ""
 
 
-def _write_data(entry):
-    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
+def _write_data(entry, cwd=""):
+    """The data of one write: `data`, else the JSON in `file_path`, a relative path read against the
+    payload's `cwd` (the hook process's own cwd is not the session's). None when neither reads."""
     data = entry.get("data")
     path = entry.get("file_path")
     if data is None and isinstance(path, str) and path:
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             return None
@@ -880,9 +881,9 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry):
+def item_hit(op, entry, cwd=""):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
-    data = _write_data(entry)
+    data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
@@ -975,7 +976,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page. The hit is the first
+    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the option-key check, by its shape). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []
@@ -984,13 +985,35 @@ def page_item_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
-    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+    if not writes:  # a read or another collection loads nothing more
         return PASS, []
+    if not is_waiting_page(tool_input, cwd):
+        # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
+        # write, by its shape. No writes return, so no other check or model review follows.
+        return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry)
+        hit = item_hit(op, entry, cwd)
         if hit[0]:
             return hit, writes
     return PASS, writes
+
+
+def keyed_options_hit(writes, cwd=""):
+    """(rule, matched) for the first of `writes` that has the waiting-page decision shape (an `options`
+    list with an option that carries a `key`) and that rule option-letter-keys refuses, else ("", ""). Judged
+    whatever page the call names: the page cannot be named reliably (another checkout's page, or a repo with
+    no page key), and a write of any other shape is no waiting-page item, so it passes."""
+    for op, entry in writes:
+        if op == "str_replace":  # carries no options: its shape, and so its page, is unseen
+            continue
+        data = _write_data(entry, cwd)
+        options = data.get("options") if isinstance(data, dict) else None
+        if not (isinstance(options, list) and any(isinstance(o, dict) and "key" in o for o in options)):
+            continue
+        hit = option_letter_hit(op, data)
+        if hit:
+            return "option-letter-keys", hit
+    return PASS
 
 
 def design_writes(writes):
