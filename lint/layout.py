@@ -517,9 +517,9 @@ def _owner_home(home):
     return None if found in ("", "~") else found
 
 
-def mockup_homes(root, home=None):
-    """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. `home`
-    is the owner's home, kept so a caller can pass it. Reads no file and starts no process."""
+def mockup_homes(root):
+    """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
+    file and starts no process."""
     return (os.path.join(root, *path(root, "design").split("/")),)
 
 
@@ -561,7 +561,7 @@ def mockup_file(root, file, home=None):
         return None, "url"
     if file.endswith(("/", "\\")):
         return None, "folder"
-    design = mockup_homes(root, home)[0]
+    design = mockup_homes(root)[0]
     owner = _owner_home(home)
     mod = _flavour(file, owner)
     if file == "~" or file.startswith(("~/", "~\\")):
