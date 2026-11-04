@@ -9,8 +9,9 @@ level in that file at base (a def, class, assignment or import) and is not bound
 is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
 The report (decision stale-cites-at-merge) prints after the findings and never changes the exit code. It names
-each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and whether
-its holder file changed, and each changed code file with the decisions whose Home names it and the rows that name it.
+each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and the changed
+files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched verdict), and each changed code file
+with the decisions whose Home names it and the rows that name it.
 
 Each case makes a temp git repo: the base commit on `main`, the head commit on `topic`. The check runs
 with the repo as cwd and the range as commit ids. The step cases run bin/ste-changed, which runs
@@ -784,6 +785,42 @@ class CostTests(StaleCase):
         self.assertIn(done.returncode, (0, 1), out)
         self.assertEqual((paths_under(rng.repo), paths_under(scripts)), before, out)
 
+    def test_an_anchor_only_edit_starts_a_pinned_count_of_git_processes_and_no_ls_tree_of_hooks(self):
+        # Pinned to the count the report starts today for an edit to CLAUDE.md alone, measured with GIT_TRACE. No code
+        # file changed, so the report reads the rule file's blobs and the mechanisms file, and no ls-tree names hooks/.
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(commands), 4, commands)  # PINNED: today's count for this edit
+        self.assertFalse(any(command.startswith("ls-tree") and "hooks/" in command for command in commands), commands)
+
+    def test_an_anchor_edit_with_a_code_change_starts_at_most_one_more_git_process(self):
+        # The code change may add one start on top of the anchor-only count: the ls-tree of the decisions folder.
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
+        extra = {CLAUDE: base_claude, MECH: mech}
+
+        def anchor_only(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+
+        def anchor_and_code(repo):
+            write(repo, CLAUDE, head_claude)
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        _, _, alone = self.run_traced_commands(self.make_range(base_files(extra=extra), anchor_only))
+        rc, out, commands = self.run_traced_commands(self.make_range(base_files(extra=extra), anchor_and_code))
+        self.assertEqual(rc, 0, out)
+        self.assertLessEqual(len(commands), len(alone) + 1, "%s\nanchor only: %s" % (commands, alone))
+
 
 class UnknownFileTests(StaleCase):
     """A touched .py that does not parse cannot say which names it defines: unknown, named, never a silent pass."""
@@ -842,9 +879,9 @@ def mechanisms(rows):
     return json.dumps({"rules": {slug: {"mechanism": m} for slug, m in rows.items()}}, indent=2) + "\n"
 
 
-def decisions(*pairs):
-    """docs/decisions records, one per (stem, Home) pair, each with the one Home line the repo writes."""
-    return {"docs/decisions/%s.md" % stem: "# %s\n\n## The ruling\n\nA fixture ruling.\n\nKind: build\nHome: %s\n"
+def decisions(*pairs, folder="docs/decisions"):
+    """Decision records under `folder`, one per (stem, Home) pair, each with the one Home line the repo writes."""
+    return {"%s/%s.md" % (folder, stem): "# %s\n\n## The ruling\n\nA fixture ruling.\n\nKind: build\nHome: %s\n"
             % (stem, home) for stem, home in pairs}
 
 
@@ -853,11 +890,16 @@ def touched(rng):
     return set(git(rng.repo, "diff", "--name-only", rng.base, rng.head).split())
 
 
+NONE = re.compile(r"\bnone\b")
+
+
 class ReportTests(StaleCase):
-    """The report: an anchor edit names its guard or check row and whether the row's holder changed; a changed
+    """The report: an anchor edit names its guard or check row and the changed files under the rule dirs; a changed
     code file lists the decisions whose Home names it. A repo with no mechanisms file gets the Home half only."""
 
-    def test_anchor_edit_names_its_guard_as_untouched_and_leaves_the_anchor_beside_it_unnamed(self):
+    def test_anchor_edit_prints_its_guard_row_and_none_when_no_rule_dir_changed(self):
+        # Re-pointed from "holder untouched": a guard row's logic can sit in another module (guard_kill.py and similar),
+        # so the report prints no verdict. It prints the row, then the changed files under the rule dirs: none here.
         base_claude = ("Never merge failing CI. <!-- rule:git-never-merge-failing-ci --> "
                        "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n")
         head_claude = ("Never merge failing CI. <!-- rule:git-never-merge-failing-ci --> "
@@ -878,18 +920,23 @@ class ReportTests(StaleCase):
         self.assertTrue(ref_lines, "the report names no guard for the edited anchor git-main-only-by-pr\n" + out)
         self.assertTrue(any(GUARD_KIND.search(line) for line in ref_lines),
                         "the guard line for git-main-only-by-pr does not say its kind is guard\n" + out)
-        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
-                        "the guard line for git-main-only-by-pr does not say its holder is untouched\n" + out)
+        self.assertFalse(any("touched" in line for line in ref_lines),
+                         "the guard line for git-main-only-by-pr gives a touched verdict\n" + out)
+        self.assertTrue(any(NONE.search(line) for line in ref_lines),
+                        "the guard line for git-main-only-by-pr does not say no rule dir changed\n" + out)
         self.assertEqual(slug_lines(out, "git-never-merge-failing-ci"), [],
                          "an anchor whose sentence did not change is named\n" + out)
         self.assertEqual(rc, 0, out)
         self.assertIn("stale-cites: PASS", out)
 
-    def test_anchor_edit_says_touched_when_its_check_row_file_changed(self):
+    def test_anchor_edit_lists_the_changed_rule_dir_file_and_prints_no_verdict(self):
+        # Re-pointed from "says touched" for a check row whose ref is the changed file. The row's ref now names
+        # lint/x.py, which this range does not change, so a hooks/ file in the anchor line can only come from the
+        # changed-files list, not from the row.
         base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
         head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
-        mech = mechanisms({"git-main-only-by-pr": {"kind": "check", "ref": "hooks/guard.py",
-                                                   "test": "hooks/test_guard.py::test_main"}})
+        mech = mechanisms({"git-main-only-by-pr": {"kind": "check", "ref": "lint/x.py",
+                                                   "test": "lint/test_x.py::test_check"}})
 
         def change(repo):
             write(repo, CLAUDE, head_claude)
@@ -897,13 +944,13 @@ class ReportTests(StaleCase):
             commit(repo)
         rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
         self.assertEqual(touched(rng), {CLAUDE, "hooks/guard.py"},
-                         "scope: the range changes the anchor's file and the check row's file")
+                         "scope: the range changes the anchor's file and a file under hooks/")
         rc, out = self.run_check(rng)
         lines = slug_lines(out, "git-main-only-by-pr")
-        self.assertTrue(any(TOUCHED.search(line) for line in lines),
-                        "the edited anchor's holder hooks/guard.py changed, yet no line says touched\n" + out)
-        self.assertFalse(any(UNTOUCHED.search(line) for line in lines),
-                         "the holder hooks/guard.py changed, yet a line says untouched\n" + out)
+        self.assertTrue(any("hooks/guard.py" in line for line in lines),
+                        "the anchor line does not list the changed file under hooks/\n" + out)
+        self.assertFalse(any("touched" in line for line in lines),
+                         "the anchor line gives a touched or untouched verdict\n" + out)
         self.assertEqual(rc, 0, out)
 
     def test_code_change_lists_each_decision_whose_home_names_the_file(self):
@@ -1040,9 +1087,11 @@ class ReportTests(StaleCase):
         self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed")
         rc, out = self.run_check(rng)
         ref_lines = [line for line in slug_lines(out, "git-main-only-by-pr") if "main-moves-by-pull-request" in line]
-        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
-                        "the real anchor git-main-only-by-pr is not named as untouched past a code span and a quote\n"
-                        + out)
+        # Re-pointed from "named as untouched": the report prints no verdict, only the changed rule-dir files, and
+        # this range changes none of them, so the line says none.
+        self.assertTrue(any(NONE.search(line) for line in ref_lines),
+                        "the real anchor git-main-only-by-pr is not named past a code span and a quote, "
+                        "with none changed\n" + out)
         self.assertFalse(named(out, "fake"), "the unchanged anchor in a code span is named\n" + out)
         self.assertEqual(rc, 0, out)
 
@@ -1063,8 +1112,9 @@ class ReportTests(StaleCase):
         self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed; the mention's sentence changed too")
         rc, out = self.run_check(rng)
         ref_lines = [line for line in slug_lines(out, "git-main-only-by-pr") if "main-moves-by-pull-request" in line]
-        self.assertTrue(any(UNTOUCHED.search(line) for line in ref_lines),
-                        "the real anchor git-main-only-by-pr is not named as untouched\n" + out)
+        # Re-pointed from "named as untouched": no verdict is printed, so the line is checked for its changed-files list.
+        self.assertTrue(any(NONE.search(line) for line in ref_lines),
+                        "the real anchor git-main-only-by-pr is not named with none changed\n" + out)
         self.assertFalse(named(out, "fake") or "fake-guard" in out,
                          "a backticked mention, `<!-- rule:fake -->`, is named as an anchor\n" + out)
         self.assertEqual(rc, 0, out)
@@ -1095,7 +1145,7 @@ class ReportTests(StaleCase):
                 self.assertEqual(rc, 0, "a malformed mechanisms file changed the exit code\n" + out)
                 self.assertNotIn("Traceback", out, out)
 
-    def test_a_reworded_guard_anchor_names_the_module_holding_its_refuse_not_an_unrelated_guard_file(self):
+    def test_a_reworded_guard_anchor_lists_only_its_changed_hooks_file(self):
         base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
         head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
         mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
@@ -1110,10 +1160,28 @@ class ReportTests(StaleCase):
                          "scope: hooks/guard.py, which holds the refuse() call, is untouched")
         rc, out = self.run_check(rng)
         lines = slug_lines(out, "git-main-only-by-pr")
-        self.assertTrue(any("hooks/guard.py" in line and UNTOUCHED.search(line) for line in lines),
-                        "the guard row's holder is not named as hooks/guard.py untouched\n" + out)
-        self.assertFalse(any("guard_stream.py" in line and TOUCHED.search(line) for line in lines),
-                         "an unrelated guard file is named as the touched holder\n" + out)
+        # Re-pointed from "names hooks/guard.py untouched as the holder": the report names no holder. Its changed-files
+        # list holds the changed hooks/ file, and it does not list the unchanged module that holds the refuse() call.
+        self.assertTrue(any("hooks/guard_stream.py" in line for line in lines),
+                        "the anchor line does not list the changed hooks/ file\n" + out)
+        self.assertFalse(any("hooks/guard.py" in line for line in lines),
+                         "the anchor line lists hooks/guard.py, which this range does not change\n" + out)
+        self.assertFalse(any("touched" in line or "holder" in line for line in lines),
+                         "the anchor line gives a holder or touched verdict\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_child_repo_with_decisions_in_a_decisions_folder_prints_the_home_line_for_a_changed_file(self):
+        # A repo not rolled out to the layout keeps its decisions at decisions/, the layout's legacy path.
+        extra = decisions(("guard-home-first", "hooks/guard.py"), folder="decisions")
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-home-first"),
+                        "the report does not list a decision in decisions/ whose Home names hooks/guard.py\n" + out)
         self.assertEqual(rc, 0, out)
 
 
