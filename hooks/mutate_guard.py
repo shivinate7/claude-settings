@@ -2092,6 +2092,11 @@ MUTATIONS = [
      '        hits = [d for d in hits if d["state"] != "Booted"]',
      '        hits = list(hits)', "guard",
      "lease: an MCP launch of a booted device with no lock is allowed"),
+    # The name arm compares exactly: a name without the case or outer-space fold matches no device. The UDID arm stays.
+    ("simulator-boot-lease: a device name compares exactly, without the case and outer-space fold",
+     '        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
+     '        hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
+     "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
