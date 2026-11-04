@@ -255,15 +255,49 @@ def _text_of(rec):
     return _transcript.owner_text(rec, NOTICE_TAGS)
 
 
+def _tail_prompts(transcript):
+    """[(offset, record)] for each owner prompt record in the last SEED_READ_MAX bytes, in order. Attachment, assistant
+    and other non-prompt records are left out. Cost: one open, one read of that tail."""
+    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+        return []
+    try:
+        with open(transcript, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            at = max(0, handle.tell() - SEED_READ_MAX)
+            handle.seek(at)
+            lines = handle.read().splitlines(True)
+    except OSError:
+        return []
+    found = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            rec = None
+        if isinstance(rec, dict) and _text_of(rec) is not None:
+            found.append((at, rec))
+        at += len(line)
+    return found
+
+
+def _own_record(transcript, prompt):
+    """Offset of the prompt's own record: the last owner prompt record whose text equals the prompt, or None."""
+    own = [at for at, rec in _tail_prompts(transcript) if _text_of(rec).strip() == prompt.strip()]
+    return own[-1] if own else None
+
+
 def _owner_turn_in(transcript, prompt):
     """True when the transcript at path `transcript` holds an owner turn, not an isMeta record, a `/effort`-style
-    command record, a record whose origin kind is not human, a promptSource "system" record, or a record whose text is
-    the prompt itself. Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX bytes."""
-    if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
+    command record, a record whose origin kind is not human, a promptSource "system" record, or the prompt's own
+    record (_own_record). Cost: one open, lines read from the top until the first owner turn, at most SEED_READ_MAX
+    bytes, plus the _own_record read."""
+    if not isinstance(transcript, str):
         return False
+    own = _own_record(transcript, prompt)
     try:
         with open(transcript, "rb") as handle:
             while handle.tell() < SEED_READ_MAX:
+                at = handle.tell()
                 line = handle.readline(SEED_READ_MAX)
                 if not line:
                     return False
@@ -271,13 +305,13 @@ def _owner_turn_in(transcript, prompt):
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system":
+                if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system" or at == own:
                     continue
                 origin = rec.get("origin")
                 if isinstance(origin, dict) and origin.get("kind", "human") != "human":
                     continue
                 text = _text_of(rec)
-                if text is not None and text.strip() != prompt.strip() and not text.lstrip().startswith(COMMAND_RECORDS):
+                if text is not None and not text.lstrip().startswith(COMMAND_RECORDS):
                     return True
     except OSError:
         pass
@@ -285,19 +319,10 @@ def _owner_turn_in(transcript, prompt):
 
 
 def _system_prompt_last(transcript, prompt):
-    """True when the transcript's last record is the prompt itself with promptSource "system": a timed check-in or
-    other harness turn. Cost: one open, the last SEED_READ_MAX bytes."""
-    if not isinstance(transcript, str):
-        return False
-    try:
-        with open(transcript, "rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            handle.seek(max(0, handle.tell() - SEED_READ_MAX))
-            lines = handle.read().splitlines()
-        rec = json.loads(lines[-1])
-    except (OSError, ValueError, IndexError):
-        return False
-    return isinstance(rec, dict) and rec.get("promptSource") == "system" and (_text_of(rec) or "").strip() == prompt.strip()
+    """True when the last owner prompt record is the prompt itself with promptSource "system": a timed check-in or
+    other harness turn."""
+    found = _tail_prompts(transcript)
+    return bool(found) and found[-1][1].get("promptSource") == "system" and _text_of(found[-1][1]).strip() == prompt.strip()
 
 
 def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
