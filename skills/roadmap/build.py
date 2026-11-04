@@ -53,14 +53,15 @@ The build goes red (step roadmap-pr-without-step) when a todo step is named by a
 needed) it prints one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
 printed line tells them apart.
 
-The build goes red (decision mockup-home) when a step's note, why or ask cites a mockup by its id (`item<N>-<letter>`,
-a whole token) and the step's `mockups` field, {"<id>": "<path>"}, holds no file for it. It prints
-"mockup with no file: <step id> <mockup id>" per miss, writes the page, then exits 1. An entry is a miss when its
-path is outside the design folder (lint/layout.py mockup_homes; a machine-home path is outside it), is a link, or
-names a file that origin does not hold (mockup_on_origin below: the remote-tracking ref of the default branch
-or of the record branch, not the checkout). It reads unknown, never a miss, and prints "mockup file unread:
-<step id> <mockup id> (<why>)" with exit 0, when origin cannot be shown: no default-branch ref, or a shallow
-checkout. Cost: up to five short git reads per entry, no file or log.
+The build goes red (decision mockup-home) when an open step (status not done) has a note, why or ask that cites a
+mockup by its id (`item<N>-<letter>`, a whole token) and the step's `mockups` field, {"<id>": "<path>"}, holds no
+file for it. It prints "mockup with no file: <step id> <mockup id>" per miss, writes the page, then exits 1. An
+entry is a miss when its path is outside the design folder (lint/layout.py mockup_homes; a machine-home path is
+outside it), is a link or a folder, or names a file that no origin ref holds (mockup_on_origin below: any
+remote-tracking ref under refs/remotes/origin/, an open PR's branch too, not the checkout). It reads unknown,
+never a miss, and prints "mockup file unread: <step id> <mockup id> (<why>)" with exit 0, when origin cannot be
+shown: no origin ref, a shallow checkout, a failed git read, or a layout that cannot be read. Cost: two short git
+reads, plus one per origin ref, per entry; no file or log.
 
 The upkeep list also names each closed waiting-page item whose home is an open step that never cites
 the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
@@ -796,11 +797,12 @@ DEFAULT_BRANCH = "main"  # the default branch when origin/HEAD is not in the che
 
 
 def mockup_on_origin(repo, layout, found):
-    """(state, why) for a design-folder file `found` (lint/layout.py mockup_file's path): "ok" when origin holds it,
-    "miss" when origin is readable and does not, "unknown" with the reason when git cannot tell. Origin is the
-    remote-tracking ref of the default branch (origin/HEAD, else origin/main) and of the record branch, as a fetch
-    leaves them; the checkout's own files do not count. With no default-branch ref, or a shallow checkout, it is
-    unknown, never a miss or a pass. The one home of the origin check (decision mockup-home)."""
+    """(state, why) for a design-folder file `found` (lint/layout.py mockup_file's path): "ok" when origin holds it
+    as a file, "miss" when origin is readable and does not, "unknown" with the reason when it cannot tell. Origin
+    is every remote-tracking ref under refs/remotes/origin/, as a fetch leaves them (an open PR's branch counts);
+    the checkout's own files do not. A folder, a link or a submodule at the path is no file. A failed read, no
+    origin ref, or a shallow checkout is unknown, never a miss or a pass. The one home of the origin check
+    (decision mockup-home)."""
     rel = os.path.relpath(found, str(repo)).replace(os.sep, "/")
     if rel == ".." or rel.startswith("../"):
         return "unknown", "the file is outside the checkout"
@@ -810,33 +812,38 @@ def mockup_on_origin(repo, layout, found):
         return "unknown", "the checkout could not be read"
     if shallow.strip() == "true":
         return "unknown", "a shallow checkout cannot show origin's files"
-    present = set(refs.split())
-    head = (git(repo, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or "").strip()
-    default = head if head in present else "refs/remotes/origin/" + DEFAULT_BRANCH
-    try:
-        record = "refs/remotes/origin/" + layout.record_branch(str(repo))
-    except layout.LayoutError:
-        record = None
-    for ref in [r for r in (default, record) if r in present]:
-        if git(repo, "cat-file", "-e", "%s:%s" % (ref, rel)) is not None:
+    present = refs.split()
+    if not present:
+        return "unknown", "no origin ref"
+    failed = False
+    for ref in present:
+        row = git(repo, "ls-tree", ref, "--", rel)
+        if row is None:
+            failed = True
+        elif row.split(None, 1)[:1] in (["100644"], ["100755"]):
             return "ok", ""
-    if default not in present:
-        return "unknown", "no origin ref for the default branch"
+    if failed:
+        return "unknown", "origin's files could not be read"
     return "miss", ""
 
 
 def mockup_state(repo, layout, file):
     """(state, why): "ok", "miss" or "unknown" for one `mockups` entry. A path outside the design folder (a
-    machine-home path, a link) is a miss. A design-folder file is judged by origin, not the checkout."""
-    found, _ = layout.mockup_file(str(repo), file)
+    machine-home path, a link) is a miss. A design-folder file is judged by origin, not the checkout. A layout that
+    cannot be read (a malformed extras file) is unknown, never a raise."""
+    try:
+        found, _ = layout.mockup_file(str(repo), file)
+    except Exception as err:  # a fault in the shared layout reads unknown
+        return "unknown", "the layout could not be read: %s" % err
     return mockup_on_origin(repo, layout, found) if found else ("miss", "")
 
 
 def mockup_misses(repo, steps):
     """([(step id, mockup id)], [(step id, mockup id, why)]): each cited mockup id that has no file, and each whose
-    file could not be read here. A step with no cited id holds none. The layout failing to load reads every cited
+    file could not be read here. Only open steps (status not done) are judged. A step with no cited id holds none. The layout failing to load reads every cited
     id as unknown."""
-    cites = {sid: mockup_cites(step) for sid, step in sorted(steps.items()) if isinstance(step, dict)}
+    cites = {sid: mockup_cites(step) for sid, step in sorted(steps.items())
+             if isinstance(step, dict) and step.get("status") != "done"}
     if not any(cites.values()):
         return [], []
     try:

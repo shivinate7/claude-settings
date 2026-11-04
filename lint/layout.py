@@ -552,12 +552,15 @@ def _below(parts, home, fold):
 def mockup_file(root, file, home=None):
     """(path, why) for a mockup `file`. path is the file as this machine reads it (`~` expanded, a relative file
     joined to `root`, `.` and `..` folded) when it sits under the design folder. Else path is None and why is
-    "empty" (no file), "url" or "outside". A Windows form reads in any case, with either slash. Starts no process."""
+    "empty" (no file), "url", "folder" (the text ends in a slash) or "outside". A Windows form reads in any case, with
+    either slash. Starts no process."""
     if not isinstance(file, str) or not file.strip():
         return None, "empty"
     file = file.strip()
     if URL_FORM.match(file):
         return None, "url"
+    if file.endswith(("/", "\\")):
+        return None, "folder"
     design = mockup_homes(root, home)[0]
     owner = _owner_home(home)
     mod = _flavour(file, owner)
@@ -578,7 +581,8 @@ def mockup_home_problem(root, file, home=None):
     found, why = mockup_file(root, file, home)
     if found:
         return None
-    cause = {"empty": "has no file", "url": "is a link, and a link does not stay with the repo"}.get(
+    cause = {"empty": "has no file", "url": "is a link, and a link does not stay with the repo",
+             "folder": "is a folder, and a folder holds no mockup"}.get(
         why, "is outside the design folder")
     return "the design's `file` %s. Keep the mockup in %s, and put its path in `file`." % (cause, mockup_home_words(root))
 
