@@ -123,8 +123,9 @@ def push_text(segment: str) -> str:
 
 def _push_parse(args):
     """The one reader of `git push` arguments: (force, mirror, every, includes, unpinned, leased,
-    delete, remote, refspecs). The remote is '' when none is named."""
-    force = mirror = every = includes = unpinned = leased = delete = False
+    delete, upstream, remote, refspecs). `upstream` is a `-u` or `--set-upstream` push. `--branches` is
+    git's alias of `--all`. The remote is '' when none is named."""
+    force = mirror = every = includes = unpinned = leased = delete = upstream = False
     remote = ""
     plain = []
     skip = repo_next = False
@@ -153,8 +154,10 @@ def _push_parse(args):
                 unpinned = unpinned or not value.partition(":")[2]
             elif name == "--mirror":
                 mirror = True
-            elif name == "--all":
+            elif name in ("--all", "--branches"):
                 every = True
+            elif len(name) >= 6 and "--set-upstream".startswith(name):
+                upstream = True
             elif name == "--delete":
                 delete = True
             elif len(name) >= 4 and "--force".startswith(name):
@@ -166,11 +169,12 @@ def _push_parse(args):
                     break
                 force = force or letter == "f"
                 delete = delete or letter == "d"
+                upstream = upstream or letter == "u"
         else:
             plain.append(arg)
     if not remote and plain:
         remote, plain = plain[0], plain[1:]
-    return force, mirror, every, includes, unpinned, leased, delete, remote, plain
+    return force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain
 
 
 def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
@@ -201,7 +205,7 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
     else 'deny'. A deletion off the default branch is ''.
     """
-    force, mirror, every, includes, unpinned, leased, delete, remote, plain = _push_parse(args)
+    force, mirror, every, includes, unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     plus = any(spec.startswith("+") for spec in plain)
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):
@@ -258,13 +262,14 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
     destination (a bare push, `HEAD`, `@`, or a colon-less refspec naming the current branch) that writes a
     name other than the branch's upstream. It needs an upstream, the pushed remote equal to
-    branch.<cur>.remote, and an upstream that is not main or master. A bare push under push.default
+    branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
+    implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
     cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
     one; one `git config --get-regexp` when the upstream is needed.
     """
-    force, mirror, every, includes, unpinned, leased, delete, remote, plain = _push_parse(args)
+    force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):
         return ""
     if every:
@@ -318,7 +323,8 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     pushed = remote or remote_cfg
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
         return ""
-    return "stray" if merge != current() else ""
+    # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
+    return "stray" if merge != current() and not upstream else ""
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -787,12 +793,12 @@ PUSH_REASON = (
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
-    "(rule git-main-only-by-pr, decision plain-push-asks). The click in this prompt is the grant."
+    "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
-    "The click in this prompt is the grant."
+    "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
