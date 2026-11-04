@@ -628,9 +628,17 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
-   raw HTML, or that does not name this account a writer, is unreadable too.
+   raw HTML, or that does not name this account a writer, is unreadable too. Write an empty
+   `<artifact id>.notfound` instead only when the read says "not found" AND `Artifact` action `list`
+   with scope `all` holds no such id. Page the list to its end (`page_token` until none is returned)
+   before an id counts as absent. Any other failed read stays `.unreadable`.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
-   `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
+   `behind`, `unknown` or `not-found` with its owner, and exits non-zero. An unread page is never
+   current. A `not-found` page is reported with the claude-settings waiting page as the place to re-file that
+   repo's items: the URL recorded in the extras file of the claude-settings checkout that holds the script, not
+   fetched. The target reads `the claude-settings waiting page is unknown` when that checkout has no page, its
+   extras file cannot be read, or its page has a `.notfound` or `.unreadable` marker in the folder. The check
+   never repoints a page: the owner decides.
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`, as "Keep the page on main's code" step 2 says:
    `stale_pages.py --page <fetched page> --write <new page>`.
@@ -646,5 +654,5 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
 4. Update one page first, then read its items: they must all still be there. That the database and
    its saved answers survive a republish is unmeasured until this live check is run.
-5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
-   its owner.
+5. Run the command again. The batch report lists its verdict line, with each `unknown` or `not-found` page
+   and its owner.
