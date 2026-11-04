@@ -21613,7 +21613,7 @@ def _stamp_verdict(stamp):
     if not re.fullmatch(STAMP_SHAPE, stamp):
         return False, "field 0 is %r, want ISO 8601 with a colon offset, like 2026-11-01T16:55:00-06:00" % stamp
     parsed = datetime.fromisoformat(stamp)
-    local = datetime.now().astimezone().utcoffset()
+    local = parsed.astimezone().utcoffset()  # the machine's offset at the stamp's own instant, not at now
     if parsed.utcoffset() != local:
         return False, "field 0 is %r with offset %s, want this machine's %s" % (stamp, parsed.utcoffset(), local)
     if abs(datetime.now(timezone.utc) - parsed) > timedelta(minutes=5):
