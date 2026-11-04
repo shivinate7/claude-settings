@@ -29,7 +29,7 @@ protection. GitHub's branch protection setting is the owner's to change.
   `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo shivinate7/claude-settings --check all-jobs-passed`,
   then the same with `--confirm`. On a branch with a check rule it PATCHes the check list only; `strict` stays.
   The protection holds one check, `all-jobs-passed`, with `strict` false. The protection pins app id
-  15368 (GitHub Actions) (read 2026-11-03 19:19 CST: `checks` [{all-jobs-passed, 15368}]). `protect.py` sends `contexts` only, so it does not pin an app id. Whether a contexts-only PATCH keeps that pin is unmeasured. The write needs the
+  15368 (GitHub Actions) (read 2026-11-03 19:19 CST: `checks` [{all-jobs-passed, 15368}]). `protect.py`'s PATCH keeps the required check's own held app id. With no app id held, it sends none, and GitHub picks the app that recently posted the check, or any app if none did. It never copies another check's app id. The write needs the
   shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block opens with `gh auth switch -u shivinate7`
   (decision `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier
   refused the direct PATCH as a CI bypass, so the owner runs the switch. Whether it refuses `protect.py --confirm` is unmeasured.
