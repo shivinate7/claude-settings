@@ -124,6 +124,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
 Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       A Write or Edit into the caller's own `agent-<id>-<suffix>` red-run folder
+                       passes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -136,7 +138,8 @@ Other tools, in `judge` order:
                        A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
-                       `agent-<id>-<suffix>` red-run folder passes that act.
+                       `agent-<id>-<suffix>` red-run folder passes that act. A write into
+                       that red-run folder passes too, here and in worktree-home.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
                        checkout, and a write (Write family or shell) that lands in the primary's own
@@ -3700,7 +3703,8 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             except Exception:
                 resolved_target = write_target
             if (path_is_inside(resolved_target, home_primary) is True
-                    and path_is_inside(resolved_target, home) is False):
+                    and path_is_inside(resolved_target, home) is False
+                    and not _own_red_run(payload, (home_primary,), resolved_target)):
                 return "write target outside recorded agent home"
     return ""
 
@@ -3775,18 +3779,26 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
     return bool(held) and path_is_inside(target, held) is True
 
 
-def _cd_red_run(payload, roots, owner: str) -> bool:
-    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
-    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
-    whole, so a sibling whose id only starts with this one does not pass."""
+def _own_red_run(payload, roots, path: str) -> bool:
+    """True when PATH is at or inside the caller's own test-author red-run folder
+    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
+    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it. The id
+    and its dash match whole, so a sibling whose id only starts with this one does not pass. ROOTS
+    holds the primary checkout. A path outside `.claude/worktrees/` is no red-run folder."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not owner:
+    if not isinstance(agent_id, str) or not agent_id or not path:
         return False
-    folder = os.path.dirname(owner)
-    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
-            and os.path.basename(folder) == "worktrees"
-            and os.path.basename(os.path.dirname(folder)) == ".claude"
-            and os.path.dirname(os.path.dirname(folder)) in roots)
+    folder = path
+    while True:
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        if (os.path.basename(parent) == "worktrees"
+                and os.path.basename(os.path.dirname(parent)) == ".claude"
+                and os.path.dirname(os.path.dirname(parent)) in roots
+                and os.path.basename(folder).startswith("agent-" + agent_id + "-")):
+            return True
+        folder = parent
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
@@ -3798,7 +3810,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
-    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    `payload` marks the target as the caller's own home or red-run folder (a write into that red-run
+    folder passes too, as a target of either kind); a `cd` toward a folder
     under another `.git` entry spends the git read.
     Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
@@ -3840,10 +3853,11 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return False
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True
+                and not _own_red_run(payload, roots, resolved))
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+        if elsewhere(move, where) and not _own_red_run(payload, roots, move):
             return OTHER_CHECKOUT_CD_DETAIL + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
