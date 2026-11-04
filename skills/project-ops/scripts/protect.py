@@ -7,6 +7,9 @@ The one check is the all-jobs-passed rollup (decision same-check-kinds), the con
 Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
 sets the required check: a branch with no protection gets it (the check, strict off, admins included, no review rule, no restriction);
 a protected branch with a check rule gets only its required check set (its strict setting stays), and an equal check is left alone.
+The PATCH keeps the app id pin: when every held check with a real app id (not null, not -1) shares one app id, it sends that id with the
+check, read from the live rule and never a constant; otherwise it sends the check unpinned. It never sends `contexts`. The PUT sends no app id,
+so its check is unpinned. The printed line names the app id, or says "unpinned".
 A branch protected without a check rule is refused, naming its rules: a PUT would replace them. merge/merge.py reads the
 required checks from this protection (merge.requiredChecks "protection"), so this is their one home.
 Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument or a check other than REQUIRED_CHECK.
@@ -57,15 +60,18 @@ def main(argv, gh=run_gh):
     code, out = gh(["-X", "GET", base + "/required_status_checks"])
     if code == 0:
         try:
-            held = json.loads(out)["contexts"]
-        except (ValueError, KeyError, TypeError):
+            rule = json.loads(out)
+            held = rule["contexts"]
+            ids = {c.get("app_id") for c in rule.get("checks") or []} - {None, -1}
+        except (ValueError, KeyError, TypeError, AttributeError):
             print(f"protect: cannot read the required checks of {a.branch}: {out}", file=sys.stderr)
             return 1
         if set(held) == set(checks):
             print(f"protect: {a.branch} already requires {', '.join(checks)}. Nothing to set.")
             return 0
-        call, body = ["-X", "PATCH", base + "/required_status_checks"], {"contexts": checks}
-        what = f"set the required checks of {a.branch} to {', '.join(checks)} (now: {', '.join(held) or 'none'}{'; drops: ' + ', '.join(sorted(set(held) - set(checks))) if set(held) - set(checks) else ''})"
+        pin = {"app_id": next(iter(ids))} if len(ids) == 1 else {}  # one live app id keeps the pin; none or several leave the check unpinned
+        call, body = ["-X", "PATCH", base + "/required_status_checks"], {"checks": [{"context": REQUIRED_CHECK, **pin}]}
+        what = f"set the required checks of {a.branch} to {', '.join(checks)} ({'pinned to app id ' + str(pin['app_id']) if pin else 'unpinned'}; now: {', '.join(held) or 'none'}{'; drops: ' + ', '.join(sorted(set(held) - set(checks))) if set(held) - set(checks) else ''})"
     elif "HTTP 404" in out:
         code, whole = gh(["-X", "GET", base])  # a 404 also answers "protected, but no check rule": a PUT would replace its other rules
         if code == 0:
@@ -81,7 +87,7 @@ def main(argv, gh=run_gh):
         call = ["-X", "PUT", base]
         body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": True,
                 "required_pull_request_reviews": None, "restrictions": None}
-        what = f"protect {a.branch} with the required checks {', '.join(checks)}"
+        what = f"protect {a.branch} with the required checks {', '.join(checks)} (unpinned)"
     else:
         print(f"protect: cannot read the protection of {a.branch}: {out}", file=sys.stderr)
         return 1
