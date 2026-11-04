@@ -6948,6 +6948,28 @@ agent_push_allowed("agent push: a bare push git cannot read the destination of a
 agent_push_allowed("agent push: origin HEAD git cannot read allows, unknown is not a hit",
                    VCS + " push origin HEAD", cwd=NOGIT)
 
+# THE VARIABLE DESTINATION. A destination that holds `$` or a backtick is shell text the guard cannot read.
+# From an agent's own checkout, a push whose source is not HEAD or `@` is refused, since its destination may
+# be the agent's branch. A HEAD or `@` source passes, a delete passes, and a lane checkout is not an agent's.
+agent_push_refused("agent push: a variable destination $BR from an agent checkout denies",
+                   VCS + " push origin $BR", cwd=PUSHAGENT)
+agent_push_refused("agent push: a quoted variable destination from an agent checkout denies",
+                   VCS + ' push origin "$BR"', cwd=PUSHAGENT)
+agent_push_refused("agent push: a braced variable destination with -u from an agent checkout denies",
+                   VCS + " push -u origin ${BR}", cwd=PUSHAGENT)
+agent_push_refused("agent push: a variable source to a variable destination from an agent checkout denies",
+                   VCS + " push origin $BR:$BR", cwd=PUSHAGENT)
+agent_push_refused("agent push: a backtick destination from an agent checkout denies",
+                   VCS + " push origin `" + VCS + " branch --show-current`", cwd=PUSHAGENT)
+agent_push_allowed("agent push: HEAD:$BRANCH from an agent checkout allows, the source is HEAD",
+                   VCS + " push origin HEAD:$BRANCH", cwd=PUSHAGENT)
+agent_push_allowed("agent push: :$BR from an agent checkout allows, a delete spec",
+                   VCS + " push origin :$BR", cwd=PUSHAGENT)
+agent_push_allowed("agent push: --delete $BR from an agent checkout allows, a delete",
+                   VCS + " push origin --delete $BR", cwd=PUSHAGENT)
+agent_push_allowed("agent push: a variable destination $BR from a lane checkout allows",
+                   VCS + " push origin $BR", cwd=PUSHFEAT)
+
 
 def agent_push_named_cost_case():
     """A named destination costs no git read, and its verdict names the agent-branch rule.
