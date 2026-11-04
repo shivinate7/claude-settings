@@ -10,6 +10,8 @@ tool lists the tests that do. It fixes none, and it writes nothing. Each finding
 - test-cap: a per-test or per-suite time limit.
 - wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
   Kept apart because it may be fine. The plan decides case by case.
+- calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
+  `time.localtime()`, JS `new Date()`). Decision test-practices P5.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -60,7 +62,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 MAX_BYTES = 1_000_000
-CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap", "calendar")
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -442,6 +444,12 @@ PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
+# A date or zone read with no time given. `time.strftime(fmt)` and `time.localtime()` read the clock only
+# when no time argument is passed, so they are matched apart from the always-real forms.
+PY_CALENDAR_NOW = {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow",
+                   "date.today", "datetime.today", "datetime.date.today", "datetime.datetime.today"}
+
+
 def dotted(node):
     parts = []
     while isinstance(node, ast.Attribute):
@@ -583,6 +591,8 @@ def scan_python(text):
         return tainted
 
     found = set()
+    calendar_calls = []
+    in_elapsed = set()  # calls inside an assert already listed as elapsed-assert: listed once, not twice
     decorator_calls = {id(d) for n in ast.walk(tree)
                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                        for d in n.decorator_list if isinstance(d, ast.Call)}
@@ -593,6 +603,10 @@ def scan_python(text):
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
                 found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+        if names & PY_CALENDAR_NOW or (
+                not call.args and not call.keywords and names & {"time.localtime"}) or (
+                len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
+            calendar_calls.append(call)
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
         if names & PY_SIGNAL_CAP and not (
                 names & {"signal.alarm"} and isinstance(first, ast.Constant) and first.value == 0):
@@ -608,10 +622,13 @@ def scan_python(text):
         for n in walk_scope(root):
             if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
+                in_elapsed.update(id(c) for c in ast.walk(n.test))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
                 if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
+                    in_elapsed.update(id(c) for x in assert_parts(n, name) for c in ast.walk(x))
+    found.update((c.lineno, "calendar") for c in calendar_calls if id(c) not in in_elapsed)
     return found
 
 
@@ -904,6 +921,9 @@ def scan_js(text):
             got = args_of(mm.end() - 1)
             if got and is_num(m[got[1][-1][0]:got[1][-1][1]], True):
                 hits.add(mm.start(), "sleep")
+
+    for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(\s*\)", m):
+        hits.add(mm.start(), "calendar")
 
     tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
     for mm in JS_ASSERT.finditer(m):
@@ -1200,7 +1220,7 @@ def main(argv=None):
         nfiles = len({f["path"] for f in findings})
         print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
               f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread")
+              f"wait-cap {counts['wait-cap']}, calendar {counts['calendar']}); {len(unread)} unread")
     if findings:
         return 1
     return 2 if unread else 0
