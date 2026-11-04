@@ -1128,9 +1128,8 @@ def case_opus_ask_no_problem_grants_builder():
           got is not None and got[2] == "builder", "got %r" % (got,))
 
 
-# THE SCHEDULED TEXT AND THE COMMAND RECORDS (debt opus-ask-scheduled-text; owner ruling, cockpit item 225, pick a,
-# 2026-11-03 22:31 CST). A `/effort` command record, a session-start (seed) prompt and a scheduled reminder never count
-# as the owner's turn. Each fixture below is a made-up record in a measured shape; no real transcript text is copied.
+# THE SCHEDULED TEXT AND THE COMMAND RECORDS (decision owner-override). A `/effort` command record, a session-start
+# (seed) prompt and a scheduled reminder never count as the owner's turn. Each fixture below is a made-up record in a measured shape; no real transcript text is copied.
 # The three texts are Claude-written asks that the real judge passed.
 CLAUDE_WRITTEN_ASKS = (
     "Resume: dispatch the opus judges on the integration branch once CI is green.",
