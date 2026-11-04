@@ -307,7 +307,7 @@
 - stale-cites-tree-exclude-worktree: tree mode reads .ste-lint-exclude from the working tree, not REV, as range mode does (lint/stale_cites.py). Decision: stale-cites-whole-tree
 - stale-cites-tree-local-parity: bin/ste-changed does not read a workflow's tree-cites; an opted-in repo must export TREE_CITES=true to match CI locally (bin/ste-changed). Decision: stale-cites-whole-tree
 - stale-cites-tree-not-adopted: claude-settings does not set tree-cites; its tree run gives 70 STALE003, mostly other-repo and runtime paths (lint/stale_cites.py). Decision: stale-cites-whole-tree
-- stale-cites-tree-relative-dead: a dead cite relative to the Markdown file's folder whose first folder is not a top folder, such as a cite one folder deep, relative to its Markdown file, never fires; the top-folder gate runs first (lint/stale_cites.py). Decision: stale-cites-whole-tree
+- stale-cites-tree-relative-dead: a dead cite one folder deep, relative to its Markdown file, never fires, since the top-folder gate runs first (lint/stale_cites.py). Decision: stale-cites-whole-tree
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
