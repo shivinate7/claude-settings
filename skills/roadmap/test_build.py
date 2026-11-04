@@ -23,6 +23,7 @@ sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
@@ -1552,6 +1553,10 @@ class ForkRecord(Fixture):
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
         self.assertNotIn(self.FORK_TITLE, page)
+
+    def test_waiting_page_is_the_forks_in_its_worktree_and_mains_on_the_checkout(self):
+        self.assertEqual(layout.waiting_page(str(self.fork)), self.FORK_URL)
+        self.assertEqual(layout.waiting_page(str(self.repo)), self.MAIN_URL)
 
     def broken_extras(self, text):
         """Put `text` in the fork's extras file, uncommitted, where the build reads it."""
