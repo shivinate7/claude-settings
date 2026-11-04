@@ -85,8 +85,8 @@ OPUS_ASK_PROMPT = (
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
 )
 
-# The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short: the two calls and
-# start-up must fit the prompt hook's "timeout": 30.
+# The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short. Unmeasured: the worst
+# case, OPUS_ASK_TIMEOUT + OPUS_SCOPE_TIMEOUT plus two `claude -p` starts, may pass the prompt hook's "timeout": 30.
 OPUS_SCOPE_TIMEOUT = 8
 OPUS_SCOPE_PROMPT = (
     "A coding assistant's owner typed the ask below, which grants Opus to agents but names no agent role. The earlier "
@@ -270,12 +270,12 @@ def opus_ask(text):
 
 def opus_scope(text, context):
     """The roles the owner's earlier prompts `context` (a list of strings, oldest first) name for the plain ask `text`,
-    as a list of roles from override.OPUS_ROLES, or None for every role. Fails open to None with one stderr line: an
-    error, a timeout or an odd answer. A role the model names that is not in OPUS_ROLES is dropped by the caller."""
+    as a list of roles from override.ASK_ROLES, or None for every role. Fails open to None with one stderr line: an
+    error, a timeout or an odd answer. A role the model names that is not in ASK_ROLES is dropped."""
     try:
         import decision_watch  # lazy: the one home of the model's name
-        from override import OPUS_ROLES  # the one home of the roles; a copy would drift
-        prompt = (OPUS_SCOPE_PROMPT % ", ".join(OPUS_ROLES) + text + "\n\nEarlier prompts:\n"
+        from override import ASK_ROLES  # the one home of the roles; a copy would drift
+        prompt = (OPUS_SCOPE_PROMPT % ", ".join(ASK_ROLES) + text + "\n\nEarlier prompts:\n"
                   + "\n".join("- " + " ".join(entry.split()) for entry in context))
         verdict, error = invoke_model(prompt, model=decision_watch.MODEL, timeout=OPUS_SCOPE_TIMEOUT,
                                       shape=OK_SHAPE, effort="low")
@@ -286,7 +286,7 @@ def opus_scope(text, context):
         roles = verdict.get("roles")
         if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
             raise ValueError("the answer has no list of roles")
-        return [role for role in roles if role in OPUS_ROLES] or None
+        return [role for role in roles if role in ASK_ROLES] or None
     except Exception as exc:
         print("call judge: opus scope grants every role: %s" % " ".join(str(exc).split()), file=sys.stderr)
         return None

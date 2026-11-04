@@ -42,7 +42,7 @@ rule's settings-write ask, and it reaches agents.
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
       and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
       and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
-      OPUS_ROLES: every role for the length, and it never asks.
+      ASK_ROLES: every role for the length, and it never asks.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
@@ -118,6 +118,8 @@ OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only i
 # refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (decision agent-model-cap).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
               "general-purpose", "claude")
+# The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
+ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 LOG_REASON_MAX = 300
 SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
 LIFTED = "override"  # the log decision of a lifted act
@@ -241,7 +243,7 @@ def _ask_scope(text):
     roles = set()
     for at, word in enumerate(words):
         role = opus_role(word)
-        if role is None or role == "claude":
+        if role not in ASK_ROLES:
             continue
         if NEGATIONS & {w.lower() for w in words[max(0, at - NEGATION_SPAN):at]}:
             return None
@@ -361,8 +363,8 @@ def _context_prompts(found, prompt):
 
 
 def _scoped_roles(scope_judge, text, context):
-    """The roles the scope read names from `context`, sorted, each one of OPUS_ROLES; empty (every role) when the read
-    raises, answers anything but a list of strings, or names no role of OPUS_ROLES. The read only narrows the grant."""
+    """The roles the scope read names from `context`, sorted, each one of ASK_ROLES; empty (every role) when the read
+    raises, answers anything but a list of strings, or names no role of ASK_ROLES. The read only narrows the grant."""
     try:
         named = scope_judge(text, context)
     except Exception as exc:
@@ -370,7 +372,7 @@ def _scoped_roles(scope_judge, text, context):
         return []
     if not isinstance(named, (list, tuple)):
         return []
-    return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(OPUS_ROLES))
+    return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(ASK_ROLES))
 
 
 def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=None, scope_judge=None):
