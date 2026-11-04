@@ -375,6 +375,8 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
 #undoBtn { font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+/* With Copy answers shown, two buttons leave the status too narrow to read, so it takes its own row at every width. */
+.bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; }
 
 /* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
 .dprev { display: grid; gap: 8px; }
@@ -2100,13 +2102,14 @@ window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 // The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
-// A browser that refuses the write sets keepFail, and the hint says so: the list would not come back after a reload.
+// A browser that refuses the write sets keepFail while the list has rows, and the hint says so: the list would not come back after a reload.
+// An empty list has nothing to lose, so keepFail clears with it.
 const saveAskStack = () => {
+  const t = askState.stack.filter((r) => !r.gone && r.state !== "saved").map((r) => (r.edit != null ? { text: r.text, edit: r.edit } : r.text));
   try {
-    const t = askState.stack.filter((r) => !r.gone && r.state !== "saved").map((r) => (r.edit != null ? { text: r.text, edit: r.edit } : r.text));
     if (t.length) localStorage.setItem("waiting.askStack", JSON.stringify(t)); else localStorage.removeItem("waiting.askStack");
     askState.keepFail = false;
-  } catch (e) { askState.keepFail = true; }
+  } catch (e) { askState.keepFail = t.length > 0; }
 };
 try {
   const t = JSON.parse(localStorage.getItem("waiting.askStack") || "[]");
@@ -2131,7 +2134,8 @@ function renderAskForm() {
   else if (over) { cls += " bad"; kids = ["Your ask is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
   else if (s.keepFail) { cls += " bad"; kids = ["This browser would not keep your list, so a reload would lose it. Send it, or copy it and paste it in chat."]; }
   // Add to list is on only with words in the box, so its clause is said only then.
-  else if (holding) kids = words((failed ? "Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again when the Undo count ends." : "Send turns on when the Undo count ends.") + (typed ? " Add to list stays on." : ""));
+  // Past the window, Send waits for Undo's deletes, not for a count.
+  else if (holding) { const when = counting ? "when the Undo count ends." : "when Undo is done."; kids = words((failed ? "Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again " + when : "Send turns on " + when) + (typed ? " Add to list stays on." : "")); }
   else if (failed) kids = words("Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again.");
   else if (rows.length && typed) kids = words("Send takes the " + rows.length + " in the list and the one in the box.");
   else if (rows.length) kids = words(rows.length === 1 ? "Add more, or send it." : "Add more, or send them together.");
@@ -2139,7 +2143,7 @@ function renderAskForm() {
   // The hint is rewritten only when its words change, so the live region announces once and not at each tick of the Undo count.
   const sig = cls + "|" + live + "|" + kids.map((k) => (k && k.nodeType ? k.textContent : k)).join("");
   if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.setAttribute("aria-live", live); hint.replaceChildren(...kids); }
-  if (state.db === false || (s.line && s.line.kind === "allfail")) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: () => copyAsk() }, "Copy ask")];
+  if (state.db === false || (s.line && s.line.kind === "allfail") || (s.keepFail && stackLive().length)) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: () => copyAsk() }, "Copy ask")];
   // A button already there stays, so a press that is under way is not lost to a repaint each second.
   if (slotKids.length !== slot.children.length || slotKids[0] !== slot.firstElementChild) slot.replaceChildren(...slotKids);
   $("askAdd").disabled = state.db === false || !typed || over;
@@ -2154,6 +2158,7 @@ function renderLine() {
   if (s.busy) { g = "wait"; words = ["Saving " + asksN(s.busyN) + "… Keep typing: the box does not wait for the send."]; }
   else if (ln && ln.kind === "undone") { g = "wait"; words = ["Undone. Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " back in the list, not sent."]; }
   else if (ln && ln.kind === "allfail") { g = "due"; cls = "bad"; words = ["Not saved (" + ln.code + "). Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " kept in the list: copy " + (ln.n === 1 ? "it" : "them") + " and paste " + (ln.n === 1 ? "it" : "them") + " in chat."]; }
+  else if (a && a.busy) { g = "wait"; undo = true; words = ["Taking back " + asksN(a.ids.length) + "…"]; }
   else if (ln && ln.kind === "late" && a) { g = "due"; cls = "bad"; words = ["Too late to undo " + asksN(ln.n) + ". " + (ln.n === 1 ? "It stays" : "They stay") + " sent."]; }
   else if (ln && ln.kind === "undofail" && a) { g = "due"; cls = "bad"; undo = true; words = ["Undo failed (" + ln.code + "). " + asksN(a.ids.length) + (a.ids.length === 1 ? " stays" : " stay") + " sent."]; }
   else if (a) { undo = true; words = [h("b", {}, a.total > a.texts.length ? a.texts.length + " of " + a.total + " sent " + fmt(a.at, false) + "." : "Sent " + fmt(a.at, false) + ". " + asksN(a.texts.length) + "."), " " + a.told]; }
@@ -2171,8 +2176,9 @@ function renderLine() {
 function syncUndo() {
   const b = $("askUndo"), a = askState.sent; if (!b) return;
   const left = a ? undoLeft(a) : 0;
-  if (left > 0) { b.textContent = "Undo send (" + left + ")"; b.classList.remove("spent"); b.removeAttribute("aria-hidden"); b.removeAttribute("tabindex"); }
-  else if (!b.classList.contains("spent")) { b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send (8)"; if (document.activeElement === b) $("askText").focus({ preventScroll: true }); }
+  // While Undo's deletes run, the button is spent as after the count, so a second press cannot start.
+  if (left > 0 && !a.busy) { b.textContent = "Undo send (" + left + ")"; b.classList.remove("spent"); b.removeAttribute("aria-hidden"); b.removeAttribute("tabindex"); }
+  else if (!b.classList.contains("spent")) { b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send"; if (document.activeElement === b) $("askText").focus({ preventScroll: true }); }
 }
 const showTray = () => { $("askTray").hidden = !$("askLine").firstChild && !$("askStack").firstChild; };
 // One ask not sent yet: idle, in edit, removed, in flight, saved, or not saved.
@@ -2333,7 +2339,7 @@ async function sendAsk() {
 // A delete that fails, or a window that has passed, stops there: the asks from it on stay sent.
 async function undoAsk() {
   const s = askState, a = s.sent; if (!a || a.busy || undoLeft(a) <= 0) return;
-  a.busy = true; renderAskForm();
+  a.busy = true; renderAskForm(); renderLine();
   const ids = a.ids.slice(), texts = a.texts.slice(), gone = [], mine = [];
   let code = "", late = false;
   for (let i = 0; i < ids.length; i++) {
@@ -2350,7 +2356,7 @@ async function undoAsk() {
   a.busy = false;
   a.ids = a.ids.slice(gone.length); a.texts = a.texts.slice(gone.length);
   s.note = ""; s.copyBox = "";
-  if (a.ids.length) s.line = late ? { kind: "late", n: a.ids.length } : { kind: "undofail", code: code || "error" };
+  if (a.ids.length) { s.line = late ? { kind: "late", n: a.ids.length } : { kind: "undofail", code: code || "error" }; if (late) $("askText").focus({ preventScroll: true }); }
   else if (s.sent === a) { clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length }; $("askText").focus({ preventScroll: true }); }
   saveAskStack(); renderAsks();
   if (gone.length) notifyClaude(fitBytes("Undone on the waiting page. " + (gone.length === 1 ? "Ask " + gone[0].id + " is withdrawn." : "Asks " + gone.map((g) => g.id).join(", ") + " are withdrawn.")), await canTell());
