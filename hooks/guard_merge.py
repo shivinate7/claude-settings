@@ -12,7 +12,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 from guard_pointer import (
     pointer_checkout,
@@ -629,15 +629,22 @@ def _merge_flags(rest):
             raise _FlagsUnreadable("the parser exited")
 
 
-def _merge_target_repo(stripped: str, cwd: str, repo_dir):
-    """The `owner/name` of the checkout a merge acts in, or None: the -C value (relative to where the command runs), else that
-    directory, which is a leading `cd` or the working directory."""
+def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
+    """The `owner/name` of the checkout the merge in `segments[number]` acts in, or None: the -C value (relative to the shell directory
+    in force where that segment runs), else that directory. The directory comes from `dir_before_segment`, which walks each earlier
+    segment's `cd` in order, ignores `git -C` (it does not move the shell) and returns None for a move it cannot follow (a variable,
+    `cd -` with no earlier directory, `popd`): None here is a refusal. `command_root` is not used: it reads the last `cd` of the whole
+    command, and its other callers want that."""
     import git_reads
-    where = command_root(stripped, cwd)
+    where = dir_before_segment(segments, number, cwd, ends)
     if repo_dir is not None:
         if not repo_dir:
             return None
-        where = _absolute(os.path.expanduser(repo_dir), where)
+        repo_dir = os.path.expanduser(repo_dir)
+        if os.path.isabs(repo_dir):
+            where = repo_dir
+        else:
+            where = os.path.join(where, repo_dir) if where else None
     return git_reads.github_repo(where) if where and os.path.isdir(where) else None
 
 
@@ -649,7 +656,9 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     else one parse, one read of the origin and one transcript read."""
     if not is_cloud():
         return ""
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         rest = merge_tool_args(segment) if segment.strip() else None
         if rest is None or "--confirm" not in rest:
             continue
@@ -657,7 +666,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
             flags = _merge_flags(rest)
             if flags.lane_lint or not flags.confirm:
                 continue
-            repo = _merge_target_repo(stripped, cwd, flags.repo_dir)
+            repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
             from override import remote_session_id
             from shared_names import repo_tag_names
             own_id = remote_session_id()

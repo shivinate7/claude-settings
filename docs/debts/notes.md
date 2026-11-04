@@ -1163,3 +1163,8 @@
 - page-stale-title-space: `stale_pages.carries_data` renames the live title before it collapses white space, so an untouched page titled "Queue " (with a trailing space, a newline or NBSP) and empty blocks passes `page-stale`. A copy of page.html has the exact title, so normal work does not hit it. Decision: page-stale-publish
 - page-stale-old-main: until a checkout fetches this merge, its origin/main template is still titled "Queue", and an untouched "Queue" page passes `page-stale`. It ends at the fetch. Decision: page-stale-publish
 - merge-background-refused: auto mode's classifier refuses `~/.claude/bin/merge <n> --confirm` run with run_in_background (Auto-Mode Bypass, measured 2026-11-03 16:56 CST); the same command in the foreground matches the allow rule. A merge runs in the foreground. Decision: merge-confirm-repo
+- merge-confirm-forms-unjudged: `repo_proof_hit` (hooks/guard_merge.py) does not judge a merge --confirm inside a subshell paren token, `timeout`, `pushd`, `bash -c`, or a bare `python3 merge.py` run from inside merge/; the allow rule does not cover them, so the classifier judges them. Decision: merge-confirm-repo
+- merge-dev-flag-stripped: merge/launch.py strips `--dev`, so `merge --dev N --confirm` is refused in the cloud. Decision: merge-confirm-repo
+- launch-checkout-read-as-pr: `python3 merge/launch.py <checkout> N --confirm` parses the checkout as the PR number (merge/launch.py). Decision: merge-confirm-repo
+- job-workflow-unreadable-skipped: `job_workflow` (lint/workflow_steps.py) skips an unreadable workflow file with no log. Decision: merge-confirm-repo
+- ci-job-discovery-no-case: lint/test_ci_job.py has no case for default workflow discovery with 0 or 2 files. Decision: merge-confirm-repo

@@ -82,6 +82,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
+REPO_CITE = "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names, and -C names the checkout it acts in)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -2713,6 +2714,8 @@ def main(argv, host=None, lock=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, or --role TIER")
     try:
+        if a.repo_dir is not None and not os.path.isdir(a.repo_dir):  # subprocess raises on a missing cwd; stop with a line instead
+            raise Stop(f"-C names no folder: {a.repo_dir} " + REPO_CITE)
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
             if c:
