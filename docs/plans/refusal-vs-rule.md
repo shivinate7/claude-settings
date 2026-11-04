@@ -43,7 +43,7 @@ exact has a gap.
 | `shared-tree` | shared-trees-no-destructive-git | "No destructive git. Destructive git loses another agent's work in a shared tree." | looser | exact | `git switch -f main` and `git switch --discard-changes main` pass, though `git checkout -f` is refused | tool fix: add switch -f, --force and --discard-changes to shared_tree_match |
 | `subject-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | when git cannot answer, `git reset --hard` passes with one note; cite-by-id also logs this id for an unread record folder | - |
 | `pointer-head` | recovery-independent-of-state | "The rule refuses a command that moves HEAD off `main` in the pointer checkout." | stricter | exact | `git switch -C main origin/main` is refused, though HEAD stays on main | tool fix: pass -C and -B when the target branch is main |
-| `silent-write` | git-never-discard-output | "Never silence a git write's output. Discarded output hides failures from the reader." | looser | exact | `git branch -D x >/dev/null` passes; only seven git writes are read. `npm test >/dev/null 2>&1` passes, as the rule allows (owner, item 177 a, 2026-11-03 22:31 CST: "Narrow the rule to git writes") | tool fix: read every git write that moves a ref, such as `branch -D` |
+| `silent-write` | git-never-discard-output | "Never silence a git write's output. Discarded output hides failures from the reader." | looser | exact | `git branch -D x >/dev/null` and `git update-ref -d refs/heads/x >/dev/null` pass. The guard reads seven git subcommands (commit, push, merge, tag, rebase, cherry-pick, pull), a `fetch` with a `src:dst` refspec, `gh pr merge` and `make merge`; a bare `fetch` is a read. A silenced non-git command passes, as the rule allows (owner, item 177 a, 2026-11-03 22:31 CST: "Narrow the rule to git writes") | tool fix: read every git write that moves a ref, such as `branch -D` |
 | `hand-made-worktree` | lanes-start-in-tool-worktrees | "A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
 | `force-push` | stale-safe-force-push | "Any forced push whose destination is the default branch: ask" | exact | exact | `--force` is denied; a lease with --force-if-includes passes | - |
 | `rm-var-unguarded` | rm-on-a-variable-needs-a-guard | "refuses a recursive `rm` only in the shape Claude Code prompts on" | exact | exact | a recursive delete of `"$D"/*` is denied; `"$ROOT/dist"` passes | rule rewrite: the CLAUDE.md line still says "quoted-variable path"; say "a guarded variable path" |
@@ -244,7 +244,7 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
   - `press-link`: a fix step. The rule covers a press the owner makes. The check stops asking for a
     link on a press the session makes.
   - `silent-write`: no step. The guard holds part of its rule, and CLAUDE.md holds the rest. See note
-    silent-write-git-only.
+    silent-write-ref-gaps.
   - `load-brake` and `create_session`: no step. A cloud session adds no load to this machine. See note
     load-brake-skips-create-session.
 - **Uncited, rule rewrite:** the merge-lock decision, `env-file`, `config-edit`,
