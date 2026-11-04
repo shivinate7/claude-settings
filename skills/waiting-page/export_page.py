@@ -73,7 +73,8 @@ BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
 REFUSED, UNKNOWN, CRASH = 1, 2, 3
 
 STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
-                "Court", "Ct", "Place", "Pl", "Circle", "Terrace", "Parkway", "Pkwy", "Highway", "Hwy")
+                "Court", "Ct", "Place", "Pl", "Circle", "Cir", "Terrace", "Ter", "Parkway", "Pkwy", "Park", "Trail", "Trl",
+                "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
@@ -97,20 +98,23 @@ SECRET_SHAPES = (
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
     # "Bearer tokens" or "Basic idea" passes.
     ("bearer", re.compile(r"(?<![A-Za-z0-9])(?:Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
-    # A name ending in secret, token, key or cookie in any case (API_SECRET, X-API-Key, token) set to a literal that looks
-    # random: 8 or more characters with a letter and a digit. A number, a "$VAR" or "${{ ... }}" reference and a plain
-    # word pass, and so does a label with a word between, as in "token budget: 200000".
+    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken,
+    # SECRET_KEY_BASE, "clientSecret") set to a literal that looks random: 8 or more characters with a letter and a
+    # digit. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass, and so does a label with a word between,
+    # as in "token budget: 200000".
     ("credential-name", re.compile(
-        r"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9]+[_-])*(?:secret|token|key|cookie)[\"']?[ \t]*[=:][ \t]*[\"']?"
+        r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*[=:][ \t]*[\"']?"
         r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}", re.I)),
-    # A well-known cookie name set to a value of 8 or more characters with a digit in it.
+    # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
         r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
         r"(?=[A-Za-z0-9+/_.~%-]*\d)[A-Za-z0-9+/_.~%-]{8,}", re.I)),
     # A postal address. Street: a house number, one to three capitalised name words (or an ordinal such as 5th), then a
-    # capitalised or all-caps street word, so "step 3 on the road map" and "a 2 way merge" pass. PO box: needs the box number.
+    # capitalised or all-caps street word, so "step 3 on the road map" and "a 2 way merge" pass. A dot ends a name word
+    # only after an initial or Mt, St or Ft, and a number after a colon is a time, so "5 PM. Way forward" and
+    # "13:44 CDT. Lane 2" pass. PO box: needs the box number.
     ("address", re.compile(
-        r"(?<![A-Za-z0-9_.-])\d{1,5}[ \t]+(?:(?:[A-Z][A-Za-z]*\.?|\d+(?:st|nd|rd|th))[ \t]+){1,3}"
+        r"(?<![A-Za-z0-9_.:-])\d{1,5}[ \t]+(?:(?:(?:[A-Z]|Mt|St|Ft)\.|[A-Z][A-Za-z]*|\d+(?:st|nd|rd|th))[ \t]+){1,3}"
         r"(?:" + "|".join(w + "|" + w.upper() for w in STREET_WORDS) + r")\b(?![\w-])")),
     ("address", re.compile(r"(?<![A-Za-z])P\.?[ \t]?O\.?[ \t]*Box[ \t]+\d+", re.I)),
     # City, a USPS state code and a ZIP or ZIP+4, after a comma: "Austin, TX 78701".

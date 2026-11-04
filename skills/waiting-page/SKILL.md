@@ -280,8 +280,9 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 
 The copy holds one JSON file per doc, `<collection>/<doc id>.json`, and `page/designData.json`. The mockups live
 in the page's `designData` block, not in the database.
-The scan reads shapes: tokens, keys, cookie and auth headers, cookie values, bare bearer or basic credentials,
-passwords, secret-named assignments (`API_SECRET=...`) and URL query secrets. It also reads email addresses,
+The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set with `=`, bare bearer or basic credentials,
+passwords and URL query secrets. It reads secret, token, key or cookie names in any case form set to a random-looking value
+(`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
