@@ -3045,7 +3045,7 @@ for (const width of [360, 390]) {
   });
 }
 
-// ---------------------------------------------------------------- review of 8e2194e2: focus after Undo, the hint in the window, the bar status width
+// ---------------------------------------------------------------- focus after Undo, the hint in the window, the bar status width
 
 // Undo's first delete waits at the hold, so focus and the hint are read while Undo runs, inside its window.
 test("after an Undo press by click or Enter, focus is on the ask box while its delete runs, never on the body", async (t) => {
