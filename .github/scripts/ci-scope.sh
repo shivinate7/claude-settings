@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Decides which checks jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
-#   per job: checks_guard (set when code and guard are both set), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
+#   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
@@ -22,7 +22,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
@@ -50,9 +50,13 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job.
       bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
-      # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it. checks-shoot
-      # is the one caller of actions/playwright-setup in this repo, so it also proves that action.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*|actions/playwright-setup/*) on="$on code shoot " ;;
+      # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
+      # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also
+      # installs the Playwright that .github/shoot pins (package-dir), so that dir takes this arm too. Set checks_guard
+      # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs neither job.
+      actions/playwright-setup/*.md) ;;
+      actions/playwright-setup/*|.github/shoot/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
@@ -89,7 +93,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
 else
   on=" $ALL "
 fi
-# checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if).
+# checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
