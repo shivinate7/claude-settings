@@ -1523,7 +1523,7 @@ async function withdrawAll() {
       const ref = state.db.collection("answers").doc(it.id), cur = await ref.get();
       if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
       await ref.delete();
-    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
+    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Paste it in chat instead: " + it.n + " withdraw"; continue; }
     delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
     done.push({ it, prior, draft: null, changing: false, withdrawn: true, act: prior.act });
   }
@@ -1667,7 +1667,7 @@ function rulingsEl() {
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
-    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Paste your answers in chat instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
   let wordsShown = false;
@@ -1703,7 +1703,7 @@ function renderList() {
 }
 const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
 // Only a line with no id is off. A view with no store has no meta/page, so it draws no parked block.
-const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.";
+const WHY_NOID = "The page's writer has not prepared this line yet. Paste your answer in chat instead.";
 // Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
 // No page id has the form "pk-<part>-<key>", so a parked id such as "h" meets no id of the page.
 function pkToggle(p, it, act, why, key) {
@@ -1954,7 +1954,7 @@ function answerLine() {
 async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
-  if (await copyText(text)) { state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
   else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
   renderBar();
 });
