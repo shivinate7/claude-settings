@@ -35,6 +35,7 @@ PY_CLOCKS = [
 PY_CALENDAR = [
     "datetime.now()", "datetime.datetime.now()", "date.today()", "datetime.today()",
     "time.localtime()", 'time.strftime("%Y")', "datetime.now().astimezone()",
+    "datetime.utcnow()", "datetime.datetime.utcnow()",
 ]
 SWIFT_CLOCKS = [
     "Date()", "CFAbsoluteTimeGetCurrent()", "DispatchTime.now()",
@@ -193,6 +194,7 @@ class PythonCategoriesTest(FinderCase):
             "tests/test_clocks.py", text,
             *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS],
             ("t = datetime.now()", "calendar"), ("t = datetime.datetime.now()", "calendar"),
+            ("t = datetime.utcnow()", "calendar"),
         ), "calendar not listed")
 
     def test_elapsed_assert_on_a_bare_imported_clock(self):
@@ -370,6 +372,23 @@ class PythonCalendarTest(FinderCase):
         self.put("tests/test_zone.py", text)
         calendar_judge(self, "tests/test_zone.py", text,
                        listed=["t_utc = datetime.now(timezone.utc)", "t_tz = datetime.now(tz)"])
+
+    def test_utcnow_is_listed_beside_a_fixed_epoch(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "EPOCH = 0",
+            "",
+            "def test_utc(stamp):",
+            "    t_utc = datetime.utcnow()",
+            "    t_utc_dt = datetime.datetime.utcnow()",
+            "    t_fixed = time.localtime(EPOCH)",
+        )
+        self.put("tests/test_utc.py", text)
+        calendar_judge(self, "tests/test_utc.py", text,
+                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()"],
+                       clean=["t_fixed = time.localtime(EPOCH)"])
 
     def test_epoch_and_given_time_forms_are_not_listed(self):
         text = src(
