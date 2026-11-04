@@ -1489,7 +1489,7 @@ def _build_subject():
     _require_stash(SUBJSTASHWT, 1)
 
     # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
-    # and deletes (MEASURED 2026-11-04). The tree is dirty, and its work is all in the index.
+    # and deletes. The tree is dirty, and its work is all in the index.
     make_repo(SUBJSTAGED, {"f.txt": "base\n", "keep.txt": "base\n"})
     write(os.path.join(SUBJSTAGED, "f.txt"), "staged\n")
     write(os.path.join(SUBJSTAGED, "new.txt"), "staged new\n")
@@ -2267,9 +2267,8 @@ sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "sh
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
 # A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
-# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file (MEASURED
-# 2026-11-04, scratch repo). `--keep` and `--merge` both move the branch at another commit, so
-# they take `--hard`'s verdict (the staged-form block below cites the ruling).
+# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
+# `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
 sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
    "allow", cwd=NOGIT)
 sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
@@ -2361,9 +2360,9 @@ sh("subject: a hard reset at a raw sha in a clean worktree asks",
    cwd=SUBJCLEANWT)
 sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
    VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
-# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Owner ruling: Cockpit item 214 a
-# (2026-11-04 07:56 CST). Each form has its own deny or ask line, so dropping either flag alone
-# turns a line red. SUBJSTAGED holds a staged edit and a staged new file, so any change denies.
+# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Each form has its own deny or ask line,
+# so dropping either flag alone turns a line red. SUBJSTAGED holds a staged edit and a staged new
+# file, so any change denies.
 sh("reset: --merge at HEAD over a staged edit and a staged new file denies",
    VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
 sh("reset: a bare --merge over a staged edit denies", VCS + " reset --merge", "deny",
@@ -3043,8 +3042,9 @@ sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
 sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
 
-# THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
-# restore of one staged file is allowed whichever tree the call runs in.
+# THE TABLE'S ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
+# restore of one staged file is allowed whichever tree the call runs in. A reset that moves the
+# branch to another commit asks here, as `--hard` does.
 sh("stash: list allows in the worktree", VCS + " stash list", "allow", cwd=GITWT)
 sh("stash: show allows in the worktree", VCS + " stash show", "allow", cwd=GITWT)
 sh("stash: apply over an empty stack allows in the worktree", VCS + " stash apply", "allow",
@@ -3053,8 +3053,10 @@ sh("stash: pop over an empty stack allows in the worktree", VCS + " stash pop", 
    cwd=GITWT)
 sh("reset: a plain reset allows in the worktree", VCS + " reset HEAD~1", "allow", cwd=GITWT)
 sh("reset: --soft allows in the worktree", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
-sh("reset: --keep allows in the worktree", VCS + " reset --keep HEAD~1", "allow", cwd=GITWT)
-sh("reset: --merge allows in the worktree", VCS + " reset --merge HEAD~1", "allow", cwd=GITWT)
+sh("reset: --keep at another commit asks in a dirty linked worktree",
+   VCS + " reset --keep HEAD~1", "ask", "shared-tree", cwd=GITWT)
+sh("reset: --merge at another commit asks in a dirty linked worktree",
+   VCS + " reset --merge HEAD~1", "ask", "shared-tree", cwd=GITWT)
 sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allow", cwd=GITWT)
 sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
    cwd=GITWT)
