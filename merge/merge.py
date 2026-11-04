@@ -73,13 +73,15 @@ RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 
 def red_way_out(verdict, preview=False):
     """The way out of a red base, in order: re-run each red run once, then --base-red-ok (decision no-merge-onto-red-main). One home for the refusal and the preview clause.
-    An UNKNOWN verdict names no red run, so it names only the flag. The re-run is named in words and by command; the run ids stay in the detail (rerun_once)."""
+    The tool tracks no re-run and lifts only on a green read, so the text says to wait until each re-run finishes green, then retry.
+    An UNKNOWN verdict names only the flag; a cancelled run in its detail names its plain re-run there. The run ids stay in the detail (rerun_once)."""
     flag = '--base-red-ok "<reason>"'
     if preview:
-        return (f"until each red run is re-run once (`gh run rerun`, as named above), unless {flag} is given" if verdict == "red"
+        return (f"until a re-run of each red run (`gh run rerun`, as named above) finishes green, unless {flag} is given" if verdict == "red"
                 else f"unless {flag} is given")
     if verdict == "red":
-        return f"first re-run each red run once with `gh run rerun`, as named above, then, if this batch carries the fix, give the reason flag {flag}"
+        return (f"first re-run each red run once with `gh run rerun`, as named above, wait until each re-run finishes green, then retry; "
+                f"if this batch carries the fix, give the reason flag {flag}")
     return f"give the reason flag {flag} if the owner accepts the unknown"
 
 def rerun_once(run_id, failed=True):
