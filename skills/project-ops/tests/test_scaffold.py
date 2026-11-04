@@ -541,7 +541,7 @@ class Protect(unittest.TestCase):
                 code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--check", f"{self.required()} (ubuntu)", *confirm)
                 self.assertEqual(code, 2, "two --check names: exit 2 expected\n" + out)
                 self.assertEqual(calls, [], "two --check names: no gh call expected, not even a GET")
-                self.assertTrue(self.last_stderr.strip(), "two --check names: the refusal must say why on stderr")
+                self.assertRegex(self.last_stderr, r"(?i)only one (--)?check", "two --check names: stderr must say only one check is allowed")
 
     def test_an_empty_check_name_is_not_counted(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "", "--check", self.required(), "--confirm")
