@@ -19220,6 +19220,110 @@ def worktree_home_red_write_case():
     return True, "an agent's writes into its own red-run folder pass; the same writes elsewhere are refused"
 
 
+def worktree_home_red_root_case():
+    """Rule 0, other-checkout, the folder root of the caller's own red-run folder: a write may land
+    inside it, never remove or move it. `rm -rf` of the folder, with or without a trailing slash, a
+    `cd` into it chained to `rm -rf .`, `mv` of it and a Write on its path are refused. A `cp` into
+    it, a `cd` into it chained to a `cp`, and a Write inside it pass. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoredroot", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), red, slash(red))
+    problems = []
+    for label, tool, tool_input in (
+        ("rm -rf <red>", "Bash", {"command": "rm -rf %s" % slash(red)}),
+        ("rm -rf <red>/", "Bash", {"command": "rm -rf %s/" % slash(red)}),
+        ("cd <red> && rm -rf .", "Bash", {"command": "cd %s && rm -rf ." % slash(red)}),
+        ("mv <red> x", "Bash", {"command": "mv %s x" % slash(red)}),
+        ("Write on <red>", "Write", {"file_path": red, "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    for label, tool, tool_input in (
+        ("cp t.py <red>/", "Bash", {"command": "cp t.py %s/" % slash(red)}),
+        ("cd <red> && cp x .", "Bash", {"command": "cd %s && cp x ." % slash(red)}),
+        ("Write inside <red>", "Write", {"file_path": os.path.join(red, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the red-run folder's root is refused to rm, mv and a Write; a cp into it and a write inside it pass"
+
+
+def worktree_home_red_nested_case():
+    """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
+    `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
+    worktree, so a `cd` into it, a shell write into it and a Write into it are refused. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, lane_b, _ = _cross_checkout_fixture(
+        "xcorednest", lanes=("agent-" + CD_AGENT_HOME, "lane-b"))
+    nested = os.path.join(lane_b, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-red")
+    os.makedirs(nested, exist_ok=True)
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), nested, slash(nested), lane_b, slash(lane_b))
+    problems = []
+    for label, tool, tool_input in (
+        ("cd <nested>", "Bash", {"command": "cd %s" % slash(nested)}),
+        ("echo x > <nested>/f", "Bash", {"command": "echo x > %s/f" % slash(nested)}),
+        ("Write <nested>/f", "Write", {"file_path": os.path.join(nested, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a red-run folder nested under another linked worktree is refused to a cd, a shell write and a Write"
+
+
+RED_CASE_OFF_WINDOWS = ("Windows folds path case, so another spelling of the red-run folder is that "
+                        "folder only there; on POSIX it is another folder, so this case does not run")
+
+
+def worktree_home_red_case_fold_case():
+    """Rule 0, other-checkout, the write act's exemption on Windows: the caller's own red-run folder
+    spelled in other letters of case is the same folder, so a Write into it and a `cd` into it
+    chained to a write pass. Decision: an-agent-outside-its-home-tree-must-stop."""
+    if os.name != "nt":
+        return SKIP, RED_CASE_OFF_WINDOWS
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcorecase", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")
+    upper = os.path.join(primary, ".claude", "worktrees", "AGENT-" + CD_AGENT_HOME.upper() + "-RED")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    problems = []
+    for label, tool, tool_input in (
+        ("Write into the upper-case red-run folder", "Write",
+         {"file_path": os.path.join(upper, "f"), "content": "x"}),
+        ("cd into the upper-case red-run folder chained to a write", "Bash",
+         {"command": "cd %s && echo x > f" % slash(upper)}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the red-run folder spelled in other letters of case passes"
+
+
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
 # after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
 CD_TEXT_ALLOW = (
@@ -19839,6 +19943,12 @@ LOG_CHECKS = (
     ("worktree-home: an agent's write into its own red-run folder, by a cd chained to it, a cp, a Write "
      "or an Edit, is allowed; the same writes into a sibling's red-run folder, a prefix-named folder, "
      "the primary, or with no agent_id are refused", worktree_home_red_write_case),
+    ("worktree-home: the own red-run folder's root is refused to rm, mv and a Write, and a cp into it "
+     "or a write inside it passes", worktree_home_red_root_case),
+    ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
+     "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
+    ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
+     "Windows, and is a skip elsewhere", worktree_home_red_case_fold_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -26085,6 +26195,9 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
     ("worktree-home: the cd exemptions pass", "worktree-home"),
     ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
+    ("worktree-home: the own red-run folder's root", "worktree-home"),
+    ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
+    ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
