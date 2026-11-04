@@ -1098,9 +1098,9 @@ def refusal_reason(tools):
     return (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it "
-        "(decision refusals-reach-the-owner). Or, if the refusal was right, say "
-        "\"`<tool_name>`: refusal was right\" on one line." % names)
+        "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
+        "right, say \"`<tool_name>`: refusal was right\" on one line "
+        "(decision refusals-reach-the-owner)." % names)
 
 
 def _marker_path(hook):
