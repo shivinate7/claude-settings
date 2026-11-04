@@ -1111,20 +1111,25 @@ def _verify_fake_gh_delay(ghdir, delay):
             "fixture check failed in _verify_fake_gh_delay: no 'gh' fake resolvable on "
             "PATH=%r" % env["PATH"]
         )
-    started = time.time()
+    # The same process times the fake and a bare interpreter start. Their difference is the delay alone,
+    # so a loaded machine slows both readings alike (a same-process difference, test-practices P5).
+    started = time.perf_counter()
     result = subprocess.run([program], capture_output=True, text=True, env=env, timeout=60)
-    elapsed = time.time() - started
+    fake_s = time.perf_counter() - started
+    started = time.perf_counter()
+    subprocess.run([sys.executable, "-c", "pass"], capture_output=True, timeout=60)
+    bare_s = time.perf_counter() - started
     if result.stderr.strip():
         sys.exit(
             "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r wrote to "
             "stderr instead of delaying %ds (PATH=%r): %r"
             % (ghdir, delay, env["PATH"], result.stderr.strip())
         )
-    if elapsed < delay:
+    if fake_s - bare_s < delay / 2:
         sys.exit(
-            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r answered "
-            "in %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to nothing "
-            "real on this PATH" % (ghdir, elapsed, delay, env["PATH"])
+            "fixture check failed in _verify_fake_gh_delay: the delayed gh fake in %r ran %.3fs, a "
+            "bare interpreter start %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to "
+            "nothing real on this PATH" % (ghdir, fake_s, bare_s, delay, env["PATH"])
         )
 
 
@@ -16569,8 +16574,9 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
-def _crash_judge_run(folder):
-    """Runs the guard with its judge raising, under CLAUDE_CONFIG_DIR = folder. Returns the run."""
+def _crash_judge_run(folder, pin=False):
+    """Runs the guard with its judge raising, under CLAUDE_CONFIG_DIR = folder. Returns the run. `pin`
+    makes the child's clock read WRITER_PIN, so the stamp it writes is the instant the verdict judges."""
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
@@ -16580,6 +16586,8 @@ def _crash_judge_run(folder):
             "g.judge = lambda payload: 1 / 0\n"
             "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
             "g.main()\n" % GUARD)
+    if pin:
+        code = _pinned_child_prelude(WRITER_PIN) + code
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                           env=env, timeout=60)
 
@@ -21225,10 +21233,10 @@ def _fix_with(folder, good, names):
     return fix
 
 
-def _reload_run(folder, name, fix=None, command=None):
+def _reload_run(folder, name, fix=None, command=None, pin=False):
     """One Bash call through the copy's guard.py. fix, when given, runs once, RELOAD_DELAY_S after the
     guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
-    only if the guard waited."""
+    only if the guard waited. `pin` runs the copy with its clock reading WRITER_PIN (see _crash_judge_run)."""
     cfg = os.path.join(ROOT, "reload-cfg", name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
@@ -21248,9 +21256,14 @@ def _reload_run(folder, name, fix=None, command=None):
     if timer:
         timer.daemon = True
         timer.start()
+    guard = os.path.join(folder, "guard.py")
+    if pin:  # the copy runs as __main__ from its own folder, as `python guard.py` runs it, behind the pin
+        argv = [sys.executable, "-c", _pinned_child_prelude(WRITER_PIN) + "import runpy, sys\n"
+                "sys.path[0] = %r\nsys.argv = [%r]\nrunpy.run_path(%r, run_name='__main__')\n" % (folder, guard, guard)]
+    else:
+        argv = [sys.executable, guard]
     try:
-        run = subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
-                             capture_output=True, text=True, env=env, timeout=120)
+        run = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, timeout=120)
     finally:
         if timer:
             timer.cancel()
@@ -21330,7 +21343,7 @@ def reload_crash_stamp_case():
     _damage_truncated(folder, good)
     cfg = os.path.join(ROOT, "reload-cfg", name)
     shutil.rmtree(cfg, ignore_errors=True)
-    run, _fixed = _reload_run(folder, name)
+    run, _fixed = _reload_run(folder, name, pin=True)
     path = os.path.join(cfg, "guard.log")
     if not os.path.exists(path):
         return False, "the broken guard wrote no guard.log line (exit %d)" % run.returncode
@@ -21339,7 +21352,7 @@ def reload_crash_stamp_case():
     crash = [fields for fields in rows if len(fields) > 3 and fields[2:4] == ["crash", "guard-crash"]]
     if len(crash) != 1:
         return False, "want one crash guard-crash line, found %d in %r" % (len(crash), rows)
-    return _stamp_verdict(crash[0][0])
+    return _stamp_verdict(crash[0][0], WRITER_PIN)
 
 
 LOG_CHECKS_EXTRA.append(("reload-stamp: the fallback writer's crash line carries the colon UTC offset",
@@ -21607,18 +21620,49 @@ LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never 
 # The time in field 0 of a written line: ISO 8601 with a colon UTC offset, as guard_core.record() writes it.
 STAMP_SHAPE = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d"
 
+# The one clock the stamp cases share (test-practices P5): the writer reads it, and _stamp_verdict judges
+# the stamp against it. Noon UTC, so no zone's day boundary or fall-back falls near it.
+WRITER_PIN = datetime(2026, 11, 3, 12, 0, 0, tzinfo=timezone.utc)
 
-def _stamp_verdict(stamp):
-    """(ok, message) for one written time: the colon shape, this machine's own offset, and the current instant."""
+
+class _PinnedClock(datetime):
+    """In-process form of the pin: now() reads WRITER_PIN, as guard_core.record() asks it."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return WRITER_PIN.astimezone(tz) if tz is not None else WRITER_PIN.astimezone().replace(tzinfo=None)
+
+
+def _pinned_child_prelude(pin):
+    """Python source that runs first in a child process and makes its datetime module read `pin`. It swaps
+    sys.modules["datetime"] before the guard imports it, so the stamp the child writes and the instant
+    _stamp_verdict judges are one clock."""
+    return (
+        "import sys, types, datetime as _real\n"
+        "_PIN = _real.datetime.fromisoformat(%r)\n"
+        "class _Pinned(_real.datetime):\n"
+        "    @classmethod\n"
+        "    def now(cls, tz=None):\n"
+        "        return _PIN.astimezone(tz) if tz is not None else _PIN.astimezone().replace(tzinfo=None)\n"
+        "_shim = types.ModuleType('datetime')\n"
+        "_shim.__dict__.update({k: v for k, v in vars(_real).items() if not k.startswith('__')})\n"
+        "_shim.datetime = _Pinned\n"
+        "sys.modules['datetime'] = _shim\n"
+    ) % pin.isoformat()
+
+
+def _stamp_verdict(stamp, now):
+    """(ok, message) for one written time: the colon shape, this machine's own offset at that instant, and
+    `now`, the instant the writer read from the injected clock."""
     if not re.fullmatch(STAMP_SHAPE, stamp):
         return False, "field 0 is %r, want ISO 8601 with a colon offset, like 2026-11-01T16:55:00-06:00" % stamp
     parsed = datetime.fromisoformat(stamp)
     local = parsed.astimezone().utcoffset()  # the machine's offset at the stamp's own instant, not at now
     if parsed.utcoffset() != local:
         return False, "field 0 is %r with offset %s, want this machine's %s" % (stamp, parsed.utcoffset(), local)
-    if abs(datetime.now(timezone.utc) - parsed) > timedelta(minutes=5):
-        return False, "field 0 is %r, which is not the current time" % stamp
-    return True, "field 0 is %s, with this machine's offset and the current time" % stamp
+    if abs(now - parsed) > timedelta(minutes=5):
+        return False, "field 0 is %r, which is not the injected instant %s" % (stamp, now.isoformat())
+    return True, "field 0 is %s, with this machine's offset and the injected instant" % stamp
 
 
 def session_log_stamp_offset_case():
@@ -21633,13 +21677,14 @@ def session_log_stamp_offset_case():
     saved = core.config_dir
     core.config_dir = lambda: folder
     try:
-        core.record("Bash", "deny", "shared-tree", "git stash")
+        with mock.patch.object(core, "datetime", _PinnedClock):
+            core.record("Bash", "deny", "shared-tree", "git stash")
     finally:
         core.config_dir = saved
     rows = _session_log_rows(folder)
     if rows is None or len(rows) != 1:
         return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
-    return _stamp_verdict(rows[0].split("\t")[0])
+    return _stamp_verdict(rows[0].split("\t")[0], WRITER_PIN)
 
 
 def crash_log_stamp_case():
@@ -21651,14 +21696,14 @@ def crash_log_stamp_case():
     path = os.path.join(folder, "guard.log")
     if os.path.exists(path):
         os.remove(path)
-    _crash_judge_run(folder)
+    _crash_judge_run(folder, pin=True)
     if not os.path.exists(path):
         return False, "no crash line was logged"
     with open(path, encoding="utf-8") as handle:
         fields = handle.read().strip().split("\t")
     if len(fields) < 4 or fields[2:4] != ["crash", "guard-crash"]:
         return False, "unexpected crash line: %r" % fields
-    return _stamp_verdict(fields[0])
+    return _stamp_verdict(fields[0], WRITER_PIN)
 
 
 LOG_CHECKS_EXTRA.append(("session-log: record() writes its time with a colon UTC offset",
