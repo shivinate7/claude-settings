@@ -1287,7 +1287,7 @@ def C3_isMeta_hand_back_does_not_relist_a_listed_job():
     output_file(base, "bfresh", 800)  # crossed 500 s ago, after the summary
     recs = ([at(prompt("zero"), 2100), at(assistant_text("ok"), 2000), stop_summary(2000),
              at(prompt("first"), 1500)] + stamped(moved("bhand"), 1490) + stamped(moved("bfresh"), 1000)
-            + [at(assistant_text("ok"), 850), stop_summary(800), meta_wake("subagent report", 700),
+            + [at(assistant_text("ok"), 850), stop_summary(800), meta_wake("agent report", 700),
                at(assistant_text("ok"), 650)])
     problems, msg = stop_listing(recs, base)
     problems += expect("bhand" not in msg, f"job bhand is listed again after the isMeta hand-back: {msg!r}")
