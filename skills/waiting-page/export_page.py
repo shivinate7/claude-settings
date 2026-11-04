@@ -25,8 +25,10 @@ Verdict, one line, then exit:
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
-shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails. A file
-that is not UTF-8 is read as latin-1; only a file with a NUL byte or an image or font extension is binary and not scanned. Only the shape counts: words such as "token budget" or "password manager" pass.
+shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
+Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
+read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
+words such as "token budget" or "password manager" pass.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -92,6 +94,8 @@ SECRET_SHAPES = (
     ("cookie-header", re.compile(r"\bCookie:\s*[^\s=;]+=\S+", re.I)),
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
+    # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
+    ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
     ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
@@ -105,7 +109,6 @@ PHONE_OTHER = (
 VERSION_PIN = re.compile(r"@\d+(?:\.\d+)*(?![\w.-]*[A-Za-z])")  # `@18.3.1` in a CDN address
 # `logo@2x.png`: a retina image name, not an email. Only an image extension after the suffix makes it one.
 RETINA_NAME = re.compile(r"@\d+x(?=\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico)\b)", re.I)
-BINARY_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".eot")
 DATE_START = re.compile(r"\d{4}-\d{2}-\d{2}")
 PHONE_DIGITS = (10, 11)  # a JSON number of this many digits is a phone; 13 digits is an epoch in milliseconds
 
@@ -231,10 +234,10 @@ def scan_text(label, text, finds):
     finds.extend((label, "$", kind) for kind in page_kinds(text))
 
 
-def file_text(rel, raw):
+def file_text(raw):
     """The text of a supporting file to scan: UTF-8, else latin-1 (so a cp1252 note is read). None for a binary
-    file: one with a NUL byte or an image or font extension."""
-    if b"\0" in raw or rel.lower().endswith(BINARY_EXT):
+    file: one with a NUL byte, whatever its name, so a text file under an image or font name is scanned."""
+    if b"\0" in raw:
         return None
     try:
         return raw.decode("utf-8")
@@ -299,7 +302,7 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         scan_text(label, text, finds)
         want[label] = raw
     for rel, raw in (files or {}).items():
-        text = file_text(rel, raw)
+        text = file_text(raw)
         name_kinds = page_kinds(rel)
         label = "%s/%s/%s" % (PAGE_FOLDER, FILES_FOLDER, "<redacted>" if name_kinds else rel)
         finds.extend((label, "$name", kind) for kind in name_kinds)
