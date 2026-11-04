@@ -4,9 +4,10 @@
     python3 lint/test_find_time_pinned.py
 
 Each case writes a small fixture folder of plain files under the run folder and runs the real finder
-on it. The cases cover the four categories for Python, JS/TS and Swift, the must-stay-clean list, the
-scanner traps of building-scanner-respects-strings, test-file selection, the text and JSON output, and
-the exit codes. The JS trap table that the scanner suite shares is in lint/test_scanner_traps.mjs.
+on it. The cases cover the four categories for Python, JS/TS and Swift, the calendar category (a real
+date or the local zone), the must-stay-clean list, the scanner traps of building-scanner-respects-strings,
+test-file selection, the text and JSON output, and the exit codes. The JS trap table that the scanner
+suite shares is in lint/test_scanner_traps.mjs.
 """
 import json
 import os
@@ -30,6 +31,10 @@ PY_CLOCKS = [
     "time.time", "time.monotonic", "time.perf_counter", "time.process_time",
     "time.time_ns", "time.monotonic_ns", "time.perf_counter_ns",
     "datetime.now", "datetime.utcnow", "datetime.datetime.now",
+]
+PY_CALENDAR = [
+    "datetime.now()", "datetime.datetime.now()", "date.today()", "datetime.today()",
+    "time.localtime()", 'time.strftime("%Y")', "datetime.now().astimezone()",
 ]
 SWIFT_CLOCKS = [
     "Date()", "CFAbsoluteTimeGetCurrent()", "DispatchTime.now()",
@@ -320,6 +325,143 @@ class PythonCleanTest(FinderCase):
         self.assertEqual((code, self.rows(out)), (0, set()))
 
 
+# ---- calendar: a test that reads the real date or the local zone (P5: a calendar date is a real clock) ----
+
+def calendar_judge(case, path, text, listed=(), clean=(), root=None):
+    """Scope first (P7): the fixture was read. Then the calendar rows: each listed form is one, no clean form
+    is one, and no other line is one. Each failure names one cause."""
+    proc = run(root or case.root, "--json")
+    case.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
+    out = json.loads(proc.stdout)
+    case.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+    got = {(f["path"], f["line"]) for f in out["findings"] if f["category"] == "calendar"}
+    missing = [n for n in listed if (path, lineno(text, n)) not in got]
+    case.assertFalse(missing, "calendar not listed: " + "; ".join(missing))
+    extra = [n for n in clean if (path, lineno(text, n)) in got]
+    case.assertFalse(extra, "calendar listed where it must not be: " + "; ".join(extra))
+    case.assertEqual(got, {(path, lineno(text, n)) for n in listed}, "calendar listed on a line no case names")
+    return out
+
+
+class PythonCalendarTest(FinderCase):
+    def last_line(self):
+        proc = run(self.root)
+        self.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
+        return proc.stdout.splitlines()[-1]
+
+    def test_each_python_calendar_form_is_listed(self):
+        forms = [f"t_{i} = {form}" for i, form in enumerate(PY_CALENDAR)]
+        text = src("import datetime", "import time", "from datetime import date", "", "def test_forms(stamp):",
+                   *["    " + f for f in forms])
+        self.put("tests/test_forms.py", text)
+        calendar_judge(self, "tests/test_forms.py", text, listed=forms)
+
+    def test_datetime_now_with_a_zone_is_listed(self):
+        text = src(
+            "import datetime",
+            "from datetime import timezone",
+            "",
+            "def test_zone(tz):",
+            "    t_utc = datetime.now(timezone.utc)",
+            "    t_tz = datetime.now(tz)",
+        )
+        self.put("tests/test_zone.py", text)
+        calendar_judge(self, "tests/test_zone.py", text,
+                       listed=["t_utc = datetime.now(timezone.utc)", "t_tz = datetime.now(tz)"])
+
+    def test_epoch_and_given_time_forms_are_not_listed(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_fixed(stamp):",
+            "    t_fixed = time.localtime(EPOCH)",
+            "    t_given = time.strftime('%Y', stamp)",
+            "    t_now = time.localtime()",
+        )
+        self.put("tests/test_fixed.py", text)
+        calendar_judge(self, "tests/test_fixed.py", text,
+                       listed=["t_now = time.localtime()"],
+                       clean=["t_fixed = time.localtime(EPOCH)", "t_given = time.strftime('%Y', stamp)"])
+
+    def test_summary_and_counts_include_calendar(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "def test_summary(stamp):",
+            "    t_a = datetime.now()",
+            "    t_b = time.localtime()",
+            "    time.sleep(1)",
+        )
+        self.put("tests/test_summary.py", text)
+        out = calendar_judge(self, "tests/test_summary.py", text,
+                             listed=["t_a = datetime.now()", "t_b = time.localtime()"])
+        self.assertEqual(out["counts"].get("calendar"), 2, "calendar not counted in the JSON counts")
+        last = self.last_line()
+        self.assertTrue(last.startswith("3 time-pinned in 1 files ("), "summary total is not 3: " + last)
+        self.assertIn("calendar 2", last, "calendar not listed in the summary")
+
+    def test_summary_shows_calendar_zero_when_no_form(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_none(stamp):",
+            "    t_fixed = time.localtime(EPOCH)",
+            "    time.sleep(1)",
+        )
+        self.put("tests/test_none.py", text)
+        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.localtime(EPOCH)"])
+        self.assertIn("calendar 0", self.last_line(), "calendar not listed in the summary")
+
+    def test_hash_opener_in_a_string_does_not_hide_a_form(self):
+        text = src(
+            "import datetime",
+            "",
+            "def test_label():",
+            "    label = '# not a comment'; t_hash = datetime.now()",
+            "    t_str = 'datetime.now()'",
+        )
+        self.put("tests/test_hash.py", text)
+        calendar_judge(self, "tests/test_hash.py", text,
+                       listed=["t_hash = datetime.now()"], clean=["t_str = 'datetime.now()'"])
+
+    def test_forms_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "# t_comment = datetime.now()",
+            "NOTE = 't_note = date.today()'",
+            "",
+            "def test_docs():",
+            "    '''Docstring: t_doc = time.localtime()'''",
+            "    t_real = datetime.today()",
+        )
+        self.put("tests/test_docs.py", text)
+        calendar_judge(self, "tests/test_docs.py", text,
+                       listed=["t_real = datetime.today()"],
+                       clean=["t_comment = datetime.now()", "t_note = date.today()", "t_doc = time.localtime()"])
+
+    def test_multi_line_string_and_a_lone_quote_do_not_hide_a_form(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            'BLOCK = """',
+            "t_block = time.localtime()",
+            '"""',
+            "msg = \"Don't stop\"",
+            "",
+            "def test_after():",
+            "    t_after = datetime.now()",
+        )
+        self.put("tests/test_block.py", text)
+        calendar_judge(self, "tests/test_block.py", text,
+                       listed=["t_after = datetime.now()"], clean=["t_block = time.localtime()"])
+
+
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
 
 class JsCategoriesTest(FinderCase):
@@ -543,6 +685,62 @@ class JsTrapsTest(FinderCase):
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
             "tests/template_parts.test.js", text, ("setTimeout(r, 500)", "sleep")))
+
+    def test_calendar_after_a_comment_opener_in_a_string(self):
+        text = src(
+            'const u = "http://a.test/"; const today = new Date();',
+            "const later = new Date();",
+        )
+        self.put("tests/calendar_slashes.test.js", text)
+        calendar_judge(self, "tests/calendar_slashes.test.js", text,
+                       listed=["const today = new Date();", "const later = new Date();"])
+
+    def test_calendar_inside_a_multi_line_template_is_not_listed(self):
+        text = src(
+            "const doc = `",
+            "const inside = new Date();",
+            "`;",
+            "const outside = new Date();",
+        )
+        self.put("tests/calendar_template.test.js", text)
+        calendar_judge(self, "tests/calendar_template.test.js", text,
+                       listed=["const outside = new Date();"], clean=["const inside = new Date();"])
+
+    def test_lone_quote_in_jsx_text_does_not_hide_a_calendar_form(self):
+        for name in ("note.test.jsx", "note.test.tsx"):
+            with self.subTest(name=name):
+                root = os.path.join(self.tmp.name, name)
+                text = src("export const Note = () => <p>Don't stop here</p>;", "const today = new Date();")
+                put(root, f"tests/{name}", text)
+                calendar_judge(self, f"tests/{name}", text,
+                               listed=["const today = new Date();"], root=root)
+
+
+class JsCalendarTest(FinderCase):
+    def test_new_date_with_no_argument_is_listed_and_with_one_is_not(self):
+        text = src(
+            "const c_0 = new Date();",
+            "let c_1 = new Date();",
+            "const fixed = new Date(0);",
+            "const epoch = new Date(EPOCH_MS);",
+        )
+        self.put("tests/calendar.test.js", text)
+        calendar_judge(self, "tests/calendar.test.js", text,
+                       listed=["const c_0 = new Date();", "let c_1 = new Date();"],
+                       clean=["const fixed = new Date(0);", "const epoch = new Date(EPOCH_MS);"])
+
+    def test_calendar_forms_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "// const note = new Date();",
+            "/* let block = new Date(); */",
+            "const quoted = 'const q = new Date();';",
+            "const real = new Date();",
+        )
+        self.put("tests/calendar_text.test.js", text)
+        calendar_judge(self, "tests/calendar_text.test.js", text,
+                       listed=["const real = new Date();"],
+                       clean=["// const note = new Date();", "/* let block = new Date(); */",
+                              "const q = new Date();"])
 
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
