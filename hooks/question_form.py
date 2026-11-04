@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the option-key check, by its shape. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -976,7 +976,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the option-key check, by its shape). The hit is the first
+    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []
@@ -989,7 +989,7 @@ def page_item_hit(tool_input, cwd=""):
         return PASS, []
     if not is_waiting_page(tool_input, cwd):
         # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
-        # write, by its shape. No writes return, so no other check or model review follows.
+        # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
         hit = item_hit(op, entry, cwd)
@@ -1000,19 +1000,19 @@ def page_item_hit(tool_input, cwd=""):
 
 def keyed_options_hit(writes, cwd=""):
     """(rule, matched) for the first of `writes` that has the waiting-page decision shape (an `options`
-    list with an option that carries a `key`) and that rule option-letter-keys refuses, else ("", ""). Judged
-    whatever page the call names: the page cannot be named reliably (another checkout's page, or a repo with
-    no page key), and a write of any other shape is no waiting-page item, so it passes."""
+    list) and an option keyed none, else ("", ""). Only the key none: the page reserves it, so it blocks the
+    item. Judged whatever page the call names, since the page cannot be named reliably (another checkout's
+    page, or a repo with no page key). Any other key, and any other shape, is no waiting-page item to this
+    check, so it passes. A task, a note and a closed item pass, as in option_letter_hit."""
     for op, entry in writes:
         if op == "str_replace":  # carries no options: its shape, and so its page, is unseen
             continue
         data = _write_data(entry, cwd)
-        options = data.get("options") if isinstance(data, dict) else None
-        if not (isinstance(options, list) and any(isinstance(o, dict) and "key" in o for o in options)):
+        if not isinstance(data, dict) or data.get("kind", "decision") != "decision" or data.get("status") == "closed":
             continue
-        hit = option_letter_hit(op, data)
-        if hit:
-            return "option-letter-keys", hit
+        options = data.get("options")
+        if isinstance(options, list) and any(isinstance(o, dict) and o.get("key") == OPTION_NONE_KEY for o in options):
+            return "option-letter-keys", "option keyed none"
     return PASS
 
 
