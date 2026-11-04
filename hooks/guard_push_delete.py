@@ -34,9 +34,12 @@ PUSH_READS = {}
 
 def _push_git(cwd: str, *args):
     key = (cwd,) + args
-    if key not in PUSH_READS:
-        PUSH_READS[key] = guard_core._git(cwd, *args)
-    return PUSH_READS[key]
+    if key in PUSH_READS:
+        return PUSH_READS[key]
+    answer = guard_core._git(cwd, *args)
+    if answer is not None:  # a failed read (None: timeout, no git) is no answer, so the next rule reads again
+        PUSH_READS[key] = answer
+    return answer
 
 
 def _push_config(cwd: str, key: str, overrides=None):
